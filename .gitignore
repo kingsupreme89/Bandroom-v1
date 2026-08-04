@@ -1,0 +1,21 @@
+# Build output
+bin/
+obj/
+dist/
+*.dll
+*.exe
+*.pdb
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.sln.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App data
+WebView2Data/
+Crash*.txt
