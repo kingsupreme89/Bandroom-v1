@@ -1,0 +1,677 @@
+Renamed Types:
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.AudioPlayer -> [Supreme's Stadium Sound Selector]A.A
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.AudioPlayer::StopAll[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.AudioPlayer::Play[1]( [System.Runtime]System.String ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.AudioPlayer::.cctor[0]( ) skipped:  special name
+
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.AudioPlayer::MasterVolume -> A
+	SupremeStadiumSoundSelector.ReverbPreset [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbPreset SupremeStadiumSoundSelector.AudioPlayer::CurrentReverb -> A
+	System.Double [Supreme's Stadium Sound Selector]System.Double SupremeStadiumSoundSelector.AudioPlayer::PreRollSeconds -> A
+	System.Double [Supreme's Stadium Sound Selector]System.Double SupremeStadiumSoundSelector.AudioPlayer::FadeStartSeconds -> a
+	System.Double [Supreme's Stadium Sound Selector]System.Double SupremeStadiumSoundSelector.AudioPlayer::FadeOutDuration -> B
+	System.Object [Supreme's Stadium Sound Selector]System.Object SupremeStadiumSoundSelector.AudioPlayer::Lock -> A
+	System.Collections.Generic.List`1<NAudio.Wave.WaveOutEvent> [Supreme's Stadium Sound Selector]System.Collections.Generic.List`1<NAudio.Wave.WaveOutEvent> SupremeStadiumSoundSelector.AudioPlayer::ActiveOutputs -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore -> [Supreme's Stadium Sound Selector]A.a
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore::LoadOrCreate[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore::Save[1]( [System.Collections]System.Collections.Generic.List`1<[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry> ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore::ProfilePath[1]( [System.Runtime]System.String ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore::SanitizeFileName[1]( [System.Runtime]System.String ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore::SaveProfile[2]( [System.Runtime]System.String, [System.Collections]System.Collections.Generic.List`1<[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry> ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore::LoadProfile[1]( [System.Runtime]System.String ) -> B
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore::DeleteProfile[1]( [System.Runtime]System.String ) -> b
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore::ListProfiles[0]( ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore::BuildDefault[0]( ) -> B
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore::.cctor[0]( ) skipped:  special name
+
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.ConfigStore::ConfigPath -> A
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.ConfigStore::SongsFolder -> a
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.ConfigStore::ProfilesFolder -> B
+	System.Text.Json.JsonSerializerOptions [Supreme's Stadium Sound Selector]System.Text.Json.JsonSerializerOptions SupremeStadiumSoundSelector.ConfigStore::JsonOptions -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.CrashLog -> [Supreme's Stadium Sound Selector]A.B
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.CrashLog::Write[2]( [System.Runtime]System.String, [System.Runtime]System.Exception ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.CrashLog::.cctor[0]( ) skipped:  special name
+
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.CrashLog::LogPath -> A
+	System.Object [Supreme's Stadium Sound Selector]System.Object SupremeStadiumSoundSelector.CrashLog::Lock -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.WatchedRegion -> [Supreme's Stadium Sound Selector]A.b
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.WatchedRegion::get_Calibrated[0]( ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.WatchedRegion::.ctor[0]( ) skipped:  special name
+
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.WatchedRegion::Name -> A
+	System.Double [Supreme's Stadium Sound Selector]System.Double SupremeStadiumSoundSelector.WatchedRegion::FxX -> A
+	System.Double [Supreme's Stadium Sound Selector]System.Double SupremeStadiumSoundSelector.WatchedRegion::FxY -> a
+	System.Double [Supreme's Stadium Sound Selector]System.Double SupremeStadiumSoundSelector.WatchedRegion::FxW -> B
+	System.Double [Supreme's Stadium Sound Selector]System.Double SupremeStadiumSoundSelector.WatchedRegion::FxH -> b
+	System.Text.RegularExpressions.Regex [Supreme's Stadium Sound Selector]System.Text.RegularExpressions.Regex SupremeStadiumSoundSelector.WatchedRegion::Pattern -> A
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.WatchedRegion::Last -> a
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.WatchedRegion::LastRawText -> B
+	System.DateTime [Supreme's Stadium Sound Selector]System.DateTime SupremeStadiumSoundSelector.WatchedRegion::CooldownUntil -> A
+
+	System.Boolean [Supreme's Stadium Sound Selector]System.Boolean SupremeStadiumSoundSelector.WatchedRegion::Calibrated -> dropped
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher -> [Supreme's Stadium Sound Selector]A.C
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::add_WindowFoundChanged[1]( [System.Runtime]System.Action`1<[System.Runtime]System.Boolean> ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::remove_WindowFoundChanged[1]( [System.Runtime]System.Action`1<[System.Runtime]System.Boolean> ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::add_DownChanged[1]( [System.Runtime]System.Action`1<[System.Runtime]System.String> ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::remove_DownChanged[1]( [System.Runtime]System.Action`1<[System.Runtime]System.String> ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::add_RegionChanged[1]( [System.Runtime]System.Action`2<[System.Runtime]System.String,[System.Runtime]System.String> ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::remove_RegionChanged[1]( [System.Runtime]System.Action`2<[System.Runtime]System.String,[System.Runtime]System.String> ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::add_Log[1]( [System.Runtime]System.Action`1<[System.Runtime]System.String> ) -> B
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::remove_Log[1]( [System.Runtime]System.Action`1<[System.Runtime]System.String> ) -> b
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::Start[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::Stop[0]( ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::RunAsync[1]( [System.Runtime]System.Threading.CancellationToken ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::OcrBitmapAsync[2]( [Microsoft.Windows.SDK.NET]Windows.Media.Ocr.OcrEngine, [System.Drawing.Common]System.Drawing.Bitmap ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::FindGameWindow[0]( ) -> B
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::.ctor[0]( ) skipped:  special name
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher::.cctor[0]( ) skipped:  special name
+
+	System.Action`1<System.Boolean> [Supreme's Stadium Sound Selector]System.Action`1<System.Boolean> SupremeStadiumSoundSelector.GameWatcher::WindowFoundChanged -> A
+	System.Action`1<System.String> [Supreme's Stadium Sound Selector]System.Action`1<System.String> SupremeStadiumSoundSelector.GameWatcher::DownChanged -> A
+	System.Action`2<System.String,System.String> [Supreme's Stadium Sound Selector]System.Action`2<System.String,System.String> SupremeStadiumSoundSelector.GameWatcher::RegionChanged -> A
+	System.Action`1<System.String> [Supreme's Stadium Sound Selector]System.Action`1<System.String> SupremeStadiumSoundSelector.GameWatcher::Log -> a
+	System.TimeSpan [Supreme's Stadium Sound Selector]System.TimeSpan SupremeStadiumSoundSelector.GameWatcher::Cooldown -> A
+	System.Collections.Generic.List`1<SupremeStadiumSoundSelector.WatchedRegion> [Supreme's Stadium Sound Selector]System.Collections.Generic.List`1<SupremeStadiumSoundSelector.WatchedRegion> SupremeStadiumSoundSelector.GameWatcher::_regions -> A
+	System.Threading.CancellationTokenSource [Supreme's Stadium Sound Selector]System.Threading.CancellationTokenSource SupremeStadiumSoundSelector.GameWatcher::_cts -> A
+
+	System.Action`1<System.Boolean> [Supreme's Stadium Sound Selector]System.Action`1<System.Boolean> SupremeStadiumSoundSelector.GameWatcher::WindowFoundChanged -> dropped
+	System.Action`1<System.String> [Supreme's Stadium Sound Selector]System.Action`1<System.String> SupremeStadiumSoundSelector.GameWatcher::DownChanged -> dropped
+	System.Action`2<System.String,System.String> [Supreme's Stadium Sound Selector]System.Action`2<System.String,System.String> SupremeStadiumSoundSelector.GameWatcher::RegionChanged -> dropped
+	System.Action`1<System.String> [Supreme's Stadium Sound Selector]System.Action`1<System.String> SupremeStadiumSoundSelector.GameWatcher::Log -> dropped
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton -> [Supreme's Stadium Sound Selector]A.c
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton::get_Primary[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton::set_Primary[1]( [System.Runtime]System.Boolean ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton::RoundedRect[2]( [System.Drawing.Primitives]System.Drawing.Rectangle, [System.Runtime]System.Int32 ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton::<.ctor>b__5_0[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton::<.ctor>b__5_1[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> a
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton::.ctor[0]( ) skipped:  special name
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton::OnPaint[1]( [System.Windows.Forms]System.Windows.Forms.PaintEventArgs ) skipped:  external base class or interface
+
+	System.Boolean [Supreme's Stadium Sound Selector]System.Boolean SupremeStadiumSoundSelector.GlassButton::<Primary>k__BackingField -> A
+	System.Boolean [Supreme's Stadium Sound Selector]System.Boolean SupremeStadiumSoundSelector.GlassButton::_hover -> a
+
+	System.Boolean [Supreme's Stadium Sound Selector]System.Boolean SupremeStadiumSoundSelector.GlassButton::Primary -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.KeyboardHook -> [Supreme's Stadium Sound Selector]A.D
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.KeyboardHook::add_KeyCombo[1]( [System.Runtime]System.Action`1<[System.Runtime]System.String> ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.KeyboardHook::remove_KeyCombo[1]( [System.Runtime]System.Action`1<[System.Runtime]System.String> ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.KeyboardHook::Start[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.KeyboardHook::Stop[0]( ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.KeyboardHook::HookCallback[3]( [System.Runtime]System.Int32, [System.Runtime]System.IntPtr, [System.Runtime]System.IntPtr ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.KeyboardHook::<Start>b__8_0[0]( ) -> B
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.KeyboardHook::.ctor[0]( ) skipped:  special name
+
+	System.Action`1<System.String> [Supreme's Stadium Sound Selector]System.Action`1<System.String> SupremeStadiumSoundSelector.KeyboardHook::KeyCombo -> A
+	System.IntPtr [Supreme's Stadium Sound Selector]System.IntPtr SupremeStadiumSoundSelector.KeyboardHook::_hookHandle -> A
+	SupremeStadiumSoundSelector.Native/LowLevelKeyboardProc [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/LowLevelKeyboardProc SupremeStadiumSoundSelector.KeyboardHook::_proc -> A
+	System.Threading.Thread [Supreme's Stadium Sound Selector]System.Threading.Thread SupremeStadiumSoundSelector.KeyboardHook::_thread -> A
+	System.UInt32 [Supreme's Stadium Sound Selector]System.UInt32 SupremeStadiumSoundSelector.KeyboardHook::_threadId -> A
+	System.Collections.Generic.HashSet`1<System.UInt32> [Supreme's Stadium Sound Selector]System.Collections.Generic.HashSet`1<System.UInt32> SupremeStadiumSoundSelector.KeyboardHook::_pressed -> A
+
+	System.Action`1<System.String> [Supreme's Stadium Sound Selector]System.Action`1<System.String> SupremeStadiumSoundSelector.KeyboardHook::KeyCombo -> dropped
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm -> [Supreme's Stadium Sound Selector]A.d
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::BuildUi[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::AppendLog[1]( [System.Runtime]System.String ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::RefreshProfileList[1]( [System.Runtime]System.String ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::SaveProfileAs[0]( ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::SaveActiveProfile[0]( ) -> B
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::LoadSelectedProfile[0]( ) -> b
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::DeleteSelectedProfile[0]( ) -> C
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::PopulateGrid[0]( ) -> c
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::UpdateAssignedIndicator[2]( [System.Windows.Forms]System.Windows.Forms.DataGridViewRow, [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::UpdateAssignedCountLabel[0]( ) -> D
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::ApplyFilter[0]( ) -> d
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::ClearAllSongs[0]( ) -> E
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::ToggleCompact[0]( ) -> e
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::SetupTrayIcon[0]( ) -> F
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::RestoreFromTray[0]( ) -> f
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::Grid_CellClick[2]( [System.Runtime]System.Object, [System.Windows.Forms]System.Windows.Forms.DataGridViewCellEventArgs ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::ToggleWatching[0]( ) -> G
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::OnWindowFoundChanged[1]( [System.Runtime]System.Boolean ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::OnDownChanged[1]( [System.Runtime]System.String ) -> B
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::OnRegionChanged[2]( [System.Runtime]System.String, [System.Runtime]System.String ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::OnKeyCombo[1]( [System.Runtime]System.String ) -> b
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::FireEvent[1]( [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::OnLog[1]( [System.Runtime]System.String ) -> C
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::RunOnUi[1]( [System.Runtime]System.Action ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<.ctor>b__24_0[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<.ctor>b__24_1[2]( [System.Runtime]System.Object, [System.Windows.Forms]System.Windows.Forms.FormClosingEventArgs ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_0[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_2[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> B
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_3[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> b
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_4[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> C
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_5[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> c
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_6[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> D
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_7[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> d
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_8[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> E
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_9[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> e
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_10[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> F
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_11[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> f
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_12[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> G
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<BuildUi>b__25_13[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> g
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<SetupTrayIcon>b__38_0[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> H
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<SetupTrayIcon>b__38_1[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> h
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<SetupTrayIcon>b__38_2[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> I
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<SetupTrayIcon>b__38_3[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> i
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::<SetupTrayIcon>b__38_4[2]( [System.Runtime]System.Object, [System.Windows.Forms]System.Windows.Forms.FormClosingEventArgs ) -> a
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm::.ctor[0]( ) skipped:  special name
+
+	System.Collections.Generic.List`1<SupremeStadiumSoundSelector.TriggerEntry> [Supreme's Stadium Sound Selector]System.Collections.Generic.List`1<SupremeStadiumSoundSelector.TriggerEntry> SupremeStadiumSoundSelector.MainForm::_config -> A
+	SupremeStadiumSoundSelector.KeyboardHook [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.KeyboardHook SupremeStadiumSoundSelector.MainForm::_hook -> A
+	SupremeStadiumSoundSelector.GameWatcher [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher SupremeStadiumSoundSelector.MainForm::_watcher -> A
+	System.Windows.Forms.Timer [Supreme's Stadium Sound Selector]System.Windows.Forms.Timer SupremeStadiumSoundSelector.MainForm::_flashTimer -> A
+	System.Windows.Forms.Label [Supreme's Stadium Sound Selector]System.Windows.Forms.Label SupremeStadiumSoundSelector.MainForm::_lblGameStatus -> A
+	System.Windows.Forms.Label [Supreme's Stadium Sound Selector]System.Windows.Forms.Label SupremeStadiumSoundSelector.MainForm::_lblDown -> a
+	System.Windows.Forms.Label [Supreme's Stadium Sound Selector]System.Windows.Forms.Label SupremeStadiumSoundSelector.MainForm::_lblLastEvent -> B
+	System.Windows.Forms.Button [Supreme's Stadium Sound Selector]System.Windows.Forms.Button SupremeStadiumSoundSelector.MainForm::_btnStartStop -> A
+	System.Windows.Forms.DataGridView [Supreme's Stadium Sound Selector]System.Windows.Forms.DataGridView SupremeStadiumSoundSelector.MainForm::_grid -> A
+	System.Windows.Forms.ListBox [Supreme's Stadium Sound Selector]System.Windows.Forms.ListBox SupremeStadiumSoundSelector.MainForm::_logList -> A
+	System.Windows.Forms.CheckBox [Supreme's Stadium Sound Selector]System.Windows.Forms.CheckBox SupremeStadiumSoundSelector.MainForm::_chkAlwaysOnTop -> A
+	System.Windows.Forms.ComboBox [Supreme's Stadium Sound Selector]System.Windows.Forms.ComboBox SupremeStadiumSoundSelector.MainForm::_cboProfiles -> A
+	System.Windows.Forms.Label [Supreme's Stadium Sound Selector]System.Windows.Forms.Label SupremeStadiumSoundSelector.MainForm::_lblActiveProfile -> b
+	System.Windows.Forms.TrackBar [Supreme's Stadium Sound Selector]System.Windows.Forms.TrackBar SupremeStadiumSoundSelector.MainForm::_volumeSlider -> A
+	System.Windows.Forms.Label [Supreme's Stadium Sound Selector]System.Windows.Forms.Label SupremeStadiumSoundSelector.MainForm::_lblVolume -> C
+	System.Windows.Forms.ComboBox [Supreme's Stadium Sound Selector]System.Windows.Forms.ComboBox SupremeStadiumSoundSelector.MainForm::_cboReverb -> a
+	System.Windows.Forms.TextBox [Supreme's Stadium Sound Selector]System.Windows.Forms.TextBox SupremeStadiumSoundSelector.MainForm::_txtSearch -> A
+	System.Windows.Forms.Label [Supreme's Stadium Sound Selector]System.Windows.Forms.Label SupremeStadiumSoundSelector.MainForm::_lblAssignedCount -> c
+	System.Windows.Forms.NotifyIcon [Supreme's Stadium Sound Selector]System.Windows.Forms.NotifyIcon SupremeStadiumSoundSelector.MainForm::_trayIcon -> A
+	System.Windows.Forms.Panel [Supreme's Stadium Sound Selector]System.Windows.Forms.Panel SupremeStadiumSoundSelector.MainForm::_gridArea -> A
+	System.Windows.Forms.Panel [Supreme's Stadium Sound Selector]System.Windows.Forms.Panel SupremeStadiumSoundSelector.MainForm::_logPanel -> a
+	System.Boolean [Supreme's Stadium Sound Selector]System.Boolean SupremeStadiumSoundSelector.MainForm::_compact -> A
+	System.Boolean [Supreme's Stadium Sound Selector]System.Boolean SupremeStadiumSoundSelector.MainForm::_watching -> a
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.MainForm::_activeProfileName -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native -> [Supreme's Stadium Sound Selector]A.E
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::EnumWindows[2]( [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/EnumWindowsProc, [System.Runtime]System.IntPtr ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::GetWindowTextLength[1]( [System.Runtime]System.IntPtr ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::GetWindowText[3]( [System.Runtime]System.IntPtr, [System.Runtime]System.Text.StringBuilder, [System.Runtime]System.Int32 ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::IsWindowVisible[1]( [System.Runtime]System.IntPtr ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::GetWindowRect[2]( [System.Runtime]System.IntPtr, [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/RECT& ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::SetWindowsHookEx[4]( [System.Runtime]System.Int32, [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/LowLevelKeyboardProc, [System.Runtime]System.IntPtr, [System.Runtime]System.UInt32 ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::UnhookWindowsHookEx[1]( [System.Runtime]System.IntPtr ) -> B
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::CallNextHookEx[4]( [System.Runtime]System.IntPtr, [System.Runtime]System.Int32, [System.Runtime]System.IntPtr, [System.Runtime]System.IntPtr ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::GetModuleHandle[1]( [System.Runtime]System.String ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::GetAsyncKeyState[1]( [System.Runtime]System.Int32 ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::GetMessage[4]( [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/MSG&, [System.Runtime]System.IntPtr, [System.Runtime]System.UInt32, [System.Runtime]System.UInt32 ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::TranslateMessage[1]( [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/MSG& ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::DispatchMessage[1]( [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/MSG& ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::PostThreadMessage[4]( [System.Runtime]System.UInt32, [System.Runtime]System.UInt32, [System.Runtime]System.IntPtr, [System.Runtime]System.IntPtr ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native::GetCurrentThreadId[0]( ) -> A
+
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native::WH_KEYBOARD_LL -> A
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native::WM_KEYDOWN -> a
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native::WM_KEYUP -> B
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native::WM_SYSKEYDOWN -> b
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native::WM_SYSKEYUP -> C
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native::WM_QUIT -> c
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native::VK_NUMPAD0 -> D
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native::VK_NUMPAD9 -> d
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native::VK_CONTROL -> E
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native::VK_SHIFT -> e
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native::VK_MENU -> F
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbPreset -> [Supreme's Stadium Sound Selector]A.f
+{
+	SupremeStadiumSoundSelector.ReverbPreset [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbPreset SupremeStadiumSoundSelector.ReverbPreset::Off -> A
+	SupremeStadiumSoundSelector.ReverbPreset [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbPreset SupremeStadiumSoundSelector.ReverbPreset::Stadium -> a
+	SupremeStadiumSoundSelector.ReverbPreset [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbPreset SupremeStadiumSoundSelector.ReverbPreset::Dome -> B
+	SupremeStadiumSoundSelector.ReverbPreset [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbPreset SupremeStadiumSoundSelector.ReverbPreset::NightGame -> b
+
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.ReverbPreset::value__ skipped:  special name
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider -> [Supreme's Stadium Sound Selector]A.g
+{
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider::get_WaveFormat[0]( ) skipped:  external base class or interface
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider::.ctor[5]( [NAudio.Core]NAudio.Wave.ISampleProvider, [System.Runtime]System.Single, [System.Runtime]System.Single, [System.Runtime]System.Single, [System.Runtime]System.Single ) skipped:  special name
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider::Read[3]( [System.Runtime]System.Single[], [System.Runtime]System.Int32, [System.Runtime]System.Int32 ) skipped:  external base class or interface
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider::.cctor[0]( ) skipped:  special name
+
+	NAudio.Wave.ISampleProvider [Supreme's Stadium Sound Selector]NAudio.Wave.ISampleProvider SupremeStadiumSoundSelector.ReverbProvider::_source -> A
+	SupremeStadiumSoundSelector.ReverbProvider/Comb[] [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/Comb[] SupremeStadiumSoundSelector.ReverbProvider::_combsL -> A
+	SupremeStadiumSoundSelector.ReverbProvider/Comb[] [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/Comb[] SupremeStadiumSoundSelector.ReverbProvider::_combsR -> a
+	SupremeStadiumSoundSelector.ReverbProvider/AllPass[] [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/AllPass[] SupremeStadiumSoundSelector.ReverbProvider::_allpassL -> A
+	SupremeStadiumSoundSelector.ReverbProvider/AllPass[] [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/AllPass[] SupremeStadiumSoundSelector.ReverbProvider::_allpassR -> a
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider::_wet -> A
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider::_dry -> a
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider::_widthL1 -> B
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider::_widthL2 -> b
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider::_widthR1 -> C
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider::_widthR2 -> c
+	System.Int32[] [Supreme's Stadium Sound Selector]System.Int32[] SupremeStadiumSoundSelector.ReverbProvider::CombTuningL -> A
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.ReverbProvider::StereoSpread -> A
+	System.Int32[] [Supreme's Stadium Sound Selector]System.Int32[] SupremeStadiumSoundSelector.ReverbProvider::AllpassTuningL -> a
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider::FixedGain -> D
+
+	NAudio.Wave.WaveFormat [Supreme's Stadium Sound Selector]NAudio.Wave.WaveFormat SupremeStadiumSoundSelector.ReverbProvider::WaveFormat -> dropped
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.SettingsForm -> [Supreme's Stadium Sound Selector]A.H
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.SettingsForm::BuildUi[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.SettingsForm::Apply[0]( ) -> a
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.SettingsForm::.ctor[1]( [System.Windows.Forms]System.Windows.Forms.IWin32Window ) skipped:  special name
+
+	System.Windows.Forms.NumericUpDown [Supreme's Stadium Sound Selector]System.Windows.Forms.NumericUpDown SupremeStadiumSoundSelector.SettingsForm::_numPreRoll -> A
+	System.Windows.Forms.NumericUpDown [Supreme's Stadium Sound Selector]System.Windows.Forms.NumericUpDown SupremeStadiumSoundSelector.SettingsForm::_numFadeStart -> a
+	System.Windows.Forms.NumericUpDown [Supreme's Stadium Sound Selector]System.Windows.Forms.NumericUpDown SupremeStadiumSoundSelector.SettingsForm::_numFadeOut -> B
+	System.Windows.Forms.NumericUpDown [Supreme's Stadium Sound Selector]System.Windows.Forms.NumericUpDown SupremeStadiumSoundSelector.SettingsForm::_numCooldown -> b
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Theme -> [Supreme's Stadium Sound Selector]A.h
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Theme::StyleButton[2]( [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton, [System.Runtime]System.Boolean ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Theme::StyleGrid[1]( [System.Windows.Forms]System.Windows.Forms.DataGridView ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Theme::.cctor[0]( ) skipped:  special name
+
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::Bg -> A
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::PanelBg -> a
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::CardBg -> B
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::GridBg -> b
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::GridAltRow -> C
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::GridHeaderBg -> c
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::Border -> D
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::Accent -> d
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::AccentDark -> E
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::AccentBright -> e
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::TextPrimary -> F
+	System.Drawing.Color [Supreme's Stadium Sound Selector]System.Drawing.Color SupremeStadiumSoundSelector.Theme::TextSecondary -> f
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry -> [Supreme's Stadium Sound Selector]A.I
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry::get_Trigger[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry::set_Trigger[1]( [System.Runtime]System.String ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry::get_Event[0]( ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry::set_Event[1]( [System.Runtime]System.String ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry::get_AudioFile[0]( ) -> B
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry::set_AudioFile[1]( [System.Runtime]System.String ) -> B
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry::.ctor[0]( ) skipped:  special name
+
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.TriggerEntry::<Trigger>k__BackingField -> A
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.TriggerEntry::<Event>k__BackingField -> a
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.TriggerEntry::<AudioFile>k__BackingField -> B
+
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.TriggerEntry::Trigger -> dropped
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.TriggerEntry::Event -> dropped
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.TriggerEntry::AudioFile -> dropped
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm -> [Supreme's Stadium Sound Selector]A.i
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::get_SavedFilePath[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::set_SavedFilePath[1]( [System.Runtime]System.String ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::BuildUi[0]( ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::GetRange[0]( ) -> B
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::PlayPreview[0]( ) -> b
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::StopPreview[0]( ) -> C
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::SaveTrimmed[0]( ) -> c
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::<.ctor>b__13_0[2]( [System.Runtime]System.Object, [System.Windows.Forms]System.Windows.Forms.FormClosingEventArgs ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::<BuildUi>b__14_0[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::<BuildUi>b__14_1[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::<BuildUi>b__14_2[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> B
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::<BuildUi>b__14_3[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> b
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm::.ctor[2]( [System.Windows.Forms]System.Windows.Forms.IWin32Window, [System.Runtime]System.String ) skipped:  special name
+
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.TrimmerForm::_sourcePath -> A
+	System.TimeSpan [Supreme's Stadium Sound Selector]System.TimeSpan SupremeStadiumSoundSelector.TrimmerForm::_totalDuration -> A
+	System.Windows.Forms.NumericUpDown [Supreme's Stadium Sound Selector]System.Windows.Forms.NumericUpDown SupremeStadiumSoundSelector.TrimmerForm::_numStart -> A
+	System.Windows.Forms.NumericUpDown [Supreme's Stadium Sound Selector]System.Windows.Forms.NumericUpDown SupremeStadiumSoundSelector.TrimmerForm::_numEnd -> a
+	System.Windows.Forms.Label [Supreme's Stadium Sound Selector]System.Windows.Forms.Label SupremeStadiumSoundSelector.TrimmerForm::_lblDuration -> A
+	SupremeStadiumSoundSelector.GlassButton [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton SupremeStadiumSoundSelector.TrimmerForm::_btnPreview -> A
+	SupremeStadiumSoundSelector.GlassButton [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton SupremeStadiumSoundSelector.TrimmerForm::_btnStop -> a
+	SupremeStadiumSoundSelector.GlassButton [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GlassButton SupremeStadiumSoundSelector.TrimmerForm::_btnSave -> B
+	NAudio.Wave.WaveOutEvent [Supreme's Stadium Sound Selector]NAudio.Wave.WaveOutEvent SupremeStadiumSoundSelector.TrimmerForm::_previewOutput -> A
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.TrimmerForm::<SavedFilePath>k__BackingField -> a
+
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.TrimmerForm::SavedFilePath -> A
+}
+
+[Supreme's Stadium Sound Selector]<PrivateImplementationDetails> -> [Supreme's Stadium Sound Selector]A.J
+{
+	<PrivateImplementationDetails>/__StaticArrayInitTypeSize=32 [Supreme's Stadium Sound Selector]<PrivateImplementationDetails>/__StaticArrayInitTypeSize=32 <PrivateImplementationDetails>::66479FA12ACDD46D5F650D21E2DB08303F1639C7D3F188252083C4A03D1E2EE8 -> A
+	<PrivateImplementationDetails>/__StaticArrayInitTypeSize=16 [Supreme's Stadium Sound Selector]<PrivateImplementationDetails>/__StaticArrayInitTypeSize=16 <PrivateImplementationDetails>::B8D944B93D1DB79E86C0AE890912F7D69BFF5B31F68566D6066D36BB2AC4C08B -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.AudioPlayer/<>c__DisplayClass8_0 -> [Supreme's Stadium Sound Selector]A.A/A
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.AudioPlayer/<>c__DisplayClass8_0::<Play>b__0[0]( ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.AudioPlayer/<>c__DisplayClass8_0::.ctor[0]( ) skipped:  special name
+
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.AudioPlayer/<>c__DisplayClass8_0::path -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore/<>O -> [Supreme's Stadium Sound Selector]A.a/A
+{
+	System.Func`2<System.String,System.String> [Supreme's Stadium Sound Selector]System.Func`2<System.String,System.String> SupremeStadiumSoundSelector.ConfigStore/<>O::<0>__GetFileNameWithoutExtension -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore/<>c -> [Supreme's Stadium Sound Selector]A.a/a
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore/<>c::<ListProfiles>b__11_0[1]( [System.Runtime]System.String ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore/<>c::<ListProfiles>b__11_1[1]( [System.Runtime]System.String ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore/<>c::<ListProfiles>b__11_2[1]( [System.Runtime]System.String ) -> B
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore/<>c::.cctor[0]( ) skipped:  special name
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore/<>c::.ctor[0]( ) skipped:  special name
+
+	SupremeStadiumSoundSelector.ConfigStore/<>c [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ConfigStore/<>c SupremeStadiumSoundSelector.ConfigStore/<>c::<>9 -> A
+	System.Func`2<System.String,System.Boolean> [Supreme's Stadium Sound Selector]System.Func`2<System.String,System.Boolean> SupremeStadiumSoundSelector.ConfigStore/<>c::<>9__11_0 -> A
+	System.Func`2<System.String,System.String> [Supreme's Stadium Sound Selector]System.Func`2<System.String,System.String> SupremeStadiumSoundSelector.ConfigStore/<>c::<>9__11_1 -> A
+	System.Func`2<System.String,System.String> [Supreme's Stadium Sound Selector]System.Func`2<System.String,System.String> SupremeStadiumSoundSelector.ConfigStore/<>c::<>9__11_2 -> a
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher/<>c__DisplayClass19_0 -> [Supreme's Stadium Sound Selector]A.C/A
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher/<>c__DisplayClass19_0::<FindGameWindow>b__0[2]( [System.Runtime]System.IntPtr, [System.Runtime]System.IntPtr ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher/<>c__DisplayClass19_0::.ctor[0]( ) skipped:  special name
+
+	System.IntPtr [Supreme's Stadium Sound Selector]System.IntPtr SupremeStadiumSoundSelector.GameWatcher/<>c__DisplayClass19_0::found -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18 -> [Supreme's Stadium Sound Selector]A.C/a
+{
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::MoveNext[0]( ) skipped:  external base class or interface
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::SetStateMachine[1]( [System.Runtime]System.Runtime.CompilerServices.IAsyncStateMachine ) skipped:  external base class or interface
+
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::<>1__state -> A
+	System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1<System.String> [Supreme's Stadium Sound Selector]System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1<System.String> SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::<>t__builder -> A
+	System.Drawing.Bitmap [Supreme's Stadium Sound Selector]System.Drawing.Bitmap SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::bmp -> A
+	Windows.Media.Ocr.OcrEngine [Supreme's Stadium Sound Selector]Windows.Media.Ocr.OcrEngine SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::engine -> A
+	System.IO.MemoryStream [Supreme's Stadium Sound Selector]System.IO.MemoryStream SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::<ms>5__2 -> A
+	Windows.Storage.Streams.InMemoryRandomAccessStream [Supreme's Stadium Sound Selector]Windows.Storage.Streams.InMemoryRandomAccessStream SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::<stream>5__3 -> A
+	Windows.Storage.Streams.IOutputStream [Supreme's Stadium Sound Selector]Windows.Storage.Streams.IOutputStream SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::<outputStream>5__4 -> A
+	System.Runtime.CompilerServices.TaskAwaiter`1<System.UInt32> [Supreme's Stadium Sound Selector]System.Runtime.CompilerServices.TaskAwaiter`1<System.UInt32> SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::<>u__1 -> A
+	System.Runtime.CompilerServices.TaskAwaiter`1<System.Boolean> [Supreme's Stadium Sound Selector]System.Runtime.CompilerServices.TaskAwaiter`1<System.Boolean> SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::<>u__2 -> A
+	System.Runtime.CompilerServices.TaskAwaiter`1<Windows.Graphics.Imaging.BitmapDecoder> [Supreme's Stadium Sound Selector]System.Runtime.CompilerServices.TaskAwaiter`1<Windows.Graphics.Imaging.BitmapDecoder> SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::<>u__3 -> A
+	System.Runtime.CompilerServices.TaskAwaiter`1<Windows.Graphics.Imaging.SoftwareBitmap> [Supreme's Stadium Sound Selector]System.Runtime.CompilerServices.TaskAwaiter`1<Windows.Graphics.Imaging.SoftwareBitmap> SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::<>u__4 -> A
+	System.Runtime.CompilerServices.TaskAwaiter`1<Windows.Media.Ocr.OcrResult> [Supreme's Stadium Sound Selector]System.Runtime.CompilerServices.TaskAwaiter`1<Windows.Media.Ocr.OcrResult> SupremeStadiumSoundSelector.GameWatcher/<OcrBitmapAsync>d__18::<>u__5 -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17 -> [Supreme's Stadium Sound Selector]A.C/B
+{
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::MoveNext[0]( ) skipped:  external base class or interface
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::SetStateMachine[1]( [System.Runtime]System.Runtime.CompilerServices.IAsyncStateMachine ) skipped:  external base class or interface
+
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<>1__state -> A
+	System.Runtime.CompilerServices.AsyncTaskMethodBuilder [Supreme's Stadium Sound Selector]System.Runtime.CompilerServices.AsyncTaskMethodBuilder SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<>t__builder -> A
+	SupremeStadiumSoundSelector.GameWatcher [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.GameWatcher SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<>4__this -> A
+	System.Threading.CancellationToken [Supreme's Stadium Sound Selector]System.Threading.CancellationToken SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::ct -> A
+	Windows.Media.Ocr.OcrEngine [Supreme's Stadium Sound Selector]Windows.Media.Ocr.OcrEngine SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<ocrEngine>5__2 -> A
+	System.IntPtr [Supreme's Stadium Sound Selector]System.IntPtr SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<hwnd>5__3 -> A
+	System.Object [Supreme's Stadium Sound Selector]System.Object SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<>7__wrap3 -> A
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<>7__wrap4 -> a
+	SupremeStadiumSoundSelector.Native/RECT [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/RECT SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<rect>5__6 -> A
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<winW>5__7 -> B
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<winH>5__8 -> b
+	System.Runtime.CompilerServices.TaskAwaiter [Supreme's Stadium Sound Selector]System.Runtime.CompilerServices.TaskAwaiter SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<>u__1 -> A
+	System.Collections.Generic.List`1/Enumerator<SupremeStadiumSoundSelector.WatchedRegion> [Supreme's Stadium Sound Selector]System.Collections.Generic.List`1/Enumerator<SupremeStadiumSoundSelector.WatchedRegion> SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<>7__wrap8 -> A
+	SupremeStadiumSoundSelector.WatchedRegion [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.WatchedRegion SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<region>5__10 -> A
+	System.Drawing.Bitmap [Supreme's Stadium Sound Selector]System.Drawing.Bitmap SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<bmp>5__11 -> A
+	System.Runtime.CompilerServices.TaskAwaiter`1<System.String> [Supreme's Stadium Sound Selector]System.Runtime.CompilerServices.TaskAwaiter`1<System.String> SupremeStadiumSoundSelector.GameWatcher/<RunAsync>d__17::<>u__2 -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c -> [Supreme's Stadium Sound Selector]A.d/A
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c::<BuildUi>b__25_1[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c::<UpdateAssignedCountLabel>b__34_0[1]( [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c::.cctor[0]( ) skipped:  special name
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c::.ctor[0]( ) skipped:  special name
+
+	SupremeStadiumSoundSelector.MainForm/<>c [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c SupremeStadiumSoundSelector.MainForm/<>c::<>9 -> A
+	System.EventHandler [Supreme's Stadium Sound Selector]System.EventHandler SupremeStadiumSoundSelector.MainForm/<>c::<>9__25_1 -> A
+	System.Func`2<SupremeStadiumSoundSelector.TriggerEntry,System.Boolean> [Supreme's Stadium Sound Selector]System.Func`2<SupremeStadiumSoundSelector.TriggerEntry,System.Boolean> SupremeStadiumSoundSelector.MainForm/<>c::<>9__34_0 -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass42_0 -> [Supreme's Stadium Sound Selector]A.d/a
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass42_0::<OnWindowFoundChanged>b__0[0]( ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass42_0::.ctor[0]( ) skipped:  special name
+
+	SupremeStadiumSoundSelector.MainForm [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass42_0::<>4__this -> A
+	System.Boolean [Supreme's Stadium Sound Selector]System.Boolean SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass42_0::found -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass43_0 -> [Supreme's Stadium Sound Selector]A.d/B
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass43_0::<OnDownChanged>b__0[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass43_0::<OnDownChanged>b__1[1]( [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass43_0::.ctor[0]( ) skipped:  special name
+
+	SupremeStadiumSoundSelector.MainForm [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass43_0::<>4__this -> A
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass43_0::down -> A
+	System.Func`2<SupremeStadiumSoundSelector.TriggerEntry,System.Boolean> [Supreme's Stadium Sound Selector]System.Func`2<SupremeStadiumSoundSelector.TriggerEntry,System.Boolean> SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass43_0::<>9__1 -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass44_0 -> [Supreme's Stadium Sound Selector]A.d/b
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass44_0::<OnRegionChanged>b__0[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass44_0::<OnRegionChanged>b__1[1]( [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass44_0::.ctor[0]( ) skipped:  special name
+
+	SupremeStadiumSoundSelector.MainForm [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass44_0::<>4__this -> A
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass44_0::region -> A
+	System.Func`2<SupremeStadiumSoundSelector.TriggerEntry,System.Boolean> [Supreme's Stadium Sound Selector]System.Func`2<SupremeStadiumSoundSelector.TriggerEntry,System.Boolean> SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass44_0::<>9__1 -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass45_0 -> [Supreme's Stadium Sound Selector]A.d/C
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass45_0::<OnKeyCombo>b__0[0]( ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass45_0::<OnKeyCombo>b__1[1]( [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TriggerEntry ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass45_0::.ctor[0]( ) skipped:  special name
+
+	SupremeStadiumSoundSelector.MainForm [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass45_0::<>4__this -> A
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass45_0::keyCombo -> A
+	System.Func`2<SupremeStadiumSoundSelector.TriggerEntry,System.Boolean> [Supreme's Stadium Sound Selector]System.Func`2<SupremeStadiumSoundSelector.TriggerEntry,System.Boolean> SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass45_0::<>9__1 -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass47_0 -> [Supreme's Stadium Sound Selector]A.d/c
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass47_0::<OnLog>b__0[0]( ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass47_0::.ctor[0]( ) skipped:  special name
+
+	SupremeStadiumSoundSelector.MainForm [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.MainForm SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass47_0::<>4__this -> A
+	System.String [Supreme's Stadium Sound Selector]System.String SupremeStadiumSoundSelector.MainForm/<>c__DisplayClass47_0::message -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/RECT -> [Supreme's Stadium Sound Selector]A.E/A
+{
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native/RECT::Left -> A
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native/RECT::Top -> a
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native/RECT::Right -> B
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native/RECT::Bottom -> b
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/POINT -> [Supreme's Stadium Sound Selector]A.E/a
+{
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native/POINT::X -> A
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.Native/POINT::Y -> a
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/MSG -> [Supreme's Stadium Sound Selector]A.E/B
+{
+	System.IntPtr [Supreme's Stadium Sound Selector]System.IntPtr SupremeStadiumSoundSelector.Native/MSG::hwnd -> A
+	System.UInt32 [Supreme's Stadium Sound Selector]System.UInt32 SupremeStadiumSoundSelector.Native/MSG::message -> A
+	System.IntPtr [Supreme's Stadium Sound Selector]System.IntPtr SupremeStadiumSoundSelector.Native/MSG::wParam -> a
+	System.IntPtr [Supreme's Stadium Sound Selector]System.IntPtr SupremeStadiumSoundSelector.Native/MSG::lParam -> B
+	System.UInt32 [Supreme's Stadium Sound Selector]System.UInt32 SupremeStadiumSoundSelector.Native/MSG::time -> a
+	SupremeStadiumSoundSelector.Native/POINT [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/POINT SupremeStadiumSoundSelector.Native/MSG::pt -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/KBDLLHOOKSTRUCT -> [Supreme's Stadium Sound Selector]A.E/b
+{
+	System.UInt32 [Supreme's Stadium Sound Selector]System.UInt32 SupremeStadiumSoundSelector.Native/KBDLLHOOKSTRUCT::vkCode -> A
+	System.UInt32 [Supreme's Stadium Sound Selector]System.UInt32 SupremeStadiumSoundSelector.Native/KBDLLHOOKSTRUCT::scanCode -> a
+	System.UInt32 [Supreme's Stadium Sound Selector]System.UInt32 SupremeStadiumSoundSelector.Native/KBDLLHOOKSTRUCT::flags -> B
+	System.UInt32 [Supreme's Stadium Sound Selector]System.UInt32 SupremeStadiumSoundSelector.Native/KBDLLHOOKSTRUCT::time -> b
+	System.IntPtr [Supreme's Stadium Sound Selector]System.IntPtr SupremeStadiumSoundSelector.Native/KBDLLHOOKSTRUCT::dwExtraInfo -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Program/<>c -> [Supreme's Stadium Sound Selector]A.e/A
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Program/<>c::<Main>b__0_0[2]( [System.Runtime]System.Object, [System.Runtime]System.UnhandledExceptionEventArgs ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Program/<>c::<Main>b__0_1[2]( [System.Runtime]System.Object, [System.Threading.Thread]System.Threading.ThreadExceptionEventArgs ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Program/<>c::.cctor[0]( ) skipped:  special name
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Program/<>c::.ctor[0]( ) skipped:  special name
+
+	SupremeStadiumSoundSelector.Program/<>c [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Program/<>c SupremeStadiumSoundSelector.Program/<>c::<>9 -> A
+	System.UnhandledExceptionEventHandler [Supreme's Stadium Sound Selector]System.UnhandledExceptionEventHandler SupremeStadiumSoundSelector.Program/<>c::<>9__0_0 -> A
+	System.Threading.ThreadExceptionEventHandler [Supreme's Stadium Sound Selector]System.Threading.ThreadExceptionEventHandler SupremeStadiumSoundSelector.Program/<>c::<>9__0_1 -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/Comb -> [Supreme's Stadium Sound Selector]A.g/A
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/Comb::Process[1]( [System.Runtime]System.Single ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/Comb::.ctor[3]( [System.Runtime]System.Int32, [System.Runtime]System.Single, [System.Runtime]System.Single ) skipped:  special name
+
+	System.Single[] [Supreme's Stadium Sound Selector]System.Single[] SupremeStadiumSoundSelector.ReverbProvider/Comb::_buffer -> A
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.ReverbProvider/Comb::_idx -> A
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider/Comb::_filterStore -> A
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider/Comb::_feedback -> a
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider/Comb::_damp1 -> B
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider/Comb::_damp2 -> b
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/AllPass -> [Supreme's Stadium Sound Selector]A.g/a
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/AllPass::Process[1]( [System.Runtime]System.Single ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/AllPass::.ctor[2]( [System.Runtime]System.Int32, [System.Runtime]System.Single ) skipped:  special name
+
+	System.Single[] [Supreme's Stadium Sound Selector]System.Single[] SupremeStadiumSoundSelector.ReverbProvider/AllPass::_buffer -> A
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.ReverbProvider/AllPass::_idx -> A
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider/AllPass::Feedback -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/<>c__DisplayClass17_0 -> [Supreme's Stadium Sound Selector]A.g/B
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/<>c__DisplayClass17_0::<.ctor>b__0[1]( [System.Runtime]System.Int32 ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/<>c__DisplayClass17_0::<.ctor>b__1[1]( [System.Runtime]System.Int32 ) -> a
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/<>c__DisplayClass17_0::<.ctor>b__2[1]( [System.Runtime]System.Int32 ) -> B
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/<>c__DisplayClass17_0::<.ctor>b__3[1]( [System.Runtime]System.Int32 ) -> b
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbProvider/<>c__DisplayClass17_0::.ctor[0]( ) skipped:  special name
+
+	System.Double [Supreme's Stadium Sound Selector]System.Double SupremeStadiumSoundSelector.ReverbProvider/<>c__DisplayClass17_0::scale -> A
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider/<>c__DisplayClass17_0::feedback -> A
+	System.Single [Supreme's Stadium Sound Selector]System.Single SupremeStadiumSoundSelector.ReverbProvider/<>c__DisplayClass17_0::damp1 -> a
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.SettingsForm/<>c__DisplayClass5_0 -> [Supreme's Stadium Sound Selector]A.H/A
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.SettingsForm/<>c__DisplayClass5_0::<BuildUi>g__Row|0[5]( [System.Runtime]System.String, [System.Runtime]System.Decimal, [System.Runtime]System.Decimal, [System.Runtime]System.Decimal, [System.Runtime]System.Decimal ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.SettingsForm/<>c__DisplayClass5_0::<BuildUi>b__1[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> A
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.SettingsForm/<>c__DisplayClass5_0::<BuildUi>b__2[2]( [System.Runtime]System.Object, [System.Runtime]System.EventArgs ) -> a
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.SettingsForm/<>c__DisplayClass5_0::.ctor[0]( ) skipped:  special name
+
+	System.Int32 [Supreme's Stadium Sound Selector]System.Int32 SupremeStadiumSoundSelector.SettingsForm/<>c__DisplayClass5_0::y -> A
+	SupremeStadiumSoundSelector.SettingsForm [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.SettingsForm SupremeStadiumSoundSelector.SettingsForm/<>c__DisplayClass5_0::<>4__this -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm/<>c__DisplayClass16_0 -> [Supreme's Stadium Sound Selector]A.i/A
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm/<>c__DisplayClass16_0::<PlayPreview>b__0[2]( [System.Runtime]System.Object, [NAudio.Core]NAudio.Wave.StoppedEventArgs ) -> A
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.TrimmerForm/<>c__DisplayClass16_0::.ctor[0]( ) skipped:  special name
+
+	NAudio.Wave.AudioFileReader [Supreme's Stadium Sound Selector]NAudio.Wave.AudioFileReader SupremeStadiumSoundSelector.TrimmerForm/<>c__DisplayClass16_0::reader -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Program -> [Supreme's Stadium Sound Selector]A.e
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Program::Main[0]( ) -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.PromptDialog -> [Supreme's Stadium Sound Selector]A.F
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.PromptDialog::Show[4]( [System.Windows.Forms]System.Windows.Forms.IWin32Window, [System.Runtime]System.String, [System.Runtime]System.String, [System.Runtime]System.String ) -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbPresets -> [Supreme's Stadium Sound Selector]A.G
+{
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbPresets::Get[1]( [Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.ReverbPreset ) -> A
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/EnumWindowsProc -> [Supreme's Stadium Sound Selector]A.E/C
+{
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/EnumWindowsProc::.ctor[2]( [System.Runtime]System.Object, [System.Runtime]System.IntPtr ) skipped:  runtime method
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/EnumWindowsProc::Invoke[2]( [System.Runtime]System.IntPtr, [System.Runtime]System.IntPtr ) skipped:  runtime method
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/EnumWindowsProc::BeginInvoke[4]( [System.Runtime]System.IntPtr, [System.Runtime]System.IntPtr, [System.Runtime]System.AsyncCallback, [System.Runtime]System.Object ) skipped:  runtime method
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/EnumWindowsProc::EndInvoke[1]( [System.Runtime]System.IAsyncResult ) skipped:  runtime method
+}
+
+[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/LowLevelKeyboardProc -> [Supreme's Stadium Sound Selector]A.E/c
+{
+
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/LowLevelKeyboardProc::.ctor[2]( [System.Runtime]System.Object, [System.Runtime]System.IntPtr ) skipped:  runtime method
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/LowLevelKeyboardProc::Invoke[3]( [System.Runtime]System.Int32, [System.Runtime]System.IntPtr, [System.Runtime]System.IntPtr ) skipped:  runtime method
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/LowLevelKeyboardProc::BeginInvoke[5]( [System.Runtime]System.Int32, [System.Runtime]System.IntPtr, [System.Runtime]System.IntPtr, [System.Runtime]System.AsyncCallback, [System.Runtime]System.Object ) skipped:  runtime method
+	[Supreme's Stadium Sound Selector]SupremeStadiumSoundSelector.Native/LowLevelKeyboardProc::EndInvoke[1]( [System.Runtime]System.IAsyncResult ) skipped:  runtime method
+}
+
+[Supreme's Stadium Sound Selector]<PrivateImplementationDetails>/__StaticArrayInitTypeSize=16 -> [Supreme's Stadium Sound Selector]A.J/A
+{
+}
+
+[Supreme's Stadium Sound Selector]<PrivateImplementationDetails>/__StaticArrayInitTypeSize=32 -> [Supreme's Stadium Sound Selector]A.J/a
+{
+}
+
+Skipped Types:
+
+Renamed Resources:
+
+
+Skipped Resources:
+

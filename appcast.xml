@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>Bandroom Updates</title>
+        <link>https://github.com/YourUsername/Bandroom</link>
+        <description>Audio cues for College Football 27</description>
+        <language>en-us</language>
+
+        <!-- Latest version at the top -->
+        <item>
+            <title>Version 1.1.0 - State Machine Event Detection</title>
+            <description>
+                <![CDATA[
+                <h2>New Features</h2>
+                <ul>
+                    <li>Intelligent state-machine based event detection</li>
+                    <li>Automatic possession tracking via scoreboard OCR</li>
+                    <li>All 33 college football events now supported</li>
+                    <li>Improved accuracy for turnovers and field goals</li>
+                </ul>
+
+                <h2>Improvements</h2>
+                <ul>
+                    <li>Better scoreboard calibration wizard</li>
+                    <li>Reduced false-positive event fires</li>
+                    <li>Auto-update system (this!)</li>
+                </ul>
+                ]]>
+            </description>
+            <pubDate>Mon, 04 Aug 2026 12:00:00 GMT</pubDate>
+            <enclosure
+                url="https://github.com/YourUsername/Bandroom/releases/download/v1.1.0/Bandroom-v1.1.0.zip"
+                sparkle:version="1.1.0"
+                sparkle:os="windows"
+                type="application/zip"
+                length="15728640" />
+        </item>
+
+        <!-- Previous versions (keep for reference) -->
+        <item>
+            <title>Version 1.0.0 - Initial Release</title>
+            <description>
+                <![CDATA[
+                <ul>
+                    <li>Initial Bandroom release</li>
+                    <li>WebView2 UI with glassmorphism design</li>
+                    <li>Basic event detection and audio assignment</li>
+                </ul>
+                ]]>
+            </description>
+            <pubDate>Fri, 01 Aug 2026 12:00:00 GMT</pubDate>
+            <enclosure
+                url="https://github.com/YourUsername/Bandroom/releases/download/v1.0.0/Bandroom-v1.0.0.zip"
+                sparkle:version="1.0.0"
+                sparkle:os="windows"
+                type="application/zip"
+                length="15728640" />
+        </item>
+    </channel>
+</rss>

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Bandroom</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="backdrop"></div>
+  <div id="scrim"></div>
+
+  <div id="app">
+    <!-- Chrome bar: traffic lights + decorative glyphs only. No URL bar, no window controls. -->
+    <div id="chrome-bar" onmousedown="window.chrome?.webview?.hostObjects?.bandroom?.BeginDrag()">
+      <div class="traffic-lights">
+        <span class="dot dot-red"></span>
+        <span class="dot dot-yellow"></span>
+        <span class="dot dot-green"></span>
+      </div>
+      <div class="chrome-glyphs">
+        <span class="glyph glyph-newwin"></span>
+        <span class="glyph glyph-chevron glyph-chevron-left"></span>
+        <span class="glyph glyph-chevron glyph-chevron-right"></span>
+      </div>
+      <div class="chrome-glyphs chrome-glyphs-right">
+        <span class="glyph glyph-clock"></span>
+        <span class="glyph glyph-share"></span>
+        <span class="glyph glyph-plus"></span>
+      </div>
+    </div>
+
+    <!-- Header bar -->
+    <div id="header-bar" class="glass">
+      <div class="header-left">
+        <span class="brand-mark">B</span>
+        <span class="brand-name">Bandroom</span>
+      </div>
+      <div class="header-center">
+        <span id="team-name">General</span>
+        <span class="header-sep">·</span>
+        <span>Live Session</span>
+      </div>
+      <div class="header-right">
+        <button id="btn-watch" class="pill pill-off" title="Toggle watching">
+          <span class="watch-dot"></span>
+          <span id="watch-label">Start Watching</span>
+        </button>
+        <button id="btn-feed" class="btn-ghost">Live Feed</button>
+        <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
+      </div>
+    </div>
+
+    <div id="body">
+      <!-- Left icon rail -->
+      <div class="rail" id="rail-left">
+        <button class="rail-item active" data-action="focus-teams"><span class="rail-icon">&#9978;</span><span class="rail-label">Teams</span></button>
+        <button class="rail-item" data-action="focus-categories"><span class="rail-icon">&#9776;</span><span class="rail-label">Categories</span></button>
+        <button class="rail-item" data-action="toggle-feed"><span class="rail-icon">&#9834;</span><span class="rail-label">Feed</span></button>
+        <button class="rail-item" data-action="assign"><span class="rail-icon">&#9998;</span><span class="rail-label">Assign</span></button>
+        <button class="rail-item" data-action="help"><span class="rail-icon">?</span><span class="rail-label">Help</span></button>
+      </div>
+
+      <!-- Left panel: team grid only -->
+      <div class="side-panel glass" id="left-panel">
+        <div class="panel-section">
+          <div class="panel-title">Team</div>
+          <div class="team-grid" id="team-grid"><!-- populated by app.js --></div>
+        </div>
+      </div>
+
+      <!-- Center: team background showing through, with a horizontal categories strip on top -->
+      <div id="center-column">
+        <div id="category-bar" class="glass">
+          <div class="category-list" id="category-list"><!-- populated by app.js --></div>
+        </div>
+        <div id="situations-panel" class="glass" hidden>
+          <div class="situations-header">
+            <span id="situations-title">Situations</span>
+            <button id="btn-close-situations" class="icon-btn">&times;</button>
+          </div>
+          <div class="situations-list" id="situations-list"><!-- populated by app.js --></div>
+        </div>
+      </div>
+
+      <!-- Right panel: Adjust -->
+      <div class="side-panel glass" id="adjust-panel">
+        <div class="panel-section">
+          <div class="panel-title">Volume</div>
+          <input type="range" id="slider-volume" min="0" max="100" value="72" class="slider" />
+          <div class="slider-value"><span id="volume-value">72</span>%</div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-title">Fire Sensitivity (Delay)</div>
+          <input type="range" id="slider-sensitivity" min="0" max="30" value="10" step="1" class="slider" />
+          <div class="slider-value"><span id="sensitivity-value">10</span>s until fade-out &mdash; no fade-in</div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-title">Reverb</div>
+          <div class="reverb-tiles" id="reverb-tiles">
+            <button class="reverb-tile" data-reverb="off">Off</button>
+            <button class="reverb-tile" data-reverb="stadium">Stadium</button>
+            <button class="reverb-tile" data-reverb="dome">Dome</button>
+            <button class="reverb-tile" data-reverb="nightgame">Night Game</button>
+          </div>
+        </div>
+        <button id="btn-reset" class="btn-ghost btn-block">Reset Team Profile</button>
+      </div>
+
+      <!-- Right icon rail -->
+      <div class="rail" id="rail-right">
+        <button class="rail-item active" data-action="focus-adjust"><span class="rail-icon">&#9881;</span><span class="rail-label">Adjust</span></button>
+        <button class="rail-item" data-action="effects"><span class="rail-icon">&#10022;</span><span class="rail-label">Effects</span></button>
+        <button class="rail-item" data-action="toggle-feed"><span class="rail-icon">&#9834;</span><span class="rail-label">Feed</span></button>
+        <button class="rail-item" data-action="help"><span class="rail-icon">?</span><span class="rail-label">Help</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full team picker -- Teams rail button opens this instead of just pointing at the small
+       sidebar grid, since browsing all ~148 teams needs more room and search. -->
+  <div id="team-picker-overlay" hidden>
+    <div id="team-picker" class="glass">
+      <div class="team-picker-header">
+        <span>Choose a Team</span>
+        <button id="btn-close-picker" class="icon-btn">&times;</button>
+      </div>
+      <input type="text" id="team-picker-search" placeholder="Search teams..." class="team-picker-search" />
+      <div class="team-picker-grid" id="team-picker-grid"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

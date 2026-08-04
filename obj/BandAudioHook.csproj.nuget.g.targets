@@ -1,0 +1,8 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <Import Project="$(NuGetPackageRoot)jaj.packages.miniaudioex\3.3.5\buildTransitive\JAJ.Packages.MiniAudioEx.targets" Condition="Exists('$(NuGetPackageRoot)jaj.packages.miniaudioex\3.3.5\buildTransitive\JAJ.Packages.MiniAudioEx.targets')" />
+    <Import Project="$(NuGetPackageRoot)hexa.net.imgui\2.2.10-prerelease\buildTransitive\Hexa.NET.ImGui.targets" Condition="Exists('$(NuGetPackageRoot)hexa.net.imgui\2.2.10-prerelease\buildTransitive\Hexa.NET.ImGui.targets')" />
+    <Import Project="$(NuGetPackageRoot)microsoft.web.webview2\1.0.2792.45\buildTransitive\Microsoft.Web.WebView2.targets" Condition="Exists('$(NuGetPackageRoot)microsoft.web.webview2\1.0.2792.45\buildTransitive\Microsoft.Web.WebView2.targets')" />
+  </ImportGroup>
+</Project>

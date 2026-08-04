@@ -1,0 +1,454 @@
+@font-face {
+  font-family: "Outfit";
+  src: url("fonts/Outfit-Regular.ttf") format("truetype");
+  font-weight: 400;
+}
+@font-face {
+  font-family: "Outfit";
+  src: url("fonts/Outfit-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+}
+@font-face {
+  font-family: "Outfit";
+  src: url("fonts/Outfit-Bold.ttf") format("truetype");
+  font-weight: 700;
+}
+
+:root {
+  --accent: #22d3ee;
+  --accent-2: #22d3ee;
+  --team-secondary: #22d3ee;
+  --window-bg: #161719;
+  --chrome-bg: rgba(27, 28, 31, 0.55);
+  --text-primary: #e7ecf1;
+  --text-muted: #7d8791;
+  --text-muted-2: #8b95a1;
+  --glass-fill: rgba(255, 255, 255, 0.06);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-blur: 22px;
+  --chrome-h: 34px;
+  --header-h: 56px;
+  --rail-w: 78px;
+  --side-w: 240px;
+  --radius-panel: 24px;
+  --radius-card: 14px;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body {
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  color: var(--text-primary);
+  background: var(--window-bg);
+}
+
+/* Full-bleed team stadium background -- this IS the "island" surface everything floats on */
+#backdrop {
+  position: fixed;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--window-bg);
+  transition: background-image 0.6s ease;
+  z-index: 0;
+}
+#scrim {
+  position: fixed;
+  inset: 0;
+  /* Team background still shows through -- just a bit darker than before so the neon panel
+     borders read clearly against it. */
+  background: radial-gradient(120% 100% at 50% 0%, rgba(10, 11, 13, 0.24) 0%, rgba(10, 11, 13, 0.44) 60%, rgba(6, 7, 8, 0.62) 100%);
+  z-index: 1;
+}
+
+#app {
+  position: relative;
+  z-index: 2;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Chrome bar: decorative only, no URL bar, no OS window controls */
+#chrome-bar {
+  height: var(--chrome-h);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 14px;
+  background: var(--chrome-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-app-region: drag;
+}
+.traffic-lights { display: flex; gap: 8px; -webkit-app-region: no-drag; }
+.dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.dot-red { background: #ff5f57; }
+.dot-yellow { background: #febc2e; }
+.dot-green { background: #28c840; }
+.chrome-glyphs { display: flex; align-items: center; gap: 14px; color: rgba(201, 211, 220, 0.35); font-size: 13px; }
+.chrome-glyphs-right { margin-left: auto; }
+.glyph { width: 15px; text-align: center; }
+
+/* Glass panel base -- real backdrop-filter blur, this is the whole point of the pivot */
+.glass {
+  background: var(--glass-fill);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  animation: neon-pulse 3.2s ease-in-out infinite;
+}
+@keyframes neon-pulse {
+  0%, 100% {
+    border-color: color-mix(in srgb, var(--team-secondary) 45%, var(--glass-border));
+    box-shadow: 0 0 10px -2px color-mix(in srgb, var(--team-secondary) 35%, transparent);
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--team-secondary) 85%, var(--glass-border));
+    box-shadow: 0 0 22px 1px color-mix(in srgb, var(--team-secondary) 60%, transparent);
+  }
+}
+
+#header-bar {
+  height: var(--header-h);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 16px;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+.header-left { display: flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; }
+.brand-mark {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: var(--accent); color: #06222a;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 17px; font-weight: 700;
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  flex: none;
+}
+.brand-name {
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: 0.2px;
+  background: linear-gradient(120deg, #ffffff 0%, var(--accent) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.35));
+}
+.brand-dot { color: var(--accent); }
+.header-center {
+  flex: 1;
+  text-align: center;
+  color: var(--text-muted-2);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#team-name { color: var(--text-primary); font-weight: 600; }
+.header-sep { margin: 0 8px; color: var(--text-muted); }
+.header-right { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted-2);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pill .watch-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex: none; }
+.pill-off .watch-dot { background: #666; }
+.pill-waiting { color: #febc2e; border-color: rgba(254, 188, 46, 0.4); }
+.pill-waiting .watch-dot { background: #febc2e; }
+.pill-watching { color: #3ddc84; border-color: rgba(61, 220, 132, 0.4); }
+.pill-watching .watch-dot { background: #3ddc84; }
+
+.btn-ghost {
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-block { width: 100%; margin-top: 8px; }
+.icon-btn {
+  width: 32px; height: 32px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted-2);
+  cursor: pointer;
+  flex: none;
+}
+
+#body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  padding: 16px;
+  gap: 16px;
+}
+
+.rail {
+  flex: 0 0 var(--rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0;
+  border-radius: var(--radius-panel);
+}
+.rail-item {
+  width: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.rail-icon { font-size: 16px; line-height: 1; }
+.rail-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.rail-item.active, .rail-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--glass-border);
+  color: var(--text-primary);
+}
+
+.side-panel {
+  flex: 0 0 var(--side-w);
+  min-width: 0;
+  border-radius: var(--radius-panel);
+  padding: 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.panel-section { min-width: 0; }
+.panel-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  /* No inner scroll box here on purpose -- the side panel itself scrolls (.side-panel has
+     overflow-y: auto), so a second nested scroll area just clipped the last row mid-tile. */
+}
+.team-swatch {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  letter-spacing: 0.02em;
+  /* Monogram placeholder until real team logos are wired in (see WebBridge.Initials --
+     swap for an <img> using a TeamLogos\ lookup once logo files exist). */
+}
+.team-swatch.active { border-color: var(--text-primary); }
+.team-swatch:hover { filter: brightness(1.15); }
+
+.category-list {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.category-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+.category-row:hover { background: rgba(255, 255, 255, 0.07); }
+.category-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.category-text { min-width: 0; overflow: hidden; display: flex; align-items: baseline; gap: 6px; }
+.category-name {
+  font-size: 12px; font-weight: 600;
+  white-space: nowrap;
+}
+.category-count { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+
+/* Center column: the "island" is the header/side panels floating over this -- the column
+   itself carries no card/hero, just lets the full-bleed backdrop show through. */
+#center-column {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: var(--radius-panel);
+  padding: 4px;
+}
+#category-bar {
+  border-radius: var(--radius-panel);
+  padding: 14px 18px;
+}
+
+#situations-panel {
+  margin-top: 10px;
+  border-radius: var(--radius-panel);
+  padding: 14px 18px;
+  max-height: calc(100vh - 260px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.situations-header {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; font-weight: 700;
+  margin-bottom: 10px;
+  flex: 0 0 auto;
+}
+.situations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.situation-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.03);
+  min-width: 0;
+}
+.situation-text { flex: 1 1 auto; min-width: 0; }
+.situation-name {
+  font-size: 12.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.situation-file { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.situation-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.situation-btn {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.situation-btn:hover { background: rgba(255, 255, 255, 0.1); }
+
+.slider { width: 100%; accent-color: var(--accent); }
+.slider-value { font-size: 12px; color: var(--text-muted-2); margin-top: 4px; }
+
+.reverb-tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.reverb-tile {
+  padding: 10px 6px;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted-2);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reverb-tile.active { background: rgba(255, 255, 255, 0.12); color: var(--text-primary); border-color: var(--text-primary); }
+
+#team-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+  opacity: 1;
+  transition: opacity 0.18s ease;
+}
+/* The ID selector above beats the browser's default `[hidden] { display: none }` (attribute
+   selector loses to ID on specificity), so toggling the `hidden` attribute from JS did nothing
+   visually -- this rule needs to win instead, which is why closing the picker silently failed. */
+#team-picker-overlay[hidden] {
+  display: none;
+}
+#team-picker {
+  width: min(900px, 90vw);
+  height: min(720px, 85vh);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.team-picker-header {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 16px; font-weight: 700;
+  margin-bottom: 14px;
+  flex: 0 0 auto;
+}
+.team-picker-search {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-size: 13px;
+  margin-bottom: 14px;
+  outline: none;
+}
+.team-picker-search::placeholder { color: var(--text-muted); }
+.team-picker-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+.team-picker-grid .team-swatch { font-size: 14px; }
+
+@keyframes panel-flash {
+  0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); border-color: var(--glass-border); }
+  30% { box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.5); border-color: var(--accent); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); border-color: var(--glass-border); }
+}
+.panel-flash { animation: panel-flash 0.9s ease-out; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }

@@ -1,0 +1,170 @@
+using System.Drawing;
+
+namespace SupremeStadiumSoundSelector;
+
+public readonly record struct TeamColor(string Name, Color? Primary, Color? Secondary)
+{
+    static readonly Color DefaultAccent = ColorTranslator.FromHtml("#22d3ee");
+
+    /// <summary>Primary color to theme with, falling back to the app's default neon accent
+    /// (#22d3ee) for "General" (no team selected). A plain constant, not Theme.CategoryDowns --
+    /// that property reads ActiveTeam.Accent, so referencing it here would recurse.</summary>
+    public Color Accent => Primary ?? DefaultAccent;
+}
+
+/// <summary>The ~140-team FBS color table, ported directly from the PROFILE_LIST constant in
+/// the design handoff's "Stadium Sound Selector - UI Redesign.dc.html". Hex pairs are
+/// verbatim from that file -- do not "correct" a color without checking the source design
+/// file first, some are intentionally unusual (e.g. Colorado's gold-primary).</summary>
+internal static class TeamColors
+{
+    static Color Hex(string hex) => ColorTranslator.FromHtml(hex);
+
+    public static readonly TeamColor[] All =
+    {
+        new("General", null, null),
+        new("Air Force", Hex("#003087"), Hex("#8a8d8f")),
+        new("Akron", Hex("#041e42"), Hex("#a89968")),
+        new("Alabama", Hex("#9e1b32"), Hex("#828a8c")),
+        new("Appalachian State", Hex("#000000"), Hex("#ffcc00")),
+        new("Arizona", Hex("#ab0520"), Hex("#0c234b")),
+        new("Arizona State", Hex("#8c1d40"), Hex("#ffc627")),
+        new("Arkansas", Hex("#9d2235"), Hex("#000000")),
+        new("Arkansas State", Hex("#cc092f"), Hex("#000000")),
+        new("Army", Hex("#000000"), Hex("#d4bf91")),
+        new("Auburn", Hex("#0c2340"), Hex("#e87722")),
+        new("Ball State", Hex("#ba0c2f"), Hex("#000000")),
+        new("Baylor", Hex("#003015"), Hex("#ffb81c")),
+        new("Boise State", Hex("#0033a0"), Hex("#d64309")),
+        new("Boston College", Hex("#98002e"), Hex("#bc9b6a")),
+        new("Bowling Green", Hex("#4f2c1d"), Hex("#fe5000")),
+        new("BYU", Hex("#002e5d"), Hex("#ffffff")),
+        new("Buffalo", Hex("#005bbb"), Hex("#ffffff")),
+        new("California", Hex("#003262"), Hex("#fdb515")),
+        new("Central Michigan", Hex("#6a0032"), Hex("#ffc82e")),
+        new("Charlotte", Hex("#005035"), Hex("#b3a369")),
+        new("Cincinnati", Hex("#e00122"), Hex("#000000")),
+        new("Clemson", Hex("#f56600"), Hex("#522d80")),
+        new("Coastal Carolina", Hex("#006f71"), Hex("#a27752")),
+        new("Colorado", Hex("#cfb87c"), Hex("#000000")),
+        new("Colorado State", Hex("#1e4d2b"), Hex("#c8c372")),
+        new("Connecticut", Hex("#000e2f"), Hex("#ffffff")),
+        new("Delaware", Hex("#00539f"), Hex("#ffd200")),
+        new("Duke", Hex("#012169"), Hex("#ffffff")),
+        new("East Carolina", Hex("#592a8a"), Hex("#fdc82f")),
+        new("Eastern Michigan", Hex("#006633"), Hex("#ffffff")),
+        new("FAU", Hex("#003366"), Hex("#cc0000")),
+        new("FIU", Hex("#002f5f"), Hex("#b0862e")),
+        new("Florida", Hex("#0021a5"), Hex("#fa4616")),
+        new("Florida State", Hex("#782f40"), Hex("#ceb888")),
+        new("Fresno State", Hex("#db0032"), Hex("#002554")),
+        new("Georgia", Hex("#ba0c2f"), Hex("#000000")),
+        new("Georgia Southern", Hex("#041e42"), Hex("#b0b7bc")),
+        new("Georgia State", Hex("#0039a6"), Hex("#c60c30")),
+        new("Georgia Tech", Hex("#b3a369"), Hex("#003057")),
+        new("Hawaii", Hex("#024731"), Hex("#ffffff")),
+        new("Houston", Hex("#c8102e"), Hex("#ffffff")),
+        new("Illinois", Hex("#e84a27"), Hex("#13294b")),
+        new("Indiana", Hex("#990000"), Hex("#eeedeb")),
+        new("Iowa", Hex("#ffcd00"), Hex("#000000")),
+        new("Iowa State", Hex("#c8102e"), Hex("#f1be48")),
+        new("Jacksonville State", Hex("#a80532"), Hex("#000000")),
+        new("James Madison", Hex("#450084"), Hex("#cbb677")),
+        new("Kansas", Hex("#0051ba"), Hex("#e8000d")),
+        new("Kansas State", Hex("#512888"), Hex("#ffffff")),
+        new("Kennesaw State", Hex("#ffc629"), Hex("#000000")),
+        new("Kent State", Hex("#002664"), Hex("#eaaa00")),
+        new("Kentucky", Hex("#0033a0"), Hex("#ffffff")),
+        new("Liberty", Hex("#002d62"), Hex("#b31942")),
+        new("Louisiana", Hex("#ce181e"), Hex("#000000")),
+        new("Louisiana Tech", Hex("#00285e"), Hex("#c41230")),
+        new("Louisville", Hex("#ad0000"), Hex("#000000")),
+        new("LSU", Hex("#461d7c"), Hex("#fdd023")),
+        new("Marshall", Hex("#00b140"), Hex("#000000")),
+        new("Maryland", Hex("#e03a3e"), Hex("#ffd520")),
+        new("Memphis", Hex("#003087"), Hex("#898d8d")),
+        new("Miami", Hex("#f47321"), Hex("#005030")),
+        new("Miami OH", Hex("#c41230"), Hex("#000000")),
+        new("Michigan", Hex("#00274c"), Hex("#ffcb05")),
+        new("Michigan State", Hex("#18453b"), Hex("#ffffff")),
+        new("Middle Tennessee", Hex("#0066cc"), Hex("#000000")),
+        new("Minnesota", Hex("#7a0019"), Hex("#ffcc33")),
+        new("Ole Miss", Hex("#14213d"), Hex("#ce1126")),
+        new("Mississippi State", Hex("#660000"), Hex("#ffffff")),
+        new("Missouri", Hex("#f1b82d"), Hex("#000000")),
+        new("Navy", Hex("#00205b"), Hex("#c5b783")),
+        new("NC State", Hex("#cc0000"), Hex("#000000")),
+        new("Nebraska", Hex("#e41c38"), Hex("#ffffff")),
+        new("Nevada", Hex("#003366"), Hex("#807f7f")),
+        new("New Mexico", Hex("#ba0c2f"), Hex("#a7a8aa")),
+        new("New Mexico State", Hex("#a72036"), Hex("#ffffff")),
+        new("North Carolina", Hex("#7bafd4"), Hex("#13294b")),
+        new("North Texas", Hex("#00853e"), Hex("#000000")),
+        new("Northern Illinois", Hex("#c8102e"), Hex("#000000")),
+        new("Northwestern", Hex("#4e2a84"), Hex("#ffffff")),
+        new("Notre Dame", Hex("#0c2340"), Hex("#c99700")),
+        new("Ohio", Hex("#00694e"), Hex("#ffffff")),
+        new("Ohio State", Hex("#bb0000"), Hex("#666666")),
+        new("Oklahoma", Hex("#841617"), Hex("#fdf9d8")),
+        new("Oklahoma State", Hex("#ff7300"), Hex("#000000")),
+        new("Old Dominion", Hex("#003057"), Hex("#8dc8e8")),
+        new("Oregon", Hex("#154733"), Hex("#fee123")),
+        new("Oregon State", Hex("#dc4405"), Hex("#000000")),
+        new("Penn State", Hex("#041e42"), Hex("#ffffff")),
+        new("Pittsburgh", Hex("#003594"), Hex("#ffb81c")),
+        new("Purdue", Hex("#ceb888"), Hex("#000000")),
+        new("Rice", Hex("#00205b"), Hex("#c1c6c8")),
+        new("Rutgers", Hex("#cc0033"), Hex("#5f6a72")),
+        new("Sam Houston", Hex("#f15a22"), Hex("#000000")),
+        new("San Diego State", Hex("#a6192e"), Hex("#000000")),
+        new("San Jose State", Hex("#0055a2"), Hex("#ffffff")),
+        new("SMU", Hex("#c8102e"), Hex("#0033a0")),
+        new("South Alabama", Hex("#00205b"), Hex("#a5acaf")),
+        new("South Carolina", Hex("#73000a"), Hex("#000000")),
+        new("South Florida", Hex("#006747"), Hex("#cfc493")),
+        new("Southern Miss", Hex("#ffab00"), Hex("#000000")),
+        new("Stanford", Hex("#8c1515"), Hex("#ffffff")),
+        new("Syracuse", Hex("#f76900"), Hex("#000e54")),
+        new("TCU", Hex("#4d1979"), Hex("#a3a9ac")),
+        new("Temple", Hex("#9d2235"), Hex("#000000")),
+        new("Tennessee", Hex("#ff8200"), Hex("#ffffff")),
+        new("Texas", Hex("#bf5700"), Hex("#ffffff")),
+        new("Texas A&M", Hex("#500000"), Hex("#ffffff")),
+        new("Texas State", Hex("#501214"), Hex("#a5acaf")),
+        new("Texas Tech", Hex("#cc0000"), Hex("#000000")),
+        new("Toledo", Hex("#005837"), Hex("#ffce00")),
+        new("Troy", Hex("#b4a369"), Hex("#8d2028")),
+        new("Tulane", Hex("#006747"), Hex("#418fde")),
+        new("Tulsa", Hex("#002664"), Hex("#c8102e")),
+        new("UAB", Hex("#1e6b52"), Hex("#000000")),
+        new("UCF", Hex("#ba9b37"), Hex("#000000")),
+        new("UCLA", Hex("#2d68c4"), Hex("#f2a900")),
+        new("UConn", Hex("#000e2f"), Hex("#ffffff")),
+        new("ULM", Hex("#840029"), Hex("#8f8f8f")),
+        new("UMass", Hex("#881c1c"), Hex("#000000")),
+        new("UNLV", Hex("#cf0a2c"), Hex("#000000")),
+        new("USC", Hex("#990000"), Hex("#ffc72c")),
+        new("Utah", Hex("#cc0000"), Hex("#ffffff")),
+        new("Utah State", Hex("#0f2439"), Hex("#ffffff")),
+        new("UTEP", Hex("#ff8200"), Hex("#041e42")),
+        new("UTSA", Hex("#0c2340"), Hex("#f15a22")),
+        new("Vanderbilt", Hex("#866d4b"), Hex("#000000")),
+        new("Virginia", Hex("#232d4b"), Hex("#f84c1e")),
+        new("Virginia Tech", Hex("#630031"), Hex("#cf4420")),
+        new("Wake Forest", Hex("#9e7e38"), Hex("#000000")),
+        new("Washington", Hex("#4b2e83"), Hex("#b7a57a")),
+        new("Washington State", Hex("#981e32"), Hex("#5e6a71")),
+        new("West Virginia", Hex("#002855"), Hex("#eaaa00")),
+        new("Western Kentucky", Hex("#c60c30"), Hex("#000000")),
+        new("Western Michigan", Hex("#532a1f"), Hex("#b6862c")),
+        new("Wisconsin", Hex("#c5050c"), Hex("#ffffff")),
+        new("Wyoming", Hex("#492f24"), Hex("#ffc425")),
+    };
+
+    public static TeamColor ByName(string name)
+    {
+        foreach (var t in All)
+            if (t.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return t;
+        return All[0];
+    }
+}

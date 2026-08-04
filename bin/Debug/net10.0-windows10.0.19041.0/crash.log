@@ -1,0 +1,84 @@
+[2026-08-04 04:00:51] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
+[2026-08-04 04:00:52] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
+[2026-08-04 04:00:52] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
+[2026-08-04 04:00:53] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
+[2026-08-04 04:01:20] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
+[2026-08-04 04:01:20] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
+[2026-08-04 09:48:04] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
+[2026-08-04 09:48:05] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
+[2026-08-04 09:48:05] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
+[2026-08-04 09:48:07] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
+[2026-08-04 09:48:08] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
+[2026-08-04 10:12:41] UI thread exception: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+   at SupremeStadiumSoundSelector.CategoryMixPanel.<>c__DisplayClass6_0.<Build>b__0(Object _, EventArgs _) in D:\Claude\Projects\tools\BandAudioHook\CategoryMixPanel.cs:line 46
+   at System.Windows.Forms.Control.WmMouseUp(Message& m, MouseButtons button, Int32 clicks)
+   at System.Windows.Forms.Control.WndProc(Message& m)
+   at System.Windows.Forms.ScrollableControl.WndProc(Message& m)
+   at System.Windows.Forms.NativeWindow.Callback(HWND hWnd, UInt32 msg, WPARAM wparam, LPARAM lparam)
+
