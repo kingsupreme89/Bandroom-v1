@@ -10,25 +10,6 @@
   <div id="scrim"></div>
 
   <div id="app">
-    <!-- Chrome bar: traffic lights + decorative glyphs only. No URL bar, no window controls. -->
-    <div id="chrome-bar" onmousedown="window.chrome?.webview?.hostObjects?.bandroom?.BeginDrag()">
-      <div class="traffic-lights">
-        <span class="dot dot-red"></span>
-        <span class="dot dot-yellow"></span>
-        <span class="dot dot-green"></span>
-      </div>
-      <div class="chrome-glyphs">
-        <span class="glyph glyph-newwin"></span>
-        <span class="glyph glyph-chevron glyph-chevron-left"></span>
-        <span class="glyph glyph-chevron glyph-chevron-right"></span>
-      </div>
-      <div class="chrome-glyphs chrome-glyphs-right">
-        <span class="glyph glyph-clock"></span>
-        <span class="glyph glyph-share"></span>
-        <span class="glyph glyph-plus"></span>
-      </div>
-    </div>
-
     <!-- Header bar -->
     <div id="header-bar" class="glass">
       <div class="header-left">
@@ -45,7 +26,7 @@
           <span class="watch-dot"></span>
           <span id="watch-label">Start Watching</span>
         </button>
-        <button id="btn-feed" class="btn-ghost">Live Feed</button>
+        <button id="btn-update" class="btn-update" title="Update available" hidden>&#8593; Update</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
       </div>
     </div>
@@ -55,7 +36,6 @@
       <div class="rail" id="rail-left">
         <button class="rail-item active" data-action="focus-teams"><span class="rail-icon">&#9978;</span><span class="rail-label">Teams</span></button>
         <button class="rail-item" data-action="focus-categories"><span class="rail-icon">&#9776;</span><span class="rail-label">Categories</span></button>
-        <button class="rail-item" data-action="toggle-feed"><span class="rail-icon">&#9834;</span><span class="rail-label">Feed</span></button>
         <button class="rail-item" data-action="assign"><span class="rail-icon">&#9998;</span><span class="rail-label">Assign</span></button>
         <button class="rail-item" data-action="help"><span class="rail-icon">?</span><span class="rail-label">Help</span></button>
       </div>
@@ -110,7 +90,6 @@
       <div class="rail" id="rail-right">
         <button class="rail-item active" data-action="focus-adjust"><span class="rail-icon">&#9881;</span><span class="rail-label">Adjust</span></button>
         <button class="rail-item" data-action="effects"><span class="rail-icon">&#10022;</span><span class="rail-label">Effects</span></button>
-        <button class="rail-item" data-action="toggle-feed"><span class="rail-icon">&#9834;</span><span class="rail-label">Feed</span></button>
         <button class="rail-item" data-action="help"><span class="rail-icon">?</span><span class="rail-label">Help</span></button>
       </div>
     </div>

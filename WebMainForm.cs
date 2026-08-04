@@ -2,6 +2,8 @@ using System.Drawing;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+using Squirrel;
+using Squirrel.Sources;
 
 namespace SupremeStadiumSoundSelector;
 
@@ -18,6 +20,7 @@ public sealed class WebMainForm : Form
     readonly KeyboardHook _hook = new();
     readonly GameWatcher _watcher = new();
     WebView2 _webView = null!;
+    bool _updateAvailable;
     bool _watching;
     bool _windowFound;
 
@@ -46,6 +49,7 @@ public sealed class WebMainForm : Form
         FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); };
 
         Load += async (_, _) => await InitWebViewAsync();
+        Load += (_, _) => InitAutoUpdater();
     }
 
     async Task InitWebViewAsync()
@@ -121,8 +125,6 @@ public sealed class WebMainForm : Form
     }
 
     string WatchStateString() => !_watching ? "off" : _windowFound ? "watching" : "waiting";
-
-    public void ToggleLiveFeedFromWeb() { /* TODO: live-feed panel port, tracked as follow-up */ }
 
     public void OpenSettingsFromWeb()
     {
@@ -304,6 +306,52 @@ public sealed class WebMainForm : Form
     }
 
     void OnLog(string message) { }
+
+    void InitAutoUpdater()
+    {
+        // Run on background thread — never block the UI for network calls.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var mgr = new UpdateManager(new GithubSource("https://github.com/kingsupreme89/Bandroom-v1", null, false));
+                var info = await mgr.CheckForUpdate();
+                if (info.ReleasesToApply.Count == 0) return;
+
+                _updateAvailable = true;
+                RunOnUi(() =>
+                {
+                    if (_webView.CoreWebView2 != null)
+                        _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:updateavailable'))");
+                });
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Auto-update check failed", ex);
+            }
+        });
+    }
+
+    public void ShowUpdateDialogFromWeb()
+    {
+        if (!_updateAvailable) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var mgr = new UpdateManager(new GithubSource("https://github.com/kingsupreme89/Bandroom-v1", null, false));
+                await mgr.UpdateApp();
+                RunOnUi(() => UpdateManager.RestartApp());
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Auto-update install failed", ex);
+                RunOnUi(() => MessageBox.Show(this,
+                    "Update download failed. Check your connection and try again.",
+                    "Bandroom Update", MessageBoxButtons.OK, MessageBoxIcon.Warning));
+            }
+        });
+    }
 
     void RunOnUi(Action action)
     {

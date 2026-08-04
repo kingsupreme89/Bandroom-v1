@@ -151,8 +151,8 @@ function wireControls() {
     setWatching(next ?? (state.watching === "off" ? "watching" : "off"));
   });
 
-  document.getElementById("btn-feed").addEventListener("click", () => bridge?.ToggleLiveFeed());
   document.getElementById("btn-settings").addEventListener("click", () => bridge?.OpenSettings());
+  document.getElementById("btn-update").addEventListener("click", () => bridge?.ShowUpdate());
   document.getElementById("btn-reset").addEventListener("click", () => bridge?.ResetTeamProfile());
 
   document.getElementById("slider-volume").addEventListener("input", (e) => {
@@ -187,6 +187,9 @@ function wireControls() {
 
   window.addEventListener("bandroom:refresh", refreshCategories);
   window.addEventListener("bandroom:watchstate", (e) => setWatching(e.detail));
+  window.addEventListener("bandroom:updateavailable", () => {
+    document.getElementById("btn-update").hidden = false;
+  });
 
   document.getElementById("btn-close-picker").addEventListener("click", closeTeamPicker);
   document.getElementById("team-picker-overlay").addEventListener("click", (e) => {
@@ -242,9 +245,6 @@ function runRailAction(action) {
     case "focus-adjust":
       flashPanel(document.getElementById("adjust-panel"));
       document.getElementById("adjust-panel").scrollIntoView({ block: "nearest" });
-      break;
-    case "toggle-feed":
-      bridge?.ToggleLiveFeed();
       break;
     case "assign":
       openSituations("All");

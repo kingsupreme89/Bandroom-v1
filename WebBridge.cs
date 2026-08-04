@@ -43,8 +43,8 @@ public sealed class WebBridge
     }
 
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
-    public void ToggleLiveFeed() => _host.ToggleLiveFeedFromWeb();
     public void OpenSettings() => _host.OpenSettingsFromWeb();
+    public void ShowUpdate() => _host.ShowUpdateDialogFromWeb();
     public void ResetTeamProfile() => _host.ResetTeamProfileFromWeb();
     public void OpenHelp() => _host.OpenHelpFromWeb();
     public void TriggerEffectsTest() => _host.TriggerEffectsTestFromWeb();
