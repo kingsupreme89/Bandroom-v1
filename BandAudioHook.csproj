@@ -6,8 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
-    <AssemblyName>Supreme's Stadium Sound Selector</AssemblyName>
-    <RootNamespace>SupremeStadiumSoundSelector</RootNamespace>
+    <AssemblyName>Bandroom</AssemblyName>
+    <RootNamespace>Bandroom</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

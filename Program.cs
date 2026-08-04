@@ -28,17 +28,16 @@ internal static class Program
     {
         try
         {
-            // Sparkle will check this URL for new versions (the appcast.xml file)
+            // IMPORTANT: Sparkle auto-update configuration
+            // The appcast.xml file at this URL contains the latest version info
             const string AppcastUrl = "https://raw.githubusercontent.com/strokaonair/Bandroom/main/appcast.xml";
 
-            // Create the Sparkle updater instance
-            // This checks for updates on startup and periodically in background
-            var updater = new Sparkle.Sparkle(AppcastUrl);
+            // TODO: Wire up Sparkle auto-update library
+            // Current status: Sparkle NuGet package added, appcast.xml configured
+            // Next: Implement using correct Sparkle API for .NET
+            // For now: Manual updates available at GitHub releases page
 
-            // Start the update loop:
-            // - Checks for updates on startup (first param: true)
-            // - Periodically re-checks every 24 hours (second param: true)
-            updater.StartLoop(true, true);
+            Log?.Invoke("[AutoUpdate] Appcast configured: " + AppcastUrl);
         }
         catch (Exception ex)
         {
@@ -46,4 +45,6 @@ internal static class Program
             CrashLog.Write("Auto-update initialization failed", ex);
         }
     }
+
+    static Action<string>? Log;
 }
