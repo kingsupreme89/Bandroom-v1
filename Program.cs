@@ -28,11 +28,17 @@ internal static class Program
     {
         try
         {
-            // TODO: Uncomment and configure once Sparkle API is verified
-            // URL to your appcast.xml (replace with your actual GitHub repo)
-            // string appcastUrl = "https://raw.githubusercontent.com/YourUsername/Bandroom/main/appcast.xml";
-            // var updater = new Sparkle.Sparkle(appcastUrl);
-            // updater.CheckForUpdatesQuietly();
+            // Sparkle will check this URL for new versions (the appcast.xml file)
+            const string AppcastUrl = "https://raw.githubusercontent.com/strokaonair/Bandroom/main/appcast.xml";
+
+            // Create the Sparkle updater instance
+            // This checks for updates on startup and periodically in background
+            var updater = new Sparkle.Sparkle(AppcastUrl);
+
+            // Start the update loop:
+            // - Checks for updates on startup (first param: true)
+            // - Periodically re-checks every 24 hours (second param: true)
+            updater.StartLoop(true, true);
         }
         catch (Exception ex)
         {
