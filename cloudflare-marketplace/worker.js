@@ -194,15 +194,21 @@ async function removeFromIndex(env, type, id) {
   await env.MARKETPLACE_META.put(indexKey(type), JSON.stringify(next));
 }
 
-async function checkRateLimit(env, request) {
+// action-scoped so /upload, /like, /report each get their own independent budget per IP.
+async function checkRateLimit(env, request, action, maxCount) {
   const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
-  const key = `ratelimit:upload:${ip}`;
+  const key = `ratelimit:${action}:${ip}`;
   const raw = await env.MARKETPLACE_META.get(key);
   const count = raw ? Number(raw) : 0;
-  if (count >= RATE_LIMIT_MAX_UPLOADS) return false;
+  if (count >= maxCount) return false;
   await env.MARKETPLACE_META.put(key, String(count + 1), { expirationTtl: RATE_LIMIT_WINDOW_SECONDS });
   return true;
 }
+
+// /like and /report had NO rate limiting at all (unlike /upload) -- unauthenticated, unbounded
+// KV writes, which is a more realistic path to exhausting the free tier's 1,000-writes/day cap
+// than upload volume ever was. Generous limit since liking/reporting is meant to be casual.
+const RATE_LIMIT_MAX_LIKES_REPORTS = 60;
 
 export default {
   async fetch(request, env) {
@@ -216,7 +222,7 @@ export default {
         return new Response("file too large (25MB max)", { status: 413, headers: cors() });
       }
 
-      const allowed = await checkRateLimit(env, request);
+      const allowed = await checkRateLimit(env, request, "upload", RATE_LIMIT_MAX_UPLOADS);
       if (!allowed) {
         return new Response("too many uploads -- try again in a few minutes", { status: 429, headers: cors() });
       }
@@ -327,6 +333,10 @@ export default {
       if ((type !== "song" && type !== "image") || !id) {
         return new Response("bad request", { status: 400, headers: cors() });
       }
+      const allowedLike = await checkRateLimit(env, request, "like", RATE_LIMIT_MAX_LIKES_REPORTS);
+      if (!allowedLike) {
+        return new Response("too many likes -- try again in a few minutes", { status: 429, headers: cors() });
+      }
       const metaKey = `meta:${type}:${id}`;
       const raw = await env.MARKETPLACE_META.get(metaKey);
       if (!raw) return new Response("not found", { status: 404, headers: cors() });
@@ -341,6 +351,10 @@ export default {
       const [type, id] = parts;
       if ((type !== "song" && type !== "image") || !id) {
         return new Response("bad request", { status: 400, headers: cors() });
+      }
+      const allowedReport = await checkRateLimit(env, request, "report", RATE_LIMIT_MAX_LIKES_REPORTS);
+      if (!allowedReport) {
+        return new Response("too many reports -- try again in a few minutes", { status: 429, headers: cors() });
       }
       const metaKey = `meta:${type}:${id}`;
       const raw = await env.MARKETPLACE_META.get(metaKey);

@@ -44,13 +44,47 @@ export default {
     }
 
     if (url.pathname === "/count" && request.method === "GET") {
+      // The free Workers KV plan has a hard daily cap on list() operations. This used to run a
+      // full list() scan on every /count call -- with clients polling every ~20s, that alone
+      // was enough to exhaust the daily cap and 500 the whole worker (same failure mode found
+      // in the marketplace worker). Cache the computed count in KV for 15s so list() runs at
+      // most once per 15s total, no matter how many clients are polling.
+      const cacheRaw = await env.USERCOUNT.get("count_cache");
+      if (cacheRaw) {
+        try {
+          const cached = JSON.parse(cacheRaw);
+          if (Date.now() - cached.computedAt < 15000) {
+            return new Response(JSON.stringify({ count: cached.count }), {
+              headers: { ...cors, "Content-Type": "application/json" },
+            });
+          }
+        } catch { /* fall through to recompute */ }
+      }
+
       let count = 0;
-      let cursor;
-      do {
-        const page = await env.USERCOUNT.list({ prefix: "u:", cursor });
-        count += page.keys.length;
-        cursor = page.list_complete ? undefined : page.cursor;
-      } while (cursor);
+      try {
+        let cursor;
+        do {
+          const page = await env.USERCOUNT.list({ prefix: "u:", cursor });
+          count += page.keys.length;
+          cursor = page.list_complete ? undefined : page.cursor;
+        } while (cursor);
+      } catch {
+        // Quota exhausted and no fresh cache to fall back on -- serve the last known count
+        // (even if stale) rather than a 500, so the UI doesn't break.
+        if (cacheRaw) {
+          try { return new Response(JSON.stringify({ count: JSON.parse(cacheRaw).count }), {
+            headers: { ...cors, "Content-Type": "application/json" },
+          }); } catch { /* fall through */ }
+        }
+        return new Response(JSON.stringify({ count: 0 }), {
+          headers: { ...cors, "Content-Type": "application/json" },
+        });
+      }
+
+      await env.USERCOUNT.put("count_cache", JSON.stringify({ count, computedAt: Date.now() }), {
+        expirationTtl: 120,
+      });
 
       return new Response(JSON.stringify({ count }), {
         headers: { ...cors, "Content-Type": "application/json" },
