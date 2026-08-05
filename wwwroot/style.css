@@ -186,6 +186,13 @@ body {
   flex: none;
 }
 
+.header-team-badge {
+  width: 28px; height: 28px;
+  font-size: 11px;
+  flex: none;
+  cursor: pointer;
+}
+
 .btn-update {
   padding: 7px 14px;
   border-radius: 999px;
@@ -198,9 +205,28 @@ body {
   white-space: nowrap;
   animation: update-pulse 2s ease-in-out infinite;
 }
+/* Default/no-update-available state -- always visible (so the control is discoverable and
+   clickable at any time), just visually quiet instead of hidden entirely. */
+.btn-update.dim {
+  border-color: var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  animation: none;
+  box-shadow: none;
+}
+.btn-update.downgraded {
+  border-color: rgba(239, 68, 68, 0.7);
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  animation: update-pulse-red 1.4s ease-in-out infinite;
+}
 @keyframes update-pulse {
   0%, 100% { box-shadow: 0 0 6px 0 rgba(61, 220, 132, 0.3); border-color: rgba(61, 220, 132, 0.5); }
   50%       { box-shadow: 0 0 18px 2px rgba(61, 220, 132, 0.65); border-color: rgba(61, 220, 132, 0.9); }
+}
+@keyframes update-pulse-red {
+  0%, 100% { box-shadow: 0 0 6px 0 rgba(239, 68, 68, 0.35); border-color: rgba(239, 68, 68, 0.6); }
+  50%       { box-shadow: 0 0 18px 2px rgba(239, 68, 68, 0.75); border-color: rgba(239, 68, 68, 1); }
 }
 
 .window-controls {
@@ -510,6 +536,204 @@ body {
   align-content: start;
 }
 .team-picker-grid .team-swatch { font-size: 14px; }
+
+.matchup-btn {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.matchup-btn:hover { color: var(--text-primary); }
+
+#matchup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#matchup-overlay[hidden] { display: none; }
+#matchup-dialog {
+  width: min(760px, 92vw);
+  height: min(620px, 85vh);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.matchup-header {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 16px; font-weight: 700;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
+}
+.matchup-instructions {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted-2);
+  margin: 0 0 14px;
+  flex: 0 0 auto;
+}
+.matchup-columns {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.matchup-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.matchup-column-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.matchup-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#save-profile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#save-profile-overlay[hidden] { display: none; }
+#save-profile-dialog {
+  width: min(440px, 90vw);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+}
+.save-profile-header {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.save-profile-instructions {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted-2);
+  margin: 0 0 14px;
+}
+.save-profile-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+}
+.save-profile-input:focus { border-color: var(--team-secondary, var(--glass-border)); }
+.save-profile-subtext {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-height: 16px;
+  margin-top: 8px;
+}
+.save-profile-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+.btn-primary {
+  padding: 7px 16px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--team-secondary, #22d3ee);
+  color: #0b0d0f;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#changelog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#changelog-overlay[hidden] { display: none; }
+#changelog-panel {
+  width: min(560px, 90vw);
+  height: min(680px, 85vh);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.changelog-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 16px; font-weight: 700;
+  margin-bottom: 14px;
+  flex: 0 0 auto;
+}
+.changelog-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.changelog-entry {
+  padding: 14px 16px;
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+}
+.changelog-entry-header {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px;
+}
+.changelog-version {
+  font-size: 12.5px; font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #0b0c0e;
+  flex: 0 0 auto;
+}
+.changelog-version.prerelease { background: rgba(255, 255, 255, 0.18); color: var(--text-primary); }
+.changelog-title {
+  font-size: 13px; font-weight: 600;
+  flex: 1 1 auto; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.changelog-date { font-size: 11px; color: var(--text-muted); flex: 0 0 auto; }
+.changelog-notes {
+  margin: 0; padding-left: 18px;
+  font-size: 12px; color: var(--text-muted-2);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.changelog-empty, .changelog-loading {
+  font-size: 12.5px; color: var(--text-muted);
+  text-align: center;
+  padding: 30px 0;
+}
 
 #onboarding-overlay {
   position: fixed;

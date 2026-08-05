@@ -63,26 +63,26 @@ internal sealed class AssignTrackForm : Form
             Controls.Add(lblEmpty);
         }
 
-        var btnAssign = new GlassButton { Text = "Assign Selected", Left = 16, Top = 340, Width = 130, Height = 30 };
+        var btnFont = AppFonts.Get(9);
+
+        var btnAssign = new GlassButton { Text = "Assign Selected", Left = 16, Top = 340, Width = 130, Height = 30, Font = btnFont };
         Theme.StyleButton(btnAssign, primary: true);
         btnAssign.Click += (_, _) => AssignFromList();
         Controls.Add(btnAssign);
 
-        var btnBrowse = new GlassButton { Text = "Browse for file...", Left = 154, Top = 340, Width = 130, Height = 30 };
+        var btnBrowse = new GlassButton { Text = "Browse for file...", Left = 154, Top = 340, Width = 130, Height = 30, Font = btnFont };
         btnBrowse.Click += (_, _) => BrowseForFile();
         Controls.Add(btnBrowse);
 
-        var btnTrim = new GlassButton { Text = "Trim...", Left = 292, Top = 340, Width = 116, Height = 30 };
+        var btnTrim = new GlassButton { Text = "Trim...", Left = 292, Top = 340, Width = 116, Height = 30, Font = btnFont };
         btnTrim.Enabled = !string.IsNullOrWhiteSpace(_entry.AudioFile);
         btnTrim.Click += (_, _) => { RequestTrim = true; DialogResult = DialogResult.OK; Close(); };
         Controls.Add(btnTrim);
 
-        var btnClear = new GlassButton { Text = "Clear Assignment", Left = 16, Top = 378, Width = 160, Height = 28 };
-        btnClear.Enabled = !string.IsNullOrWhiteSpace(_entry.AudioFile);
-        btnClear.Click += (_, _) => { RequestClear = true; DialogResult = DialogResult.OK; Close(); };
-        Controls.Add(btnClear);
+        // Clear Assignment removed for now (per user request) -- RequestClear still exists
+        // on the form so callers don't need to change, it just never gets set to true right now.
 
-        var btnCancel = new GlassButton { Text = "Cancel", Left = 332, Top = 378, Width = 76, Height = 28 };
+        var btnCancel = new GlassButton { Text = "Cancel", Left = 332, Top = 378, Width = 76, Height = 28, Font = btnFont };
         btnCancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
         Controls.Add(btnCancel);
     }

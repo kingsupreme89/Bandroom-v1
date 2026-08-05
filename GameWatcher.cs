@@ -27,7 +27,22 @@ internal sealed class GameWatcher
     /// <summary>Fires for any region (including "down") whenever its OCR'd value changes
     /// to a new non-null value -- edge-triggered, same as DownChanged but generic.</summary>
     public event Action<string, string?>? RegionChanged;
+    /// <summary>Fires when the down/distance ribbon's background color flips between the home
+    /// team's color / the away team's color / neutral (black, e.g. kickoff) -- confirmed via
+    /// live screenshots that this same ribbon (the "down" region below) fills with whichever
+    /// team currently has the ball, not just down/distance text. "home"/"away"/null,
+    /// edge-triggered like DownChanged.</summary>
+    public event Action<string?>? PossessionChanged;
     public event Action<string>? Log;
+
+    /// <summary>Lets the host resolve a sampled ribbon color to "home"/"away"/null (host owns
+    /// the home/away team color table via ConfigStore/TeamColors, set from the Matchup picker)
+    /// without GameWatcher depending on those types directly. Null delegate or null result ->
+    /// possession never fires.</summary>
+    public Func<Color, string?>? ResolveTeamColor;
+
+    string? _lastPossession;
+    DateTime _possessionCooldownUntil;
 
     /// <summary>Minimum time between fires for the SAME region, guarding against a
     /// flickery OCR read (e.g. "2nd" -&gt; blank -&gt; "2nd" within one second) spam-firing
@@ -147,6 +162,8 @@ internal sealed class GameWatcher
                         Log?.Invoke($"[{region.Name}] OCR read: \"{trimmedText}\"");
                     }
 
+                    if (region.Name == "down") SamplePossession(bmp);
+
                     var match = region.Pattern.Match(text);
                     string? currentValue = match.Success ? NormalizeMatch(region.Name, match.Value) : null;
 
@@ -187,6 +204,48 @@ internal sealed class GameWatcher
                 Log?.Invoke($"Watcher error: {ex.Message}");
                 CrashLog.Write("Watcher error", ex);
                 try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { break; }
+            }
+        }
+    }
+
+    /// <summary>Reads the average background color of the down/distance ribbon and resolves it
+    /// to "home"/"away"/null via ResolveTeamColor, edge-triggering PossessionChanged the same
+    /// way OCR'd regions do (with the same Cooldown, to avoid flicker firing on a single bad
+    /// frame). Averaging the whole crop (not one sample pixel) means the mostly-solid-color
+    /// background dominates even with the down/distance digits drawn on top.</summary>
+    void SamplePossession(Bitmap bmp)
+    {
+        if (ResolveTeamColor == null) return;
+
+        long r = 0, g = 0, b = 0;
+        int n = 0;
+        for (int y = 0; y < bmp.Height; y += 2)
+        for (int x = 0; x < bmp.Width; x += 2)
+        {
+            var px = bmp.GetPixel(x, y);
+            r += px.R; g += px.G; b += px.B;
+            n++;
+        }
+        if (n == 0) return;
+        var avg = Color.FromArgb((int)(r / n), (int)(g / n), (int)(b / n));
+
+        string? side = ResolveTeamColor(avg);
+
+        if (side != _lastPossession)
+        {
+            _lastPossession = side;
+            if (side != null)
+            {
+                if (DateTime.UtcNow < _possessionCooldownUntil)
+                {
+                    Log?.Invoke($"[possession] suppressed re-fire of \"{side}\" (cooldown)");
+                }
+                else
+                {
+                    _possessionCooldownUntil = DateTime.UtcNow + Cooldown;
+                    Log?.Invoke($"[possession] now: {side}");
+                    PossessionChanged?.Invoke(side);
+                }
             }
         }
     }

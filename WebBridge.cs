@@ -77,8 +77,37 @@ public sealed class WebBridge
     public void StopPreview() => _host.StopPreviewFromWeb();
 
     public void SetVolume(int percent) => _host.SetVolumeFromWeb(percent);
+    public void SetHomeVolume(int percent) => _host.SetHomeVolumeFromWeb(percent);
+    public void SetAwayVolume(int percent) => _host.SetAwayVolumeFromWeb(percent);
+    public int GetHomeVolume() => _host.GetHomeVolumeFromWeb();
+    public int GetAwayVolume() => _host.GetAwayVolumeFromWeb();
     public void SetFadeDelay(int seconds) => _host.SetFadeDelayFromWeb(seconds);
     public void SetReverb(string key) => _host.SetReverbFromWeb(key);
+
+    /// <summary>Real changelog -- Bandroom's own GitHub Releases (version, title, bullet
+    /// notes, published date). Powers the "Updates" panel (formerly a Live Feed of in-session
+    /// cue fires, repurposed since a running changelog is more useful than a feed nobody
+    /// looked at).</summary>
+    public async Task<string> GetChangelog()
+    {
+        try
+        {
+            var releases = await ChangelogService.GetReleasesAsync();
+            return JsonSerializer.Serialize(releases.Select(r => new
+            {
+                version = r.Version,
+                title = r.Title,
+                notes = r.Notes,
+                publishedAt = r.PublishedAt.ToString("yyyy-MM-dd"),
+                prerelease = r.Prerelease,
+            }));
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("GetChangelog failed", ex);
+            return "[]";
+        }
+    }
 
     public void BeginDrag() => _host.BeginWindowDrag();
     public void MinimizeWindow() => _host.MinimizeWindowFromWeb();
@@ -86,6 +115,10 @@ public sealed class WebBridge
     public void CloseWindow() => _host.CloseWindowFromWeb();
 
     public string GetSavedProfiles() => JsonSerializer.Serialize(ConfigStore.ListProfiles());
+    public string SaveProfileAs(string? name) => _host.SaveProfileAsFromWeb(name);
+    public string? GetProfileSavedAt(string name) => _host.GetProfileSavedAtFromWeb(name);
+    public void SetGameTeams(string home, string away) => _host.SetGameTeamsFromWeb(home, away);
+    public string? GetGameTeams() => _host.GetGameTeamsFromWeb();
     public void CopyCurrentToAllTeams() => _host.CopyCurrentToAllTeamsFromWeb();
     public void DeleteCurrentProfile() => _host.DeleteCurrentProfileFromWeb();
     public void ExportProfile() => _host.ExportProfileFromWeb();

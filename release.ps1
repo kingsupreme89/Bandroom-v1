@@ -1,5 +1,14 @@
 # Bandroom release script — bumps patch version, builds, packs with Squirrel (delta+full),
 # and publishes to GitHub. Squirrel handles delta generation automatically.
+#
+# Pass -Notes with real bullet points for what changed (shows up in the in-app Updates panel
+# verbatim -- see ChangelogService.cs). Passed via a temp file to `gh`, not inline on the
+# command line -- embedding multi-line/quoted text directly in a native-exe argument list is
+# exactly what broke this script once already (PowerShell mangled the quoting, `gh` failed,
+# and the script kept going and printed "Done!" anyway since nothing checked its exit code).
+param(
+    [string]$Notes = "See the full changelog at https://github.com/kingsupreme89/Bandroom-v1/releases"
+)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -46,11 +55,15 @@ Write-Host "  Packing with Squirrel..." -ForegroundColor Yellow
 if (Test-Path $ReleaseDir) { Remove-Item $ReleaseDir -Recurse -Force }
 New-Item -ItemType Directory -Path $ReleaseDir | Out-Null
 
+$IconPath = Join-Path $ProjectDir "app.ico"
 & $SquirrelExe pack `
     --packId      "Bandroom" `
     --packVersion $version `
     --packDir     $PublishDir `
-    --releaseDir  $ReleaseDir
+    --releaseDir  $ReleaseDir `
+    --icon        $IconPath `
+    --framework   "net10.0-x64" `
+    --allowUnaware
 
 if ($LASTEXITCODE -ne 0) { Write-Host "Squirrel pack failed." -ForegroundColor Red; exit 1 }
 
@@ -70,10 +83,22 @@ git -C $ProjectDir push origin $tag
 Write-Host "  Creating GitHub release..." -ForegroundColor Yellow
 $assets = Get-ChildItem $ReleaseDir -File | ForEach-Object { $_.FullName }
 
+$notesFile = Join-Path ([System.IO.Path]::GetTempPath()) "bandroom_release_notes_$tag.txt"
+[System.IO.File]::WriteAllText($notesFile, $Notes, [System.Text.UTF8Encoding]::new($false))
+
 gh release create $tag @assets `
     --repo  kingsupreme89/Bandroom-v1 `
     --title "Bandroom $tag" `
-    --notes "See the full changelog at https://github.com/kingsupreme89/Bandroom-v1/releases"
+    --notes-file $notesFile
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "  gh release create FAILED (exit $LASTEXITCODE) -- the tag was pushed but NO release/assets are live." -ForegroundColor Red
+    Write-Host "  Fix the issue above, then re-run: gh release create $tag <files in $ReleaseDir> --repo kingsupreme89/Bandroom-v1 --title `"Bandroom $tag`" --notes-file $notesFile" -ForegroundColor Red
+    exit 1
+}
+
+Remove-Item $notesFile -Force -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "  Done! $tag is live." -ForegroundColor Green

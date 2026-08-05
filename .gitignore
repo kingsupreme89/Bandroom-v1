@@ -19,3 +19,7 @@ Thumbs.db
 # App data
 WebView2Data/
 Crash*.txt
+
+# Release archives
+*.zip
+squirrel_releases/

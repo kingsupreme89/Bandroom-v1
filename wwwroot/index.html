@@ -20,7 +20,7 @@
       <div class="header-center" id="drag-handle">
         <span id="team-name">General</span>
         <span class="header-sep">·</span>
-        <span>Live Session</span>
+        <button id="btn-matchup" class="matchup-btn" title="Pick who's home and away for this game">Set Matchup</button>
         <span id="user-count" class="user-count" hidden></span>
       </div>
       <div class="header-right">
@@ -28,7 +28,10 @@
           <span class="watch-dot"></span>
           <span id="watch-label">Start Watching</span>
         </button>
-        <button id="btn-update" class="btn-update" title="Update available" hidden>&#8593; Update</button>
+        <!-- Favorite-team badge -- shows the currently active team at a glance, click opens
+             the full team picker. Sits right next to the update button on purpose. -->
+        <div id="header-team-badge" class="team-swatch header-team-badge" title="Change team"></div>
+        <button id="btn-update" class="btn-update dim" title="You're on the latest version">Up to date</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
         <div class="window-controls">
           <button id="btn-minimize" class="wc-btn wc-min" title="Minimize">&#8211;</button>
@@ -42,8 +45,7 @@
       <!-- Left icon rail -->
       <div class="rail" id="rail-left">
         <button class="rail-item active" data-action="focus-teams"><span class="rail-icon">&#9978;</span><span class="rail-label">Teams</span></button>
-        <button class="rail-item" data-action="focus-categories"><span class="rail-icon">&#9776;</span><span class="rail-label">Categories</span></button>
-        <button class="rail-item" data-action="assign"><span class="rail-icon">&#9998;</span><span class="rail-label">Assign</span></button>
+        <button class="rail-item" data-action="save-profile"><span class="rail-icon">&#128190;</span><span class="rail-label">Save</span></button>
         <button class="rail-item" data-action="help"><span class="rail-icon">?</span><span class="rail-label">Help</span></button>
       </div>
 
@@ -88,6 +90,16 @@
           <input type="range" id="slider-volume" min="0" max="100" value="72" class="slider" />
           <div class="slider-value"><span id="volume-value">72</span>%</div>
         </div>
+        <!-- Only meaningful once a matchup is set (see #btn-matchup) -- home/away events fire
+             through these instead of the master Volume slider above. -->
+        <div class="panel-section" id="matchup-volumes">
+          <div class="panel-title">Away Volume</div>
+          <input type="range" id="slider-away-volume" min="0" max="100" value="100" class="slider" />
+          <div class="slider-value"><span id="away-volume-value">100</span>%</div>
+          <div class="panel-title" style="margin-top: 10px;">Home Volume</div>
+          <input type="range" id="slider-home-volume" min="0" max="100" value="100" class="slider" />
+          <div class="slider-value"><span id="home-volume-value">100</span>%</div>
+        </div>
         <div class="panel-section">
           <div class="panel-title">Fire Sensitivity (Delay)</div>
           <input type="range" id="slider-sensitivity" min="0" max="30" value="10" step="1" class="slider" />
@@ -102,14 +114,10 @@
             <button class="reverb-tile" data-reverb="nightgame">Night Game</button>
           </div>
         </div>
+        <div class="panel-section adjust-actions">
+          <button id="btn-help" class="btn-ghost btn-block" title="How to use Bandroom">? Help</button>
+        </div>
         <button id="btn-reset" class="btn-ghost btn-block">Reset Team Profile</button>
-      </div>
-
-      <!-- Right icon rail -->
-      <div class="rail" id="rail-right">
-        <button class="rail-item active" data-action="focus-adjust"><span class="rail-icon">&#9881;</span><span class="rail-label">Adjust</span></button>
-        <button class="rail-item" data-action="effects"><span class="rail-icon">&#10022;</span><span class="rail-label">Effects</span></button>
-        <button class="rail-item" data-action="help"><span class="rail-icon">?</span><span class="rail-label">Help</span></button>
       </div>
     </div>
   </div>
@@ -124,6 +132,60 @@
       </div>
       <input type="text" id="team-picker-search" placeholder="Search teams..." class="team-picker-search" />
       <div class="team-picker-grid" id="team-picker-grid"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- Matchup picker -- pick who's home and away for this game so the app can auto-load
+       BOTH teams' own saved profiles and play the right side's song when OCR detects who
+       actually scored/forced a turnover, instead of always assuming "the active team". -->
+  <div id="matchup-overlay" hidden>
+    <div id="matchup-dialog" class="glass">
+      <div class="matchup-header">
+        <span>Set Matchup</span>
+        <button id="btn-close-matchup" class="icon-btn">&times;</button>
+      </div>
+      <p class="matchup-instructions">
+        Pick the home and away team for this game. Each team's own saved profile (if they have
+        one) loads automatically, so the right song plays for whichever side actually scores or
+        forces a turnover.
+      </p>
+      <div class="matchup-columns">
+        <div class="matchup-column">
+          <div class="matchup-column-title">Away</div>
+          <input type="text" id="matchup-away-search" placeholder="Search teams..." class="team-picker-search" />
+          <div class="team-picker-grid matchup-grid" id="matchup-away-grid"></div>
+        </div>
+        <div class="matchup-column">
+          <div class="matchup-column-title">Home</div>
+          <input type="text" id="matchup-home-search" placeholder="Search teams..." class="team-picker-search" />
+          <div class="team-picker-grid matchup-grid" id="matchup-home-grid"></div>
+        </div>
+      </div>
+      <div class="save-profile-subtext" id="matchup-subtext"></div>
+      <div class="save-profile-actions">
+        <button id="btn-matchup-cancel" class="btn-ghost">Cancel</button>
+        <button id="btn-matchup-confirm" class="btn-primary">Set Matchup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save Profile dialog -- replaces the native window.prompt() (which showed a generic
+       "appassets says" browser dialog with no context) with one that explains what's about
+       to happen before the user commits to it. -->
+  <div id="save-profile-overlay" hidden>
+    <div id="save-profile-dialog" class="glass">
+      <div class="save-profile-header">Save Profile</div>
+      <p class="save-profile-instructions">
+        This saves every song currently assigned to situations for the active team. Keep the
+        name as-is to overwrite that team's existing save, or type a different name to keep
+        this setup as a separate, extra profile you can reload later.
+      </p>
+      <input type="text" id="save-profile-name" class="save-profile-input" />
+      <div class="save-profile-subtext" id="save-profile-subtext"></div>
+      <div class="save-profile-actions">
+        <button id="btn-save-profile-cancel" class="btn-ghost">Cancel</button>
+        <button id="btn-save-profile-confirm" class="btn-primary">Save</button>
+      </div>
     </div>
   </div>
 

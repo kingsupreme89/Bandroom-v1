@@ -9,6 +9,12 @@ internal static class AudioPlayer
     /// slider in the UI just needs to set this.</summary>
     public static float MasterVolume = 1.0f;
 
+    /// <summary>Independent volumes for matchup-mode side-aware events (home team's touchdown,
+    /// away team's turnover, etc.) -- lets one side be turned down/muted without affecting the
+    /// other, since both sides' cues can legitimately fire close together in a real game.</summary>
+    public static float HomeVolume = 1.0f;
+    public static float AwayVolume = 1.0f;
+
     /// <summary>Which "room" preset (if any) triggered clips are played through. Off = dry,
     /// no processing overhead.</summary>
     public static ReverbPreset CurrentReverb = ReverbPreset.Off;
@@ -21,12 +27,14 @@ internal static class AudioPlayer
     static readonly object Lock = new();
     static readonly List<WaveOutEvent> ActiveOutputs = new();
 
-    /// <summary>Cooldown between fires -- covers both "don't stack songs" and the real bug this
-    /// was added for: GameWatcher's OCR re-detects the same on-screen state (e.g. "First Down")
+    /// <summary>Cooldown between repeat fires of the SAME clip -- covers the real bug this was
+    /// added for: GameWatcher's OCR re-detects the same on-screen state (e.g. "First Down")
     /// after a replay overlay clears and the live feed reappears, firing the same cue twice in
-    /// a few seconds. 20s blocks that without needing to fix OCR debouncing separately.</summary>
+    /// a few seconds. 20s blocks that without needing to fix OCR debouncing separately.
+    /// Scoped per audio file path (not global) so a home-team cue and an away-team cue firing
+    /// seconds apart in a real matchup don't block each other -- they're different clips.</summary>
     public static readonly TimeSpan FireCooldown = TimeSpan.FromSeconds(20);
-    static DateTime _lastFireUtc = DateTime.MinValue;
+    static readonly Dictionary<string, DateTime> _lastFireByPath = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Immediately stops every clip currently playing (or waiting out its pre-roll
     /// delay). Used by the UI's "Stop All" button.</summary>
@@ -41,15 +49,20 @@ internal static class AudioPlayer
         }
     }
 
-    public static void Play(string path)
+    /// <param name="volumeOverride">If set, used instead of MasterVolume -- lets side-aware
+    /// events (home/away) play at their own independently-configured volume.</param>
+    public static void Play(string path, float? volumeOverride = null)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
         lock (Lock)
         {
-            if (DateTime.UtcNow - _lastFireUtc < FireCooldown) return; // already playing / too soon after the last cue
-            _lastFireUtc = DateTime.UtcNow;
+            if (_lastFireByPath.TryGetValue(path, out var last) && DateTime.UtcNow - last < FireCooldown)
+                return; // this exact clip already fired too recently -- different clips don't block each other
+            _lastFireByPath[path] = DateTime.UtcNow;
         }
+
+        float volume = volumeOverride ?? MasterVolume;
 
         Task.Run(() =>
         {
@@ -60,7 +73,7 @@ internal static class AudioPlayer
                 using var reader = new AudioFileReader(path);
                 using var output = new WaveOutEvent();
                 lock (Lock) ActiveOutputs.Add(output);
-                reader.Volume = MasterVolume;
+                reader.Volume = volume;
 
                 try
                 {
@@ -90,12 +103,12 @@ internal static class AudioPlayer
                                 output.Stop();
                                 break;
                             }
-                            reader.Volume = MasterVolume * (float)(1.0 - fadeProgress);
+                            reader.Volume = volume * (float)(1.0 - fadeProgress);
                             Thread.Sleep(30); // finer steps during the fade for a smooth ramp
                         }
                         else
                         {
-                            reader.Volume = MasterVolume;
+                            reader.Volume = volume;
                             Thread.Sleep(200);
                         }
                     }

@@ -18,14 +18,38 @@ let state = {
   savedProfiles: [],
   activeTeam: "General",
   watching: "off", // off | waiting | watching
+  matchupHome: null,
+  matchupAway: null,
 };
 
 async function init() {
+  // wireControls() attaches every click handler in the app (rail buttons, header
+  // controls, etc). It used to run only after a chain of sequential awaits below --
+  // if ANY of those threw (e.g. a bridge call failing), wireControls() never ran and
+  // the whole UI looked dead (no version, no working buttons, nothing). Run it FIRST
+  // so a data-fetch failure can only blank out its own piece of the UI, never the
+  // controls themselves.
+  wireControls();
+
   if (bridge) {
-    state.teams = JSON.parse(await bridge.GetTeams());
-    state.categories = JSON.parse(await bridge.GetCategories());
-    state.activeTeam = await bridge.GetActiveTeam();
-    document.getElementById("app-version").textContent = "v" + await bridge.GetAppVersion();
+    try {
+      state.teams = JSON.parse(await bridge.GetTeams());
+    } catch (err) { console.error("GetTeams failed", err); }
+    try {
+      state.categories = JSON.parse(await bridge.GetCategories());
+    } catch (err) { console.error("GetCategories failed", err); }
+    try {
+      state.activeTeam = await bridge.GetActiveTeam();
+    } catch (err) { console.error("GetActiveTeam failed", err); }
+    try {
+      document.getElementById("app-version").textContent = "v" + await bridge.GetAppVersion();
+    } catch (err) {
+      console.error("GetAppVersion failed", err);
+      document.getElementById("app-version").textContent = "";
+    }
+    try {
+      state.savedProfiles = JSON.parse(await bridge.GetSavedProfiles());
+    } catch (err) { console.error("GetSavedProfiles failed", err); }
   } else {
     state.teams = [{ name: "General", primary: "#22d3ee", secondary: "#22d3ee" }];
     state.categories = [
@@ -37,12 +61,10 @@ async function init() {
       { name: "Hype", assigned: 0, total: 7 },
     ];
   }
-  if (bridge) state.savedProfiles = JSON.parse(await bridge.GetSavedProfiles());
   renderTeamGrid();
   renderCategories();
   setActiveTeam(state.activeTeam, /*fromInit*/ true);
   updateProfileStatus();
-  wireControls();
   maybeShowOnboarding();
   pollUserCount();
 }
@@ -75,14 +97,21 @@ function renderTeamGrid() {
   }
 }
 
-function updateProfileStatus() {
+async function updateProfileStatus() {
   const el = document.getElementById("profile-status");
   if (!el) return;
   const configured = state.savedProfiles.includes(state.activeTeam);
   const total = state.savedProfiles.length;
-  el.innerHTML = configured
-    ? `<span class="profile-saved">&#10003; ${state.activeTeam} saved &mdash; ${total} team${total !== 1 ? "s" : ""} configured</span>`
-    : `<span class="profile-unsaved">No tracks assigned yet for ${state.activeTeam}</span>`;
+  if (!configured) {
+    el.innerHTML = `<span class="profile-unsaved">No tracks assigned yet for ${state.activeTeam}</span>`;
+    return;
+  }
+  let savedAt = "";
+  try {
+    const t = await bridge?.GetProfileSavedAt(state.activeTeam);
+    if (t) savedAt = ` at ${t}`;
+  } catch (err) { console.error("GetProfileSavedAt failed", err); }
+  el.innerHTML = `<span class="profile-saved">&#10003; ${state.activeTeam} saved${savedAt} &mdash; ${total} team${total !== 1 ? "s" : ""} configured</span>`;
 }
 
 function renderCategories() {
@@ -151,6 +180,21 @@ function setActiveTeam(name, fromInit = false) {
   const team = state.teams.find((t) => t.name === name);
   document.documentElement.style.setProperty("--team-secondary", team?.secondary ?? "#22d3ee");
   updateProfileStatus();
+  updateHeaderTeamBadge(team);
+}
+
+function updateHeaderTeamBadge(team) {
+  const badge = document.getElementById("header-team-badge");
+  if (!badge) return;
+  if (team) {
+    badge.style.background = `linear-gradient(135deg, ${team.primary}, ${team.secondary})`;
+    badge.textContent = team.initials ?? "";
+    badge.title = `${team.name} -- click to change team`;
+  } else {
+    badge.style.background = "rgba(255,255,255,0.08)";
+    badge.textContent = "?";
+    badge.title = "Click to pick a team";
+  }
 }
 
 async function applyBackground(name) {
@@ -191,9 +235,11 @@ function wireControls() {
   document.getElementById("btn-import-profile").addEventListener("click", () => bridge?.ImportProfile());
   document.getElementById("btn-delete-profile").addEventListener("click", () => bridge?.DeleteCurrentProfile());
 
-  // Drag the borderless window by pulling on the header center region
+  // Drag the borderless window by pulling on the header center region -- but not when the
+  // mousedown started on a real control inside it (e.g. "Set Matchup"), since native drag
+  // capture swallows the click before it ever reaches the button.
   document.getElementById("drag-handle").addEventListener("mousedown", (e) => {
-    if (e.button === 0) bridge?.BeginDrag();
+    if (e.button === 0 && !e.target.closest("button")) bridge?.BeginDrag();
   });
   document.getElementById("btn-update").addEventListener("click", () => bridge?.ShowUpdate());
   document.getElementById("btn-reset").addEventListener("click", () => bridge?.ResetTeamProfile());
@@ -201,6 +247,14 @@ function wireControls() {
   document.getElementById("slider-volume").addEventListener("input", (e) => {
     document.getElementById("volume-value").textContent = e.target.value;
     bridge?.SetVolume(Number(e.target.value));
+  });
+  document.getElementById("slider-home-volume").addEventListener("input", (e) => {
+    document.getElementById("home-volume-value").textContent = e.target.value;
+    bridge?.SetHomeVolume(Number(e.target.value));
+  });
+  document.getElementById("slider-away-volume").addEventListener("input", (e) => {
+    document.getElementById("away-volume-value").textContent = e.target.value;
+    bridge?.SetAwayVolume(Number(e.target.value));
   });
   document.getElementById("slider-sensitivity").addEventListener("input", (e) => {
     document.getElementById("sensitivity-value").textContent = e.target.value;
@@ -236,8 +290,25 @@ function wireControls() {
     updateProfileStatus();
   });
   window.addEventListener("bandroom:updateavailable", () => {
-    document.getElementById("btn-update").hidden = false;
+    const btn = document.getElementById("btn-update");
+    btn.classList.remove("dim", "downgraded");
+    btn.textContent = "↑ Update";
+    btn.title = "A new version is available -- click to update.";
   });
+  // Fires when this install is OLDER than a version this machine has run before -- almost
+  // always means an old cached Setup.exe got run by mistake. Louder than the normal update
+  // button since this is a "you're missing stuff you've already seen" situation, not
+  // a routine "new version exists" one.
+  window.addEventListener("bandroom:downgraded", () => {
+    const btn = document.getElementById("btn-update");
+    btn.classList.remove("dim");
+    btn.classList.add("downgraded");
+    btn.textContent = "↑ Fix Version";
+    btn.title = "This looks like an older build than one you've already run -- click to update to the latest.";
+    showToast("This is an older Bandroom build than one you've run before -- click \"Fix Version\" in the header to update.");
+  });
+
+  document.getElementById("header-team-badge").addEventListener("click", openTeamPicker);
   // Files dropped anywhere on the window get copied into Songs\ (normalized name) by the
   // native DragDrop handler in WebMainForm.cs; re-render so newly imported tracks show up
   // in any open Assign dialog / situation list right away.
@@ -250,8 +321,34 @@ function wireControls() {
     if (e.target.id === "team-picker-overlay") closeTeamPicker();
   });
   document.getElementById("team-picker-search").addEventListener("input", (e) => renderTeamPickerGrid(e.target.value));
+
+  document.getElementById("btn-matchup").addEventListener("click", openMatchupDialog);
+  document.getElementById("btn-close-matchup").addEventListener("click", closeMatchupDialog);
+  document.getElementById("btn-matchup-cancel").addEventListener("click", closeMatchupDialog);
+  document.getElementById("btn-matchup-confirm").addEventListener("click", confirmMatchup);
+  document.getElementById("matchup-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "matchup-overlay") closeMatchupDialog();
+  });
+  document.getElementById("matchup-home-search").addEventListener("input", (e) => renderMatchupGrid("home", e.target.value));
+  document.getElementById("matchup-away-search").addEventListener("input", (e) => renderMatchupGrid("away", e.target.value));
+
+  document.getElementById("btn-save-profile-cancel").addEventListener("click", closeSaveProfileDialog);
+  document.getElementById("btn-save-profile-confirm").addEventListener("click", confirmSaveProfile);
+  document.getElementById("save-profile-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "save-profile-overlay") closeSaveProfileDialog();
+  });
+  document.getElementById("save-profile-name").addEventListener("input", updateSaveProfileSubtext);
+  document.getElementById("save-profile-name").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") confirmSaveProfile();
+  });
+
+  document.getElementById("btn-help").addEventListener("click", () => bridge?.OpenHelp());
+
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !document.getElementById("team-picker-overlay").hidden) closeTeamPicker();
+    if (e.key !== "Escape") return;
+    if (!document.getElementById("team-picker-overlay").hidden) closeTeamPicker();
+    if (!document.getElementById("save-profile-overlay").hidden) closeSaveProfileDialog();
+    if (!document.getElementById("matchup-overlay").hidden) closeMatchupDialog();
   });
 }
 
@@ -317,23 +414,124 @@ function flashPanel(el) {
   setTimeout(() => el.classList.remove("panel-flash"), 900);
 }
 
+function updateMatchupLabel() {
+  const btn = document.getElementById("btn-matchup");
+  if (!btn) return;
+  btn.textContent = state.matchupHome && state.matchupAway
+    ? `${state.matchupAway} @ ${state.matchupHome}`
+    : "Set Matchup";
+}
+
+async function loadMatchup() {
+  if (!bridge) return;
+  try {
+    const raw = await bridge.GetGameTeams();
+    if (!raw) return;
+    const { home, away } = JSON.parse(raw);
+    state.matchupHome = home;
+    state.matchupAway = away;
+    updateMatchupLabel();
+  } catch (err) { console.error("GetGameTeams failed", err); }
+}
+
+function openMatchupDialog() {
+  const overlay = document.getElementById("matchup-overlay");
+  document.getElementById("matchup-home-search").value = "";
+  document.getElementById("matchup-away-search").value = "";
+  renderMatchupGrid("home", "");
+  renderMatchupGrid("away", "");
+  updateMatchupSubtext();
+  overlay.hidden = false;
+}
+
+function closeMatchupDialog() {
+  document.getElementById("matchup-overlay").hidden = true;
+}
+
+function renderMatchupGrid(side, filter) {
+  const gridId = side === "home" ? "matchup-home-grid" : "matchup-away-grid";
+  renderTeamGridInto(gridId, filter, (name) => {
+    if (side === "home") state.matchupHome = name; else state.matchupAway = name;
+    renderMatchupGrid(side, document.getElementById(`matchup-${side}-search`).value);
+    updateMatchupSubtext();
+  });
+  // renderTeamGridInto only marks state.activeTeam as active -- overlay the actual
+  // matchup pick for this column too, since it's independent of the sidebar's team.
+  const picked = side === "home" ? state.matchupHome : state.matchupAway;
+  if (picked) {
+    document.querySelectorAll(`#${gridId} .team-swatch`).forEach((sw) => {
+      if (sw.title === picked) sw.classList.add("active");
+    });
+  }
+}
+
+function updateMatchupSubtext() {
+  const el = document.getElementById("matchup-subtext");
+  if (!state.matchupHome || !state.matchupAway) {
+    el.textContent = "Pick both a home and an away team.";
+  } else if (state.matchupHome === state.matchupAway) {
+    el.textContent = "Home and away can't be the same team.";
+  } else {
+    el.textContent = `${state.matchupAway} (away) at ${state.matchupHome} (home) -- each team's own saved profile loads automatically.`;
+  }
+}
+
+async function confirmMatchup() {
+  if (!state.matchupHome || !state.matchupAway || state.matchupHome === state.matchupAway) return;
+  await bridge?.SetGameTeams(state.matchupHome, state.matchupAway);
+  updateMatchupLabel();
+  closeMatchupDialog();
+  showToast(`Matchup set: ${state.matchupAway} @ ${state.matchupHome}`);
+}
+
+function openSaveProfileDialog() {
+  const overlay = document.getElementById("save-profile-overlay");
+  const input = document.getElementById("save-profile-name");
+  const subtext = document.getElementById("save-profile-subtext");
+  input.value = state.activeTeam;
+  updateSaveProfileSubtext();
+  overlay.hidden = false;
+  input.focus();
+  input.select();
+}
+
+function updateSaveProfileSubtext() {
+  const input = document.getElementById("save-profile-name");
+  const subtext = document.getElementById("save-profile-subtext");
+  const name = input.value.trim();
+  if (!name) { subtext.textContent = ""; return; }
+  subtext.textContent = name === state.activeTeam
+    ? `Overwrites ${state.activeTeam}'s current save.`
+    : `Creates a new, separate profile named "${name}" — ${state.activeTeam}'s own save is untouched.`;
+}
+
+function closeSaveProfileDialog() {
+  document.getElementById("save-profile-overlay").hidden = true;
+}
+
+async function confirmSaveProfile() {
+  const name = document.getElementById("save-profile-name").value.trim();
+  if (!name) return;
+  closeSaveProfileDialog();
+  const saved = await bridge?.SaveProfileAs(name);
+  if (bridge) state.savedProfiles = JSON.parse(await bridge.GetSavedProfiles());
+  renderTeamGrid();
+  await updateProfileStatus();
+  const t = await bridge?.GetProfileSavedAt(saved ?? name);
+  showToast(`Saved "${saved ?? name}"${t ? ` at ${t}` : ""}`);
+}
+
 function runRailAction(action) {
   switch (action) {
     case "focus-teams":
       openTeamPicker();
       break;
-    case "focus-categories":
-      openSituations("All");
-      break;
     case "focus-adjust":
       flashPanel(document.getElementById("adjust-panel"));
       document.getElementById("adjust-panel").scrollIntoView({ block: "nearest" });
       break;
-    case "assign":
-      openSituations("All");
-      break;
-    case "effects":
-      bridge?.TriggerEffectsTest();
+    case "save-profile":
+      openSaveProfileDialog();
       break;
     case "help":
       bridge?.OpenHelp();

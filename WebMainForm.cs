@@ -25,6 +25,14 @@ public sealed class WebMainForm : Form
     bool _watching;
     bool _windowFound;
 
+    // Matchup: lets a user pick who's home/away for THIS game and load each side's own saved
+    // profile, so both teams' customized songs are available at once -- Offense/Defense sounds
+    // fire from whichever side's config actually did the thing, resolved via GameWatcher's
+    // color-sampled possession read, instead of always assuming "the active team".
+    TeamColor? _homeTeam, _awayTeam;
+    List<TriggerEntry>? _homeConfig, _awayConfig;
+    string? _possession;
+
     public WebMainForm()
     {
         Text = "Bandroom";
@@ -43,12 +51,15 @@ public sealed class WebMainForm : Form
         _webView.DragDrop += OnSongDragDrop;
         Controls.Add(_webView);
 
+        ConfigStore.MigrateFromVersionedFolderIfNeeded();
         _config = ConfigStore.LoadOrCreate();
 
         _hook.KeyCombo += OnKeyCombo;
         _watcher.WindowFoundChanged += OnWindowFoundChanged;
         _watcher.DownChanged += OnDownChanged;
         _watcher.RegionChanged += OnRegionChanged;
+        _watcher.PossessionChanged += side => _possession = side;
+        _watcher.ResolveTeamColor = ResolveTeamColor;
         _watcher.Log += OnLog;
 
         FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); };
@@ -129,6 +140,77 @@ public sealed class WebMainForm : Form
             : ConfigStore.BuildDefault();
         ConfigStore.Save(_config);
         PushCategories();
+    }
+
+    /// <summary>Explicit user-triggered save, from the Save rail button. name is null/empty ->
+    /// save under the active team's name (the normal case); non-empty -> save as an extra,
+    /// separately-named profile without switching the active team away from it.</summary>
+    public string SaveProfileAsFromWeb(string? name)
+    {
+        ConfigStore.Save(_config);
+        string target = string.IsNullOrWhiteSpace(name) ? Theme.ActiveTeam.Name : name.Trim();
+        ConfigStore.SaveProfile(target, _config);
+        RunOnUi(() =>
+        {
+            if (_webView.CoreWebView2 != null)
+                _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:profileschanged'))");
+        });
+        return target;
+    }
+
+    public string? GetProfileSavedAtFromWeb(string name) =>
+        ConfigStore.GetProfileSavedAt(name)?.ToString("h:mm tt");
+
+    /// <summary>Matchup picker (JS) calls this with both teams for the game about to be
+    /// watched. Loads each team's OWN saved profile if they have one (falls back to defaults
+    /// otherwise) -- these are separate from _config/Theme.ActiveTeam, which stay pointed at
+    /// whatever the sidebar/background is currently showing.</summary>
+    public void SetGameTeamsFromWeb(string homeName, string awayName)
+    {
+        _homeTeam = TeamColors.All.FirstOrDefault(t => t.Name == homeName);
+        _awayTeam = TeamColors.All.FirstOrDefault(t => t.Name == awayName);
+        _homeConfig = ConfigStore.ListProfiles().Contains(homeName, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(homeName) : ConfigStore.BuildDefault();
+        _awayConfig = ConfigStore.ListProfiles().Contains(awayName, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(awayName) : ConfigStore.BuildDefault();
+        _possession = null;
+    }
+
+    public string? GetGameTeamsFromWeb() =>
+        _homeTeam.HasValue && _awayTeam.HasValue
+            ? System.Text.Json.JsonSerializer.Serialize(new { home = _homeTeam.Value.Name, away = _awayTeam.Value.Name })
+            : null;
+
+    /// <summary>Resolves a sampled ribbon color to "home"/"away"/null -- null covers both the
+    /// neutral black background (no play in progress) and a color that doesn't clearly match
+    /// either team (bad OCR crop, mid-transition frame). Distance-based, not exact match, since
+    /// capture/compression introduces noise around the real hex values.</summary>
+    string? ResolveTeamColor(Color sampled)
+    {
+        if (IsNearBlack(sampled)) return null;
+        if (_homeTeam is not { } home || _awayTeam is not { } away) return null;
+
+        int homeDist = Math.Min(ColorDistance(sampled, home.Primary), ColorDistance(sampled, home.Secondary));
+        int awayDist = Math.Min(ColorDistance(sampled, away.Primary), ColorDistance(sampled, away.Secondary));
+        const int MaxMatchDistance = 90;
+        if (homeDist > MaxMatchDistance && awayDist > MaxMatchDistance) return null;
+        return homeDist <= awayDist ? "home" : "away";
+    }
+
+    static bool IsNearBlack(Color c) => c.R < 45 && c.G < 45 && c.B < 45;
+
+    static int ColorDistance(Color a, Color? b)
+    {
+        if (b is not { } c) return int.MaxValue;
+        int dr = a.R - c.R, dg = a.G - c.G, db = a.B - c.B;
+        return (int)Math.Sqrt(dr * dr + dg * dg + db * db);
+    }
+
+    void FireEventForSide(string side, string eventName)
+    {
+        var config = side == "home" ? _homeConfig : _awayConfig;
+        var entry = config?.FirstOrDefault(e => e.Event == eventName);
+        if (entry != null) FireEvent(entry, side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume);
     }
 
     void SaveCurrentTeamProfile()
@@ -233,7 +315,7 @@ public sealed class WebMainForm : Form
     {
         var library = new List<string>();
         if (Directory.Exists(ConfigStore.SongsFolder))
-            library.AddRange(Directory.GetFiles(ConfigStore.SongsFolder)
+            library.AddRange(Directory.GetFiles(ConfigStore.SongsFolder, "*", SearchOption.AllDirectories)
                 .Where(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())));
 
         using var dlg = new AssignTrackForm(this, entry, library);
@@ -262,6 +344,14 @@ public sealed class WebMainForm : Form
     }
 
     public void SetVolumeFromWeb(int percent) => AudioPlayer.MasterVolume = percent / 100f;
+
+    /// <summary>Matchup-mode independent side volumes -- lets the home and away team's cues be
+    /// balanced (or one muted) separately, since both sides' events can legitimately fire close
+    /// together in a real game now that possession detection routes each to its own side.</summary>
+    public void SetHomeVolumeFromWeb(int percent) => AudioPlayer.HomeVolume = percent / 100f;
+    public void SetAwayVolumeFromWeb(int percent) => AudioPlayer.AwayVolume = percent / 100f;
+    public int GetHomeVolumeFromWeb() => (int)(AudioPlayer.HomeVolume * 100);
+    public int GetAwayVolumeFromWeb() => (int)(AudioPlayer.AwayVolume * 100);
 
     /// <summary>"Fire Sensitivity" slider -- delay in seconds before a fired cue starts fading
     /// out. No fade-in: AudioPlayer.Play already jumps straight to full volume, only the
@@ -424,10 +514,10 @@ public sealed class WebMainForm : Form
 
     // --- Backend event wiring (unchanged from native MainForm) ---
 
-    void FireEvent(TriggerEntry entry)
+    void FireEvent(TriggerEntry entry, float? volumeOverride = null)
     {
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
-            AudioPlayer.Play(entry.AudioFile);
+            AudioPlayer.Play(entry.AudioFile, volumeOverride);
     }
 
     void OnWindowFoundChanged(bool found)
@@ -454,11 +544,28 @@ public sealed class WebMainForm : Form
     // rather than a fixed on/off toggle ("flag:on") -- see GameWatcher.NormalizeMatch.
     static readonly HashSet<string> ValueKeyedRegions = new(StringComparer.OrdinalIgnoreCase) { "situation", "banner" };
 
+    // situation:touchdown/turnover need to know WHO did it, not just that it happened --
+    // resolved via _possession (GameWatcher's color-sampled read of the same ribbon) when a
+    // Matchup is set. Falls through to the old single-active-team behavior otherwise, so
+    // nothing regresses for anyone who hasn't set up a Matchup.
+    static readonly Dictionary<string, string> SideAwareEvents = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["touchdown"] = "Offense: Touchdown Scored",
+        ["turnover"] = "Defense: Turnover Forced",
+    };
+
     void OnRegionChanged(string region, string? value)
     {
         if (region == "down") return;
         RunOnUi(() =>
         {
+            if (region == "situation" && value != null && _homeConfig != null && _awayConfig != null
+                && _possession != null && SideAwareEvents.TryGetValue(value, out var eventName))
+            {
+                FireEventForSide(_possession, eventName);
+                return;
+            }
+
             string triggerKey = ValueKeyedRegions.Contains(region) ? $"{region}:{value}" : $"{region}:on";
             var entry = _config.FirstOrDefault(e => e.Trigger.Equals(triggerKey, StringComparison.OrdinalIgnoreCase));
             if (entry != null) FireEvent(entry);
@@ -478,6 +585,17 @@ public sealed class WebMainForm : Form
 
     void InitAutoUpdater()
     {
+        // Catches the "ran an old cached Setup.exe and silently downgraded" bug -- see
+        // VersionGuard.cs. This machine has run a newer build before, but is currently on an
+        // older one, so tell the user plainly instead of leaving them staring at a build
+        // that's missing features they've already seen, with no explanation why.
+        var current = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
+        if (VersionGuard.CheckAndRecord(current))
+        {
+            _updateAvailable = true;
+            RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:downgraded'))"));
+        }
+
         // Run on background thread — never block the UI for network calls.
         _ = Task.Run(async () =>
         {
@@ -500,12 +618,24 @@ public sealed class WebMainForm : Form
 
     public void ShowUpdateDialogFromWeb()
     {
-        if (!_updateAvailable) return;
+        // Used to silently do nothing if the background "is an update available" check
+        // hadn't completed/succeeded yet (VPN hiccup, slow network, etc) -- clicking the
+        // button looked broken with zero feedback. Now it always tries, and always tells
+        // the user something either way.
         _ = Task.Run(async () =>
         {
             try
             {
                 using var mgr = new UpdateManager(new GithubSource("https://github.com/kingsupreme89/Bandroom-v1", null, false));
+                var info = await mgr.CheckForUpdate();
+                if (info.ReleasesToApply.Count == 0)
+                {
+                    RunOnUi(() => MessageBox.Show(this,
+                        "You're already on the latest version.",
+                        "Bandroom Update", MessageBoxButtons.OK, MessageBoxIcon.Information));
+                    return;
+                }
+
                 await mgr.UpdateApp();
                 RunOnUi(() => UpdateManager.RestartApp());
             }
@@ -513,7 +643,7 @@ public sealed class WebMainForm : Form
             {
                 CrashLog.Write("Auto-update install failed", ex);
                 RunOnUi(() => MessageBox.Show(this,
-                    "Update download failed. Check your connection and try again.",
+                    "Update check/download failed -- check your internet connection (and VPN, if you use one) and try again.",
                     "Bandroom Update", MessageBoxButtons.OK, MessageBoxIcon.Warning));
             }
         });

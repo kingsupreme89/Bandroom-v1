@@ -4,11 +4,70 @@ namespace SupremeStadiumSoundSelector;
 
 internal static class ConfigStore
 {
-    public static readonly string ConfigPath = Path.Combine(AppContext.BaseDirectory, "triggers.json");
-    public static readonly string SongsFolder = Path.Combine(AppContext.BaseDirectory, "Songs");
-    public static readonly string ProfilesFolder = Path.Combine(AppContext.BaseDirectory, "Profiles");
-    public static readonly string TeamBackgroundsFolder = Path.Combine(AppContext.BaseDirectory, "TeamBackgrounds");
-    static readonly string FirstRunFlagPath = Path.Combine(AppContext.BaseDirectory, ".firstrun_done");
+    // Everything the user actually owns -- songs, profiles, team backgrounds, trigger config --
+    // lives in ONE folder next to (not inside) the versioned app-X.X.X install folder. Squirrel
+    // deletes app-X.X.X wholesale on every update, so anything stored under AppContext.BaseDirectory
+    // (the old behavior) got silently wiped on every single update. This folder is the parent of
+    // that versioned folder and Squirrel never touches it.
+    public static readonly string UserDataRoot = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Bandroom", "UserData");
+
+    public static readonly string ConfigPath = Path.Combine(UserDataRoot, "triggers.json");
+    public static readonly string SongsFolder = Path.Combine(UserDataRoot, "Songs");
+    /// <summary>Trimmed clips (from TrimmerForm's "Save & Name") land here, not loose in
+    /// SongsFolder -- keeps user-trimmed cues visually separate from raw uploaded files.</summary>
+    public static readonly string SongsTrimmedFolder = Path.Combine(SongsFolder, "trimmed");
+    /// <summary>Raw files a user browses/imports (untrimmed) land here. Only created when they
+    /// actually import a new file -- picking an existing library track never copies anything,
+    /// so storage isn't duplicated on every load.</summary>
+    public static readonly string SongsUploadedFolder = Path.Combine(SongsFolder, "uploaded");
+    public static readonly string ProfilesFolder = Path.Combine(UserDataRoot, "Profiles");
+    public static readonly string TeamBackgroundsFolder = Path.Combine(UserDataRoot, "TeamBackgrounds");
+    static readonly string FirstRunFlagPath = Path.Combine(UserDataRoot, ".firstrun_done");
+
+    /// <summary>One-time migration, run before anything else touches the folders above.
+    /// Moves anything left behind in the OLD per-version location (AppContext.BaseDirectory --
+    /// where this data used to live, and gets wiped by Squirrel on every update) into the new
+    /// persistent UserDataRoot. Existing files in UserDataRoot always win -- never overwrites
+    /// real user data with older leftovers. Safe to call on every launch; it's a no-op once
+    /// nothing is left in the old location.</summary>
+    public static void MigrateFromVersionedFolderIfNeeded()
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        MoveFileIfNewer(Path.Combine(AppContext.BaseDirectory, "triggers.json"), ConfigPath);
+        MoveFileIfNewer(Path.Combine(AppContext.BaseDirectory, ".firstrun_done"), FirstRunFlagPath);
+        MergeFolderIfNeeded(Path.Combine(AppContext.BaseDirectory, "Songs"), SongsFolder);
+        MergeFolderIfNeeded(Path.Combine(AppContext.BaseDirectory, "Profiles"), ProfilesFolder);
+        // TeamBackgrounds ships bundled WITH the app (default art for every team) and gets
+        // re-copied into AppContext.BaseDirectory fresh on every update -- merge-only (never
+        // overwrite) so a user who drops in their own custom image keeps it, while still
+        // picking up any new default images a future release adds.
+        MergeFolderIfNeeded(Path.Combine(AppContext.BaseDirectory, "TeamBackgrounds"), TeamBackgroundsFolder, overwrite: false);
+    }
+
+    static void MoveFileIfNewer(string oldPath, string newPath)
+    {
+        if (File.Exists(newPath) || !File.Exists(oldPath)) return;
+        try { File.Copy(oldPath, newPath, overwrite: false); } catch { /* best-effort */ }
+    }
+
+    static void MergeFolderIfNeeded(string oldFolder, string newFolder, bool overwrite = false)
+    {
+        if (!Directory.Exists(oldFolder)) return;
+        Directory.CreateDirectory(newFolder);
+        foreach (string file in Directory.GetFiles(oldFolder, "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(oldFolder, file);
+            string dest = Path.Combine(newFolder, rel);
+            if (!overwrite && File.Exists(dest)) continue;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                File.Copy(file, dest, overwrite);
+            }
+            catch { /* best-effort -- never block startup over one bad file */ }
+        }
+    }
 
     /// <summary>True until the onboarding wizard has been completed once. Gated on a marker
     /// file rather than a triggers.json field so it survives profile resets/imports.</summary>
@@ -27,12 +86,12 @@ internal static class ConfigStore
         string ext = Path.GetExtension(sourcePath);
         if (!AudioExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase)) return null;
 
-        Directory.CreateDirectory(SongsFolder);
+        Directory.CreateDirectory(SongsUploadedFolder);
         string baseName = Path.GetFileNameWithoutExtension(sourcePath).ToUpperInvariant();
-        string destPath = Path.Combine(SongsFolder, baseName + ext);
+        string destPath = Path.Combine(SongsUploadedFolder, baseName + ext);
         int suffix = 2;
         while (File.Exists(destPath) && !PathsPointToSameFile(sourcePath, destPath))
-            destPath = Path.Combine(SongsFolder, $"{baseName} ({suffix++}){ext}");
+            destPath = Path.Combine(SongsUploadedFolder, $"{baseName} ({suffix++}){ext}");
 
         if (!PathsPointToSameFile(sourcePath, destPath))
             File.Copy(sourcePath, destPath, overwrite: false);
@@ -93,6 +152,12 @@ internal static class ConfigStore
     {
         string path = ProfilePath(name);
         if (File.Exists(path)) File.Delete(path);
+    }
+
+    public static DateTime? GetProfileSavedAt(string name)
+    {
+        string path = ProfilePath(name);
+        return File.Exists(path) ? File.GetLastWriteTime(path) : null;
     }
 
     public static List<string> ListProfiles()
