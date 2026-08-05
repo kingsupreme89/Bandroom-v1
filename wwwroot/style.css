@@ -643,6 +643,61 @@ body {
   min-height: 0;
 }
 
+#changelog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#changelog-overlay[hidden] { display: none; }
+#changelog-dialog {
+  width: min(520px, 92vw);
+  height: min(620px, 85vh);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.changelog-header {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 16px; font-weight: 700;
+  margin-bottom: 14px;
+  flex: 0 0 auto;
+}
+.changelog-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.changelog-entry {
+  padding: 12px 14px;
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.03);
+}
+.changelog-entry-header {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-bottom: 8px;
+}
+.changelog-version { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.changelog-date { font-size: 11px; color: var(--text-muted); }
+.changelog-prerelease {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #f0b429;
+  border: 1px solid rgba(240, 180, 41, 0.5);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+.changelog-notes { margin: 0; padding-left: 18px; }
+.changelog-notes li { font-size: 12px; color: var(--text-muted-2); line-height: 1.6; }
+.changelog-empty { font-size: 12px; color: var(--text-muted); text-align: center; margin-top: 40px; }
+
 #save-profile-overlay {
   position: fixed;
   inset: 0;

@@ -377,13 +377,51 @@ function wireControls() {
   });
 
   document.getElementById("btn-help").addEventListener("click", () => bridge?.OpenHelp());
+  document.getElementById("btn-changelog").addEventListener("click", openChangelog);
+  document.getElementById("btn-close-changelog").addEventListener("click", closeChangelog);
+  document.getElementById("changelog-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "changelog-overlay") closeChangelog();
+  });
 
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     if (!document.getElementById("team-picker-overlay").hidden) closeTeamPicker();
     if (!document.getElementById("save-profile-overlay").hidden) closeSaveProfileDialog();
     if (!document.getElementById("matchup-overlay").hidden) closeMatchupDialog();
+    if (!document.getElementById("changelog-overlay").hidden) closeChangelog();
   });
+}
+
+async function openChangelog() {
+  const overlay = document.getElementById("changelog-overlay");
+  overlay.hidden = false;
+  const list = document.getElementById("changelog-list");
+  list.innerHTML = `<div class="changelog-empty">Loading...</div>`;
+
+  const entries = bridge ? JSON.parse(await bridge.GetChangelog()) : [];
+  if (entries.length === 0) {
+    list.innerHTML = `<div class="changelog-empty">Couldn't load release notes right now.</div>`;
+    return;
+  }
+
+  list.innerHTML = "";
+  for (const e of entries) {
+    const row = document.createElement("div");
+    row.className = "changelog-entry";
+    const notes = e.notes.map((n) => `<li>${n}</li>`).join("");
+    row.innerHTML = `
+      <div class="changelog-entry-header">
+        <span class="changelog-version">${e.title}</span>
+        <span class="changelog-date">${e.publishedAt}</span>
+        ${e.prerelease ? `<span class="changelog-prerelease">Beta</span>` : ""}
+      </div>
+      ${notes ? `<ul class="changelog-notes">${notes}</ul>` : ""}`;
+    list.appendChild(row);
+  }
+}
+
+function closeChangelog() {
+  document.getElementById("changelog-overlay").hidden = true;
 }
 
 function openTeamPicker() {

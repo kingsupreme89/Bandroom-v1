@@ -124,6 +124,7 @@
           </div>
         </div>
         <div class="panel-section adjust-actions">
+          <button id="btn-changelog" class="btn-ghost btn-block" title="What's new in Bandroom">Updates</button>
           <button id="btn-help" class="btn-ghost btn-block" title="How to use Bandroom">? Help</button>
         </div>
         <button id="btn-reset" class="btn-ghost btn-block">Reset Team Profile</button>
@@ -195,6 +196,18 @@
         <button id="btn-save-profile-cancel" class="btn-ghost">Cancel</button>
         <button id="btn-save-profile-confirm" class="btn-primary">Save</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Updates / changelog -- real GitHub Releases for this app (see ChangelogService.cs),
+       opened from the "Updates" button in the Adjust panel. -->
+  <div id="changelog-overlay" hidden>
+    <div id="changelog-dialog" class="glass">
+      <div class="changelog-header">
+        <span>What's New</span>
+        <button id="btn-close-changelog" class="icon-btn">&times;</button>
+      </div>
+      <div class="changelog-list" id="changelog-list"><!-- populated by app.js --></div>
     </div>
   </div>
 
