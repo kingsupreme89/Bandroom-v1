@@ -165,6 +165,20 @@ window.addEventListener("resize", () => {
     squareUpTiles(document.getElementById(id));
 });
 
+/// The window can now be resized by dragging its edges (see WebMainForm.WndProc), but every
+/// size/spacing/font in this app is a fixed px value -- without this, a bigger window just
+/// reveals more empty space instead of the UI actually growing with it. Chromium's `zoom` CSS
+/// property (well supported in WebView2) scales the whole rendered page uniformly -- fonts,
+/// padding, gaps, everything -- keeping every element proportioned to each other exactly as
+/// designed, just bigger or smaller. Scaled against the app's default launch size (1920x1080,
+/// see WebMainForm's constructor) and clamped so it never gets illegibly tiny or absurdly huge.
+function updatePageZoom() {
+  const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+  document.documentElement.style.zoom = Math.max(0.6, Math.min(1.4, scale)).toFixed(3);
+}
+window.addEventListener("resize", updatePageZoom);
+updatePageZoom();
+
 function renderTeamGrid() {
   const grid = document.getElementById("team-grid");
   grid.innerHTML = "";

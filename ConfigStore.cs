@@ -178,10 +178,10 @@ internal static class ConfigStore
     {
         var list = new List<TriggerEntry>
         {
-            new() { Trigger = "down:1st", Event = "Down: 1st", AudioFile = "" },
-            new() { Trigger = "down:2nd", Event = "Down: 2nd", AudioFile = "" },
-            new() { Trigger = "down:3rd", Event = "Down: 3rd", AudioFile = "" },
-            new() { Trigger = "down:4th", Event = "Down: 4th", AudioFile = @"C:\Games\Mod Folder\CFB Mods\MMC_Editor_v1.1.0.2\dies irie 0.wav" },
+            new() { Trigger = "down:1st", Event = "1st Down", AudioFile = "" },
+            new() { Trigger = "down:2nd", Event = "2nd Down", AudioFile = "" },
+            new() { Trigger = "down:3rd", Event = "3rd Down", AudioFile = "" },
+            new() { Trigger = "down:4th", Event = "4th Down", AudioFile = @"C:\Games\Mod Folder\CFB Mods\MMC_Editor_v1.1.0.2\dies irie 0.wav" },
             new() { Trigger = "flag:on", Event = "Penalty Flag", AudioFile = "" },
         };
 
