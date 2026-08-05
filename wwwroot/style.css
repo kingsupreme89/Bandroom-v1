@@ -350,6 +350,14 @@ body {
   display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.55);
 }
+/* Same bug/fix as #team-picker-overlay above: the ID selector's `display: flex` beats the
+   browser's default `[hidden] { display: none }` on specificity, so without this override
+   these overlays showed up immediately on load/ignored the hidden attribute entirely --
+   reproduced live as a black screen with the album's static placeholder content showing
+   through, since JS's real openTeamAlbum() flow never actually ran to populate anything. */
+#bandroom-overlay[hidden], #bandroom-album-overlay[hidden] {
+  display: none;
+}
 #bandroom-picker, #bandroom-album {
   width: min(720px, 92vw);
   max-height: 80vh;

@@ -643,6 +643,10 @@ function closeTeamAlbum() {
 }
 
 function setAlbumTab(tab) {
+  // Guard against openTeamAlbum never having found a matching team (e.g. state.teams hasn't
+  // loaded yet) -- rendering would otherwise throw on albumTeam.secondary and leave the album
+  // in a half-broken state instead of just declining to open.
+  if (!albumTeam) return;
   document.getElementById("tab-sound-bank").classList.toggle("active", tab === "songs");
   document.getElementById("tab-trophy-room").classList.toggle("active", tab === "images");
   document.getElementById("bandroom-songs-grid").hidden = tab !== "songs";

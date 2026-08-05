@@ -73,14 +73,19 @@ public sealed class WebBridge
     public void OpenHelp() => _host.OpenHelpFromWeb();
     public void TriggerEffectsTest() => _host.TriggerEffectsTestFromWeb();
 
-    // Triggers actually confirmed live in a real game, not just wired in code. Touchdown/Turnover
-    // have been play-tested across sessions; PAT/Kickoff/Downs were just wired to the live
-    // possession-color read and haven't been confirmed live yet; "flag" has no calibrated OCR
-    // region at all, so it can never fire. Move an entry here once the user confirms it live.
+    // Triggers actually confirmed live in a real game, not just wired in code. Touchdown/
+    // Turnover/Downs/PAT have been play-tested across sessions; Kickoff was just wired to the
+    // live possession-color read and hasn't been confirmed live yet; "flag" has no calibrated
+    // OCR region at all, so it can never fire. Move an entry here once the user confirms it live.
     static readonly HashSet<string> ConfirmedTriggers = new(StringComparer.OrdinalIgnoreCase)
     {
         "situation:touchdown",
         "situation:turnover",
+        "situation:pat_good",
+        "down:1st",
+        "down:2nd",
+        "down:3rd",
+        "down:4th",
     };
 
     public string GetEventsForCategory(string? category) => JsonSerializer.Serialize(_host.GetEvents(category)
