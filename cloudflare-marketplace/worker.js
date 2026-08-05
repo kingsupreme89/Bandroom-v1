@@ -130,6 +130,70 @@ async function verifyGoogleIdToken(idToken) {
   return valid ? payload : null;
 }
 
+// ---- Item index (avoids KV list()) -----------------------------------------------------
+// The free Workers KV plan has a hard daily cap on list() operations. /list and /leaderboard
+// used to do a full paginated list() scan on every call -- with the app hitting them on every
+// team-grid open, hub load, and leaderboard render, that blew through the daily cap and made
+// EVERY marketplace request (including uploads, since checkRateLimit also touches KV) start
+// throwing "KV list() limit exceeded for the day". Maintaining an explicit id index per type
+// means /list and /leaderboard only ever do get/put, which have a much higher free-tier quota.
+function indexKey(type) {
+  return `index:${type}`;
+}
+
+// Raw read only -- no rebuild attempt. Returns null if the index doesn't exist yet, which
+// callers must treat as "unknown", never as "empty" (see addToIndex/removeFromIndex below).
+async function readIndexRaw(env, type) {
+  const raw = await env.MARKETPLACE_META.get(indexKey(type));
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+// Full list() scan to (re)build the index from scratch. Throws if the daily list() quota is
+// exhausted -- callers decide what "can't rebuild right now" means for them.
+async function rebuildIndex(env, type) {
+  const ids = [];
+  let cursor;
+  do {
+    const page = await env.MARKETPLACE_META.list({ prefix: `meta:${type}:`, cursor });
+    for (const k of page.keys) ids.push(k.name.slice(`meta:${type}:`.length));
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  await env.MARKETPLACE_META.put(indexKey(type), JSON.stringify(ids));
+  return ids;
+}
+
+async function getIndexIds(env, type) {
+  const existing = await readIndexRaw(env, type);
+  return existing !== null ? existing : await rebuildIndex(env, type);
+}
+
+// IMPORTANT: if the index doesn't exist yet and a rebuild fails (quota exhausted), this must
+// NOT write a fresh index containing only `id` -- that would permanently orphan every
+// already-uploaded item that isn't `id` (once an index exists, it's never rebuilt again). In
+// that case we leave the index absent; the item's meta record is already stored by the caller,
+// so the next successful rebuild (after the quota resets) picks it up naturally alongside
+// everything else.
+async function addToIndex(env, type, id) {
+  const existing = await readIndexRaw(env, type);
+  if (existing !== null) {
+    if (!existing.includes(id)) existing.push(id);
+    await env.MARKETPLACE_META.put(indexKey(type), JSON.stringify(existing));
+    return;
+  }
+  let rebuilt;
+  try { rebuilt = await rebuildIndex(env, type); } catch { return; } // leave index absent, self-heals later
+  if (!rebuilt.includes(id)) rebuilt.push(id);
+  await env.MARKETPLACE_META.put(indexKey(type), JSON.stringify(rebuilt));
+}
+
+async function removeFromIndex(env, type, id) {
+  const existing = await readIndexRaw(env, type);
+  if (existing === null) return; // nothing indexed yet -- next rebuild reflects reality anyway
+  const next = existing.filter((existingId) => existingId !== id);
+  await env.MARKETPLACE_META.put(indexKey(type), JSON.stringify(next));
+}
+
 async function checkRateLimit(env, request) {
   const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
   const key = `ratelimit:upload:${ip}`;
@@ -192,6 +256,7 @@ export default {
         ownerToken, likes: 0, reports: 0,
       };
       await env.MARKETPLACE_META.put(`meta:${type}:${id}`, JSON.stringify(meta));
+      await addToIndex(env, type, id);
 
       return jsonResponse({ id, url: `${url.origin}/file/${encodeURIComponent(r2Key)}`, ownerToken });
     }
@@ -203,22 +268,27 @@ export default {
       }
       const schoolFilter = url.searchParams.get("school");
 
+      let ids;
+      try {
+        ids = await getIndexIds(env, type);
+      } catch {
+        // Daily KV list() quota exhausted and no index exists yet to fall back on -- return an
+        // empty list rather than a 500 so the UI shows "nothing here yet" instead of erroring.
+        // Self-heals: once the quota resets, the next /list call rebuilds the index for good.
+        return jsonResponse({ items: [] });
+      }
+
       const items = [];
-      let cursor;
-      do {
-        const page = await env.MARKETPLACE_META.list({ prefix: `meta:${type}:`, cursor });
-        for (const k of page.keys) {
-          const raw = await env.MARKETPLACE_META.get(k.name);
-          if (!raw) continue;
-          const meta = JSON.parse(raw);
-          if (schoolFilter && meta.school.toLowerCase() !== schoolFilter.toLowerCase()) continue;
-          // ownerToken is a delete credential -- never echoed back in /list, only returned once
-          // at upload time, so a passive listing request can never leak another uploader's token.
-          const { ownerToken, ...pub } = meta;
-          items.push({ ...pub, likes: meta.likes ?? 0, reports: meta.reports ?? 0, url: `${url.origin}/file/${encodeURIComponent(meta.key)}` });
-        }
-        cursor = page.list_complete ? undefined : page.cursor;
-      } while (cursor);
+      for (const id of ids) {
+        const raw = await env.MARKETPLACE_META.get(`meta:${type}:${id}`);
+        if (!raw) continue;
+        const meta = JSON.parse(raw);
+        if (schoolFilter && meta.school.toLowerCase() !== schoolFilter.toLowerCase()) continue;
+        // ownerToken is a delete credential -- never echoed back in /list, only returned once
+        // at upload time, so a passive listing request can never leak another uploader's token.
+        const { ownerToken, ...pub } = meta;
+        items.push({ ...pub, likes: meta.likes ?? 0, reports: meta.reports ?? 0, url: `${url.origin}/file/${encodeURIComponent(meta.key)}` });
+      }
 
       items.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1));
       return jsonResponse({ items });
@@ -230,18 +300,20 @@ export default {
         return new Response('type must be "song" or "image"', { status: 400, headers: cors() });
       }
 
+      let ids;
+      try {
+        ids = await getIndexIds(env, type);
+      } catch {
+        return jsonResponse({ schools: [] });
+      }
+
       const counts = new Map();
-      let cursor;
-      do {
-        const page = await env.MARKETPLACE_META.list({ prefix: `meta:${type}:`, cursor });
-        for (const k of page.keys) {
-          const raw = await env.MARKETPLACE_META.get(k.name);
-          if (!raw) continue;
-          const meta = JSON.parse(raw);
-          counts.set(meta.school, (counts.get(meta.school) ?? 0) + 1);
-        }
-        cursor = page.list_complete ? undefined : page.cursor;
-      } while (cursor);
+      for (const id of ids) {
+        const raw = await env.MARKETPLACE_META.get(`meta:${type}:${id}`);
+        if (!raw) continue;
+        const meta = JSON.parse(raw);
+        counts.set(meta.school, (counts.get(meta.school) ?? 0) + 1);
+      }
 
       const schools = [...counts.entries()]
         .map(([school, count]) => ({ school, count }))
@@ -297,6 +369,7 @@ export default {
 
       await env.MARKETPLACE_FILES.delete(meta.key);
       await env.MARKETPLACE_META.delete(metaKey);
+      await removeFromIndex(env, type, id);
       return jsonResponse({ deleted: true });
     }
 

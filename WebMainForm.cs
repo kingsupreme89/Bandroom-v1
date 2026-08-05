@@ -218,7 +218,7 @@ public sealed class WebMainForm : Form
     {
         SetGameTeamsFromWeb(homeName, awayName);
         _matchupLocked = true;
-        PlayDraftChime();
+        PlayGametimeSound();
     }
 
     public bool IsMatchupLockedFromWeb() => _matchupLocked;
@@ -584,14 +584,23 @@ public sealed class WebMainForm : Form
         });
     }
 
-    /// <summary>The shared "draft chime" (Assets\nfl-draft-chime.mp3) used for every moment
-    /// that should grab attention: app open, GAMETIME pressed, and a new update detected --
-    /// including while the app is already running unattended on someone else's machine, which
-    /// is the normal case (it's always left open on one computer), so the update path fires
-    /// this too, not just at launch.</summary>
+    /// <summary>The shared "draft chime" (Assets\nfl-draft-chime.mp3) used for attention-moments
+    /// that AREN'T the GAMETIME press: app open, and a new update detected -- including while the
+    /// app is already running unattended on someone else's machine, which is the normal case
+    /// (it's always left open on one computer), so the update path fires this too, not just at
+    /// launch.</summary>
     static void PlayDraftChime()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "Assets", "nfl-draft-chime.mp3");
+        AudioPlayer.Play(path);
+    }
+
+    /// <summary>The GAMETIME confirmation cue (Assets\gametime-tackle.mp3) -- a football tackle
+    /// hit, kept separate from PlayDraftChime per user request so app-open/update-detected keep
+    /// the draft chime while GAMETIME gets its own distinct sound.</summary>
+    static void PlayGametimeSound()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "Assets", "gametime-tackle.mp3");
         AudioPlayer.Play(path);
     }
 
