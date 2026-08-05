@@ -694,22 +694,37 @@ public sealed class WebMainForm : Form
             RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:downgraded'))"));
         }
 
-        // Run on background thread — never block the UI for network calls.
+        // Run on a background thread — never block the UI for network calls. Loops for the
+        // whole lifetime of the app (not just once at startup): Bandroom is normally left open
+        // on one machine for hours/days, so a release shipped after launch would otherwise
+        // never chime/pulse until the user happened to restart the app or manually click
+        // Update -- which is exactly the gap a live user hit (pushed a release while their app
+        // was already open; nothing fired until they were told to click it by hand).
         _ = Task.Run(async () =>
         {
-            try
+            while (!_lifetimeCts.IsCancellationRequested)
             {
-                using var mgr = new UpdateManager(new GithubSource("https://github.com/kingsupreme89/Bandroom-v1", null, false));
-                var info = await mgr.CheckForUpdate();
-                if (info.ReleasesToApply.Count == 0) return;
+                try
+                {
+                    if (!_updateAvailable)
+                    {
+                        using var mgr = new UpdateManager(new GithubSource("https://github.com/kingsupreme89/Bandroom-v1", null, false));
+                        var info = await mgr.CheckForUpdate();
+                        if (info.ReleasesToApply.Count > 0)
+                        {
+                            _updateAvailable = true;
+                            PlayDraftChime();
+                            RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:updateavailable'))"));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    CrashLog.Write("Auto-update check failed", ex);
+                }
 
-                _updateAvailable = true;
-                PlayDraftChime();
-                RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:updateavailable'))"));
-            }
-            catch (Exception ex)
-            {
-                CrashLog.Write("Auto-update check failed", ex);
+                try { await Task.Delay(TimeSpan.FromMinutes(10), _lifetimeCts.Token); }
+                catch (TaskCanceledException) { break; }
             }
         });
     }
