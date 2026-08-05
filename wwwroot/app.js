@@ -20,6 +20,7 @@ let state = {
   watching: "off", // off | waiting | watching
   matchupHome: null,
   matchupAway: null,
+  matchupLocked: false,
 };
 
 async function init() {
@@ -243,6 +244,13 @@ async function refreshCategories() {
 }
 
 function setWatching(mode) {
+  // Stop Watching is the one explicit "this game is over" signal (see WebMainForm._matchupLocked)
+  // -- unlocks the matchup and swaps the VS backdrop back to normal for the next game.
+  if (mode === "off" && state.matchupLocked) {
+    state.matchupLocked = false;
+    revertVsBackdrop();
+    updateMatchupLabel();
+  }
   state.watching = mode;
   const btn = document.getElementById("btn-watch");
   const label = document.getElementById("watch-label");
@@ -504,9 +512,16 @@ function flashPanel(el) {
 function updateMatchupLabel() {
   const btn = document.getElementById("btn-matchup");
   if (!btn) return;
-  btn.textContent = state.matchupHome && state.matchupAway
-    ? `${state.matchupAway} @ ${state.matchupHome}`
-    : "Set Matchup";
+  btn.classList.toggle("locked", state.matchupLocked);
+  if (state.matchupLocked) {
+    btn.textContent = `\u{1F512} ${state.matchupAway} @ ${state.matchupHome}`;
+    btn.title = "Locked in for this game -- press Stop Watching when it ends to change it";
+  } else {
+    btn.textContent = state.matchupHome && state.matchupAway
+      ? `${state.matchupAway} @ ${state.matchupHome}`
+      : "Set Matchup";
+    btn.title = "Pick who's home and away for this game";
+  }
   updateMatchupSideBar();
 }
 
@@ -515,14 +530,20 @@ async function loadMatchup() {
   try {
     const raw = await bridge.GetGameTeams();
     if (!raw) return;
-    const { home, away } = JSON.parse(raw);
+    const { home, away, locked } = JSON.parse(raw);
     state.matchupHome = home;
     state.matchupAway = away;
+    state.matchupLocked = !!locked;
     updateMatchupLabel();
+    if (state.matchupLocked) await applyVsBackdrop();
   } catch (err) { console.error("GetGameTeams failed", err); }
 }
 
 function openMatchupDialog() {
+  if (state.matchupLocked) {
+    showToast("Matchup is locked for this game -- press Stop Watching at the top when it ends.");
+    return;
+  }
   const overlay = document.getElementById("matchup-overlay");
   document.getElementById("matchup-home-search").value = "";
   document.getElementById("matchup-away-search").value = "";
@@ -555,21 +576,54 @@ function renderMatchupGrid(side, filter) {
 
 function updateMatchupSubtext() {
   const el = document.getElementById("matchup-subtext");
+  const ready = state.matchupHome && state.matchupAway && state.matchupHome !== state.matchupAway;
   if (!state.matchupHome || !state.matchupAway) {
     el.textContent = "Pick both a home and an away team.";
   } else if (state.matchupHome === state.matchupAway) {
     el.textContent = "Home and away can't be the same team.";
   } else {
-    el.textContent = `${state.matchupAway} (away) at ${state.matchupHome} (home) -- each team's own saved profile loads automatically.`;
+    el.textContent = `${state.matchupAway} (away) at ${state.matchupHome} (home) -- each team's own saved profile loads automatically. Hit GAMETIME while you're still on CFB 27's team-select screen.`;
   }
+  document.getElementById("btn-matchup-confirm").disabled = !ready;
 }
 
+/// GAMETIME -- locks in who's home/away for OCR event routing (see WebMainForm._matchupLocked)
+/// and swaps the backdrop to the two-team VS screen. The Home/Away toggle bar still works
+/// after this for editing songs; only the routing itself is locked until Stop Watching.
 async function confirmMatchup() {
   if (!state.matchupHome || !state.matchupAway || state.matchupHome === state.matchupAway) return;
-  await bridge?.SetGameTeams(state.matchupHome, state.matchupAway);
+  await bridge?.ConfirmGametime(state.matchupHome, state.matchupAway);
+  state.matchupLocked = true;
   updateMatchupLabel();
   closeMatchupDialog();
-  showToast(`Matchup set: ${state.matchupAway} @ ${state.matchupHome}`);
+  await applyVsBackdrop();
+  showToast(`GAMETIME! ${state.matchupAway} @ ${state.matchupHome}`);
+}
+
+/// Populates the two-team VS backdrop (photo + logo + name + team-color underglow per side)
+/// and swaps it in over the normal single #backdrop. Reuses the same team data (colors/logos)
+/// and background lookup already used for the sidebar/header everywhere else.
+async function applyVsBackdrop() {
+  const away = state.teams.find((t) => t.name === state.matchupAway);
+  const home = state.teams.find((t) => t.name === state.matchupHome);
+  if (!away || !home) return;
+
+  const fill = async (side, team) => {
+    const half = document.getElementById(`backdrop-vs-${side}`);
+    const logo = document.getElementById(`backdrop-vs-${side}-logo`);
+    const name = document.getElementById(`backdrop-vs-${side}-name`);
+    half.style.setProperty("--half-color", team.secondary || team.primary);
+    if (team.logoUrl) logo.src = team.logoUrl; else logo.removeAttribute("src");
+    name.textContent = team.name;
+    const bgUrl = bridge ? await bridge.GetTeamBackgroundUrl(team.name) : null;
+    half.style.backgroundImage = bgUrl ? `url("${bgUrl}")` : "none";
+  };
+  await Promise.all([fill("away", away), fill("home", home)]);
+  document.getElementById("backdrop-vs").hidden = false;
+}
+
+function revertVsBackdrop() {
+  document.getElementById("backdrop-vs").hidden = true;
 }
 
 function openSaveProfileDialog() {

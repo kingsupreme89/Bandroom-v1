@@ -51,6 +51,98 @@ body {
   transition: background-image 0.6s ease;
   z-index: 0;
 }
+/* VS split screen -- replaces #backdrop once GAMETIME locks in a matchup. Two halves, each
+   the picked team's own stadium image (same TeamBackgrounds\ lookup as the single backdrop)
+   with a big centered logo and a pulsing underglow in that team's color, split by a center
+   emblem -- structurally the same as a game's own team-select screen, restyled in Bandroom's
+   glass/neon language instead of copying it. */
+#backdrop-vs {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  align-items: stretch;
+}
+#backdrop-vs[hidden] { display: none; }
+.backdrop-vs-half {
+  position: relative;
+  flex: 1 1 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background-size: cover;
+  background-color: var(--window-bg);
+  transition: background-image 0.6s ease;
+  /* --half-color is set inline per team on confirm; falls back to the app accent. */
+  --half-color: var(--accent);
+}
+#backdrop-vs-away { background-position: right center; }
+#backdrop-vs-home { background-position: left center; }
+.backdrop-vs-half::before {
+  /* Dark scrim so the logo/label read clearly over whatever stadium photo (or none) is behind. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 100% at 50% 40%, rgba(6, 7, 8, 0.35) 0%, rgba(6, 7, 8, 0.7) 100%);
+}
+.backdrop-vs-label {
+  position: relative;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--half-color);
+  margin-bottom: 18px;
+}
+.backdrop-vs-logo {
+  position: relative;
+  width: min(30vh, 220px);
+  height: min(30vh, 220px);
+  object-fit: contain;
+  filter: drop-shadow(0 0 28px var(--half-color));
+}
+.backdrop-vs-logo:not([src]) { display: none; }
+.backdrop-vs-name {
+  position: relative;
+  margin-top: 18px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+.backdrop-vs-underglow {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 5px;
+  background: var(--half-color);
+  box-shadow: 0 0 20px 3px var(--half-color);
+  animation: vs-underglow-pulse 1.8s ease-in-out infinite;
+}
+@keyframes vs-underglow-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+#backdrop-vs-emblem {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 11, 13, 0.75);
+  border: 2px solid var(--glass-border);
+  box-shadow: 0 0 24px 4px rgba(34, 211, 238, 0.35);
+  animation: vs-emblem-pulse 2.4s ease-in-out infinite;
+}
+#backdrop-vs-emblem .brand-mark { font-size: 26px; }
+@keyframes vs-emblem-pulse {
+  0%, 100% { box-shadow: 0 0 18px 2px rgba(34, 211, 238, 0.3); }
+  50% { box-shadow: 0 0 30px 6px rgba(34, 211, 238, 0.55); }
+}
+
 #scrim {
   position: fixed;
   inset: 0;
@@ -744,6 +836,39 @@ body {
   font-weight: 600;
   cursor: pointer;
 }
+
+.gametime-btn {
+  padding: 10px 28px;
+  border-radius: 10px;
+  border: 2px solid #ffcc33;
+  background: linear-gradient(135deg, #ff6a00, #ffcc33);
+  color: #1a0f00;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  animation: gametime-flash 1s ease-in-out infinite;
+}
+.gametime-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+  animation: none;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--glass-border);
+  color: var(--text-muted);
+}
+@keyframes gametime-flash {
+  0%, 100% { box-shadow: 0 0 8px 1px rgba(255, 204, 51, 0.4); transform: scale(1); }
+  50% { box-shadow: 0 0 22px 6px rgba(255, 204, 51, 0.85); transform: scale(1.035); }
+}
+
+.matchup-btn.locked {
+  border-color: rgba(61, 220, 132, 0.6);
+  background: rgba(61, 220, 132, 0.10);
+  color: #3ddc84;
+  cursor: default;
+}
+.matchup-btn.locked:hover { background: rgba(61, 220, 132, 0.10); border-color: rgba(61, 220, 132, 0.6); }
 
 #onboarding-overlay {
   position: fixed;

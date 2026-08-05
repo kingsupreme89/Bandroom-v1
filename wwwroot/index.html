@@ -7,6 +7,26 @@
 </head>
 <body>
   <div id="backdrop"></div>
+  <!-- VS split backdrop -- shown instead of #backdrop once GAMETIME is pressed, replicating the
+       structure of CFB 27's own team-select screen: two symmetric halves, each team's stadium
+       image + big centered logo + a pulsing underglow in that team's color, split by a center
+       emblem. Purely visual (no controls live here) -- the glass panels on top still carry the
+       actual UI, same pulsing-LED theme as the rest of the app. -->
+  <div id="backdrop-vs" hidden>
+    <div id="backdrop-vs-away" class="backdrop-vs-half">
+      <span class="backdrop-vs-label">Away</span>
+      <img class="backdrop-vs-logo" id="backdrop-vs-away-logo" alt="" />
+      <span class="backdrop-vs-name" id="backdrop-vs-away-name"></span>
+      <div class="backdrop-vs-underglow"></div>
+    </div>
+    <div id="backdrop-vs-emblem"><span class="brand-mark">B</span></div>
+    <div id="backdrop-vs-home" class="backdrop-vs-half">
+      <span class="backdrop-vs-label">Home</span>
+      <img class="backdrop-vs-logo" id="backdrop-vs-home-logo" alt="" />
+      <span class="backdrop-vs-name" id="backdrop-vs-home-name"></span>
+      <div class="backdrop-vs-underglow"></div>
+    </div>
+  </div>
   <div id="scrim"></div>
 
   <div id="app">
@@ -150,19 +170,23 @@
     </div>
   </div>
 
-  <!-- Matchup picker -- pick who's home and away for this game so the app can auto-load
-       BOTH teams' own saved profiles and play the right side's song when OCR detects who
-       actually scored/forced a turnover, instead of always assuming "the active team". -->
+  <!-- Matchup picker / GAMETIME -- pick who's home and away for this game so the app can
+       auto-load BOTH teams' own saved profiles and play the right side's song when OCR detects
+       who actually scored/forced a turnover, instead of always assuming "the active team". -->
   <div id="matchup-overlay" hidden>
     <div id="matchup-dialog" class="glass">
       <div class="matchup-header">
-        <span>Set Matchup</span>
+        <span>Start a Game</span>
         <button id="btn-close-matchup" class="icon-btn">&times;</button>
       </div>
       <p class="matchup-instructions">
-        Pick the home and away team for this game. Each team's own saved profile (if they have
-        one) loads automatically, so the right song plays for whichever side actually scores or
-        forces a turnover.
+        Do this while you're still on CFB 27's own team-select screen: pick the same two teams
+        below, then hit GAMETIME right before kickoff. Each team's own saved profile loads
+        automatically, so the right song plays for whichever side actually scores or forces a
+        turnover. You can still switch between them below to tweak songs during the game --
+        GAMETIME only locks in <em>who's home and away</em>, not which one you're editing.
+        Press <strong>Stop Watching</strong> at the top when the game ends to unlock and start a
+        new one.
       </p>
       <div class="matchup-columns">
         <div class="matchup-column">
@@ -179,7 +203,7 @@
       <div class="save-profile-subtext" id="matchup-subtext"></div>
       <div class="save-profile-actions">
         <button id="btn-matchup-cancel" class="btn-ghost">Cancel</button>
-        <button id="btn-matchup-confirm" class="btn-primary">Set Matchup</button>
+        <button id="btn-matchup-confirm" class="gametime-btn" disabled>GAMETIME</button>
       </div>
     </div>
   </div>

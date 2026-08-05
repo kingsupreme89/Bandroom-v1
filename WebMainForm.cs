@@ -33,6 +33,13 @@ public sealed class WebMainForm : Form
     List<TriggerEntry>? _homeConfig, _awayConfig;
     string? _possession;
 
+    /// <summary>True from the moment GAMETIME is pressed until watching is stopped. While
+    /// locked, _homeTeam/_awayTeam (and therefore which physical side OCR-detected events route
+    /// to) can't change -- only the SONGS assigned to each side can, via the Home/Away toggle.
+    /// This matches the real workflow: you set the matchup once at kickoff, then Stop Watching
+    /// is the one signal that means "this game is over, I might pick a different matchup next."</summary>
+    bool _matchupLocked;
+
     public WebMainForm()
     {
         Text = "Bandroom";
@@ -178,9 +185,21 @@ public sealed class WebMainForm : Form
         _possession = null;
     }
 
+    /// <summary>The GAMETIME button. Same wiring as SetGameTeamsFromWeb, plus the confirmation
+    /// chime and the lock -- meant to be pressed once, while still on CFB 27's own team-select
+    /// screen, right before kickoff.</summary>
+    public void ConfirmGametimeFromWeb(string homeName, string awayName)
+    {
+        SetGameTeamsFromWeb(homeName, awayName);
+        _matchupLocked = true;
+        PlayGametimeChime();
+    }
+
+    public bool IsMatchupLockedFromWeb() => _matchupLocked;
+
     public string? GetGameTeamsFromWeb() =>
         _homeTeam.HasValue && _awayTeam.HasValue
-            ? System.Text.Json.JsonSerializer.Serialize(new { home = _homeTeam.Value.Name, away = _awayTeam.Value.Name })
+            ? System.Text.Json.JsonSerializer.Serialize(new { home = _homeTeam.Value.Name, away = _awayTeam.Value.Name, locked = _matchupLocked })
             : null;
 
     /// <summary>Resolves a sampled ribbon color to "home"/"away"/null -- null covers both the
@@ -247,6 +266,9 @@ public sealed class WebMainForm : Form
             _watcher.Stop();
             _watching = false;
             _windowFound = false;
+            // Stop Watching is the one explicit "this game is over" signal (see _matchupLocked) --
+            // unlock so a new GAMETIME press can pick a different matchup for the next game.
+            _matchupLocked = false;
         }
         else
         {
@@ -478,6 +500,53 @@ public sealed class WebMainForm : Form
                 MessageBox.Show(this, "That file doesn't look like a valid Bandroom profile.", "Import Failed",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+        });
+    }
+
+    /// <summary>Short two-tone "horn stab" confirming GAMETIME was pressed -- same synthesized
+    /// approach as PlayUpdateChime (no embedded audio asset needed), just punchier/lower so it
+    /// reads as a kickoff signal rather than a notification ping.</summary>
+    static void PlayGametimeChime()
+    {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                int sampleRate = 44100;
+                float[] freqs = [220f, 220f, 330f]; // low horn, low horn, punch up
+                int noteMs = 130, gapMs = 30;
+                int totalSamples = freqs.Length * ((noteMs + gapMs) * sampleRate / 1000);
+                var buf = new float[totalSamples];
+                int pos = 0;
+                foreach (float freq in freqs)
+                {
+                    int n = noteMs * sampleRate / 1000;
+                    int g = gapMs * sampleRate / 1000;
+                    for (int i = 0; i < n; i++)
+                    {
+                        float env = MathF.Pow(1f - (float)i / n, 0.3f);
+                        // A little second harmonic mixed in so it reads as a horn, not a pure sine beep.
+                        float sample = MathF.Sin(2 * MathF.PI * freq * i / sampleRate)
+                                     + MathF.Sin(2 * MathF.PI * freq * 2 * i / sampleRate) * 0.25f;
+                        buf[pos++] = sample * 0.34f * env;
+                    }
+                    for (int i = 0; i < g; i++) buf[pos++] = 0f;
+                }
+                var bytes = new byte[buf.Length * 2];
+                for (int i = 0; i < buf.Length; i++)
+                {
+                    short s = (short)(Math.Clamp(buf[i], -1f, 1f) * 32767);
+                    bytes[i * 2] = (byte)(s & 0xFF);
+                    bytes[i * 2 + 1] = (byte)(s >> 8);
+                }
+                var fmt = new NAudio.Wave.WaveFormat(sampleRate, 16, 1);
+                using var stream = new NAudio.Wave.RawSourceWaveStream(new MemoryStream(bytes), fmt);
+                using var wo = new NAudio.Wave.WaveOutEvent();
+                wo.Init(stream);
+                wo.Play();
+                while (wo.PlaybackState == NAudio.Wave.PlaybackState.Playing) Thread.Sleep(10);
+            }
+            catch { }
         });
     }
 

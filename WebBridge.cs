@@ -127,6 +127,8 @@ public sealed class WebBridge
     public string? GetProfileSavedAt(string name) => _host.GetProfileSavedAtFromWeb(name);
     public void SetGameTeams(string home, string away) => _host.SetGameTeamsFromWeb(home, away);
     public string? GetGameTeams() => _host.GetGameTeamsFromWeb();
+    public void ConfirmGametime(string home, string away) => _host.ConfirmGametimeFromWeb(home, away);
+    public bool IsMatchupLocked() => _host.IsMatchupLockedFromWeb();
     public void CopyCurrentToAllTeams() => _host.CopyCurrentToAllTeamsFromWeb();
     public void DeleteCurrentProfile() => _host.DeleteCurrentProfileFromWeb();
     public void ExportProfile() => _host.ExportProfileFromWeb();
