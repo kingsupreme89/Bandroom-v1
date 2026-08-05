@@ -60,13 +60,14 @@ body {
   position: fixed;
   inset: 0;
   z-index: 0;
-  display: flex;
-  align-items: stretch;
 }
 #backdrop-vs[hidden] { display: none; }
 .backdrop-vs-half {
-  position: relative;
-  flex: 1 1 50%;
+  /* Absolutely positioned + clip-path instead of flex 50/50 -- lets the two halves overlap
+     the full screen and meet along a diagonal seam instead of a straight vertical line,
+     per explicit user ask. */
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -78,8 +79,41 @@ body {
   /* --half-color is set inline per team on confirm; falls back to the app accent. */
   --half-color: var(--accent);
 }
-#backdrop-vs-away { background-position: right center; }
-#backdrop-vs-home { background-position: left center; }
+#backdrop-vs-away {
+  background-position: right center;
+  clip-path: polygon(0 0, 56% 0, 44% 100%, 0 100%);
+  /* Each half's box is still the full screen (for its background-image to size/position
+     correctly), but its VISIBLE (clipped) region is only ever roughly the left or right side --
+     centering content with align-items:center would put both teams' logos on top of each
+     other at dead screen-center. Push content toward this half's own side instead. */
+  align-items: flex-start;
+  padding-left: 9vw;
+}
+#backdrop-vs-home {
+  background-position: left center;
+  clip-path: polygon(56% 0, 100% 0, 100% 100%, 44% 100%);
+  align-items: flex-end;
+  padding-right: 9vw;
+}
+/* The diagonal seam itself: a thin band along the same cut, split top/bottom into each team's
+   own color (set via --away-color/--home-color in applyVsBackdrop) so it visibly divides the
+   two schools' colors, with a pulsing glow. */
+#backdrop-vs-seam {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  clip-path: polygon(57.4% 0, 58.6% 0, 46.6% 100%, 45.4% 100%);
+  background: linear-gradient(to bottom,
+    var(--away-color, var(--accent)) 0%, var(--away-color, var(--accent)) 50%,
+    var(--home-color, var(--accent)) 50%, var(--home-color, var(--accent)) 100%);
+  filter: drop-shadow(0 0 10px var(--away-color, var(--accent))) drop-shadow(0 0 10px var(--home-color, var(--accent)));
+  animation: vs-seam-pulse 1.8s ease-in-out infinite;
+}
+@keyframes vs-seam-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
 .backdrop-vs-half::before {
   /* Dark scrim so the logo/label read clearly over whatever stadium photo (or none) is behind. */
   content: "";
@@ -112,14 +146,11 @@ body {
   color: var(--text-primary);
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
 }
-.backdrop-vs-underglow {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: 5px;
-  background: var(--half-color);
-  box-shadow: 0 0 20px 3px var(--half-color);
-  animation: vs-underglow-pulse 1.8s ease-in-out infinite;
-}
+/* .backdrop-vs-underglow (the old full-width bottom bar) is retired -- now that each half is
+   absolutely positioned + clip-path'd instead of a 50%-width flex item, a left:0;right:0 bar
+   would span the entire screen for BOTH halves and stack incorrectly. #backdrop-vs-seam above
+   replaces its job of showing each team's color. */
+.backdrop-vs-underglow { display: none; }
 @keyframes vs-underglow-pulse {
   0%, 100% { opacity: 0.55; }
   50% { opacity: 1; }
@@ -137,7 +168,9 @@ body {
   box-shadow: 0 0 24px 4px rgba(34, 211, 238, 0.35);
   animation: vs-emblem-pulse 2.4s ease-in-out infinite;
 }
-#backdrop-vs-emblem .brand-mark { font-size: 26px; }
+/* Neutral here, not team-colored -- this "B" sits between BOTH teams on the VS split, so it
+   shouldn't wear either one's color specifically. */
+#backdrop-vs-emblem .brand-mark { font-size: 26px; background: var(--accent); animation: none; }
 @keyframes vs-emblem-pulse {
   0%, 100% { box-shadow: 0 0 18px 2px rgba(34, 211, 238, 0.3); }
   50% { box-shadow: 0 0 30px 6px rgba(34, 211, 238, 0.55); }
@@ -192,12 +225,36 @@ body {
 }
 .header-left { display: flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; }
 .brand-mark {
-  width: 30px; height: 30px; border-radius: 8px;
-  background: var(--accent); color: #06222a;
+  width: 32px; height: 32px; border-radius: 9px;
+  /* Fill follows the user's active team color (--team-secondary, already set app-wide by
+     setActiveTeam) instead of a fixed teal, as a gradient with a glossy sheen for depth --
+     with a pulsing/breathing outline that stays the app's own brand teal (--accent) so the
+     logo still reads as "Bandroom" at a glance no matter which team's colors it's wearing.
+     Explicit ask: make this the loudest, most eye-catching thing in the header -- it's the
+     brand mark. */
+  background: linear-gradient(135deg, var(--team-secondary, var(--accent)) 0%, color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, #000) 100%);
+  color: #06222a;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 17px; font-weight: 700;
+  font-size: 19px; font-weight: 800;
   font-family: "Outfit", "Segoe UI", sans-serif;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   flex: none;
+  position: relative;
+  overflow: hidden;
+  border: 2px solid var(--accent);
+  animation: brand-mark-pulse 2s ease-in-out infinite;
+}
+.brand-mark::before {
+  /* Glossy top-left sheen, same trick used on team tiles. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.08) 32%, rgba(255, 255, 255, 0) 58%);
+  pointer-events: none;
+}
+@keyframes brand-mark-pulse {
+  0%, 100%  { box-shadow: 0 0 4px 0 var(--accent), 0 2px 5px rgba(0, 0, 0, 0.4); transform: scale(1); }
+  50%       { box-shadow: 0 0 16px 4px var(--accent), 0 2px 5px rgba(0, 0, 0, 0.4); transform: scale(1.07); }
 }
 .brand-name {
   font-family: "Outfit", "Segoe UI", sans-serif;

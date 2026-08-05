@@ -732,6 +732,9 @@ async function applyVsBackdrop() {
     half.style.backgroundImage = bgUrl ? `url("${bgUrl}")` : "none";
   };
   await Promise.all([fill("away", away), fill("home", home)]);
+  const seam = document.getElementById("backdrop-vs-seam");
+  seam.style.setProperty("--away-color", away.secondary || away.primary);
+  seam.style.setProperty("--home-color", home.secondary || home.primary);
   document.getElementById("backdrop-vs").hidden = false;
 }
 

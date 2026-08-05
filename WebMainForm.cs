@@ -758,7 +758,7 @@ public sealed class WebMainForm : Form
                     CrashLog.Write("Auto-update check failed", ex);
                 }
 
-                try { await Task.Delay(TimeSpan.FromMinutes(10), _lifetimeCts.Token); }
+                try { await Task.Delay(TimeSpan.FromMinutes(3), _lifetimeCts.Token); }
                 catch (TaskCanceledException) { break; }
             }
         });
