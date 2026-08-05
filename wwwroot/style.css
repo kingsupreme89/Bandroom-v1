@@ -257,6 +257,16 @@ body {
 .pill-watching { color: #3ddc84; border-color: rgba(61, 220, 132, 0.4); }
 .pill-watching .watch-dot { background: #3ddc84; }
 
+/* Universal "lights up when clicked" feedback -- every button in the app gets a bright accent
+   flash + slight press-down on :active, so clicking anything reads as a real physical press
+   instead of feeling inert. Individual button styles (.btn-ghost, .btn-update, .situation-btn,
+   etc.) layer their own look on top; this is just the shared press feedback. */
+button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matchup-btn:active {
+  filter: brightness(1.4);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 12px 1px rgba(34, 211, 238, 0.6);
+  transform: translateY(1px);
+}
+
 .btn-ghost {
   padding: 7px 14px;
   border-radius: 10px;
@@ -266,6 +276,7 @@ body {
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
+  transition: filter 0.08s ease, box-shadow 0.08s ease, transform 0.08s ease;
 }
 .btn-block { width: 100%; margin-top: 8px; }
 .icon-btn {

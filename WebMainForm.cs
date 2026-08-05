@@ -100,6 +100,15 @@ public sealed class WebMainForm : Form
 
         core.AddHostObjectToScript("bandroom", new WebBridge(this));
 
+        // WebView2's disk cache can hang onto an old style.css/app.js across a Squirrel update
+        // (the WebView2Data profile folder is intentionally persistent across versions, for
+        // cookies/localStorage -- but that means static assets served through the virtual host
+        // mapping above can get served stale instead of picking up the new version's files).
+        // Force every network request this session to skip cache so UI fixes always take effect
+        // right after an update, not just after a manual profile wipe.
+        try { await core.CallDevToolsProtocolMethodAsync("Network.setCacheDisabled", "{\"cacheDisabled\":true}"); }
+        catch (Exception ex) { CrashLog.Write("Failed to disable WebView2 cache", ex); }
+
         _webView.Source = new Uri("https://appassets/index.html");
     }
 
