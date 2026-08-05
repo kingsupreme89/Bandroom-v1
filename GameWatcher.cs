@@ -185,6 +185,8 @@ internal sealed class GameWatcher
                     WindowFoundChanged?.Invoke(hwnd != IntPtr.Zero);
                     if (hwnd == IntPtr.Zero)
                     {
+                        // Not on the tackle-detection critical path -- this only fires while the
+                        // game window hasn't been found at all yet, so left at 1500ms.
                         await Task.Delay(1500, ct);
                         continue;
                     }
@@ -197,6 +199,8 @@ internal sealed class GameWatcher
                 {
                     hwnd = IntPtr.Zero;
                     WindowFoundChanged?.Invoke(false);
+                    // Not on the tackle-detection critical path -- window handle just went stale
+                    // (e.g. game closed/minimized), so left at 1000ms.
                     await Task.Delay(1000, ct);
                     continue;
                 }
@@ -282,7 +286,17 @@ internal sealed class GameWatcher
                     _downChangedThisTick = false;
                 }
 
-                await Task.Delay(400, ct);
+                // This is the ONE delay on the actual tackle-to-sound critical path: it gates how
+                // often the "down" region gets re-OCR'd, and "down" is what both DownChanged and
+                // CheckForLossOfYards (tackle-for-loss) key off of. Dropped from 400ms to 250ms --
+                // knocks up to 150ms off detection latency on average. Not pushed lower than that:
+                // OCR itself takes real time per region per tick, and going much faster starts
+                // trading noticeably more CPU for diminishing returns against a 2s Cooldown that
+                // already dominates perceived responsiveness on repeat events. The other
+                // Task.Delay calls in this loop (1500ms window-search retry, 1000ms rect-failure/
+                // error backoff) are recovery paths for "no game window" / "OCR threw", not part
+                // of steady-state detection, so they were left alone.
+                await Task.Delay(250, ct);
             }
             catch (OperationCanceledException)
             {
@@ -292,6 +306,8 @@ internal sealed class GameWatcher
             {
                 Log?.Invoke($"Watcher error: {ex.Message}");
                 CrashLog.Write("Watcher error", ex);
+                // Not on the tackle-detection critical path -- this only runs after an exception
+                // already broke the tick, so left at 1000ms as an error backoff.
                 try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { break; }
             }
         }

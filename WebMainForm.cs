@@ -101,9 +101,14 @@ public sealed class WebMainForm : Form
         core.SetVirtualHostNameToFolderMapping("teamlogo", ConfigStore.TeamLogosFolder, CoreWebView2HostResourceAccessKind.Allow);
         Directory.CreateDirectory(ConfigStore.DownloadedImagesFolder);
         Directory.CreateDirectory(ConfigStore.SongsUploadedFolder);
+        Directory.CreateDirectory(ConfigStore.LocalTracksFolder);
         Directory.CreateDirectory(ConfigStore.AvatarFolder);
         core.SetVirtualHostNameToFolderMapping("downloadedimages", ConfigStore.DownloadedImagesFolder, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("downloadedsongs", ConfigStore.SongsUploadedFolder, CoreWebView2HostResourceAccessKind.Allow);
+        // End-user "import my own song" pipeline (item 21) -- its own virtual host, separate
+        // from downloadedsongs, since these tracks live in ConfigStore.LocalTracksFolder, not
+        // SongsUploadedFolder.
+        core.SetVirtualHostNameToFolderMapping("localtracks", ConfigStore.LocalTracksFolder, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("avatar", ConfigStore.AvatarFolder, CoreWebView2HostResourceAccessKind.Allow);
 
         core.AddHostObjectToScript("bandroom", new WebBridge(this));
@@ -1006,4 +1011,38 @@ public sealed class WebMainForm : Form
         if (IsHandleCreated && InvokeRequired) BeginInvoke(action);
         else if (IsHandleCreated) action();
     }
+
+    /// <summary>Synchronous counterpart to RunOnUi -- needed here (unlike every existing
+    /// RunOnUi caller) because WebBridge.ImportLocalSong has to hand a real result (or
+    /// "cancelled") back to the JS await, not just fire a dialog and move on. Blocks the
+    /// calling (WebView2 host-object) thread until the whole modal sequence below finishes.</summary>
+    T RunOnUiSync<T>(Func<T> func) =>
+        IsHandleCreated && InvokeRequired ? (T)Invoke(func) : func();
+
+    /// <summary>End-user "import my own song" pipeline (item 21): choose a local file -> name
+    /// the track -> the SAME TrimmerForm/NormalizeAndLimit path marketplace tracks go through
+    /// auto-opens with that name already set -> saved into ConfigStore.LocalTracksFolder and
+    /// registered in the local-tracks manifest so it shows up in My Downloads immediately, with
+    /// "Share to Marketplace" available. All three dialogs are modal, so this runs synchronously
+    /// on the UI thread via RunOnUiSync and returns a real result to the JS caller either way.</summary>
+    public string ImportLocalSongFromWeb() => RunOnUiSync(() =>
+    {
+        using var ofd = new OpenFileDialog
+        {
+            Filter = "Audio files (*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac)|*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac|All files (*.*)|*.*",
+            Title = "Choose a song to import",
+        };
+        if (ofd.ShowDialog(this) != DialogResult.OK)
+            return System.Text.Json.JsonSerializer.Serialize(new { success = false, cancelled = true });
+
+        var name = PromptDialog.Show(this, "Name Your Track", "Enter a name for this track:");
+        if (string.IsNullOrWhiteSpace(name))
+            return System.Text.Json.JsonSerializer.Serialize(new { success = false, cancelled = true });
+
+        using var trimmer = new TrimmerForm(this, ofd.FileName, presetSongName: name);
+        if (trimmer.ShowDialog(this) != DialogResult.OK || trimmer.SavedFilePath == null)
+            return System.Text.Json.JsonSerializer.Serialize(new { success = false, cancelled = true });
+
+        return System.Text.Json.JsonSerializer.Serialize(new { success = true, path = trimmer.SavedFilePath, name });
+    });
 }

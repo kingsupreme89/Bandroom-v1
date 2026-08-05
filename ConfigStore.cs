@@ -21,6 +21,12 @@ internal static class ConfigStore
     /// actually import a new file -- picking an existing library track never copies anything,
     /// so storage isn't duplicated on every load.</summary>
     public static readonly string SongsUploadedFolder = Path.Combine(SongsFolder, "uploaded");
+    /// <summary>End-user "import my own song" pipeline (item 21) lands trimmed+normalized clips
+    /// here -- separate from SongsTrimmedFolder (trims of an already-assigned/marketplace track)
+    /// so these have their own virtual host mapping (see WebMainForm's "localtracks") and their
+    /// own manifest (local_tracks.json below) for the My Downloads tab's "Share to Marketplace"
+    /// button, which only ever applies to tracks that came through THIS pipeline.</summary>
+    public static readonly string LocalTracksFolder = Path.Combine(SongsFolder, "local");
     public static readonly string ProfilesFolder = Path.Combine(UserDataRoot, "Profiles");
     public static readonly string TeamBackgroundsFolder = Path.Combine(UserDataRoot, "TeamBackgrounds");
     public static readonly string TeamLogosFolder = Path.Combine(UserDataRoot, "TeamLogos");
@@ -31,6 +37,7 @@ internal static class ConfigStore
     /// the two folders would make FindImagePath's single-active-file convention ambiguous.</summary>
     public static readonly string DownloadedImagesFolder = Path.Combine(UserDataRoot, "DownloadedImages");
     static readonly string MarketplaceDownloadsManifestPath = Path.Combine(UserDataRoot, "marketplace_downloads.json");
+    static readonly string LocalTracksManifestPath = Path.Combine(UserDataRoot, "local_tracks.json");
     static readonly string AuthSessionPath = Path.Combine(UserDataRoot, "auth_session.json");
     static readonly string UserProfilePath = Path.Combine(UserDataRoot, "user_profile.json");
     static readonly string FirstRunFlagPath = Path.Combine(UserDataRoot, ".firstrun_done");
@@ -195,6 +202,95 @@ internal static class ConfigStore
         }
     }
 
+    /// <summary>One entry in "My Downloads" for a track the user imported/trimmed themselves
+    /// (item 21's local-import pipeline), as opposed to a marketplace download
+    /// (MarketplaceDownloadEntry above). Kept as its own manifest/type rather than folded into
+    /// MarketplaceDownloadEntry so the "Share to Marketplace" button in the My Downloads tab can
+    /// tell the two apart -- it must only ever appear on tracks that came through this pipeline,
+    /// never on something already sourced from the marketplace.</summary>
+    public sealed record LocalTrackEntry
+    {
+        public string Id { get; init; } = Guid.NewGuid().ToString("N");
+        public string Name { get; init; } = "";
+        public string Path { get; init; } = "";
+        public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
+        /// <summary>True once this track has actually been shared to the marketplace -- lets the
+        /// UI swap the button for a "Shared" state instead of letting the same local track get
+        /// re-uploaded as a brand new marketplace item on every click.</summary>
+        public bool Shared { get; init; }
+    }
+
+    // Same rationale as MarketplaceDownloadsLock above -- guards every read-modify-write of
+    // local_tracks.json against two near-simultaneous calls (import racing a delete/share).
+    static readonly object LocalTracksLock = new();
+
+    public static List<LocalTrackEntry> LoadLocalTracks()
+    {
+        lock (LocalTracksLock) return LoadLocalTracksUnlocked();
+    }
+
+    static List<LocalTrackEntry> LoadLocalTracksUnlocked()
+    {
+        if (!File.Exists(LocalTracksManifestPath)) return new List<LocalTrackEntry>();
+        try
+        {
+            string json = File.ReadAllText(LocalTracksManifestPath);
+            return JsonSerializer.Deserialize<List<LocalTrackEntry>>(json, JsonOptions) ?? new List<LocalTrackEntry>();
+        }
+        catch { return new List<LocalTrackEntry>(); } // corrupt manifest shouldn't crash the downloads tab
+    }
+
+    static void SaveLocalTracks(List<LocalTrackEntry> entries)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(LocalTracksManifestPath, JsonSerializer.Serialize(entries, JsonOptions));
+    }
+
+    public static LocalTrackEntry RecordLocalTrack(string name, string path)
+    {
+        lock (LocalTracksLock)
+        {
+            var entries = LoadLocalTracksUnlocked();
+            entries.RemoveAll(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
+            var entry = new LocalTrackEntry { Name = name, Path = path };
+            entries.Add(entry);
+            SaveLocalTracks(entries);
+            return entry;
+        }
+    }
+
+    /// <summary>Removes a locally-imported track and deletes its file -- same semantics as
+    /// RemoveMarketplaceDownload (false, not an error, if the id's already gone).</summary>
+    public static bool RemoveLocalTrack(string id)
+    {
+        lock (LocalTracksLock)
+        {
+            var entries = LoadLocalTracksUnlocked();
+            var entry = entries.FirstOrDefault(e => e.Id == id);
+            if (entry == null) return false;
+
+            entries.Remove(entry);
+            SaveLocalTracks(entries);
+            try { if (File.Exists(entry.Path)) File.Delete(entry.Path); } catch { /* best-effort */ }
+            return true;
+        }
+    }
+
+    /// <summary>Flips a local track's Shared flag once it's actually been uploaded to the
+    /// marketplace. Returns false if the id isn't found.</summary>
+    public static bool MarkLocalTrackShared(string id)
+    {
+        lock (LocalTracksLock)
+        {
+            var entries = LoadLocalTracksUnlocked();
+            int idx = entries.FindIndex(e => e.Id == id);
+            if (idx < 0) return false;
+            entries[idx] = entries[idx] with { Shared = true };
+            SaveLocalTracks(entries);
+            return true;
+        }
+    }
+
     /// <summary>Locally-persisted sign-in state -- just enough to show "signed in as X" and
     /// re-attach to the Worker-issued app session on next launch without re-running the full
     /// browser OAuth flow every time. The Google ID token itself is NOT stored here long-term
@@ -263,6 +359,51 @@ internal static class ConfigStore
         /// <summary>Filename (not full path) of a custom local avatar under UserDataRoot\Avatar\,
         /// shown instead of the Google avatar -- available signed-out too, unlike the Google one.</summary>
         public string? AvatarFileName { get; init; }
+        /// <summary>Custom team logo edits (key = team name), synced across devices for a signed-in
+        /// account -- unlike EventCounts/GamesWatchedByTeam above, this is NOT a monotonic counter,
+        /// so the merge rule is "newest UpdatedAtUtc per key wins", not max-of-value (see
+        /// WebBridge.MergeLatestWins). Works fully offline/signed-out same as before; this dict is
+        /// just the cloud-sync record of what was last saved locally, per team.</summary>
+        public Dictionary<string, TeamLogoEntry> CustomTeamLogos { get; init; } = new();
+    }
+
+    /// <summary>One custom team logo edit -- the base64 PNG bytes plus when it was saved, so a
+    /// "newest wins" merge (WebBridge.MergeLatestWins) can tell which device's edit is more recent
+    /// for a given team.</summary>
+    public sealed record TeamLogoEntry
+    {
+        public string Base64Png { get; init; } = "";
+        public DateTime UpdatedAtUtc { get; init; } = DateTime.UtcNow;
+    }
+
+    /// <summary>Tracks, per team, the UpdatedAtUtc of the logo edit that's actually been written to
+    /// TeamLogosFolder on THIS device -- lets the pull path (WebBridge, after a cloud merge) tell
+    /// which merged entries are genuinely newer than what's on disk here, without re-writing a PNG
+    /// (and toasting about it) on every sign-in for logos that already match. Same sidecar-manifest
+    /// pattern as local_tracks.json/marketplace_downloads.json above, just for logos.</summary>
+    public sealed record TeamLogoSyncManifest
+    {
+        public Dictionary<string, DateTime> AppliedAtUtc { get; init; } = new();
+        /// <summary>True once this device has completed one full pull of CustomTeamLogos --
+        /// suppresses the "Logo updated for X" toast on that very first sync (which could otherwise
+        /// spam a toast per pre-existing custom logo on a brand-new device), while still writing
+        /// the files themselves.</summary>
+        public bool InitialSyncDone { get; init; }
+    }
+
+    static readonly string TeamLogoSyncManifestPath = Path.Combine(UserDataRoot, "team_logo_sync.json");
+
+    public static TeamLogoSyncManifest LoadTeamLogoSyncManifest()
+    {
+        if (!File.Exists(TeamLogoSyncManifestPath)) return new TeamLogoSyncManifest();
+        try { return JsonSerializer.Deserialize<TeamLogoSyncManifest>(File.ReadAllText(TeamLogoSyncManifestPath), JsonOptions) ?? new TeamLogoSyncManifest(); }
+        catch { return new TeamLogoSyncManifest(); } // corrupt manifest -- treat as never-synced, not fatal
+    }
+
+    public static void SaveTeamLogoSyncManifest(TeamLogoSyncManifest manifest)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(TeamLogoSyncManifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
     }
 
     public static readonly string AvatarFolder = Path.Combine(UserDataRoot, "Avatar");

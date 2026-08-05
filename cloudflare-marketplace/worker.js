@@ -9,8 +9,9 @@
 //      returns { id, url, ownerToken }.
 //   -> rate-limited per IP (see RATE_LIMIT_* below).
 //
-// GET /list?type=song|image[&school=<name>]
-//   -> { items: [{ id, name, school, url, uploadedAt, likes, reports }, ...] }, newest first.
+// GET /list?type=song|image[&school=<name>][&sort=newest|views|downloads|likes]
+//   -> { items: [{ id, name, school, url, uploadedAt, likes, reports, views, downloads }, ...] },
+//      sorted per `sort` (default "newest").
 //
 // GET /file/<key>
 //   -> streams the raw file back out of R2 (this is how the app actually plays/displays it).
@@ -19,6 +20,16 @@
 //   -> deletes the R2 file + KV metadata, only if the token matches the one returned at upload
 //      time. No accounts, so this is the only ownership check there is -- lose the token
 //      (browser data cleared, different device) and the upload can't be deleted this way.
+//   -> Admin override: header X-Admin-Token: <ADMIN_TOKEN> (Worker secret, set via
+//      `wrangler secret put ADMIN_TOKEN`, never hardcoded here) bypasses the ownerToken match
+//      entirely and deletes regardless of who owns the item. Only the app owner's local/dev
+//      build ever has this token (see admin_token.local.txt in the C# app) -- it is
+//      deliberately never shipped in the public installer.
+//
+// PATCH /item/<type>/<id>   header: X-Admin-Token: <ADMIN_TOKEN>   body: { name?, school? }
+//   -> admin-exclusive metadata edit, no ownerToken fallback (403/401 without a valid admin
+//      token). Updates only `name`/`school` on the item -- `id`/`key`/`ownerToken` and any
+//      counters (likes/reports/views/downloads) are never touched by this endpoint.
 //
 // POST /report/<type>/<id>
 //   -> increments a report counter for that item (KV). No auth needed -- cheap first pass at
@@ -27,6 +38,15 @@
 // POST /like/<type>/<id>
 //   -> increments a like counter for that item (KV), returns the new count. No de-dup (no
 //      accounts to de-dup against) -- a determined user could spam likes; acceptable for a v1.
+//
+// POST /view/<type>/<id>
+//   -> increments a view counter for that item (KV), returns the new count. Fired when the
+//      app opens an item's preview/detail (not on every list render) -- same no-de-dup caveat
+//      as /like, same rate limit bucket as like/report.
+//
+// POST /download/<type>/<id>
+//   -> increments a download counter for that item (KV), returns the new count. Fired when a
+//      download actually completes (not merely requested) -- same pattern as /like.
 //
 // GET /leaderboard?type=song|image
 //   -> { schools: [{ school, count }, ...] }, sorted by count descending. Per-team upload counts.
@@ -63,8 +83,8 @@ const RATE_LIMIT_WINDOW_SECONDS = 60 * 10; // 10 minutes
 function cors(extra) {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Owner-Token",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, PATCH, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-Owner-Token, X-Admin-Token",
     ...extra,
   };
 }
@@ -264,7 +284,7 @@ export default {
 
       const meta = {
         id, type, name, school, key: r2Key, uploadedAt: new Date().toISOString(),
-        ownerToken, likes: 0, reports: 0,
+        ownerToken, likes: 0, reports: 0, views: 0, downloads: 0,
       };
       await env.MARKETPLACE_META.put(`meta:${type}:${id}`, JSON.stringify(meta));
       await addToIndex(env, type, id);
@@ -278,6 +298,7 @@ export default {
         return new Response('type must be "song" or "image"', { status: 400, headers: cors() });
       }
       const schoolFilter = url.searchParams.get("school");
+      const sort = url.searchParams.get("sort") ?? "newest";
 
       let ids;
       try {
@@ -298,10 +319,25 @@ export default {
         // ownerToken is a delete credential -- never echoed back in /list, only returned once
         // at upload time, so a passive listing request can never leak another uploader's token.
         const { ownerToken, ...pub } = meta;
-        items.push({ ...pub, likes: meta.likes ?? 0, reports: meta.reports ?? 0, url: `${url.origin}/file/${encodeURIComponent(meta.key)}` });
+        items.push({
+          ...pub,
+          likes: meta.likes ?? 0,
+          reports: meta.reports ?? 0,
+          // ?? 0 -- items uploaded before this field existed have no views/downloads in KV yet.
+          views: meta.views ?? 0,
+          downloads: meta.downloads ?? 0,
+          url: `${url.origin}/file/${encodeURIComponent(meta.key)}`,
+        });
       }
 
-      items.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1));
+      // "newest" (default) preserves the existing uploadedAt-descending behavior; the rest sort
+      // by their counter descending, ties broken by newest-first so equal counts still order
+      // predictably.
+      if (sort === "views" || sort === "downloads" || sort === "likes") {
+        items.sort((a, b) => (b[sort] - a[sort]) || (a.uploadedAt < b.uploadedAt ? 1 : -1));
+      } else {
+        items.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1));
+      }
       return jsonResponse({ items });
     }
 
@@ -370,6 +406,44 @@ export default {
       return jsonResponse({ reports: meta.reports });
     }
 
+    if (url.pathname.startsWith("/view/") && request.method === "POST") {
+      const parts = url.pathname.slice("/view/".length).split("/");
+      const [type, id] = parts;
+      if ((type !== "song" && type !== "image") || !id) {
+        return new Response("bad request", { status: 400, headers: cors() });
+      }
+      const allowedView = await checkRateLimit(env, request, "view", RATE_LIMIT_MAX_LIKES_REPORTS);
+      if (!allowedView) {
+        return new Response("too many views -- try again in a few minutes", { status: 429, headers: cors() });
+      }
+      const metaKey = `meta:${type}:${id}`;
+      const raw = await env.MARKETPLACE_META.get(metaKey);
+      if (!raw) return new Response("not found", { status: 404, headers: cors() });
+      const meta = JSON.parse(raw);
+      meta.views = (meta.views ?? 0) + 1;
+      await env.MARKETPLACE_META.put(metaKey, JSON.stringify(meta));
+      return jsonResponse({ views: meta.views });
+    }
+
+    if (url.pathname.startsWith("/download/") && request.method === "POST") {
+      const parts = url.pathname.slice("/download/".length).split("/");
+      const [type, id] = parts;
+      if ((type !== "song" && type !== "image") || !id) {
+        return new Response("bad request", { status: 400, headers: cors() });
+      }
+      const allowedDownload = await checkRateLimit(env, request, "download", RATE_LIMIT_MAX_LIKES_REPORTS);
+      if (!allowedDownload) {
+        return new Response("too many downloads -- try again in a few minutes", { status: 429, headers: cors() });
+      }
+      const metaKey = `meta:${type}:${id}`;
+      const raw = await env.MARKETPLACE_META.get(metaKey);
+      if (!raw) return new Response("not found", { status: 404, headers: cors() });
+      const meta = JSON.parse(raw);
+      meta.downloads = (meta.downloads ?? 0) + 1;
+      await env.MARKETPLACE_META.put(metaKey, JSON.stringify(meta));
+      return jsonResponse({ downloads: meta.downloads });
+    }
+
     // GET/PUT /profile   header: Authorization: Bearer <sessionToken from /auth/verify>
     //   -> the "universal profile" (favorite team + lifetime stats) mirrored here so it follows
     //      a signed-in account across devices/reinstalls. Local storage on each device is always
@@ -397,6 +471,7 @@ export default {
           rivalTeam: existing.rivalTeam ?? null,
           bio: existing.bio ?? null,
           stats: existing.stats ?? {},
+          customTeamLogos: existing.customTeamLogos ?? {},
         });
       }
 
@@ -436,8 +511,30 @@ export default {
         gamesWatchedByTeam: capObject(body.stats.gamesWatchedByTeam),
       } : (existing?.stats ?? {});
 
-      await env.MARKETPLACE_META.put(userKey, JSON.stringify({ ...(existing ?? {}), favoriteTeam, rivalTeam, bio, stats }));
-      return jsonResponse({ favoriteTeam, rivalTeam, bio, stats });
+      // customTeamLogos: keyed by team name -> { base64Png, updatedAtUtc }, "newest wins" merge
+      // happens client-side (WebBridge.MergeLatestWins) before this PUT, so the server just
+      // carries the field through untouched -- same schemaless-KV-JSON treatment as stats above.
+      // Capped at 50 entries (fewer than the 200 on eventCounts/gamesWatchedByTeam) since each
+      // entry embeds a full base64 PNG rather than a number -- KV's ~25MB value cap is nowhere
+      // close at this app's roster size, but logos are the one field here big enough to matter if
+      // that ever changes (flagged in the handoff notes, not a problem yet).
+      function capLogos(obj) {
+        if (!obj || typeof obj !== "object") return {};
+        const entries = Object.entries(obj).slice(0, 50);
+        const out = {};
+        for (const [k, v] of entries) {
+          if (!v || typeof v !== "object") continue;
+          if (typeof v.base64Png !== "string" || typeof v.updatedAtUtc !== "string") continue;
+          out[k.slice(0, 80)] = { base64Png: v.base64Png, updatedAtUtc: v.updatedAtUtc };
+        }
+        return out;
+      }
+      const customTeamLogos = body?.customTeamLogos && typeof body.customTeamLogos === "object"
+        ? capLogos(body.customTeamLogos)
+        : (existing?.customTeamLogos ?? {});
+
+      await env.MARKETPLACE_META.put(userKey, JSON.stringify({ ...(existing ?? {}), favoriteTeam, rivalTeam, bio, stats, customTeamLogos }));
+      return jsonResponse({ favoriteTeam, rivalTeam, bio, stats, customTeamLogos });
     }
 
     if (url.pathname.startsWith("/item/") && request.method === "DELETE") {
@@ -451,15 +548,57 @@ export default {
       if (!raw) return new Response("not found", { status: 404, headers: cors() });
       const meta = JSON.parse(raw);
 
-      const token = request.headers.get("x-owner-token");
-      if (!token || token !== meta.ownerToken) {
-        return new Response("forbidden -- owner token doesn't match", { status: 403, headers: cors() });
+      const adminToken = request.headers.get("x-admin-token");
+      const isAdmin = !!env.ADMIN_TOKEN && !!adminToken && adminToken === env.ADMIN_TOKEN;
+
+      if (!isAdmin) {
+        const token = request.headers.get("x-owner-token");
+        if (!token || token !== meta.ownerToken) {
+          return new Response("forbidden -- owner token doesn't match", { status: 403, headers: cors() });
+        }
       }
 
       await env.MARKETPLACE_FILES.delete(meta.key);
       await env.MARKETPLACE_META.delete(metaKey);
       await removeFromIndex(env, type, id);
       return jsonResponse({ deleted: true });
+    }
+
+    if (url.pathname.startsWith("/item/") && request.method === "PATCH") {
+      // Admin-exclusive metadata edit -- no ownerToken fallback here at all, unlike DELETE.
+      const adminToken = request.headers.get("x-admin-token");
+      const isAdmin = !!env.ADMIN_TOKEN && !!adminToken && adminToken === env.ADMIN_TOKEN;
+      if (!isAdmin) {
+        return new Response("forbidden -- admin token required", { status: 403, headers: cors() });
+      }
+
+      const parts = url.pathname.slice("/item/".length).split("/");
+      const [type, id] = parts;
+      if ((type !== "song" && type !== "image") || !id) {
+        return new Response("bad request", { status: 400, headers: cors() });
+      }
+      const metaKey = `meta:${type}:${id}`;
+      const raw = await env.MARKETPLACE_META.get(metaKey);
+      if (!raw) return new Response("not found", { status: 404, headers: cors() });
+      const meta = JSON.parse(raw);
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return new Response("bad request -- invalid JSON body", { status: 400, headers: cors() });
+      }
+
+      // Only editable metadata fields -- id/key/ownerToken/counters are never touched here.
+      // Run through the SAME sanitizeSegment used at upload time -- these fields get interpolated
+      // unescaped into an `alt="..."` attribute inside innerHTML on the client (app.js's item-tile
+      // renderer), so anything admitting quotes/angle-brackets here would be a stored-XSS vector
+      // hitting every user who lists this item, not just the admin.
+      if (typeof body.name === "string" && sanitizeSegment(body.name)) meta.name = sanitizeSegment(body.name);
+      if (typeof body.school === "string" && sanitizeSegment(body.school)) meta.school = sanitizeSegment(body.school);
+
+      await env.MARKETPLACE_META.put(metaKey, JSON.stringify(meta));
+      return jsonResponse({ id, name: meta.name, school: meta.school });
     }
 
     if (url.pathname === "/auth/verify" && request.method === "POST") {

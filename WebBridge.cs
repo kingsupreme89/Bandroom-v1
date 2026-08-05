@@ -90,22 +90,203 @@ public sealed class WebBridge
     /// WebMainForm.InitWebViewAsync) -- WebView2's https-loaded page can't play/display a bare
     /// file:// path (mixed-content blocked), so both images and songs need a mapped host the
     /// same way team logos/backgrounds already do.</summary>
-    public string GetMyDownloads() => JsonSerializer.Serialize(
-        ConfigStore.LoadMarketplaceDownloads()
-            .OrderByDescending(e => e.DownloadedAt)
+    /// <summary>My Downloads now merges TWO sources: real marketplace downloads (as before) and
+    /// tracks the user imported/trimmed themselves via the local-import pipeline (item 21,
+    /// ConfigStore.LoadLocalTracks). Local entries get source="local" plus shared/canShare flags
+    /// so app.js only ever shows the "Share to Marketplace" button on tracks that came through
+    /// that pipeline -- never on an item that's already sourced from the marketplace.</summary>
+    public string GetMyDownloads()
+    {
+        var marketplace = ConfigStore.LoadMarketplaceDownloads().Select(e => new
+        {
+            id = e.Id,
+            type = e.Type,
+            name = e.Name,
+            school = (string?)e.School,
+            downloadedAt = e.DownloadedAt,
+            sortAt = e.DownloadedAt,
+            fileUrl = (e.Type == "image" ? "https://downloadedimages/" : "https://downloadedsongs/")
+                + Uri.EscapeDataString(Path.GetFileName(e.Path)),
+            schoolLogoUrl = LogoUrl(e.School),
+            source = "marketplace",
+            shared = false,
+            canShare = false,
+        });
+
+        var local = ConfigStore.LoadLocalTracks().Select(e => new
+        {
+            id = e.Id,
+            type = "song",
+            name = e.Name,
+            school = (string?)null,
+            downloadedAt = e.CreatedAt,
+            sortAt = e.CreatedAt,
+            fileUrl = "https://localtracks/" + Uri.EscapeDataString(Path.GetFileName(e.Path)),
+            schoolLogoUrl = (string?)null,
+            source = "local",
+            shared = e.Shared,
+            canShare = !e.Shared,
+        });
+
+        var combined = marketplace.Concat(local)
+            .OrderByDescending(e => e.sortAt)
             .Select(e => new
             {
-                id = e.Id,
-                type = e.Type,
-                name = e.Name,
-                school = e.School,
-                downloadedAt = e.DownloadedAt.ToString("O"),
-                fileUrl = (e.Type == "image" ? "https://downloadedimages/" : "https://downloadedsongs/")
-                    + Uri.EscapeDataString(Path.GetFileName(e.Path)),
-                schoolLogoUrl = LogoUrl(e.School),
-            }));
+                e.id, e.type, e.name, e.school,
+                downloadedAt = e.downloadedAt.ToString("O"),
+                e.fileUrl, e.schoolLogoUrl, e.source, e.shared, e.canShare,
+            });
+        return JsonSerializer.Serialize(combined);
+    }
 
-    public bool RemoveMyDownload(string id) => ConfigStore.RemoveMarketplaceDownload(id);
+    /// <summary>Handles removal for either "My Downloads" source (see GetMyDownloads) -- tries
+    /// the marketplace-download manifest first, then the local-track manifest, since an id only
+    /// ever exists in one of the two.</summary>
+    public bool RemoveMyDownload(string id) =>
+        ConfigStore.RemoveMarketplaceDownload(id) || ConfigStore.RemoveLocalTrack(id);
+
+    /// <summary>End-user "import my own song" pipeline (item 21) -- runs the whole native flow
+    /// (choose file, name the track, trim/normalize via the existing TrimmerForm) on the UI
+    /// thread since it's all modal dialogs. Returns {success, path?, name?} on completion, or
+    /// {success:false, cancelled:true} if the user backed out at any step.</summary>
+    public string ImportLocalSong() => _host.ImportLocalSongFromWeb();
+
+    static readonly System.Net.Http.HttpClient ShareHttp = BuildShareHttpClient();
+    static System.Net.Http.HttpClient BuildShareHttpClient()
+    {
+        var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        http.DefaultRequestHeaders.UserAgent.Add(new System.Net.Http.Headers.ProductInfoHeaderValue("Bandroom", "1.0"));
+        return http;
+    }
+
+    /// <summary>Uploads a locally-imported track (item 21) to the marketplace worker, using the
+    /// exact same request shape (multipart: type/name/school/file) a normal in-album upload
+    /// sends from app.js's confirmUpload -- so it shows up in that school's Sound Bank exactly
+    /// like any other upload. Opt-in only: never called automatically, only from the "Share to
+    /// Marketplace" button on a My Downloads tile whose source is "local". Marks the track
+    /// Shared on success so the button doesn't re-offer a duplicate upload.</summary>
+    public async Task<string> ShareLocalTrackToMarketplace(string id, string school)
+    {
+        var entry = ConfigStore.LoadLocalTracks().FirstOrDefault(e => e.Id == id);
+        if (entry == null || !File.Exists(entry.Path))
+            return JsonSerializer.Serialize(new { success = false, error = "That track couldn't be found." });
+        if (string.IsNullOrWhiteSpace(school))
+            return JsonSerializer.Serialize(new { success = false, error = "A team/school name is required." });
+
+        try
+        {
+            using var form = new System.Net.Http.MultipartFormDataContent();
+            form.Add(new System.Net.Http.StringContent("song"), "type");
+            form.Add(new System.Net.Http.StringContent(entry.Name), "name");
+            form.Add(new System.Net.Http.StringContent(school), "school");
+            var bytes = await File.ReadAllBytesAsync(entry.Path);
+            var fileContent = new System.Net.Http.ByteArrayContent(bytes);
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
+            form.Add(fileContent, "file", Path.GetFileName(entry.Path));
+
+            using var response = await ShareHttp.PostAsync(
+                "https://bandroom-marketplace.bandroom.workers.dev/upload", form);
+            if (!response.IsSuccessStatusCode)
+                return JsonSerializer.Serialize(new { success = false, error = "Upload failed -- check your connection and try again." });
+
+            ConfigStore.MarkLocalTrackShared(id);
+            return JsonSerializer.Serialize(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write($"ShareLocalTrackToMarketplace failed for \"{entry.Name}\"", ex);
+            return JsonSerializer.Serialize(new { success = false, error = "Upload failed -- check your connection and try again." });
+        }
+    }
+
+    // ---- Admin marketplace override (owner-only, never shipped to end users) -----------------
+    // Unlike google_client_secret.local.txt, this file is deliberately NOT added as a
+    // <Content Include> in BandAudioHook.csproj and never copied into the build output. It's
+    // read straight from this fixed source-checkout path, which only ever exists on the app
+    // owner's own dev machine -- a normal Squirrel-installed copy on an end user's machine has
+    // no such path and no such file, so AdminTokenPath simply doesn't exist there and every
+    // method below silently no-ops. If a future session "fixes" this by wiring the file into
+    // the csproj like the Google secret, it would ship the admin bypass secret inside every
+    // installer, letting any user extract it and impersonate the admin against worker.js's
+    // X-Admin-Token check -- do not do that.
+    const string AdminTokenPath = @"D:\Claude\Projects\tools\BandAudioHook\admin_token.local.txt";
+    static readonly string? _adminToken = LoadAdminToken();
+
+    static string? LoadAdminToken()
+    {
+        try
+        {
+            if (!File.Exists(AdminTokenPath)) return null;
+            var token = File.ReadAllText(AdminTokenPath).Trim();
+            return string.IsNullOrEmpty(token) ? null : token;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("LoadAdminToken failed", ex);
+            return null;
+        }
+    }
+
+    /// <summary>Whether this build/machine has admin capability -- true only when
+    /// admin_token.local.txt exists next to the source checkout (see AdminTokenPath comment
+    /// above). app.js gates the admin edit/delete UI on this so regular users never see it.</summary>
+    public bool IsAdminMode() => _adminToken != null;
+
+    /// <summary>Admin-only delete that bypasses the ownerToken check on worker.js's DELETE
+    /// /item/&lt;type&gt;/&lt;id&gt; via X-Admin-Token, for items this device never uploaded (the
+    /// normal per-owner delete in app.js's deleteUploadedItem still handles your own uploads).
+    /// No-ops with an error if IsAdminMode() is false.</summary>
+    public async Task<string> AdminDeleteMarketplaceItem(string type, string id)
+    {
+        if (_adminToken == null)
+            return JsonSerializer.Serialize(new { success = false, error = "Admin mode is not active." });
+
+        try
+        {
+            using var request = new System.Net.Http.HttpRequestMessage(
+                System.Net.Http.HttpMethod.Delete,
+                $"https://bandroom-marketplace.bandroom.workers.dev/item/{type}/{Uri.EscapeDataString(id)}");
+            request.Headers.Add("X-Admin-Token", _adminToken);
+            using var response = await ShareHttp.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+                return JsonSerializer.Serialize(new { success = false, error = $"Delete failed: {(int)response.StatusCode}" });
+            return JsonSerializer.Serialize(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write($"AdminDeleteMarketplaceItem failed for {type}/{id}", ex);
+            return JsonSerializer.Serialize(new { success = false, error = "Delete failed -- check your connection and try again." });
+        }
+    }
+
+    /// <summary>Admin-only edit of an item's name/school via worker.js's admin-exclusive PATCH
+    /// /item/&lt;type&gt;/&lt;id&gt; (no ownerToken fallback there -- X-Admin-Token or nothing).
+    /// No-ops with an error if IsAdminMode() is false.</summary>
+    public async Task<string> AdminEditMarketplaceItem(string type, string id, string newName, string newSchool)
+    {
+        if (_adminToken == null)
+            return JsonSerializer.Serialize(new { success = false, error = "Admin mode is not active." });
+
+        try
+        {
+            using var request = new System.Net.Http.HttpRequestMessage(
+                System.Net.Http.HttpMethod.Patch,
+                $"https://bandroom-marketplace.bandroom.workers.dev/item/{type}/{Uri.EscapeDataString(id)}");
+            request.Headers.Add("X-Admin-Token", _adminToken);
+            request.Content = new System.Net.Http.StringContent(
+                JsonSerializer.Serialize(new { name = newName, school = newSchool }),
+                System.Text.Encoding.UTF8, "application/json");
+            using var response = await ShareHttp.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+                return JsonSerializer.Serialize(new { success = false, error = $"Edit failed: {(int)response.StatusCode}" });
+            return JsonSerializer.Serialize(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write($"AdminEditMarketplaceItem failed for {type}/{id}", ex);
+            return JsonSerializer.Serialize(new { success = false, error = "Edit failed -- check your connection and try again." });
+        }
+    }
 
     // ---- Google sign-in (scaffolded -- see GoogleAuthService.ClientId, needs a real Google
     // Cloud OAuth Client ID of type "Desktop app" before this can succeed) ----
@@ -194,6 +375,10 @@ public sealed class WebBridge
                 // as the plain counters above, just applied per-entry instead of to one total.
                 EventCounts = MergeCounts(localProfile.EventCounts, cloudProfile.EventCounts),
                 GamesWatchedByTeam = MergeCounts(localProfile.GamesWatchedByTeam, cloudProfile.GamesWatchedByTeam),
+                // Custom team logos are NOT counters -- a device could legitimately re-crop an
+                // older-looking logo, which would look like "going backwards" to a max-of-value
+                // merge. Newest UpdatedAtUtc per team wins instead (see MergeLatestWins).
+                CustomTeamLogos = MergeLatestWins(localProfile.CustomTeamLogos, cloudProfile.CustomTeamLogos),
                 // Local-only, deliberately not touched by the merge: StreakLastActiveDate,
                 // FavoriteTeam avatar file, ToastsEnabled, CreatedAt (see ProfileSyncService's
                 // class-level comment for why each of these stays per-device).
@@ -205,7 +390,17 @@ public sealed class WebBridge
             ConfigStore.SaveUserProfile(merged);
             _ = ProfileSyncService.PushAsync(merged); // write the merged result back so both sides agree
 
-            return JsonSerializer.Serialize(new { signedIn = true, name = profile.Name, email = profile.Email, picture = profile.Picture });
+            // Write any team logo the merge picked up that isn't already on disk here yet, and
+            // collect which teams actually changed -- suppressed (see ApplyPulledLogos) on this
+            // device's very first-ever sync so a brand-new device pulling down many pre-existing
+            // custom logos doesn't spam a toast per team.
+            string[] logosUpdated = ApplyPulledLogos(merged.CustomTeamLogos);
+
+            return JsonSerializer.Serialize(new
+            {
+                signedIn = true, name = profile.Name, email = profile.Email, picture = profile.Picture,
+                logosUpdated,
+            });
         }
         catch (Exception ex)
         {
@@ -225,6 +420,74 @@ public sealed class WebBridge
         foreach (var (key, value) in b)
             result[key] = Math.Max(result.GetValueOrDefault(key), value);
         return result;
+    }
+
+    /// <summary>Union of two per-team logo dictionaries, keeping whichever side's entry has the
+    /// newer UpdatedAtUtc per key -- unlike MergeCounts above, a logo edit isn't a counter, so
+    /// "bigger wins" doesn't apply; "most recent edit wins" does. Ties keep <paramref name="a"/>
+    /// (the local side, same tie-break convention as the rest of the sign-in merge).</summary>
+    static Dictionary<string, ConfigStore.TeamLogoEntry> MergeLatestWins(
+        Dictionary<string, ConfigStore.TeamLogoEntry> a, Dictionary<string, ConfigStore.TeamLogoEntry> b)
+    {
+        var result = new Dictionary<string, ConfigStore.TeamLogoEntry>(a);
+        foreach (var (key, value) in b)
+            if (!result.TryGetValue(key, out var existing) || value.UpdatedAtUtc > existing.UpdatedAtUtc)
+                result[key] = value;
+        return result;
+    }
+
+    /// <summary>Writes any merged CustomTeamLogos entry that's newer than what this device has
+    /// already applied (per the team_logo_sync.json sidecar manifest) to TeamLogosFolder, so a
+    /// logo edited on another device shows up here too. Returns the team names that actually
+    /// changed as a result -- empty on this device's first-ever sync (files are still written,
+    /// just not reported, so a brand-new device pulling down a profile with many pre-existing
+    /// custom logos doesn't spam a "Logo updated" toast per team) or when nothing changed.</summary>
+    static string[] ApplyPulledLogos(Dictionary<string, ConfigStore.TeamLogoEntry> merged)
+    {
+        var manifest = ConfigStore.LoadTeamLogoSyncManifest();
+        var appliedAt = new Dictionary<string, DateTime>(manifest.AppliedAtUtc);
+        var changed = new List<string>();
+
+        foreach (var (team, entry) in merged)
+        {
+            if (appliedAt.TryGetValue(team, out var already) && already >= entry.UpdatedAtUtc) continue;
+            try
+            {
+                byte[] bytes = Convert.FromBase64String(entry.Base64Png);
+                string? outPath = WriteTeamLogoFile(team, bytes);
+                if (outPath == null) continue;
+                appliedAt[team] = entry.UpdatedAtUtc;
+                changed.Add(team);
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write($"ApplyPulledLogos failed for \"{team}\"", ex);
+            }
+        }
+
+        bool isFirstSync = !manifest.InitialSyncDone;
+        ConfigStore.SaveTeamLogoSyncManifest(manifest with { AppliedAtUtc = appliedAt, InitialSyncDone = true });
+        return isFirstSync ? Array.Empty<string>() : changed.ToArray();
+    }
+
+    /// <summary>Shared by SaveCustomTeamLogo and ApplyPulledLogos -- clears any stale file for
+    /// <paramref name="team"/> under another recognized extension, then writes the PNG. Returns the
+    /// path written, or null if the team name doesn't survive sanitization.</summary>
+    static string? WriteTeamLogoFile(string team, byte[] pngBytes)
+    {
+        Directory.CreateDirectory(ConfigStore.TeamLogosFolder);
+        string safeTeam = System.Text.RegularExpressions.Regex.Replace(team, @"[^\w\s&-]", "").Trim();
+        if (safeTeam.Length == 0) return null;
+
+        foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".webp" })
+        {
+            string oldPath = Path.Combine(ConfigStore.TeamLogosFolder, safeTeam + ext);
+            if (File.Exists(oldPath)) { try { File.Delete(oldPath); } catch { /* best-effort */ } }
+        }
+
+        string outPath = Path.Combine(ConfigStore.TeamLogosFolder, safeTeam + ".png");
+        File.WriteAllBytes(outPath, pngBytes);
+        return outPath;
     }
 
     // ---- Universal profile (favorite team + lifetime stats) --------------------------------
@@ -403,34 +666,55 @@ public sealed class WebBridge
     /// extension" convention TeamBackgroundDownloadService already uses. Any team can be
     /// re-logo'd this way; there's no accounts/ownership system to gate it against (this is a
     /// single-user local app, not the marketplace).</summary>
-    public bool SaveCustomTeamLogo(string team, string base64Png)
+    /// <summary>Returns JSON {ok, pushFailed} rather than a plain bool now -- ok is the LOCAL
+    /// disk-write result (unchanged behavior, still works fully offline/signed-out); pushFailed is
+    /// only ever true when signed in AND the cloud push specifically failed, so app.js can toast
+    /// the two failure modes differently ("couldn't save" vs. "saved locally but couldn't sync")
+    /// without a push failure ever blocking or rolling back the local save, which already
+    /// succeeded by the time a push is even attempted.</summary>
+    public async Task<string> SaveCustomTeamLogo(string team, string base64Png)
     {
-        if (string.IsNullOrWhiteSpace(team) || string.IsNullOrWhiteSpace(base64Png)) return false;
-        if (TeamColors.All.All(t => t.Name != team)) return false; // only real roster entries
-
+        bool ok = false;
+        bool pushFailed = false;
         try
         {
+            if (string.IsNullOrWhiteSpace(team) || string.IsNullOrWhiteSpace(base64Png))
+                return JsonSerializer.Serialize(new { ok, pushFailed });
+            if (TeamColors.All.All(t => t.Name != team))
+                return JsonSerializer.Serialize(new { ok, pushFailed }); // only real roster entries
+
             byte[] bytes = Convert.FromBase64String(base64Png);
-            if (bytes.Length == 0 || bytes.Length > 10 * 1024 * 1024) return false; // sanity cap
+            if (bytes.Length == 0 || bytes.Length > 10 * 1024 * 1024)
+                return JsonSerializer.Serialize(new { ok, pushFailed }); // sanity cap
 
-            Directory.CreateDirectory(ConfigStore.TeamLogosFolder);
-            string safeTeam = System.Text.RegularExpressions.Regex.Replace(team, @"[^\w\s&-]", "").Trim();
-            if (safeTeam.Length == 0) return false;
+            if (WriteTeamLogoFile(team, bytes) == null) return JsonSerializer.Serialize(new { ok, pushFailed });
+            ok = true;
 
-            foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".webp" })
+            var updatedAt = DateTime.UtcNow;
+            var current = ConfigStore.LoadUserProfile();
+            var newLogos = new Dictionary<string, ConfigStore.TeamLogoEntry>(current.CustomTeamLogos)
             {
-                string oldPath = Path.Combine(ConfigStore.TeamLogosFolder, safeTeam + ext);
-                if (File.Exists(oldPath)) { try { File.Delete(oldPath); } catch { /* best-effort */ } }
-            }
+                [team] = new ConfigStore.TeamLogoEntry { Base64Png = base64Png, UpdatedAtUtc = updatedAt },
+            };
+            var updated = current with { CustomTeamLogos = newLogos };
+            ConfigStore.SaveUserProfile(updated);
 
-            string outPath = Path.Combine(ConfigStore.TeamLogosFolder, safeTeam + ".png");
-            File.WriteAllBytes(outPath, bytes);
-            return true;
+            // This device just became the source of truth for this team's logo -- record it as
+            // already-applied so a later pull of this same edit (echoed back from the cloud) never
+            // re-writes the file it just wrote or toasts about a "change" that originated here.
+            var manifest = ConfigStore.LoadTeamLogoSyncManifest();
+            var appliedAt = new Dictionary<string, DateTime>(manifest.AppliedAtUtc) { [team] = updatedAt };
+            ConfigStore.SaveTeamLogoSyncManifest(manifest with { AppliedAtUtc = appliedAt });
+
+            if (ConfigStore.LoadAuthSession() != null)
+                pushFailed = !await ProfileSyncService.PushAsync(updated);
+
+            return JsonSerializer.Serialize(new { ok, pushFailed });
         }
         catch (Exception ex)
         {
             CrashLog.Write($"SaveCustomTeamLogo failed for \"{team}\"", ex);
-            return false;
+            return JsonSerializer.Serialize(new { ok, pushFailed });
         }
     }
 

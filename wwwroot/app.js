@@ -7,6 +7,15 @@ const bridge = window.chrome?.webview?.hostObjects?.bandroom ?? null;
 // KV for name/school metadata. See that file for the exact /upload, /list, /file contract.
 const MARKETPLACE_URL = "https://bandroom-marketplace.bandroom.workers.dev";
 
+// Admin marketplace override (owner-only) -- set once in init() from bridge.IsAdminMode().
+// Stays false for every real end-user build (see WebBridge.cs's AdminTokenPath comment).
+let _isAdminMode = false;
+
+// The usercount worker (cloudflare-usercount/worker.js) also carries the Discord chat relay --
+// GET /discord/messages?after=<id> -- since it already has the lightweight per-isolate caching
+// pattern this needed and didn't require standing up a whole new worker for one endpoint.
+const USERCOUNT_URL = "https://bandroom-usercount.bandroom.workers.dev";
+
 const categoryColors = {
   Downs: "#2f6f78",
   Scoring: "#2f7d55",
@@ -107,6 +116,12 @@ async function init() {
       state.toastsEnabled = userProfile.toastsEnabled !== false;
       updateFavoriteTeamJumpButton(userProfile.favoriteTeam);
     } catch (err) { console.error("GetUserProfile (startup) failed", err); }
+    try {
+      // Admin marketplace override (owner-only) -- see WebBridge.cs's IsAdminMode. Cached once
+      // at startup since tile rendering is synchronous and this never changes mid-session; false
+      // for every real end-user install (no admin_token.local.txt ships in the installer).
+      _isAdminMode = await bridge.IsAdminMode();
+    } catch (err) { console.error("IsAdminMode failed", err); }
   } else {
     state.teams = [{ name: "General", primary: "#22d3ee", secondary: "#22d3ee" }];
     state.categories = [
@@ -572,6 +587,13 @@ function wireControls() {
       const result = JSON.parse(await bridge.SignInWithGoogle());
       if (result.signedIn) {
         showToast(`Signed in as ${result.name}.`);
+        // logosUpdated is empty (not just absent) on this device's first-ever sync, even if the
+        // pulled profile carries many pre-existing custom logos -- see WebBridge.ApplyPulledLogos.
+        // Batched into one toast rather than one per team so a multi-logo pull doesn't spam.
+        if (result.logosUpdated && result.logosUpdated.length > 0) {
+          showToast(`Logo updated for ${result.logosUpdated.join(", ")}.`);
+          await refreshTeamsAfterLogoChange();
+        }
         await refreshProfileView();
       } else {
         showToast(result.error ?? "Sign-in isn't set up yet -- needs a Google OAuth Client ID configured first.");
@@ -712,6 +734,9 @@ function wireControls() {
   document.getElementById("btn-trophy-room").addEventListener("click", () => { openTeamAlbum(state.activeTeam); setAlbumTab("images"); });
   document.getElementById("btn-my-downloads").addEventListener("click", openMyDownloads);
   document.getElementById("btn-close-my-downloads").addEventListener("click", closeMyDownloads);
+  document.getElementById("btn-discord-chat").addEventListener("click", openDiscordChat);
+  document.getElementById("btn-close-discord-chat").addEventListener("click", closeDiscordChat);
+  document.getElementById("btn-import-local-song")?.addEventListener("click", importLocalSong);
   document.getElementById("btn-close-bandroom").addEventListener("click", closeBandroomMarketplace);
   document.getElementById("bandroom-overlay").addEventListener("click", (e) => {
     if (e.target.id === "bandroom-overlay") closeBandroomMarketplace();
@@ -875,6 +900,16 @@ function wireControls() {
   document.getElementById("btn-help").addEventListener("click", () => bridge?.OpenHelp());
 
   document.addEventListener("keydown", (e) => {
+    // Creator-only batch logo/icon import (item 20) -- deliberately NOT a menu item or button
+    // anywhere: this is a maintainer tool for bulk-prepping team art, not something an end user
+    // should ever stumble into. A four-key chord is about as low-risk of an accidental trigger
+    // as a keyboard shortcut gets, while still needing zero setup (no --dev launch flag to
+    // remember, no hidden menu to find) for the one person who actually uses it.
+    if (e.ctrlKey && e.altKey && e.shiftKey && e.key.toUpperCase() === "L") {
+      e.preventDefault();
+      openBatchLogoImportTool();
+      return;
+    }
     if (e.key !== "Escape") return;
     if (!document.getElementById("team-picker-overlay").hidden) closeTeamPicker();
     if (!document.getElementById("save-profile-overlay").hidden) closeSaveProfileDialog();
@@ -886,6 +921,7 @@ function wireControls() {
     else if (!document.getElementById("my-downloads-overlay").hidden) closeMyDownloads();
     else if (!document.getElementById("logo-crop-overlay").hidden) closeLogoCropTool();
     else if (!document.getElementById("profile-overlay").hidden) closeProfile();
+    else if (!document.getElementById("discord-chat-overlay").hidden) closeDiscordChat();
   });
 }
 
@@ -1008,10 +1044,11 @@ function marketplaceGuard(fn, label) {
 // Thin wrappers over the cloudflare-marketplace worker's GET /list. Every call is defensive --
 // a network hiccup returns an empty list instead of throwing, since marketplaceGuard's job is
 // to keep the UI alive, not to surface raw fetch errors to the user.
-async function fetchUploadList(type, school) {
+async function fetchUploadList(type, school, sort) {
   try {
     const qs = new URLSearchParams({ type });
     if (school) qs.set("school", school);
+    if (sort) qs.set("sort", sort);
     const res = await fetch(`${MARKETPLACE_URL}/list?${qs}`);
     if (!res.ok) return [];
     const data = await res.json();
@@ -1022,11 +1059,24 @@ async function fetchUploadList(type, school) {
   }
 }
 
-async function fetchRecentUploads(limit) {
-  const [songs, images] = await Promise.all([fetchUploadList("song"), fetchUploadList("image")]);
-  return [...songs, ...images]
-    .sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1))
-    .slice(0, limit);
+// Which hub sort is currently selected -- "newest" (default), "views", "downloads", "likes".
+// Module-level so it survives re-renders (e.g. re-opening the hub keeps the last choice).
+let _hubSort = "newest";
+
+async function fetchRecentUploads(limit, sort) {
+  const [songs, images] = await Promise.all([
+    fetchUploadList("song", null, sort),
+    fetchUploadList("image", null, sort),
+  ]);
+  const combined = [...songs, ...images];
+  // The worker sorts each type independently by the counter -- merging two independently-sorted
+  // lists needs a re-sort by the same key, same as the "newest" merge already did.
+  if (sort === "views" || sort === "downloads" || sort === "likes") {
+    combined.sort((a, b) => (b[sort] ?? 0) - (a[sort] ?? 0));
+  } else {
+    combined.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1));
+  }
+  return combined.slice(0, limit);
 }
 
 // ---- "My uploads" tracking (item 5) ----------------------------------------------------
@@ -1095,6 +1145,9 @@ async function downloadMarketplaceItem(item) {
     const result = JSON.parse(raw);
     if (result.success) {
       try { await bridge.RecordMarketplaceDownload(); } catch (err) { console.error("RecordMarketplaceDownload failed", err); }
+      // Server-side download counter, for the "Most Downloaded" sort -- fired only once the
+      // download actually completed, same as the local RecordMarketplaceDownload call above.
+      recordItemDownload(item);
     }
     return !!result.success;
   } catch (err) {
@@ -1113,6 +1166,25 @@ async function reportUploadedItem(item) {
   }
 }
 
+// Fire-and-forget increments -- same shape as likeUploadedItem, but callers don't need the
+// updated count back (views/downloads aren't shown live on a tile the way likes are), so these
+// don't block on the response the way likeUploadedItem's caller does.
+async function recordItemView(item) {
+  try {
+    await fetch(`${MARKETPLACE_URL}/view/${item.type}/${encodeURIComponent(item.id)}`, { method: "POST" });
+  } catch (err) {
+    console.error("recordItemView failed", err);
+  }
+}
+
+async function recordItemDownload(item) {
+  try {
+    await fetch(`${MARKETPLACE_URL}/download/${item.type}/${encodeURIComponent(item.id)}`, { method: "POST" });
+  } catch (err) {
+    console.error("recordItemDownload failed", err);
+  }
+}
+
 async function likeUploadedItem(item) {
   try {
     const res = await fetch(`${MARKETPLACE_URL}/like/${item.type}/${encodeURIComponent(item.id)}`, { method: "POST" });
@@ -1125,12 +1197,27 @@ async function likeUploadedItem(item) {
   }
 }
 
+let _hubSortListenerBound = false;
+
 function openBandroomMarketplace() {
   marketplaceGuard(() => {
     document.getElementById("bandroom-overlay").hidden = false;
     const search = document.getElementById("bandroom-search");
     search.value = "";
     renderBandroomTeamGrid("");
+    const sortSelect = document.getElementById("bandroom-hub-sort");
+    if (sortSelect) {
+      sortSelect.value = _hubSort;
+      // Bound once, not per-open -- re-adding the same listener on every open would stack up
+      // duplicate handlers (same pattern as other one-time listener guards in this file).
+      if (!_hubSortListenerBound) {
+        _hubSortListenerBound = true;
+        sortSelect.addEventListener("change", () => {
+          _hubSort = sortSelect.value;
+          renderBandroomHub();
+        });
+      }
+    }
     renderBandroomHub();
     renderLeaderboard();
     search.focus();
@@ -1171,6 +1258,117 @@ async function renderMyDownloadsGrid() {
   for (const item of items) grid.appendChild(buildMyDownloadTile(item));
 }
 
+// Discord Chat panel -- read-only relay feed, polled from the usercount worker while the panel
+// is open (see USERCOUNT_URL above and cloudflare-usercount/worker.js's /discord/messages doc
+// comment for the full contract). _discordLastId tracks the newest message id we've rendered so
+// each poll only asks for what's new; _discordPollTimer is cleared on close so polling truly
+// stops rather than just going unused in the background.
+let _discordLastId = null;
+let _discordPollTimer = null;
+
+function openDiscordChat() {
+  document.getElementById("discord-chat-overlay").hidden = false;
+  document.getElementById("btn-discord-chat").classList.add("pill-active");
+  pollDiscordChat();
+}
+
+function closeDiscordChat() {
+  document.getElementById("discord-chat-overlay").hidden = true;
+  document.getElementById("btn-discord-chat").classList.remove("pill-active");
+  if (_discordPollTimer) {
+    clearTimeout(_discordPollTimer);
+    _discordPollTimer = null;
+  }
+}
+
+async function pollDiscordChat() {
+  const overlay = document.getElementById("discord-chat-overlay");
+  if (overlay.hidden) return; // panel closed while a previous poll was in flight
+
+  const list = document.getElementById("discord-chat-messages");
+  try {
+    const qs = _discordLastId ? `?after=${encodeURIComponent(_discordLastId)}` : "";
+    const res = await fetch(`${USERCOUNT_URL}/discord/messages${qs}`);
+    const data = res.ok ? await res.json() : { messages: [] };
+    const messages = data.messages ?? [];
+
+    if (overlay.hidden) return; // closed while awaiting the fetch
+
+    if (_discordLastId === null && messages.length === 0 && list.children.length === 0) {
+      // First load, nothing came back at all -- most likely the owner hasn't set
+      // DISCORD_BOT_TOKEN/DISCORD_CHANNEL_ID on the worker yet. Quiet empty state, no error toast.
+      list.innerHTML = `<div class="bandroom-empty-state">Discord feed not connected.</div>`;
+    } else if (messages.length > 0) {
+      if (list.querySelector(".bandroom-empty-state")) list.innerHTML = "";
+      const wasScrolledToBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 24;
+      for (const m of messages) list.appendChild(buildDiscordMessageRow(m));
+      _discordLastId = messages[messages.length - 1].id;
+      if (wasScrolledToBottom) list.scrollTop = list.scrollHeight;
+    }
+  } catch (err) {
+    console.error("pollDiscordChat failed", err);
+    // Transient network error -- leave whatever's already rendered alone and just retry on the
+    // next tick rather than replacing it with an error state.
+  }
+
+  if (!overlay.hidden) _discordPollTimer = setTimeout(pollDiscordChat, 4500);
+}
+
+function buildDiscordMessageRow(m) {
+  const row = document.createElement("div");
+  row.className = "discord-message-row";
+  const avatar = m.avatarUrl
+    ? `<img src="${m.avatarUrl}" alt="" class="discord-avatar">`
+    : `<div class="discord-avatar discord-avatar-fallback">${(m.author || "?")[0].toUpperCase()}</div>`;
+  row.innerHTML = `
+    ${avatar}
+    <div class="discord-message-body">
+      <div class="discord-message-meta">
+        <span class="discord-message-author">${m.author}</span>
+        <span class="discord-message-time">${discordRelativeTime(m.timestampUtc)}</span>
+      </div>
+      <div class="discord-message-text"></div>
+    </div>`;
+  // Set as textContent (not innerHTML) so message content can never inject markup.
+  row.querySelector(".discord-message-text").textContent = m.content;
+  return row;
+}
+
+function discordRelativeTime(timestampUtc) {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(timestampUtc).getTime()) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/// End-user "import my own song" pipeline (item 21) -- runs the whole native flow (choose file,
+/// name track, trim/normalize via TrimmerForm) synchronously on the C# side; this just kicks it
+/// off and refreshes the grid on success. All three of those steps are modal WinForms dialogs,
+/// so ImportLocalSong doesn't return until the user finishes or cancels.
+async function importLocalSong() {
+  const btn = document.getElementById("btn-import-local-song");
+  if (!bridge || !btn) return;
+  btn.disabled = true;
+  try {
+    const raw = await bridge.ImportLocalSong();
+    const result = JSON.parse(raw);
+    if (result.success) {
+      showToast(`Imported "${result.name}" -- it's ready to assign to any trigger.`);
+      renderMyDownloadsGrid();
+    }
+    // cancelled: true just means the user backed out of one of the dialogs -- not an error,
+    // nothing to show.
+  } catch (err) {
+    console.error("ImportLocalSong failed", err);
+    showToast("Couldn't import that song -- try again.");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function buildMyDownloadTile(item) {
   const tile = document.createElement("div");
   tile.className = "bandroom-item-tile";
@@ -1188,9 +1386,10 @@ function buildMyDownloadTile(item) {
   name.textContent = item.name;
   const school = document.createElement("div");
   school.className = "bandroom-item-school";
-  school.textContent = item.school;
+  // Locally-imported tracks (item 21) have no school -- label them instead of showing a blank line.
+  school.textContent = item.source === "local" ? "Your library" : item.school;
   tile.append(thumb, name, school);
-  tile.title = `${item.school} — ${item.name}`;
+  tile.title = item.source === "local" ? item.name : `${item.school} — ${item.name}`;
   tile.addEventListener("click", (e) => {
     if (e.target.closest(".bandroom-item-action")) return;
     if (item.type === "song") previewSong({ url: item.fileUrl });
@@ -1198,6 +1397,47 @@ function buildMyDownloadTile(item) {
 
   const actions = document.createElement("div");
   actions.className = "bandroom-item-actions";
+
+  // Share to Marketplace (item 21) -- ONLY for tracks that came through the local-import
+  // pipeline (item.source === "local") and haven't already been shared. Explicit opt-in per
+  // track, never automatic -- nothing here fires without this click.
+  if (item.source === "local" && item.canShare) {
+    const shareBtn = document.createElement("button");
+    shareBtn.className = "bandroom-item-action";
+    shareBtn.title = "Share this track to the marketplace";
+    shareBtn.textContent = "\u{1F4E4} Share";
+    shareBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const school = window.prompt(`Share "${item.name}" to the marketplace -- which team is it for?`);
+      if (!school || !school.trim()) return;
+      shareBtn.disabled = true;
+      shareBtn.textContent = "Sharing...";
+      try {
+        const raw = bridge ? await bridge.ShareLocalTrackToMarketplace(item.id, school.trim()) : null;
+        const result = raw ? JSON.parse(raw) : null;
+        if (result?.success) {
+          showToast(`Shared "${item.name}" to ${school.trim()}'s Sound Bank!`);
+          shareBtn.remove();
+        } else {
+          showToast(result?.error ?? "Couldn't share that -- try again.");
+          shareBtn.disabled = false;
+          shareBtn.textContent = "\u{1F4E4} Share";
+        }
+      } catch (err) {
+        console.error("ShareLocalTrackToMarketplace failed", err);
+        showToast("Couldn't share that -- try again.");
+        shareBtn.disabled = false;
+        shareBtn.textContent = "\u{1F4E4} Share";
+      }
+    });
+    actions.appendChild(shareBtn);
+  } else if (item.source === "local" && item.shared) {
+    const sharedLabel = document.createElement("span");
+    sharedLabel.className = "bandroom-item-action bandroom-item-action-static";
+    sharedLabel.textContent = "\u{2705} Shared";
+    actions.appendChild(sharedLabel);
+  }
+
   const removeBtn = document.createElement("button");
   removeBtn.className = "bandroom-item-action bandroom-item-action-danger";
   removeBtn.title = "Remove from My Downloads";
@@ -1257,7 +1497,7 @@ async function renderLeaderboard() {
 async function renderBandroomHub() {
   const grid = document.getElementById("bandroom-recent-grid");
   grid.innerHTML = `<div class="bandroom-recent-empty">Loading...</div>`;
-  const items = await fetchRecentUploads(20);
+  const items = await fetchRecentUploads(20, _hubSort);
   // The overlay may have been closed (or a different one reopened) while this fetch was in
   // flight -- bail instead of writing into a grid the user can no longer see, or worse, into a
   // hub that's since been torn down.
@@ -1402,6 +1642,61 @@ function buildItemTile(item, inHub) {
       actions.appendChild(delBtn);
     }
 
+    // Admin-only controls (bypass ownerToken via X-Admin-Token) -- only ever rendered when
+    // _isAdminMode is true, which only happens on the app owner's own dev build (see
+    // WebBridge.cs's IsAdminMode/AdminTokenPath). Visually distinct "ADMIN" tag so it's never
+    // confused with the regular per-owner "delete your own upload" control above.
+    if (_isAdminMode) {
+      const adminEditBtn = document.createElement("button");
+      adminEditBtn.className = "bandroom-item-action bandroom-item-action-admin";
+      adminEditBtn.title = "Admin: Edit";
+      adminEditBtn.textContent = "\u{1F6E0} ADMIN";
+      adminEditBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const newName = prompt("Admin edit -- name:", item.name);
+        if (newName === null) return;
+        const newSchool = prompt("Admin edit -- school:", item.school ?? "");
+        if (newSchool === null) return;
+        adminEditBtn.disabled = true;
+        try {
+          const raw = await bridge.AdminEditMarketplaceItem(item.type, item.id, newName, newSchool);
+          const result = JSON.parse(raw);
+          showToast(result.success ? `Admin-edited "${newName}".` : "Admin edit failed -- try again.");
+          if (result.success) renderBandroomHub();
+        } catch (err) {
+          console.error("AdminEditMarketplaceItem failed", err);
+          showToast("Admin edit failed -- try again.");
+        }
+        adminEditBtn.disabled = false;
+      });
+      actions.appendChild(adminEditBtn);
+
+      const adminDelBtn = document.createElement("button");
+      adminDelBtn.className = "bandroom-item-action bandroom-item-action-admin bandroom-item-action-danger";
+      adminDelBtn.title = "Admin: Delete";
+      adminDelBtn.textContent = "\u{1F6E0} ADMIN \u{1F5D1}";
+      adminDelBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        adminDelBtn.disabled = true;
+        try {
+          const raw = await bridge.AdminDeleteMarketplaceItem(item.type, item.id);
+          const result = JSON.parse(raw);
+          if (result.success) {
+            showToast(`Admin-deleted "${item.name}".`);
+            tile.remove();
+          } else {
+            showToast("Admin delete failed -- try again.");
+            adminDelBtn.disabled = false;
+          }
+        } catch (err) {
+          console.error("AdminDeleteMarketplaceItem failed", err);
+          showToast("Admin delete failed -- try again.");
+          adminDelBtn.disabled = false;
+        }
+      });
+      actions.appendChild(adminDelBtn);
+    }
+
     tile.appendChild(actions);
   }
 
@@ -1414,6 +1709,9 @@ function previewSong(item) {
     _previewAudio?.pause();
     _previewAudio = new Audio(item.url);
     _previewAudio.play().catch((err) => console.error("Song preview failed", err));
+    // Only marketplace items carry an id (My Downloads tiles pass a bare {url} -- see
+    // buildMyDownloadTile -- which have no server-side item to increment).
+    if (item.id && item.type) recordItemView(item);
   } catch (err) {
     console.error("Song preview failed", err);
   }
@@ -1953,6 +2251,13 @@ function closeLogoCropTool() {
   document.getElementById("logo-crop-overlay").hidden = true;
   _logoCropTeam = null;
   _logoCropImg = null;
+  // Batch cleanup lives here (not just in advanceBatchLogoImport) so Escape/Cancel mid-batch
+  // (item 20) can't leave a half-finished queue bleeding into the next single-logo use of this
+  // same tool.
+  _batchLogoQueue = [];
+  _batchLogoIndex = 0;
+  const batchRow = document.getElementById("batch-logo-team-row");
+  if (batchRow) batchRow.hidden = true;
 }
 
 function clearLogoCropCanvas() {
@@ -2058,18 +2363,32 @@ function wireLogoCropTool() {
   });
 
   document.getElementById("btn-logo-crop-confirm").addEventListener("click", async () => {
-    if (!_logoCropImg || !_logoCropTeam) return;
+    // Batch mode (item 20) overrides which team the save targets -- the operator can correct
+    // a bad filename-match via the team select shown only while a batch queue is active (see
+    // openBatchLogoImportTool). Outside batch mode this select doesn't exist/is hidden and
+    // _logoCropTeam (set by the normal single-team "Set Logo" entry point) is used as before.
+    const batchSelect = document.getElementById("batch-logo-team-select");
+    const targetTeam = (_batchLogoQueue.length > 0 && batchSelect) ? batchSelect.value : _logoCropTeam;
+    if (!_logoCropImg || !targetTeam) return;
     const confirmBtn = document.getElementById("btn-logo-crop-confirm");
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Saving...";
     try {
       const dataUrl = canvas.toDataURL("image/png");
       const base64 = dataUrl.split(",")[1];
-      const ok = bridge ? await bridge.SaveCustomTeamLogo(_logoCropTeam, base64) : false;
-      if (ok) {
-        showToast(`Saved a new logo for ${_logoCropTeam}.`);
+      const result = bridge ? JSON.parse(await bridge.SaveCustomTeamLogo(targetTeam, base64)) : { ok: false, pushFailed: false };
+      if (result.ok) {
+        showToast(`Saved a new logo for ${targetTeam}.`);
+        // Distinct from the local-save failure above -- the save to disk already succeeded, this
+        // is just the cloud mirror not going through (network/server issue). Doesn't block or
+        // undo the local save; the next successful sync catches up on its own.
+        if (result.pushFailed) showToast(`Logo for ${targetTeam} saved locally but couldn't sync -- will retry.`);
         await refreshTeamsAfterLogoChange();
-        closeLogoCropTool();
+        if (_batchLogoQueue.length > 0) {
+          advanceBatchLogoImport();
+        } else {
+          closeLogoCropTool();
+        }
       } else {
         showToast("Couldn't save that logo -- try again.");
       }
@@ -2081,6 +2400,115 @@ function wireLogoCropTool() {
       confirmBtn.textContent = "Save Logo";
     }
   });
+
+  document.getElementById("btn-logo-crop-skip")?.addEventListener("click", () => {
+    if (_batchLogoQueue.length > 0) advanceBatchLogoImport();
+  });
+}
+
+// ---- Creator-only batch logo/icon import (item 20) -------------------------------------
+// Thin sequential wrapper around the SAME crop tool used for single-team logo uploads above --
+// no new crop math, just a queue that feeds openLogoCropTool one file at a time and auto-advances
+// on confirm. Entry point is the Ctrl+Alt+Shift+L chord wired in the keydown handler above; there
+// is no button/menu item anywhere else, on purpose (see that handler's comment).
+let _batchLogoQueue = []; // [{ file, teamName }]
+let _batchLogoIndex = 0;
+
+function normalizeForMatch(s) {
+  return String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/// Best-effort filename -> team-name match (e.g. "ohio_state.png" -> "Ohio State"). Returns null
+/// if nothing matches well enough -- the operator picks/corrects via the team select instead of
+/// this guessing wrong silently.
+function matchTeamFromFilename(filename) {
+  const base = normalizeForMatch(filename.replace(/\.[^.]+$/, ""));
+  if (!base) return null;
+  const exact = state.teams?.find((t) => normalizeForMatch(t.name) === base);
+  if (exact) return exact.name;
+  // Fall back to substring containment either direction (e.g. "bama.png" won't match "Alabama"
+  // this way, but "ohio-state-logo.png" -> base "ohio state logo" contains "ohio state").
+  const contains = state.teams?.find((t) => {
+    const name = normalizeForMatch(t.name);
+    return base.includes(name) || name.includes(base);
+  });
+  return contains?.name ?? null;
+}
+
+async function openBatchLogoImportTool() {
+  if (!state.teams || state.teams.length === 0) {
+    showToast("Teams haven't loaded yet -- try again in a moment.");
+    return;
+  }
+  const input = document.getElementById("batch-logo-folder-input");
+  if (!input) return;
+  input.value = "";
+  input.onchange = () => {
+    const files = [...(input.files ?? [])].filter((f) => f.type.startsWith("image/"));
+    if (files.length === 0) {
+      showToast("No image files found in that folder.");
+      return;
+    }
+    _batchLogoQueue = files.map((file) => ({ file, teamName: matchTeamFromFilename(file.name) }));
+    _batchLogoIndex = 0;
+    showToast(`Batch logo import: ${files.length} image(s) queued.`);
+    loadCurrentBatchLogoItem();
+  };
+  input.click();
+}
+
+function populateBatchTeamSelect(selected) {
+  const select = document.getElementById("batch-logo-team-select");
+  if (!select) return;
+  select.innerHTML = "";
+  for (const team of state.teams ?? []) {
+    const opt = document.createElement("option");
+    opt.value = team.name;
+    opt.textContent = team.name;
+    if (team.name === selected) opt.selected = true;
+    select.appendChild(opt);
+  }
+}
+
+function loadCurrentBatchLogoItem() {
+  if (_batchLogoIndex >= _batchLogoQueue.length) {
+    showToast("Batch logo import complete.");
+    _batchLogoQueue = [];
+    _batchLogoIndex = 0;
+    closeLogoCropTool();
+    return;
+  }
+  const { file, teamName } = _batchLogoQueue[_batchLogoIndex];
+  const guessedTeam = teamName ?? state.teams[0].name;
+
+  openLogoCropTool(guessedTeam);
+  document.getElementById("logo-crop-header").textContent =
+    `Batch Import (${_batchLogoIndex + 1}/${_batchLogoQueue.length}) — ${file.name}`;
+  document.getElementById("batch-logo-team-row").hidden = false;
+  populateBatchTeamSelect(guessedTeam);
+  if (!teamName) showToast(`Couldn't guess a team for "${file.name}" -- pick one manually.`);
+
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    _logoCropImg = img;
+    _logoCropScale = 1;
+    _logoCropOffsetX = 0;
+    _logoCropOffsetY = 0;
+    document.getElementById("logo-crop-empty").hidden = true;
+    document.getElementById("logo-crop-zoom").disabled = false;
+    document.getElementById("logo-crop-zoom").value = 100;
+    document.getElementById("btn-logo-crop-confirm").disabled = false;
+    drawLogoCrop();
+  };
+  img.onerror = () => showToast(`Couldn't open "${file.name}" -- skipping.`);
+  img.src = url;
+}
+
+function advanceBatchLogoImport() {
+  _batchLogoIndex++;
+  loadCurrentBatchLogoItem();
 }
 
 // Re-fetches state.teams (picking up the new logoUrl) and repaints whatever team UI is

@@ -20,10 +20,14 @@ internal static class ProfileSyncService
     const string BaseUrl = "https://bandroom-marketplace.bandroom.workers.dev";
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
 
-    public static async Task PushAsync(ConfigStore.UserProfile profile)
+    /// <summary>Returns true if the push actually reached the server and was accepted, false on any
+    /// failure (signed out, network down, non-success status) -- callers that only care about
+    /// fire-and-forget "best effort" can keep discarding the result (`_ = PushAsync(...)`) exactly
+    /// as before; SaveCustomTeamLogo's push-failure toast is the one caller that needs to know.</summary>
+    public static async Task<bool> PushAsync(ConfigStore.UserProfile profile)
     {
         var session = ConfigStore.LoadAuthSession();
-        if (session == null) return;
+        if (session == null) return false;
         try
         {
             string payload = JsonSerializer.Serialize(new
@@ -43,15 +47,19 @@ internal static class ProfileSyncService
                     eventCounts = profile.EventCounts,
                     gamesWatchedByTeam = profile.GamesWatchedByTeam,
                 },
+                customTeamLogos = profile.CustomTeamLogos.ToDictionary(
+                    kv => kv.Key,
+                    kv => new { base64Png = kv.Value.Base64Png, updatedAtUtc = kv.Value.UpdatedAtUtc.ToString("O") }),
             });
             using var request = new HttpRequestMessage(HttpMethod.Put, $"{BaseUrl}/profile")
             {
                 Content = new StringContent(payload, Encoding.UTF8, "application/json"),
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", session.SessionToken);
-            await Http.SendAsync(request);
+            using var response = await Http.SendAsync(request);
+            return response.IsSuccessStatusCode;
         }
-        catch { /* best-effort -- local save already succeeded regardless */ }
+        catch { return false; /* best-effort -- local save already succeeded regardless */ }
     }
 
     /// <summary>Pulls the cloud-saved profile down right after a fresh sign-in, so favorites/stats
@@ -92,6 +100,18 @@ internal static class ProfileSyncService
                 return result;
             }
 
+            var customTeamLogos = new Dictionary<string, ConfigStore.TeamLogoEntry>();
+            if (root.TryGetProperty("customTeamLogos", out var logosEl) && logosEl.ValueKind == JsonValueKind.Object)
+                foreach (var prop in logosEl.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind != JsonValueKind.Object) continue;
+                    string? b64 = GetStr(prop.Value, "base64Png");
+                    string? updatedRaw = GetStr(prop.Value, "updatedAtUtc");
+                    if (b64 == null || updatedRaw == null || !DateTime.TryParse(updatedRaw, null,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out var updatedAt)) continue;
+                    customTeamLogos[prop.Name] = new ConfigStore.TeamLogoEntry { Base64Png = b64, UpdatedAtUtc = updatedAt };
+                }
+
             return new ConfigStore.UserProfile
             {
                 FavoriteTeam = favoriteTeam,
@@ -106,6 +126,7 @@ internal static class ProfileSyncService
                 StreakCurrentDays = GetInt("streakCurrentDays"),
                 EventCounts = GetDict("eventCounts"),
                 GamesWatchedByTeam = GetDict("gamesWatchedByTeam"),
+                CustomTeamLogos = customTeamLogos,
             };
         }
         catch { return null; }

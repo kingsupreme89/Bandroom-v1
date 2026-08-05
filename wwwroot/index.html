@@ -57,6 +57,7 @@
           <button id="btn-sound-bank" class="pill pill-marketplace" title="This team's Sound Bank">Sound Bank</button>
           <button id="btn-trophy-room" class="pill pill-marketplace" title="This team's Trophy Room">Trophy Room</button>
           <button id="btn-my-downloads" class="pill pill-marketplace" title="Songs and images you've downloaded">My Downloads</button>
+          <button id="btn-discord-chat" class="pill pill-marketplace" title="Live Discord chat feed">Discord</button>
         </div>
         <!-- Favorite-team badge -- shows the currently active team at a glance, click opens
              the full team picker. Sits right next to the update button on purpose. -->
@@ -205,7 +206,15 @@
         Trophy Room (background images) -- open one and hit <strong>+ Upload</strong> to
         contribute.
       </p>
-      <div class="bandroom-hub-section-label">Newest Uploads</div>
+      <div class="bandroom-hub-section-label">
+        Uploads
+        <select id="bandroom-hub-sort" class="bandroom-hub-sort">
+          <option value="newest">Newest</option>
+          <option value="views">Most Viewed</option>
+          <option value="downloads">Most Downloaded</option>
+          <option value="likes">Most Liked</option>
+        </select>
+      </div>
       <div class="bandroom-recent-grid" id="bandroom-recent-grid"><!-- populated by app.js --></div>
       <div class="bandroom-hub-section-label">Top Contributing Teams</div>
       <div class="bandroom-leaderboard" id="bandroom-leaderboard"><!-- populated by app.js --></div>
@@ -335,6 +344,11 @@
        logo everywhere in the app (team tiles, marketplace song tiles, etc). Fixed square output
        is what keeps every logo uniform regardless of the source image's own shape/aspect ratio. -->
   <input type="file" id="logo-crop-file-input" accept="image/*" hidden />
+  <!-- Creator-only batch logo import (item 20, opened via Ctrl+Alt+Shift+L, see app.js) --
+       webkitdirectory lets the OS folder picker hand back every image in one folder at once,
+       which openBatchLogoImportTool() then feeds through the SAME crop tool below one at a
+       time. Not reachable from any visible button/menu on purpose. -->
+  <input type="file" id="batch-logo-folder-input" accept="image/*" webkitdirectory multiple hidden />
   <div id="logo-crop-overlay" hidden>
     <div id="logo-crop-dialog" class="glass">
       <div class="save-profile-header" id="logo-crop-header">Set Team Logo</div>
@@ -342,16 +356,26 @@
         Drag the image to reposition it, use the slider to zoom. Whatever shows inside the
         square becomes the logo -- keep the important part centered.
       </p>
+      <!-- Only shown mid-batch-import -- lets the operator correct a bad filename->team guess
+           before hitting Save Logo for this image. -->
+      <div id="batch-logo-team-row" hidden>
+        <label for="batch-logo-team-select">Team:</label>
+        <select id="batch-logo-team-select"></select>
+      </div>
       <div id="logo-crop-viewport">
         <canvas id="logo-crop-canvas" width="400" height="400"></canvas>
         <div id="logo-crop-empty">Choose an image to get started</div>
       </div>
       <div id="logo-crop-controls">
         <button id="btn-logo-crop-choose" class="btn-ghost">Choose Image...</button>
-        <input type="range" id="logo-crop-zoom" min="100" max="400" value="100" disabled />
+        <input type="range" id="logo-crop-zoom" min="100" max="900" value="100" disabled />
       </div>
       <div class="save-profile-actions">
         <button id="btn-logo-crop-cancel" class="btn-ghost">Cancel</button>
+        <!-- Batch-only: skip this image without saving a logo for it. Hidden outside batch mode
+             via CSS (see style.css) since #batch-logo-team-row's hidden state is the visibility
+             signal for "are we in a batch". -->
+        <button id="btn-logo-crop-skip" class="btn-ghost">Skip</button>
         <button id="btn-logo-crop-confirm" class="btn-primary" disabled>Save Logo</button>
       </div>
     </div>
@@ -371,7 +395,26 @@
         list them right away). Images are saved for later -- open one from a team's Trophy Room
         if you want to set it as that team's background.
       </p>
+      <!-- End-user "import my own song" pipeline (item 21) -- picks a local file, names it,
+           trims/normalizes it through the same tool a marketplace track uses, and it lands
+           right here alongside real downloads. -->
+      <button id="btn-import-local-song" class="btn-ghost bandroom-import-song-btn">+ Import Your Own Song</button>
       <div class="bandroom-album-grid" id="my-downloads-grid"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- Discord Chat -- a docked (not full-screen-modal) panel so it can sit open on the side while
+       still watching a game, unlike the other marketplace overlays which cover the whole window.
+       Read-only relay of one Discord channel via the usercount worker's /discord/messages
+       endpoint (see that worker for the bot-token/channel-id setup this needs on the owner's
+       side); polling starts when opened and stops when closed, see pollDiscordChat in app.js. -->
+  <div id="discord-chat-overlay" hidden>
+    <div id="discord-chat-panel" class="glass">
+      <div class="team-picker-header">
+        <span>Discord Chat</span>
+        <button id="btn-close-discord-chat" class="icon-btn">&times;</button>
+      </div>
+      <div id="discord-chat-messages"><!-- populated by app.js --></div>
     </div>
   </div>
 

@@ -23,6 +23,11 @@ WebView2Data/
 google_client_secret.local.txt
 Crash*.txt
 
+# Admin marketplace override token -- never committed AND deliberately never packaged into the
+# build (see WebBridge.cs's AdminTokenPath comment for why this one is different from the
+# Google secret above). Only ever present on the app owner's own dev machine.
+admin_token.local.txt
+
 # Release archives
 *.zip
 squirrel_releases/

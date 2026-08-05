@@ -33,11 +33,19 @@ internal sealed class TrimmerForm : Form
 
     WaveOutEvent? _previewOutput;
 
+    /// <summary>Non-null only for the end-user local-song-import pipeline (item 21): the track
+    /// name was already collected BEFORE this form opened (per that flow's required order --
+    /// name, then trim), so SaveTrimmed skips its own team/song-name prompts and just uses this
+    /// instead. Null for every other existing call site (marketplace-track trimming via
+    /// AssignTrackForm), which keeps prompting for team+name exactly as before.</summary>
+    readonly string? _presetSongName;
+
     public string? SavedFilePath { get; private set; }
 
-    public TrimmerForm(IWin32Window owner, string sourcePath)
+    public TrimmerForm(IWin32Window owner, string sourcePath, string? presetSongName = null)
     {
         _sourcePath = sourcePath;
+        _presetSongName = presetSongName;
 
         using (var probe = new AudioFileReader(sourcePath))
             _totalDuration = probe.TotalTime;
@@ -298,25 +306,46 @@ internal sealed class TrimmerForm : Form
 
         StopPreview();
 
-        // Prompt for team name
-        var team = PromptDialog.Show(this, "Team", "Enter team name (e.g., UGA, LSU):");
-        if (string.IsNullOrWhiteSpace(team)) return;
+        string songName;
+        string outFolder;
+        string outPath;
+        if (_presetSongName != null)
+        {
+            // Local-import pipeline (item 21) -- name was already collected before this form
+            // opened, no team concept for a user's own track, saved into its own folder so it
+            // gets its own virtual host + My Downloads manifest entry (see ConfigStore.LocalTracksFolder).
+            songName = _presetSongName;
+            outFolder = ConfigStore.LocalTracksFolder;
+            Directory.CreateDirectory(outFolder);
+            string safeLocalName = System.Text.RegularExpressions.Regex.Replace(songName, @"[^\w\s-]", "").Replace(" ", "_");
+            outPath = Path.Combine(outFolder, $"{safeLocalName}.wav");
+            int localN = 1;
+            while (File.Exists(outPath))
+                outPath = Path.Combine(outFolder, $"{safeLocalName}_{localN++}.wav");
+        }
+        else
+        {
+            // Prompt for team name
+            var team = PromptDialog.Show(this, "Team", "Enter team name (e.g., UGA, LSU):");
+            if (string.IsNullOrWhiteSpace(team)) return;
 
-        // Prompt for song name
-        var songName = PromptDialog.Show(this, "Song Name", "Enter song name or trigger description:");
-        if (string.IsNullOrWhiteSpace(songName)) return;
+            // Prompt for song name
+            songName = PromptDialog.Show(this, "Song Name", "Enter song name or trigger description:") ?? "";
+            if (string.IsNullOrWhiteSpace(songName)) return;
 
-        Directory.CreateDirectory(ConfigStore.SongsTrimmedFolder);
+            outFolder = ConfigStore.SongsTrimmedFolder;
+            Directory.CreateDirectory(outFolder);
 
-        // Normalize to safe filename: Team-SongName.wav
-        string safeSongName = System.Text.RegularExpressions.Regex.Replace(songName, @"[^\w\s-]", "").Replace(" ", "_");
-        string safeTeam = System.Text.RegularExpressions.Regex.Replace(team, @"[^\w-]", "");
-        string outPath = Path.Combine(ConfigStore.SongsTrimmedFolder, $"{safeTeam}-{safeSongName}.wav");
+            // Normalize to safe filename: Team-SongName.wav
+            string safeSongName = System.Text.RegularExpressions.Regex.Replace(songName, @"[^\w\s-]", "").Replace(" ", "_");
+            string safeTeam = System.Text.RegularExpressions.Regex.Replace(team, @"[^\w-]", "");
+            outPath = Path.Combine(outFolder, $"{safeTeam}-{safeSongName}.wav");
 
-        // Handle duplicates
-        int n = 1;
-        while (File.Exists(outPath))
-            outPath = Path.Combine(ConfigStore.SongsTrimmedFolder, $"{safeTeam}-{safeSongName}_{n++}.wav");
+            // Handle duplicates
+            int n = 1;
+            while (File.Exists(outPath))
+                outPath = Path.Combine(outFolder, $"{safeTeam}-{safeSongName}_{n++}.wav");
+        }
 
         try
         {
@@ -330,6 +359,10 @@ internal sealed class TrimmerForm : Form
             WaveFileWriter.CreateWaveFile16(outPath, normalized);
 
             SavedFilePath = outPath;
+            // Local-import pipeline (item 21) -- registers in the "My Downloads" manifest so it
+            // shows up there (with a "Share to Marketplace" option) immediately, same as a real
+            // marketplace download does via ConfigStore.RecordMarketplaceDownload.
+            if (_presetSongName != null) ConfigStore.RecordLocalTrack(songName, outPath);
             MessageBox.Show(this, $"Saved: {Path.GetFileName(outPath)}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
             DialogResult = DialogResult.OK;
             Close();

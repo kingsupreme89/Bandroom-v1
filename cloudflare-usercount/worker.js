@@ -10,6 +10,32 @@
 //
 // No IP, hostname, or any identifying info is stored -- just a random GUID the
 // app generates once and keeps locally, and a timestamp KV manages for us via TTL.
+//
+// GET /discord/messages?after=<messageId>
+//   -> { messages: [{ id, author, avatarUrl, content, timestampUtc }] }
+//      Relays the owner's Discord channel so it can be shown as a read-only chat feed inside
+//      Bandroom without the app holding open its own Discord gateway connection. Requires
+//      env.DISCORD_BOT_TOKEN (secret, `wrangler secret put DISCORD_BOT_TOKEN`) and
+//      env.DISCORD_CHANNEL_ID (var or secret) to be configured -- if either is missing this
+//      returns { messages: [] } rather than an error, so the app just shows its "not connected"
+//      empty state instead of erroring. `after` is optional; when present only messages newer
+//      than that Discord message id are returned (still relies on the shared 3s cache below, so
+//      it's a "give me what's fresh" hint, not a guarantee of a fully precise incremental fetch).
+//      Response messages are sorted oldest-to-newest (Discord's own API returns newest-first) and
+//      stripped down to only what the UI needs -- no raw Discord payload (embeds, mentions,
+//      attachments, etc.) ever reaches the client.
+//
+//      Rate-limit note: multiple Bandroom instances polling this endpoint would otherwise each
+//      hit Discord's REST API directly. Instead this caches the last fetch from Discord for 3s
+//      per Worker isolate (a plain in-memory module-level variable, not KV -- simplest thing that
+//      works for a first pass; if this worker ever scales across many isolates a KV- or
+//      Durable-Object-backed cache would coalesce bursts more reliably, but at Bandroom's
+//      current scale a single isolate handling all traffic is the common case).
+
+// Per-isolate cache for the Discord relay -- see the doc comment above /discord/messages.
+// Deliberately module-level (survives across requests handled by the same warm isolate, reset
+// on cold start) rather than KV, per the "simplest first pass" note above.
+let _discordCache = { fetchedAt: 0, messages: [] };
 
 export default {
   async fetch(request, env) {
@@ -87,6 +113,58 @@ export default {
       });
 
       return new Response(JSON.stringify({ count }), {
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    if (url.pathname === "/discord/messages" && request.method === "GET") {
+      const token = env.DISCORD_BOT_TOKEN;
+      const channelId = env.DISCORD_CHANNEL_ID;
+      if (!token || !channelId) {
+        // Owner hasn't run the wrangler secret/var setup yet -- empty list, not an error, so the
+        // app renders its quiet "Discord feed not connected" state instead of retry-spamming.
+        return new Response(JSON.stringify({ messages: [] }), {
+          headers: { ...cors, "Content-Type": "application/json" },
+        });
+      }
+
+      const now = Date.now();
+      if (now - _discordCache.fetchedAt >= 3000) {
+        try {
+          const discordRes = await fetch(
+            `https://discord.com/api/v10/channels/${channelId}/messages?limit=50`,
+            { headers: { Authorization: `Bot ${token}` } }
+          );
+          if (discordRes.ok) {
+            const raw = await discordRes.json();
+            const mapped = raw
+              .map((m) => ({
+                id: m.id,
+                author: m.author?.username ?? "Unknown",
+                avatarUrl: m.author?.avatar
+                  ? `https://cdn.discordapp.com/avatars/${m.author.id}/${m.author.avatar}.png?size=64`
+                  : null,
+                content: String(m.content ?? "").slice(0, 2000),
+                timestampUtc: m.timestamp,
+              }))
+              .reverse(); // Discord returns newest-first; the client wants oldest-to-newest.
+            _discordCache = { fetchedAt: now, messages: mapped };
+          }
+          // On a non-ok response (bad token, missing permissions, rate limited) fall through and
+          // serve whatever's already cached rather than erroring the whole endpoint.
+        } catch {
+          // Network hiccup talking to Discord -- same fallback, serve the stale cache below.
+        }
+      }
+
+      let messages = _discordCache.messages;
+      const after = url.searchParams.get("after");
+      if (after) {
+        const idx = messages.findIndex((m) => m.id === after);
+        if (idx >= 0) messages = messages.slice(idx + 1);
+      }
+
+      return new Response(JSON.stringify({ messages }), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }

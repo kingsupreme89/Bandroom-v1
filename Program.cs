@@ -27,6 +27,11 @@ internal static class Program
         Application.SetCompatibleTextRenderingDefault(false);
         AppFonts.EnsureLoaded();
 
+        // Fire-and-forget: gets the WaveOut/audio driver initialized before the first real
+        // trigger fires, so THAT call isn't the one eating the one-time device-init cost (see
+        // AudioPlayer.Warmup for why this matters for tackle-to-sound latency).
+        AudioPlayer.Warmup();
+
         Application.Run(new WebMainForm());
     }
 }

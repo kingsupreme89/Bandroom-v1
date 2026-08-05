@@ -36,6 +36,48 @@ internal static class AudioPlayer
     public static readonly TimeSpan FireCooldown = TimeSpan.FromSeconds(20);
     static readonly Dictionary<string, DateTime> _lastFireByPath = new(StringComparer.OrdinalIgnoreCase);
 
+    static bool _warmedUp;
+
+    /// <summary>Opens a throwaway WaveOutEvent against a few ms of silence and immediately
+    /// tears it down. Call once at app startup (see Program.cs), off the UI thread.
+    ///
+    /// Why: NAudio's WaveOutEvent.Init() does a real waveOutOpen() against the Windows audio
+    /// driver/session, which has measurable one-time cost the FIRST time any process touches
+    /// the audio subsystem after launch (COM/driver/session negotiation). Play() below still
+    /// opens a fresh WaveOutEvent per clip (needed for overlapping cues -- see Play's doc
+    /// comment), so that per-call open itself isn't removed, but paying the one-time
+    /// subsystem cold-start cost here means the FIRST real tackle/trigger sound doesn't
+    /// silently eat an extra chunk of latency on top of the fast path everything after it
+    /// gets. Safe to call more than once; only the first call does anything.</summary>
+    public static void Warmup()
+    {
+        if (_warmedUp) return;
+        _warmedUp = true;
+
+        Task.Run(() =>
+        {
+            try
+            {
+                // 20ms of silence, mono 44.1kHz -- just enough for the driver to actually open
+                // and start, nothing audible, nothing worth generating more of.
+                var format = new NAudio.Wave.WaveFormat(44100, 16, 1);
+                var silence = new byte[(int)(format.AverageBytesPerSecond * 0.02)];
+                using var provider = new NAudio.Wave.RawSourceWaveStream(new MemoryStream(silence), format);
+                using var output = new WaveOutEvent();
+                output.Init(provider);
+                output.Play();
+                Thread.Sleep(30);
+                output.Stop();
+            }
+            catch (Exception ex)
+            {
+                // Never let a warmup failure be user-visible -- worst case, the first real
+                // Play() just pays the cold-start cost it would have paid anyway.
+                CrashLog.Write("AudioPlayer warmup failed", ex);
+            }
+        });
+    }
+
     /// <summary>Immediately stops every clip currently playing (or waiting out its pre-roll
     /// delay). Used by the UI's "Stop All" button.</summary>
     public static void StopAll()
