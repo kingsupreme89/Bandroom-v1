@@ -366,6 +366,8 @@ function wireControls() {
   });
   document.getElementById("btn-update").addEventListener("click", () => bridge?.ShowUpdate());
   document.getElementById("btn-bandroom-cloud").addEventListener("click", openBandroomMarketplace);
+  document.getElementById("btn-sound-bank").addEventListener("click", () => { openTeamAlbum(state.activeTeam); setAlbumTab("songs"); });
+  document.getElementById("btn-trophy-room").addEventListener("click", () => { openTeamAlbum(state.activeTeam); setAlbumTab("images"); });
   document.getElementById("btn-close-bandroom").addEventListener("click", closeBandroomMarketplace);
   document.getElementById("bandroom-overlay").addEventListener("click", (e) => {
     if (e.target.id === "bandroom-overlay") closeBandroomMarketplace();
@@ -515,6 +517,9 @@ function wireControls() {
     if (!document.getElementById("team-picker-overlay").hidden) closeTeamPicker();
     if (!document.getElementById("save-profile-overlay").hidden) closeSaveProfileDialog();
     if (!document.getElementById("matchup-overlay").hidden) closeMatchupDialog();
+    // Album closes first if both happen to be open (it renders on top of the team-grid overlay).
+    if (!document.getElementById("bandroom-album-overlay").hidden) closeTeamAlbum();
+    else if (!document.getElementById("bandroom-overlay").hidden) closeBandroomMarketplace();
   });
 }
 

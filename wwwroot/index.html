@@ -46,11 +46,14 @@
           <span class="watch-dot"></span>
           <span id="watch-label">Start Watching</span>
         </button>
-        <!-- Placeholder for "The Bandroom" cloud marketplace tab (sound bank / trophy room /
-             community uploads) -- not wired up yet, just marking its spot in the header. -->
-        <button id="btn-bandroom-cloud" class="pill pill-rainbow" title="The Bandroom (coming soon)">
-          The Bandroom
-        </button>
+        <!-- Marketplace island tabs -- "The Bandroom" opens the full team-browser; Sound Bank
+             / Trophy Room jump straight into the ACTIVE team's album on that specific tab,
+             skipping the team-picker step since you're usually already working on one team. -->
+        <div class="marketplace-tabs">
+          <button id="btn-bandroom-cloud" class="pill pill-rainbow" title="Browse The Bandroom">The Bandroom</button>
+          <button id="btn-sound-bank" class="pill pill-marketplace" title="This team's Sound Bank">Sound Bank</button>
+          <button id="btn-trophy-room" class="pill pill-marketplace" title="This team's Trophy Room">Trophy Room</button>
+        </div>
         <!-- Favorite-team badge -- shows the currently active team at a glance, click opens
              the full team picker. Sits right next to the update button on purpose. -->
         <div id="header-team-badge" class="team-swatch header-team-badge" title="Switch which team's sound profile you're editing (use Set Matchup to pick home/away)"></div>
