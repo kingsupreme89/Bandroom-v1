@@ -72,6 +72,41 @@ public sealed class WebBridge
     public async Task<bool> DownloadAndSetTeamBackground(string team, string url) =>
         await _host.DownloadAndSetTeamBackgroundFromWeb(team, url);
 
+    /// <summary>Downloads a marketplace song or image into the local library ("My Downloads")
+    /// with a clear "[School] - [Name]" filename. Songs land in the Songs library so they're
+    /// immediately assignable to a trigger; images land in a general downloaded-images library.
+    /// Returns {success, path?, error?} as JSON rather than a bare bool so the UI can show why a
+    /// download failed (network error vs. oversized vs. bad type) instead of a generic failure.</summary>
+    public async Task<string> DownloadMarketplaceItem(string type, string name, string school, string url)
+    {
+        string? path = await MarketplaceDownloadService.DownloadAsync(type, name, school, url);
+        return path != null
+            ? JsonSerializer.Serialize(new { success = true, path })
+            : JsonSerializer.Serialize(new { success = false, error = "Download failed -- check your connection and try again." });
+    }
+
+    /// <summary>Lists everything in "My Downloads", newest first. Every entry gets a servable
+    /// URL via the "downloadedimages"/"downloadedsongs" virtual host mappings (see
+    /// WebMainForm.InitWebViewAsync) -- WebView2's https-loaded page can't play/display a bare
+    /// file:// path (mixed-content blocked), so both images and songs need a mapped host the
+    /// same way team logos/backgrounds already do.</summary>
+    public string GetMyDownloads() => JsonSerializer.Serialize(
+        ConfigStore.LoadMarketplaceDownloads()
+            .OrderByDescending(e => e.DownloadedAt)
+            .Select(e => new
+            {
+                id = e.Id,
+                type = e.Type,
+                name = e.Name,
+                school = e.School,
+                downloadedAt = e.DownloadedAt.ToString("O"),
+                fileUrl = (e.Type == "image" ? "https://downloadedimages/" : "https://downloadedsongs/")
+                    + Uri.EscapeDataString(Path.GetFileName(e.Path)),
+                schoolLogoUrl = LogoUrl(e.School),
+            }));
+
+    public bool RemoveMyDownload(string id) => ConfigStore.RemoveMarketplaceDownload(id);
+
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
     public void OpenSettings() => _host.OpenSettingsFromWeb();
     public void ShowUpdate() => _host.ShowUpdateDialogFromWeb();

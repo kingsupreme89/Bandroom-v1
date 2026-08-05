@@ -99,6 +99,10 @@ public sealed class WebMainForm : Form
         core.SetVirtualHostNameToFolderMapping("appassets", wwwroot, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("teambg", ConfigStore.TeamBackgroundsFolder, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("teamlogo", ConfigStore.TeamLogosFolder, CoreWebView2HostResourceAccessKind.Allow);
+        Directory.CreateDirectory(ConfigStore.DownloadedImagesFolder);
+        Directory.CreateDirectory(ConfigStore.SongsUploadedFolder);
+        core.SetVirtualHostNameToFolderMapping("downloadedimages", ConfigStore.DownloadedImagesFolder, CoreWebView2HostResourceAccessKind.Allow);
+        core.SetVirtualHostNameToFolderMapping("downloadedsongs", ConfigStore.SongsUploadedFolder, CoreWebView2HostResourceAccessKind.Allow);
 
         core.AddHostObjectToScript("bandroom", new WebBridge(this));
 
@@ -648,7 +652,23 @@ public sealed class WebMainForm : Form
     void FireEvent(TriggerEntry entry, float? volumeOverride = null)
     {
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
+        {
             AudioPlayer.Play(entry.AudioFile, volumeOverride, interruptPrevious: true);
+            // Names exactly which trigger OCR just read as a small on-screen flash, so a user can
+            // confirm what fired without digging through logs -- this call isn't gated on
+            // _webView.CoreWebView2 being non-null elsewhere in this file only because FireEvent
+            // is never reachable before the WebView2 is initialized (all watcher events wire up
+            // after InitWebViewAsync completes).
+            // Skipped for down:* triggers specifically -- those fire on nearly every single play,
+            // so toasting every one would spam the screen during a live game without adding real
+            // information (the sound itself is already the real-time confirmation for downs).
+            // Rarer situational events (touchdown/turnover/kickoff/etc.) are worth calling out.
+            if (!entry.Trigger.StartsWith("down:", StringComparison.OrdinalIgnoreCase))
+            {
+                string safeName = entry.Event.Replace("'", "\\'");
+                _ = _webView.ExecuteScriptAsync($"window.dispatchEvent(new CustomEvent('bandroom:triggerfired', {{ detail: '{safeName}' }}))");
+            }
+        }
     }
 
     void OnWindowFoundChanged(bool found)

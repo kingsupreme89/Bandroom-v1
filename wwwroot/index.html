@@ -56,6 +56,7 @@
           <button id="btn-bandroom-cloud" class="pill pill-rainbow" title="Browse The Bandroom">The Bandroom</button>
           <button id="btn-sound-bank" class="pill pill-marketplace" title="This team's Sound Bank">Sound Bank</button>
           <button id="btn-trophy-room" class="pill pill-marketplace" title="This team's Trophy Room">Trophy Room</button>
+          <button id="btn-my-downloads" class="pill pill-marketplace" title="Songs and images you've downloaded">My Downloads</button>
         </div>
         <!-- Favorite-team badge -- shows the currently active team at a glance, click opens
              the full team picker. Sits right next to the update button on purpose. -->
@@ -235,6 +236,24 @@
       </div>
       <div class="bandroom-album-grid bandroom-songs-grid" id="bandroom-songs-grid"><!-- populated by app.js --></div>
       <div class="bandroom-album-grid bandroom-images-grid" id="bandroom-images-grid" hidden><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- My Downloads -- everything the user has pulled down locally from the marketplace, songs
+       and images together, newest first, with clear "[School] — [Name]" identifiers so a saved
+       item is still recognizable outside of whichever team's album it came from. -->
+  <div id="my-downloads-overlay" hidden>
+    <div id="my-downloads" class="glass">
+      <div class="team-picker-header">
+        <span>My Downloads</span>
+        <button id="btn-close-my-downloads" class="icon-btn">&times;</button>
+      </div>
+      <p class="bandroom-instructions">
+        Songs you download here are added straight to your Sound Bank library (Assign Track will
+        list them right away). Images are saved for later -- open one from a team's Trophy Room
+        if you want to set it as that team's background.
+      </p>
+      <div class="bandroom-album-grid" id="my-downloads-grid"><!-- populated by app.js --></div>
     </div>
   </div>
 

@@ -354,6 +354,11 @@ function setWatching(mode) {
     revertVsBackdrop();
     updateMatchupLabel();
   }
+  // Toast only on the WATCHING -> WAITING transition (the game window disappeared mid-session,
+  // e.g. alt-tabbed out, game closed) -- not on every "waiting" state, which is also the normal
+  // startup state before the game window is even found the first time and would be pure noise.
+  if (state.watching === "watching" && mode === "waiting")
+    showToast("Lost the game window -- Bandroom is waiting for it to come back.");
   state.watching = mode;
   const btn = document.getElementById("btn-watch");
   const label = document.getElementById("watch-label");
@@ -402,6 +407,8 @@ function wireControls() {
   document.getElementById("btn-bandroom-cloud").addEventListener("click", openBandroomMarketplace);
   document.getElementById("btn-sound-bank").addEventListener("click", () => { openTeamAlbum(state.activeTeam); setAlbumTab("songs"); });
   document.getElementById("btn-trophy-room").addEventListener("click", () => { openTeamAlbum(state.activeTeam); setAlbumTab("images"); });
+  document.getElementById("btn-my-downloads").addEventListener("click", openMyDownloads);
+  document.getElementById("btn-close-my-downloads").addEventListener("click", closeMyDownloads);
   document.getElementById("btn-close-bandroom").addEventListener("click", closeBandroomMarketplace);
   document.getElementById("bandroom-overlay").addEventListener("click", (e) => {
     if (e.target.id === "bandroom-overlay") closeBandroomMarketplace();
@@ -468,6 +475,9 @@ function wireControls() {
 
   window.addEventListener("bandroom:refresh", refreshCategories);
   window.addEventListener("bandroom:watchstate", (e) => setWatching(e.detail));
+  // Names exactly which trigger OCR just read and played a sound for -- lets a user verify live
+  // that Bandroom read the right thing off the scoreboard, without checking logs.
+  window.addEventListener("bandroom:triggerfired", (e) => showToast(`Trigger fired: ${e.detail}`));
   window.addEventListener("bandroom:profileschanged", async () => {
     if (bridge) state.savedProfiles = JSON.parse(await bridge.GetSavedProfiles());
     renderTeamGrid();
@@ -478,6 +488,9 @@ function wireControls() {
     btn.classList.remove("dim", "downgraded");
     btn.textContent = "↑ Update";
     btn.title = "A new version is available -- click to update.";
+    // Passive toast in addition to the button changing -- the button alone is easy to miss if
+    // it's not the thing you're looking at when a new version lands in the background.
+    showToast("A new Bandroom update is available -- click \"↑ Update\" in the header to grab it.");
   });
   // Fires when this install is OLDER than a version this machine has run before -- almost
   // always means an old cached Setup.exe got run by mistake. Louder than the normal update
@@ -567,6 +580,7 @@ function wireControls() {
     if (!document.getElementById("bandroom-upload-overlay").hidden) closeUploadDialog();
     else if (!document.getElementById("bandroom-album-overlay").hidden) closeTeamAlbum();
     else if (!document.getElementById("bandroom-overlay").hidden) closeBandroomMarketplace();
+    else if (!document.getElementById("my-downloads-overlay").hidden) closeMyDownloads();
   });
 }
 
@@ -759,6 +773,17 @@ async function deleteUploadedItem(item) {
   }
 }
 
+async function downloadMarketplaceItem(item) {
+  try {
+    const raw = await bridge.DownloadMarketplaceItem(item.type, item.name, item.school, item.url);
+    const result = JSON.parse(raw);
+    return !!result.success;
+  } catch (err) {
+    console.error("downloadMarketplaceItem failed", err);
+    return false;
+  }
+}
+
 async function reportUploadedItem(item) {
   try {
     const res = await fetch(`${MARKETPLACE_URL}/report/${item.type}/${encodeURIComponent(item.id)}`, { method: "POST" });
@@ -791,6 +816,83 @@ function openBandroomMarketplace() {
     renderLeaderboard();
     search.focus();
   }, "openBandroomMarketplace");
+}
+
+function openMyDownloads() {
+  marketplaceGuard(() => {
+    document.getElementById("bandroom-overlay").hidden = true;
+    document.getElementById("bandroom-album-overlay").hidden = true;
+    document.getElementById("my-downloads-overlay").hidden = false;
+    renderMyDownloadsGrid();
+  }, "openMyDownloads");
+}
+
+function closeMyDownloads() {
+  document.getElementById("my-downloads-overlay").hidden = true;
+  _previewAudio?.pause();
+}
+
+async function renderMyDownloadsGrid() {
+  const grid = document.getElementById("my-downloads-grid");
+  grid.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
+  let items;
+  try {
+    items = JSON.parse(await bridge.GetMyDownloads());
+  } catch (err) {
+    console.error("GetMyDownloads failed", err);
+    items = [];
+  }
+  if (document.getElementById("my-downloads-overlay").hidden) return; // closed while awaiting
+
+  grid.innerHTML = "";
+  if (items.length === 0) {
+    grid.innerHTML = `<div class="bandroom-empty-state">Nothing downloaded yet -- open a team's Sound Bank or Trophy Room and hit the ⬇ button on anything you like.</div>`;
+    return;
+  }
+  for (const item of items) grid.appendChild(buildMyDownloadTile(item));
+}
+
+function buildMyDownloadTile(item) {
+  const tile = document.createElement("div");
+  tile.className = "bandroom-item-tile";
+  const thumb = document.createElement("div");
+  thumb.className = "bandroom-item-thumb";
+  if (item.type === "image") {
+    thumb.innerHTML = `<img src="${item.fileUrl}" alt="${item.name}" loading="lazy">`;
+  } else {
+    thumb.innerHTML = item.schoolLogoUrl
+      ? `<img src="${item.schoolLogoUrl}" alt="${item.school}" class="bandroom-item-thumb-logo" loading="lazy">`
+      : `<span>\u{1F3B5}</span>`;
+  }
+  const name = document.createElement("div");
+  name.className = "bandroom-item-name";
+  name.textContent = item.name;
+  const school = document.createElement("div");
+  school.className = "bandroom-item-school";
+  school.textContent = item.school;
+  tile.append(thumb, name, school);
+  tile.title = `${item.school} — ${item.name}`;
+  tile.addEventListener("click", (e) => {
+    if (e.target.closest(".bandroom-item-action")) return;
+    if (item.type === "song") previewSong({ url: item.fileUrl });
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "bandroom-item-actions";
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "bandroom-item-action bandroom-item-action-danger";
+  removeBtn.title = "Remove from My Downloads";
+  removeBtn.textContent = "\u{1F5D1}";
+  removeBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    removeBtn.disabled = true;
+    const ok = bridge ? await bridge.RemoveMyDownload(item.id) : false;
+    if (ok) { showToast(`Removed "${item.name}".`); tile.remove(); }
+    else { showToast("Couldn't remove that -- try again."); removeBtn.disabled = false; }
+  });
+  actions.appendChild(removeBtn);
+  tile.appendChild(actions);
+  return tile;
 }
 
 /// Per-team upload leaderboard (item 19) -- combines song + image counts per school from the
@@ -849,6 +951,14 @@ async function renderBandroomHub() {
   for (const item of items) grid.appendChild(buildItemTile(item, /*inHub*/ true));
 }
 
+// Song tiles use the uploading team's logo instead of a generic note icon, so every song tile
+// in a given team's Sound Bank -- and in My Downloads -- looks uniform and immediately tells you
+// whose song it is, the same way image tiles already show the real uploaded picture.
+function teamLogoUrl(schoolName) {
+  const team = state.teams?.find((t) => t.name === schoolName);
+  return team?.logoUrl ?? null;
+}
+
 function buildItemTile(item, inHub) {
   const tile = document.createElement("div");
   tile.className = "bandroom-item-tile";
@@ -857,7 +967,10 @@ function buildItemTile(item, inHub) {
   if (item.type === "image") {
     thumb.innerHTML = `<img src="${item.url}" alt="${item.name}" loading="lazy">`;
   } else {
-    thumb.textContent = "\u{1F3B5}"; // musical note -- songs have no visual thumbnail
+    const logo = teamLogoUrl(item.school);
+    thumb.innerHTML = logo
+      ? `<img src="${logo}" alt="${item.school}" class="bandroom-item-thumb-logo" loading="lazy">`
+      : `<span>\u{1F3B5}</span>`; // no logo on file for this team -- fall back to a musical note
   }
   const name = document.createElement("div");
   name.className = "bandroom-item-name";
@@ -897,6 +1010,23 @@ function buildItemTile(item, inHub) {
       else { likeBtn.disabled = false; showToast("Couldn't like that right now."); }
     });
     actions.appendChild(likeBtn);
+
+    const dlBtn = document.createElement("button");
+    dlBtn.className = "bandroom-item-action";
+    dlBtn.title = "Download to My Downloads";
+    dlBtn.textContent = "\u{2B07}"; // down arrow
+    dlBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      dlBtn.disabled = true;
+      dlBtn.textContent = "...";
+      const ok = bridge ? await downloadMarketplaceItem(item) : false;
+      showToast(ok
+        ? `Downloaded "${item.name}" -- see it in My Downloads.`
+        : "Couldn't download that -- try again.");
+      dlBtn.disabled = false;
+      dlBtn.textContent = "\u{2B07}";
+    });
+    actions.appendChild(dlBtn);
 
     if (item.type === "image") {
       const bgBtn = document.createElement("button");

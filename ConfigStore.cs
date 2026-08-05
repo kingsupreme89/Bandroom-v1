@@ -24,6 +24,13 @@ internal static class ConfigStore
     public static readonly string ProfilesFolder = Path.Combine(UserDataRoot, "Profiles");
     public static readonly string TeamBackgroundsFolder = Path.Combine(UserDataRoot, "TeamBackgrounds");
     public static readonly string TeamLogosFolder = Path.Combine(UserDataRoot, "TeamLogos");
+    /// <summary>Images downloaded from the marketplace via the "My Downloads" tab land here --
+    /// separate from TeamBackgroundsFolder, which holds only the ONE currently-active background
+    /// per team. A downloaded image doesn't become a team's live background until the user
+    /// explicitly picks it (still via TeamBackgroundDownloadService's existing flow), so mixing
+    /// the two folders would make FindImagePath's single-active-file convention ambiguous.</summary>
+    public static readonly string DownloadedImagesFolder = Path.Combine(UserDataRoot, "DownloadedImages");
+    static readonly string MarketplaceDownloadsManifestPath = Path.Combine(UserDataRoot, "marketplace_downloads.json");
     static readonly string FirstRunFlagPath = Path.Combine(UserDataRoot, ".firstrun_done");
     static readonly string ScorebugPresetPath = Path.Combine(UserDataRoot, "scorebug_preset.txt");
 
@@ -108,6 +115,64 @@ internal static class ConfigStore
         if (!PathsPointToSameFile(sourcePath, destPath))
             File.Copy(sourcePath, destPath, overwrite: false);
         return destPath;
+    }
+
+    /// <summary>One entry in "My Downloads" -- a marketplace item the user has pulled down
+    /// locally, with a clear human-readable identifier ("[School] — [Name]") rather than the raw
+    /// filename, so the downloads list reads clearly even when many teams' files share generic
+    /// names like "Fight Song.mp3".</summary>
+    public sealed record MarketplaceDownloadEntry
+    {
+        public string Id { get; init; } = Guid.NewGuid().ToString("N");
+        public string Type { get; init; } = ""; // "song" or "image"
+        public string Name { get; init; } = "";
+        public string School { get; init; } = "";
+        public string Path { get; init; } = "";
+        public DateTime DownloadedAt { get; init; } = DateTime.UtcNow;
+    }
+
+    public static List<MarketplaceDownloadEntry> LoadMarketplaceDownloads()
+    {
+        if (!File.Exists(MarketplaceDownloadsManifestPath)) return new List<MarketplaceDownloadEntry>();
+        try
+        {
+            string json = File.ReadAllText(MarketplaceDownloadsManifestPath);
+            return JsonSerializer.Deserialize<List<MarketplaceDownloadEntry>>(json, JsonOptions) ?? new List<MarketplaceDownloadEntry>();
+        }
+        catch { return new List<MarketplaceDownloadEntry>(); } // corrupt manifest shouldn't crash the whole downloads tab
+    }
+
+    static void SaveMarketplaceDownloads(List<MarketplaceDownloadEntry> entries)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(MarketplaceDownloadsManifestPath, JsonSerializer.Serialize(entries, JsonOptions));
+    }
+
+    /// <summary>Records a new download in the manifest. If a prior entry already points at the
+    /// same local path (a re-download after deleting the manifest entry but not the file, or a
+    /// double-click), it's replaced rather than duplicated.</summary>
+    public static MarketplaceDownloadEntry RecordMarketplaceDownload(string type, string name, string school, string path)
+    {
+        var entries = LoadMarketplaceDownloads();
+        entries.RemoveAll(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
+        var entry = new MarketplaceDownloadEntry { Type = type, Name = name, School = school, Path = path };
+        entries.Add(entry);
+        SaveMarketplaceDownloads(entries);
+        return entry;
+    }
+
+    /// <summary>Removes a "My Downloads" entry and deletes its local file. Returns false if the
+    /// id wasn't found (already removed, stale UI) -- not an error, just a no-op.</summary>
+    public static bool RemoveMarketplaceDownload(string id)
+    {
+        var entries = LoadMarketplaceDownloads();
+        var entry = entries.FirstOrDefault(e => e.Id == id);
+        if (entry == null) return false;
+
+        entries.Remove(entry);
+        SaveMarketplaceDownloads(entries);
+        try { if (File.Exists(entry.Path)) File.Delete(entry.Path); } catch { /* best-effort */ }
+        return true;
     }
 
     static bool PathsPointToSameFile(string a, string b) =>
