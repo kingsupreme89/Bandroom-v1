@@ -1481,6 +1481,30 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   outline: none;
 }
 .save-profile-input:focus { border-color: var(--team-secondary, var(--glass-border)); }
+#profile-favorite-header, #profile-stats-header { margin-top: 18px; }
+#profile-favorite-team {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 4px;
+}
+#profile-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.profile-stat {
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 10px 14px;
+}
+.profile-stat span {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--team-secondary, var(--accent));
+}
+.profile-stat label { font-size: 12px; color: var(--text-muted-2); }
 .save-profile-subtext {
   font-size: 12px;
   color: var(--text-muted);

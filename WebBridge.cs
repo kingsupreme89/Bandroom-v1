@@ -154,6 +154,26 @@ public sealed class WebBridge
                 Picture = profile.Picture, SessionToken = sessionToken,
             });
 
+            // Merge the cloud profile (if this account has one saved from another device/install)
+            // with whatever's local -- NEVER a blind overwrite. Lifetime stat counters only ever
+            // go up, so taking the max of each is always safe and can never discard real local
+            // history (e.g. weeks of anonymous use before a first-ever sign-in, where the cloud
+            // side might still hold a stray near-empty profile from a different install reusing
+            // this same Google account). Favorite team prefers whichever device set one; local
+            // wins ties since it's the device the user is on right now.
+            var localProfile = ConfigStore.LoadUserProfile();
+            var cloudProfile = await ProfileSyncService.PullAsync(sessionToken);
+            var merged = cloudProfile == null ? localProfile : new ConfigStore.UserProfile
+            {
+                FavoriteTeam = localProfile.FavoriteTeam ?? cloudProfile.FavoriteTeam,
+                GamesWatched = Math.Max(localProfile.GamesWatched, cloudProfile.GamesWatched),
+                SongsTriggered = Math.Max(localProfile.SongsTriggered, cloudProfile.SongsTriggered),
+                MarketplaceUploads = Math.Max(localProfile.MarketplaceUploads, cloudProfile.MarketplaceUploads),
+                MarketplaceDownloads = Math.Max(localProfile.MarketplaceDownloads, cloudProfile.MarketplaceDownloads),
+            };
+            ConfigStore.SaveUserProfile(merged);
+            _ = ProfileSyncService.PushAsync(merged); // write the merged result back so both sides agree
+
             return JsonSerializer.Serialize(new { signedIn = true, name = profile.Name, email = profile.Email, picture = profile.Picture });
         }
         catch (Exception ex)
@@ -164,6 +184,52 @@ public sealed class WebBridge
     }
 
     public void SignOutOfGoogle() => ConfigStore.ClearAuthSession();
+
+    // ---- Universal profile (favorite team + lifetime stats) --------------------------------
+    // Distinct from the per-team "Save Profile" feature (ConfigProfileManager), which saves
+    // song-to-situation assignments for ONE team. This is one record per install, always saved
+    // locally so it works fully signed-out, and mirrored to the cloud when signed in with Google
+    // (see ProfileSyncService) so it can follow the account across devices.
+
+    public string GetUserProfile()
+    {
+        var p = ConfigStore.LoadUserProfile();
+        return JsonSerializer.Serialize(new
+        {
+            favoriteTeam = p.FavoriteTeam,
+            gamesWatched = p.GamesWatched,
+            songsTriggered = p.SongsTriggered,
+            marketplaceUploads = p.MarketplaceUploads,
+            marketplaceDownloads = p.MarketplaceDownloads,
+        });
+    }
+
+    public void SetFavoriteTeam(string team)
+    {
+        var updated = ConfigStore.LoadUserProfile() with { FavoriteTeam = team };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    /// <summary>Called from app.js right after a marketplace upload actually succeeds (not on
+    /// every attempt) -- bumps the local lifetime counter and mirrors it to the cloud profile if
+    /// signed in.</summary>
+    public void RecordMarketplaceUpload()
+    {
+        var current = ConfigStore.LoadUserProfile();
+        var updated = current with { MarketplaceUploads = current.MarketplaceUploads + 1 };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    /// <summary>Same as RecordMarketplaceUpload but for a completed "My Downloads" pull.</summary>
+    public void RecordMarketplaceDownload()
+    {
+        var current = ConfigStore.LoadUserProfile();
+        var updated = current with { MarketplaceDownloads = current.MarketplaceDownloads + 1 };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
 
     /// <summary>Saves a user-cropped custom logo (base64 PNG bytes from the web crop tool's
     /// canvas) as <paramref name="team"/>'s logo, replacing any existing one under any of

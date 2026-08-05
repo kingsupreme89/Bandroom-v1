@@ -393,6 +393,45 @@ async function refreshProfileView() {
     const avatar = document.getElementById("profile-avatar");
     if (user.picture) avatar.src = user.picture; else avatar.removeAttribute("src");
   }
+  await refreshUniversalProfileView();
+}
+
+// ---- Universal profile: favorite team + lifetime stats (works fully signed-out; syncs to the
+// cloud automatically once signed in -- see WebBridge.GetUserProfile/SetFavoriteTeam). ----
+async function refreshUniversalProfileView() {
+  const select = document.getElementById("profile-favorite-team");
+  // Rebuild whenever the option count doesn't match state.teams (+1 for the blank placeholder)
+  // -- NOT just "if empty". state.teams starts as [] and fills in asynchronously after GetTeams()
+  // resolves; if the profile overlay is opened before that finishes, a naive "only populate once"
+  // guard would permanently lock the dropdown to just "Choose a team..." for the whole session,
+  // since it'd never get a second chance to see the real list.
+  if (select.options.length !== state.teams.length + 1) {
+    select.innerHTML = "";
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = "Choose a team...";
+    select.appendChild(blank);
+    for (const team of state.teams) {
+      const opt = document.createElement("option");
+      opt.value = team.name;
+      opt.textContent = team.name;
+      select.appendChild(opt);
+    }
+  }
+
+  let profile;
+  try {
+    profile = JSON.parse(await bridge.GetUserProfile());
+  } catch (err) {
+    console.error("GetUserProfile failed", err);
+    return;
+  }
+
+  select.value = profile.favoriteTeam ?? "";
+  document.getElementById("profile-stat-games").textContent = profile.gamesWatched ?? 0;
+  document.getElementById("profile-stat-songs").textContent = profile.songsTriggered ?? 0;
+  document.getElementById("profile-stat-uploads").textContent = profile.marketplaceUploads ?? 0;
+  document.getElementById("profile-stat-downloads").textContent = profile.marketplaceDownloads ?? 0;
 }
 
 function wireControls() {
@@ -423,6 +462,9 @@ function wireControls() {
     try { await bridge.SignOutOfGoogle(); } catch (err) { console.error("SignOutOfGoogle failed", err); }
     showToast("Signed out.");
     await refreshProfileView();
+  });
+  document.getElementById("profile-favorite-team").addEventListener("change", async (e) => {
+    try { await bridge.SetFavoriteTeam(e.target.value); } catch (err) { console.error("SetFavoriteTeam failed", err); }
   });
   document.getElementById("btn-watch").addEventListener("click", async () => {
     if (!(state.matchupHome && state.matchupAway)) {
@@ -845,6 +887,9 @@ async function downloadMarketplaceItem(item) {
   try {
     const raw = await bridge.DownloadMarketplaceItem(item.type, item.name, item.school, item.url);
     const result = JSON.parse(raw);
+    if (result.success) {
+      try { await bridge.RecordMarketplaceDownload(); } catch (err) { console.error("RecordMarketplaceDownload failed", err); }
+    }
     return !!result.success;
   } catch (err) {
     console.error("downloadMarketplaceItem failed", err);
@@ -1440,6 +1485,7 @@ async function confirmUpload() {
 
     stopProgress();
     recordMyUpload(pendingUpload.type, uploadResult);
+    try { await bridge?.RecordMarketplaceUpload(); } catch (err) { console.error("RecordMarketplaceUpload failed", err); }
     closeUploadDialog();
     showToast(`Uploaded "${name}" to ${albumTeam.name}!`);
     // Re-render whichever grid is currently visible for this album.

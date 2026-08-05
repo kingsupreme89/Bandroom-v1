@@ -32,6 +32,7 @@ internal static class ConfigStore
     public static readonly string DownloadedImagesFolder = Path.Combine(UserDataRoot, "DownloadedImages");
     static readonly string MarketplaceDownloadsManifestPath = Path.Combine(UserDataRoot, "marketplace_downloads.json");
     static readonly string AuthSessionPath = Path.Combine(UserDataRoot, "auth_session.json");
+    static readonly string UserProfilePath = Path.Combine(UserDataRoot, "user_profile.json");
     static readonly string FirstRunFlagPath = Path.Combine(UserDataRoot, ".firstrun_done");
     static readonly string ScorebugPresetPath = Path.Combine(UserDataRoot, "scorebug_preset.txt");
 
@@ -225,6 +226,35 @@ internal static class ConfigStore
     public static void ClearAuthSession()
     {
         if (File.Exists(AuthSessionPath)) File.Delete(AuthSessionPath);
+    }
+
+    /// <summary>The "universal profile" -- favorite team + lifetime stats, distinct from the
+    /// per-team Save Profile feature (ConfigProfileManager, which saves song-to-situation
+    /// assignments for ONE team). This is one record per Bandroom install, always saved locally
+    /// so it works fully signed-out; when signed in with Google it's also mirrored to the
+    /// marketplace worker's /profile endpoint so it can follow the account across devices (see
+    /// WebBridge.SyncProfileToCloud/PullProfileFromCloud). Local is always the source of truth
+    /// for THIS device; cloud sync is best-effort and never blocks local save/load.</summary>
+    public sealed record UserProfile
+    {
+        public string? FavoriteTeam { get; init; }
+        public int GamesWatched { get; init; }
+        public int SongsTriggered { get; init; }
+        public int MarketplaceUploads { get; init; }
+        public int MarketplaceDownloads { get; init; }
+    }
+
+    public static UserProfile LoadUserProfile()
+    {
+        if (!File.Exists(UserProfilePath)) return new UserProfile();
+        try { return JsonSerializer.Deserialize<UserProfile>(File.ReadAllText(UserProfilePath), JsonOptions) ?? new UserProfile(); }
+        catch { return new UserProfile(); } // corrupt file -- start fresh rather than crash startup
+    }
+
+    public static void SaveUserProfile(UserProfile profile)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(UserProfilePath, JsonSerializer.Serialize(profile, JsonOptions));
     }
 
     static bool PathsPointToSameFile(string a, string b) =>

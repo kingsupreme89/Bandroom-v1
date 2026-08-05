@@ -264,6 +264,21 @@
         </div>
         <button id="btn-google-signout" class="btn-ghost">Sign Out</button>
       </div>
+      <!-- Universal profile -- favorite team + lifetime stats. Distinct from the per-team "Save
+           Profile" feature (song-to-situation assignments for one team); this is one record per
+           install, works fully signed-out, and mirrors to the cloud when signed in with Google
+           so it can follow the account across devices (see ConfigStore.UserProfile). -->
+      <div class="save-profile-header" id="profile-favorite-header">Favorite Team</div>
+      <select id="profile-favorite-team" class="team-picker-search"></select>
+
+      <div class="save-profile-header" id="profile-stats-header">Stats</div>
+      <div id="profile-stats-grid">
+        <div class="profile-stat"><span id="profile-stat-games">0</span><label>Games Watched</label></div>
+        <div class="profile-stat"><span id="profile-stat-songs">0</span><label>Songs Triggered</label></div>
+        <div class="profile-stat"><span id="profile-stat-uploads">0</span><label>Uploads</label></div>
+        <div class="profile-stat"><span id="profile-stat-downloads">0</span><label>Downloads</label></div>
+      </div>
+
       <div class="save-profile-actions">
         <button id="btn-close-profile" class="btn-ghost">Close</button>
       </div>

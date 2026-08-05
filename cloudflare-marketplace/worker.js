@@ -43,6 +43,11 @@
 //      trusted for anything that writes shared state (e.g. a future "link uploads to my
 //      account" feature).
 //
+// GET/PUT /profile   header: Authorization: Bearer <sessionToken from /auth/verify>
+//   -> the signed-in user's "universal profile" (favorite team + lifetime stats: games watched,
+//      songs triggered, marketplace uploads/downloads). GET returns {found:false} if nothing's
+//      saved yet. PUT merges favoriteTeam/stats into the existing user:<sub> record.
+//
 // No accounts on uploads YET -- anyone can still upload anonymously via the owner-token system
 // above. /auth/verify exists so a real account system can be built on top without a second
 // migration later, but nothing currently requires being signed in.
@@ -363,6 +368,46 @@ export default {
       meta.reports = (meta.reports ?? 0) + 1;
       await env.MARKETPLACE_META.put(metaKey, JSON.stringify(meta));
       return jsonResponse({ reports: meta.reports });
+    }
+
+    // GET/PUT /profile   header: Authorization: Bearer <sessionToken from /auth/verify>
+    //   -> the "universal profile" (favorite team + lifetime stats) mirrored here so it follows
+    //      a signed-in account across devices/reinstalls. Local storage on each device is always
+    //      the real source of truth day-to-day (see ConfigStore.UserProfile) -- this is a
+    //      best-effort sync target, pulled once on sign-in and pushed on every local change.
+    if (url.pathname === "/profile" && (request.method === "GET" || request.method === "PUT")) {
+      const authHeader = request.headers.get("authorization") ?? "";
+      const sessionToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      if (!sessionToken) return new Response("missing session token", { status: 401, headers: cors() });
+
+      const sub = await env.MARKETPLACE_META.get(`session:${sessionToken}`);
+      if (!sub) return new Response("invalid or expired session", { status: 401, headers: cors() });
+
+      const userKey = `user:${sub}`;
+      const existingRaw = await env.MARKETPLACE_META.get(userKey);
+      const existing = existingRaw ? JSON.parse(existingRaw) : null;
+
+      if (request.method === "GET") {
+        if (!existing || (!existing.favoriteTeam && !existing.stats)) {
+          return jsonResponse({ found: false });
+        }
+        return jsonResponse({ found: true, favoriteTeam: existing.favoriteTeam ?? null, stats: existing.stats ?? {} });
+      }
+
+      // PUT -- merge favoriteTeam/stats into whatever profile fields /auth/verify already wrote
+      // (email/name/picture/createdAt) rather than overwriting them.
+      let body;
+      try { body = await request.json(); } catch { return new Response("bad request", { status: 400, headers: cors() }); }
+      const favoriteTeam = typeof body?.favoriteTeam === "string" ? sanitizeSegment(body.favoriteTeam) : (existing?.favoriteTeam ?? null);
+      const stats = body?.stats && typeof body.stats === "object" ? {
+        gamesWatched: Number(body.stats.gamesWatched) || 0,
+        songsTriggered: Number(body.stats.songsTriggered) || 0,
+        marketplaceUploads: Number(body.stats.marketplaceUploads) || 0,
+        marketplaceDownloads: Number(body.stats.marketplaceDownloads) || 0,
+      } : (existing?.stats ?? {});
+
+      await env.MARKETPLACE_META.put(userKey, JSON.stringify({ ...(existing ?? {}), favoriteTeam, stats }));
+      return jsonResponse({ favoriteTeam, stats });
     }
 
     if (url.pathname.startsWith("/item/") && request.method === "DELETE") {

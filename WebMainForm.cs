@@ -219,6 +219,35 @@ public sealed class WebMainForm : Form
         SetGameTeamsFromWeb(homeName, awayName);
         _matchupLocked = true;
         PlayGametimeSound();
+        RecordGameWatched();
+    }
+
+    /// <summary>Bumps the universal profile's lifetime "games watched" counter -- see
+    /// ConfigStore.UserProfile. Fire-and-forget cloud sync, local save is what actually matters
+    /// here since it must never delay/interrupt GAMETIME locking in.</summary>
+    static void RecordGameWatched()
+    {
+        var current = ConfigStore.LoadUserProfile();
+        var updated = current with { GamesWatched = current.GamesWatched + 1 };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    static DateTime _lastSongTriggerCloudSync = DateTime.MinValue;
+
+    /// <summary>Bumps "songs triggered" for every real in-game cue (FireEvent), including down:*
+    /// triggers which fire on nearly every single play -- the local file write stays per-trigger
+    /// (cheap), but the cloud push is throttled to at most once every 30s so a live game never
+    /// turns into a rapid-fire network hammer against the marketplace worker.</summary>
+    static void RecordSongTriggered()
+    {
+        var current = ConfigStore.LoadUserProfile();
+        var updated = current with { SongsTriggered = current.SongsTriggered + 1 };
+        ConfigStore.SaveUserProfile(updated);
+
+        if (DateTime.UtcNow - _lastSongTriggerCloudSync < TimeSpan.FromSeconds(30)) return;
+        _lastSongTriggerCloudSync = DateTime.UtcNow;
+        _ = ProfileSyncService.PushAsync(updated);
     }
 
     public bool IsMatchupLockedFromWeb() => _matchupLocked;
@@ -663,6 +692,7 @@ public sealed class WebMainForm : Form
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
         {
             AudioPlayer.Play(entry.AudioFile, volumeOverride, interruptPrevious: true);
+            RecordSongTriggered();
             // Names exactly which trigger OCR just read as a small on-screen flash, so a user can
             // confirm what fired without digging through logs -- this call isn't gated on
             // _webView.CoreWebView2 being non-null elsewhere in this file only because FireEvent
