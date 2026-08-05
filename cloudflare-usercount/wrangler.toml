@@ -5,5 +5,5 @@ compatibility_date = "2024-01-01"
 # Created by `wrangler kv namespace create USERCOUNT` -- paste the id it prints
 # into both lines below (the second is only used by `wrangler dev` locally).
 kv_namespaces = [
-  { binding = "USERCOUNT", id = "REPLACE_WITH_KV_NAMESPACE_ID" }
+  { binding = "USERCOUNT", id = "39a5b13918c4490c9ae1627a4d64ecf0" }
 ]

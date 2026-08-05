@@ -55,7 +55,7 @@ function enableDockMagnify(gridEl) {
     if (tile === current) setScale(tile, 2);
   });
 }
-for (const id of ["team-grid", "team-picker-grid", "matchup-away-grid", "matchup-home-grid", "onboarding-grid"]) {
+for (const id of ["team-grid", "team-picker-grid", "matchup-away-grid", "matchup-home-grid", "onboarding-grid", "bandroom-team-grid"]) {
   enableDockMagnify(document.getElementById(id));
 }
 
@@ -120,15 +120,11 @@ async function init() {
 }
 
 async function pollUserCount() {
-  if (!bridge) return;
-  const el = document.getElementById("user-count");
-  const count = await bridge.GetActiveUserCount();
-  if (count < 0) {
-    el.hidden = true;
-  } else {
-    el.hidden = false;
-    el.textContent = `· ${count} watching now`;
-  }
+  const el = document.getElementById("ticker-text");
+  const count = bridge ? await bridge.GetActiveUserCount() : -1;
+  el.textContent = count < 0
+    ? "-- band members online"
+    : `${count} band member${count === 1 ? "" : "s"} online`;
   setTimeout(pollUserCount, 30000);
 }
 
@@ -161,7 +157,7 @@ function squareUpTiles(gridEl) {
   });
 }
 window.addEventListener("resize", () => {
-  for (const id of ["team-grid", "team-picker-grid", "matchup-away-grid", "matchup-home-grid", "onboarding-grid"])
+  for (const id of ["team-grid", "team-picker-grid", "matchup-away-grid", "matchup-home-grid", "onboarding-grid", "bandroom-team-grid"])
     squareUpTiles(document.getElementById(id));
 });
 
@@ -345,6 +341,10 @@ function setWatching(mode) {
 function wireControls() {
   document.getElementById("btn-watch").addEventListener("click", async () => {
     const next = await bridge?.ToggleWatching();
+    if (next === "no-matchup") {
+      alert("Set Matchup first — Bandroom needs to know both teams' colors before it can watch the game.");
+      return;
+    }
     setWatching(next ?? (state.watching === "off" ? "watching" : "off"));
   });
 
@@ -365,6 +365,19 @@ function wireControls() {
     if (e.button === 0 && !e.target.closest("button")) bridge?.BeginDrag();
   });
   document.getElementById("btn-update").addEventListener("click", () => bridge?.ShowUpdate());
+  document.getElementById("btn-bandroom-cloud").addEventListener("click", openBandroomMarketplace);
+  document.getElementById("btn-close-bandroom").addEventListener("click", closeBandroomMarketplace);
+  document.getElementById("bandroom-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "bandroom-overlay") closeBandroomMarketplace();
+  });
+  document.getElementById("bandroom-search").addEventListener("input", (e) => renderBandroomTeamGrid(e.target.value));
+
+  document.getElementById("btn-close-bandroom-album").addEventListener("click", closeTeamAlbum);
+  document.getElementById("bandroom-album-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "bandroom-album-overlay") closeTeamAlbum();
+  });
+  document.getElementById("tab-sound-bank").addEventListener("click", () => setAlbumTab("songs"));
+  document.getElementById("tab-trophy-room").addEventListener("click", () => setAlbumTab("images"));
   document.getElementById("btn-reset").addEventListener("click", () => bridge?.ResetTeamProfile());
 
   document.getElementById("slider-volume").addEventListener("input", (e) => {
@@ -588,6 +601,83 @@ function renderTeamGridInto(gridId, filter, onPick) {
     grid.appendChild(sw);
   }
   squareUpTiles(grid);
+}
+
+function openBandroomMarketplace() {
+  document.getElementById("bandroom-overlay").hidden = false;
+  const search = document.getElementById("bandroom-search");
+  search.value = "";
+  renderBandroomTeamGrid("");
+  search.focus();
+}
+
+function closeBandroomMarketplace() {
+  document.getElementById("bandroom-overlay").hidden = true;
+}
+
+function renderBandroomTeamGrid(filter) {
+  renderTeamGridInto("bandroom-team-grid", filter, (name) => openTeamAlbum(name));
+}
+
+let albumTeam = null;
+
+function openTeamAlbum(name) {
+  const team = state.teams.find((t) => t.name === name);
+  if (!team) return;
+  albumTeam = team;
+  document.getElementById("bandroom-overlay").hidden = true;
+  document.getElementById("bandroom-album-overlay").hidden = false;
+  fillTeamSwatch(document.getElementById("bandroom-album-icon"), team);
+  document.getElementById("bandroom-album-name").textContent = team.name;
+  setAlbumTab("songs");
+}
+
+function closeTeamAlbum() {
+  document.getElementById("bandroom-album-overlay").hidden = true;
+  albumTeam = null;
+}
+
+function setAlbumTab(tab) {
+  document.getElementById("tab-sound-bank").classList.toggle("active", tab === "songs");
+  document.getElementById("tab-trophy-room").classList.toggle("active", tab === "images");
+  document.getElementById("bandroom-songs-grid").hidden = tab !== "songs";
+  document.getElementById("bandroom-images-grid").hidden = tab !== "images";
+  if (tab === "songs") renderSoundBankGrid(); else renderTrophyRoomGrid();
+}
+
+// Sound Bank: fixed 6x5 grid (30 slots). Community upload backend doesn't exist yet -- every
+// slot renders as an empty "+ Upload Song" tile for now, labeled clearly, rather than faking
+// data. Once uploads are wired up, real entries (song name + school name, per the upload
+// prompt spec) replace the empty slots here.
+function renderSoundBankGrid() {
+  const grid = document.getElementById("bandroom-songs-grid");
+  grid.innerHTML = "";
+  for (let i = 0; i < 30; i++) {
+    const tile = document.createElement("div");
+    tile.className = "bandroom-slot bandroom-song-slot";
+    tile.innerHTML = `<span class="bandroom-slot-plus">+</span><span class="bandroom-slot-label">Upload Song</span>`;
+    tile.title = `${albumTeam.name} — upload a song`;
+    tile.addEventListener("click", () => alert("Community sound uploads are coming soon!"));
+    grid.appendChild(tile);
+  }
+}
+
+// Trophy Room: 5x5 grid, scrolls if a team ever has more than fits (scrolling handled by CSS
+// overflow, not JS). Each filled tile would show the team's glowing pulse outline (same
+// technique as .situation-row's team-secondary glow) with a "Set as team background" option --
+// not wired yet since there's no real image data to show.
+function renderTrophyRoomGrid() {
+  const grid = document.getElementById("bandroom-images-grid");
+  grid.innerHTML = "";
+  for (let i = 0; i < 25; i++) {
+    const tile = document.createElement("div");
+    tile.className = "bandroom-slot bandroom-image-slot";
+    tile.style.setProperty("--tile-color", albumTeam.secondary);
+    tile.innerHTML = `<span class="bandroom-slot-plus">+</span><span class="bandroom-slot-label">Upload Image</span>`;
+    tile.title = `${albumTeam.name} — upload a background image`;
+    tile.addEventListener("click", () => alert("Community background uploads are coming soon!"));
+    grid.appendChild(tile);
+  }
 }
 
 async function maybeShowOnboarding() {

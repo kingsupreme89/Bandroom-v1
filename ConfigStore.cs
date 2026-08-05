@@ -25,6 +25,16 @@ internal static class ConfigStore
     public static readonly string TeamBackgroundsFolder = Path.Combine(UserDataRoot, "TeamBackgrounds");
     public static readonly string TeamLogosFolder = Path.Combine(UserDataRoot, "TeamLogos");
     static readonly string FirstRunFlagPath = Path.Combine(UserDataRoot, ".firstrun_done");
+    static readonly string ScorebugPresetPath = Path.Combine(UserDataRoot, "scorebug_preset.txt");
+
+    public static string LoadScorebugPresetName() =>
+        File.Exists(ScorebugPresetPath) ? File.ReadAllText(ScorebugPresetPath).Trim() : ScorebugPreset.KamsCbsScorebug.Name;
+
+    public static void SaveScorebugPresetName(string name)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(ScorebugPresetPath, name);
+    }
 
     /// <summary>One-time migration, run before anything else touches the folders above.
     /// Moves anything left behind in the OLD per-version location (AppContext.BaseDirectory --
@@ -196,6 +206,7 @@ internal static class ConfigStore
             ["Other: Opening Kickoff"] = "situation:kickoff",
             ["Defense: Turnover Forced"] = "situation:turnover",
             ["Defense: Tackle for Loss"] = "loss:tfl",
+            ["Other: Start of 4th Quarter"] = "quarter:4th",
         };
 
         foreach (var (eventName, trigger) in autoDetected)

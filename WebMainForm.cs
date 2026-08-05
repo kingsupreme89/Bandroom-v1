@@ -69,6 +69,7 @@ public sealed class WebMainForm : Form
         _watcher.TackleForLossDetected += OnTackleForLoss;
         _watcher.ResolveTeamColor = ResolveTeamColor;
         _watcher.Log += OnLog;
+        _watcher.ActivePreset = ScorebugPreset.GetByName(ConfigStore.LoadScorebugPresetName());
 
         FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); };
 
@@ -290,6 +291,13 @@ public sealed class WebMainForm : Form
         }
         else
         {
+            // Refuse to start without a Matchup set -- _homeTeam/_awayTeam (and everything
+            // derived from them: ResolveTeamColor, _homeConfig/_awayConfig) stay null until
+            // SetGameTeamsFromWeb runs, which otherwise silently falls back to firing one
+            // team's cues for both sides. Explicit user ask: force Set Matchup first so the
+            // system actually knows both teams' colors before OCR starts.
+            if (_homeTeam is null || _awayTeam is null) return "no-matchup";
+
             _hook.Start();
             _watcher.Start();
             _watching = true;
@@ -313,7 +321,13 @@ public sealed class WebMainForm : Form
             ClearAll: ClearAll,
             Compact: false,
             ToggleCompact: () => { },
-            ResetTeamProfile: ResetTeamProfileFromWeb
+            ResetTeamProfile: ResetTeamProfileFromWeb,
+            ScorebugPresetName: _watcher.ActivePreset.Name,
+            SetScorebugPresetName: name =>
+            {
+                _watcher.ActivePreset = ScorebugPreset.GetByName(name);
+                ConfigStore.SaveScorebugPresetName(name);
+            }
         );
         new SettingsForm(this, opts).ShowDialog(this);
     }
@@ -673,7 +687,7 @@ public sealed class WebMainForm : Form
 
     // Regions whose matched value IS the trigger key ("situation:kickoff", "banner:touchdown")
     // rather than a fixed on/off toggle ("flag:on") -- see GameWatcher.NormalizeMatch.
-    static readonly HashSet<string> ValueKeyedRegions = new(StringComparer.OrdinalIgnoreCase) { "situation", "banner" };
+    static readonly HashSet<string> ValueKeyedRegions = new(StringComparer.OrdinalIgnoreCase) { "situation", "banner", "quarter" };
 
     // situation:touchdown/turnover need to know WHO did it, not just that it happened --
     // resolved via _possession (GameWatcher's color-sampled read of the same ribbon) when a

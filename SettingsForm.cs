@@ -13,13 +13,15 @@ internal sealed class SettingsForm : Form
         ReverbPreset Reverb, Action<ReverbPreset> SetReverb,
         Action StopPlayback, Action OpenSongsFolder, Action ClearAll,
         bool Compact, Action ToggleCompact,
-        Action ResetTeamProfile);
+        Action ResetTeamProfile,
+        string ScorebugPresetName, Action<string> SetScorebugPresetName);
 
     readonly Options _opts;
     NumericUpDown _numPreRoll = null!, _numFadeStart = null!, _numFadeOut = null!, _numCooldown = null!;
     TrackBar _volumeSlider = null!;
     Label _lblVolume = null!;
     ComboBox _cboReverb = null!;
+    ComboBox _cboScorebugPreset = null!;
     CheckBox _chkAlwaysOnTop = null!;
 
     public SettingsForm(IWin32Window owner, Options opts)
@@ -28,7 +30,7 @@ internal sealed class SettingsForm : Form
 
         Text = "Settings";
         Width = 400;
-        Height = 620;
+        Height = 660;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
@@ -91,6 +93,19 @@ internal sealed class SettingsForm : Form
         _cboReverb.SelectedIndex = (int)_opts.Reverb;
         _cboReverb.SelectedIndexChanged += (_, _) => _opts.SetReverb((ReverbPreset)_cboReverb.SelectedIndex);
         Controls.Add(_cboReverb);
+        y += 40;
+
+        // "Kam's CBS Scorebug" is the only preset today -- saved here so a future broadcast
+        // skin (or a completely different game) can be added as a new ScorebugPreset entry and
+        // picked without touching code, exactly like the Reverb combo above.
+        var lblScorebug = new Label { Text = "Scorebug position:", Left = 12, Top = y + 3, AutoSize = true, ForeColor = Theme.TextSecondary };
+        Controls.Add(lblScorebug);
+        _cboScorebugPreset = new ComboBox { Left = 150, Top = y, Width = 200, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, BackColor = Theme.CardBg, ForeColor = Theme.TextPrimary };
+        foreach (var preset in ScorebugPreset.AllPresets) _cboScorebugPreset.Items.Add(preset.Name);
+        _cboScorebugPreset.SelectedItem = _opts.ScorebugPresetName;
+        if (_cboScorebugPreset.SelectedIndex < 0) _cboScorebugPreset.SelectedIndex = 0;
+        _cboScorebugPreset.SelectedIndexChanged += (_, _) => _opts.SetScorebugPresetName((string)_cboScorebugPreset.SelectedItem!);
+        Controls.Add(_cboScorebugPreset);
         y += 40;
 
         var div2 = new Panel { Left = 12, Top = y, Width = 360, Height = 1, BackColor = Theme.Divider };

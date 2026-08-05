@@ -14,7 +14,7 @@ internal static class UserCountService
 {
     // Set this once cloudflare-usercount/DEPLOY.md has been run and you have a real
     // workers.dev URL. Left blank == feature quietly does nothing.
-    const string Endpoint = "";
+    const string Endpoint = "https://bandroom-usercount.bandroom.workers.dev";
 
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(5) };
     static readonly string InstallIdPath = Path.Combine(AppContext.BaseDirectory, ".install_id");

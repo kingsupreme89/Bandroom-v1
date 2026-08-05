@@ -40,16 +40,24 @@
         <span id="team-name">General</span>
         <span class="header-sep">·</span>
         <button id="btn-matchup" class="matchup-btn" title="Pick who's home and away for this game">Set Matchup</button>
-        <span id="user-count" class="user-count" hidden></span>
       </div>
       <div class="header-right">
         <button id="btn-watch" class="pill pill-off" title="Toggle watching">
           <span class="watch-dot"></span>
           <span id="watch-label">Start Watching</span>
         </button>
+        <!-- Placeholder for "The Bandroom" cloud marketplace tab (sound bank / trophy room /
+             community uploads) -- not wired up yet, just marking its spot in the header. -->
+        <button id="btn-bandroom-cloud" class="pill pill-rainbow" title="The Bandroom (coming soon)">
+          The Bandroom
+        </button>
         <!-- Favorite-team badge -- shows the currently active team at a glance, click opens
              the full team picker. Sits right next to the update button on purpose. -->
         <div id="header-team-badge" class="team-swatch header-team-badge" title="Switch which team's sound profile you're editing (use Set Matchup to pick home/away)"></div>
+        <!-- Subtle presence indicator -- just a small flashing dot, count shown on hover via
+             title rather than a persistent number, so it stays out of the way in the toolbar.
+             The big ESPN-style bottom ticker is for upload activity, not this. -->
+        <span id="presence-dot" class="presence-dot" title="Connecting…"></span>
         <button id="btn-update" class="btn-update dim" title="You're on the latest version">Up to date</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
         <div class="window-controls">
@@ -169,6 +177,40 @@
     </div>
   </div>
 
+  <!-- "The Bandroom" cloud marketplace -- same team icons/logos as everywhere else in the app
+       (fillTeamSwatch), same dock-magnify hover. Picking a team opens its "album" below. -->
+  <div id="bandroom-overlay" hidden>
+    <div id="bandroom-picker" class="glass">
+      <div class="team-picker-header">
+        <span>The Bandroom</span>
+        <button id="btn-close-bandroom" class="icon-btn">&times;</button>
+      </div>
+      <input type="text" id="bandroom-search" placeholder="Search teams..." class="team-picker-search" />
+      <div class="team-picker-grid" id="bandroom-team-grid"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- A team's album -- Sound Bank (songs, 6x5 grid) / Trophy Room (images, 5x5 scrollable
+       grid). Community uploads aren't live yet -- slots show as empty "+ Upload" tiles until
+       the upload backend exists, so the layout is real even though it's not wired to data. -->
+  <div id="bandroom-album-overlay" hidden>
+    <div id="bandroom-album" class="glass">
+      <div class="team-picker-header">
+        <div class="bandroom-album-title">
+          <span class="team-swatch bandroom-album-icon" id="bandroom-album-icon"></span>
+          <span id="bandroom-album-name">Team</span>
+        </div>
+        <button id="btn-close-bandroom-album" class="icon-btn">&times;</button>
+      </div>
+      <div class="bandroom-album-tabs">
+        <button class="bandroom-album-tab active" id="tab-sound-bank">Sound Bank</button>
+        <button class="bandroom-album-tab" id="tab-trophy-room">Trophy Room</button>
+      </div>
+      <div class="bandroom-album-grid bandroom-songs-grid" id="bandroom-songs-grid"><!-- 6x5, populated by app.js --></div>
+      <div class="bandroom-album-grid bandroom-images-grid" id="bandroom-images-grid" hidden><!-- 5x5 scrollable, populated by app.js --></div>
+    </div>
+  </div>
+
   <!-- Matchup picker / GAMETIME -- pick who's home and away for this game so the app can
        auto-load BOTH teams' own saved profiles and play the right side's song when OCR detects
        who actually scored/forced a turnover, instead of always assuming "the active team". -->
@@ -256,6 +298,18 @@
       <div class="update-actions" id="update-actions" hidden>
         <button id="btn-update-restart" class="btn-primary">Restart Now</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Persistent bottom ticker, ESPN-style: a fixed logo tile on the far left (same
+       team-colored brand-mark as the header), scrolling upload activity ("<song/image name> —
+       <school name>") behind/into it. NOT the online-count -- that's the small presence-dot in
+       the header toolbar now. Shows a placeholder line until real uploads exist (Sound
+       Bank/Trophy Room backend isn't built yet). -->
+  <div id="bandroom-ticker">
+    <span class="brand-mark ticker-logo">B</span>
+    <div class="ticker-track">
+      <span id="ticker-text" class="ticker-scroll">No uploads yet — be the first to add a song or background in The Bandroom!</span>
     </div>
   </div>
 

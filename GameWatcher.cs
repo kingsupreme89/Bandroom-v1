@@ -41,6 +41,29 @@ internal sealed class GameWatcher
     /// possession never fires.</summary>
     public Func<Color, string?>? ResolveTeamColor;
 
+    /// <summary>Which named crop-position preset (see ScorebugPreset.cs) is currently applied
+    /// to the down/situation/quarter band and the possession-color box. Setting this re-applies
+    /// the new preset's fractions to the live regions immediately, so a change takes effect on
+    /// the very next poll without needing a restart.</summary>
+    ScorebugPreset _activePreset = ScorebugPreset.KamsCbsScorebug;
+    public ScorebugPreset ActivePreset
+    {
+        get => _activePreset;
+        set { _activePreset = value; ApplyScorebugPreset(value); }
+    }
+
+    void ApplyScorebugPreset(ScorebugPreset preset)
+    {
+        foreach (var region in _regions)
+        {
+            if (region.Name is "down" or "situation" or "quarter")
+            {
+                region.FxY = preset.BandFxY;
+                region.FxH = preset.BandFxH;
+            }
+        }
+    }
+
     /// <summary>Fires when the down/distance ribbon shows a negative distance-to-go (e.g.
     /// "3rd & -4") -- confirmed via a live screenshot that the ribbon reads down and distance
     /// together as one string ("3rd & 7"), so no new OCR region was needed, just a wider regex
@@ -62,13 +85,23 @@ internal sealed class GameWatcher
 
     readonly List<WatchedRegion> _regions = new()
     {
-        // Calibrated against a LIVE gameplay screenshot (bottom-right score bug) --
-        // NOT the pause menu, whose scoreboard sits mid-screen in a different spot.
+        // Spans the FULL WIDTH of the bottom score-bug band rather than one tight box, because
+        // the college football broadcast rotates between several overlay skins (CBS/ABC/FOX/
+        // ESPN) that each place the down/distance text at a different X position along that
+        // same bottom strip. Widening horizontally (instead of calibrating one skin's exact
+        // box) means any of them still gets caught. Vertical band widened slightly too as a
+        // margin of safety across skins with slightly different bug heights/positions.
+        // NOTE: possession-color sampling does NOT use this crop -- see PossessionCropRect,
+        // which keeps the original tight box so widening this one doesn't wash out the color
+        // read with background/crowd pixels.
+        // Requires "&" right after the ordinal (e.g. "3rd & 7") -- the down/distance combo is
+        // the ONLY place that pattern renders in this bug, which disambiguates it from the
+        // quarter indicator below now that both share the same full-width capture band.
         new WatchedRegion
         {
             Name = "down",
-            FxX = 0.65, FxY = 0.85, FxW = 0.14, FxH = 0.09,
-            Pattern = new Regex(@"\b(1st|2nd|3rd|4th)\b", RegexOptions.IgnoreCase),
+            FxX = 0, FxY = 0.83, FxW = 1.0, FxH = 0.14,
+            Pattern = new Regex(@"\b(1st|2nd|3rd|4th)\b(?=\s*&)", RegexOptions.IgnoreCase),
         },
         // Penalty/flag banner -- NOT calibrated yet (FxW/FxH left at 0, so it's skipped).
         // Next time a flag happens in a live game, grab a screenshot of where the banner
@@ -88,8 +121,23 @@ internal sealed class GameWatcher
         new WatchedRegion
         {
             Name = "situation",
-            FxX = 0.65, FxY = 0.85, FxW = 0.14, FxH = 0.09,
+            FxX = 0, FxY = 0.83, FxW = 1.0, FxH = 0.14,
             Pattern = new Regex(@"\b(KICKOFF|PAT\s*GOOD|TOUCHDOWN|INTERCEPTED|FUMBLE|TURNOVER)\b", RegexOptions.IgnoreCase),
+        },
+        // Quarter indicator -- reads the HUD's quarter number (sits between the score and the
+        // game clock in the bottom scorebug, e.g. "1st | 5:11 | -- | KICKOFF") so we can
+        // edge-trigger "Other: Start of 4th Quarter". Shares the same full-width band as
+        // "down"/"situation" above for the same broadcast-skin-independence reason -- the
+        // quarter text lives in the same score-bug row, just at a different X per skin.
+        // Negative lookahead excludes an ordinal followed by "&" so this never matches the
+        // down/distance combo instead (see "down" above) -- reading order in the bug always
+        // puts the quarter text before down/distance, so the first non-"&" ordinal found here
+        // is reliably the quarter, not a down.
+        new WatchedRegion
+        {
+            Name = "quarter",
+            FxX = 0, FxY = 0.83, FxW = 1.0, FxH = 0.14,
+            Pattern = new Regex(@"\b(1st|2nd|3rd|4th)\b(?!\s*&)", RegexOptions.IgnoreCase),
         },
         // The big full-screen scoring banner (e.g. "TOUCHDOWN") -- a wide white ribbon
         // across the middle-bottom of the screen, NOT the small persistent scorebug.
@@ -175,7 +223,7 @@ internal sealed class GameWatcher
 
                     if (region.Name == "down")
                     {
-                        SamplePossession(bmp);
+                        SamplePossessionFromWindow(rect, winW, winH);
                         CheckForLossOfYards(text);
                     }
 
@@ -227,7 +275,30 @@ internal sealed class GameWatcher
     /// to "home"/"away"/null via ResolveTeamColor, edge-triggering PossessionChanged the same
     /// way OCR'd regions do (with the same Cooldown, to avoid flicker firing on a single bad
     /// frame). Averaging the whole crop (not one sample pixel) means the mostly-solid-color
-    /// background dominates even with the down/distance digits drawn on top.</summary>
+    /// background dominates even with the down/distance digits drawn on top.
+    ///
+    /// Deliberately NOT reusing the (now full-width) "down" region's bitmap -- that crop was
+    /// widened for broadcast-skin-independent text OCR (see the "down" WatchedRegion comment
+    /// above) and would wash out the color average with crowd/background pixels outside the
+    /// actual ribbon. Possession color sampling stays on this original tight box, calibrated
+    /// against the CBS Sports skin; if the ribbon color itself needs skin-independence too,
+    /// that's a separate, harder problem (would need locating the ribbon dynamically, not just
+    /// widening a crop) -- flag it if this stops matching on a different broadcast skin.</summary>
+    void SamplePossessionFromWindow(Native.RECT rect, int winW, int winH)
+    {
+        int cropX = rect.Left + (int)(winW * _activePreset.PossessionFxX);
+        int cropY = rect.Top + (int)(winH * _activePreset.PossessionFxY);
+        int cropW = (int)(winW * _activePreset.PossessionFxW);
+        int cropH = (int)(winH * _activePreset.PossessionFxH);
+
+        using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.CopyFromScreen(cropX, cropY, 0, 0, new Size(cropW, cropH));
+        }
+        SamplePossession(bmp);
+    }
+
     void SamplePossession(Bitmap bmp)
     {
         if (ResolveTeamColor == null) return;
