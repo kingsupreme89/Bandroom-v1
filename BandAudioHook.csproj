@@ -48,8 +48,8 @@
     <Content Include="Assets\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <!-- Gitignored (see GoogleAuthService.cs's ClientSecret) -- kept out of the public source
-         repo per GitHub's push protection, but still needs to ship INSIDE the built app so every
+    <!-- Gitignored (see GoogleAuthService.cs's ClientSecret): kept out of the public source repo
+         per GitHub's push protection, but still needs to ship INSIDE the built app so every
          installed copy can complete Google sign-in, not just this dev machine. Condition means a
          fresh clone without the file still builds fine (sign-in just stays inert, same as before
          the Client ID was ever configured). -->

@@ -1495,6 +1495,21 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   width: 100%;
   box-sizing: border-box;
   margin: 0 0 4px;
+  color-scheme: dark;
+}
+/* WebView2/Chromium renders a <select>'s OPEN dropdown list with native OS chrome by default --
+   that's the plain white "MS-DOS" popup, completely ignoring the dark glass theme applied to the
+   closed control itself. color-scheme:dark above gets the browser's own popup chrome (scrollbar,
+   default background) into dark mode; explicitly styling <option> here (Chromium, unlike some
+   other engines, does honor background-color/color on individual options) finishes the job. */
+#profile-favorite-team option {
+  background: #12181d;
+  color: var(--text-primary);
+}
+#profile-favorite-team option:checked,
+#profile-favorite-team option:hover {
+  background: var(--team-secondary, var(--accent));
+  color: #06222a;
 }
 #profile-stats-grid {
   display: grid;
