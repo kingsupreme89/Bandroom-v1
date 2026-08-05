@@ -131,7 +131,19 @@ internal static class ConfigStore
         public DateTime DownloadedAt { get; init; } = DateTime.UtcNow;
     }
 
+    // Guards every read-modify-write of the manifest file. Downloads happen on background async
+    // continuations (WebView2 host-object calls aren't serialized onto one thread), so two
+    // near-simultaneous downloads -- or a download racing a delete from the My Downloads tab --
+    // could otherwise both load the same "before" list, each add/remove their own entry, and
+    // whichever writes last silently wins, dropping the other's change on the floor.
+    static readonly object MarketplaceDownloadsLock = new();
+
     public static List<MarketplaceDownloadEntry> LoadMarketplaceDownloads()
+    {
+        lock (MarketplaceDownloadsLock) return LoadMarketplaceDownloadsUnlocked();
+    }
+
+    static List<MarketplaceDownloadEntry> LoadMarketplaceDownloadsUnlocked()
     {
         if (!File.Exists(MarketplaceDownloadsManifestPath)) return new List<MarketplaceDownloadEntry>();
         try
@@ -153,26 +165,32 @@ internal static class ConfigStore
     /// double-click), it's replaced rather than duplicated.</summary>
     public static MarketplaceDownloadEntry RecordMarketplaceDownload(string type, string name, string school, string path)
     {
-        var entries = LoadMarketplaceDownloads();
-        entries.RemoveAll(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
-        var entry = new MarketplaceDownloadEntry { Type = type, Name = name, School = school, Path = path };
-        entries.Add(entry);
-        SaveMarketplaceDownloads(entries);
-        return entry;
+        lock (MarketplaceDownloadsLock)
+        {
+            var entries = LoadMarketplaceDownloadsUnlocked();
+            entries.RemoveAll(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
+            var entry = new MarketplaceDownloadEntry { Type = type, Name = name, School = school, Path = path };
+            entries.Add(entry);
+            SaveMarketplaceDownloads(entries);
+            return entry;
+        }
     }
 
     /// <summary>Removes a "My Downloads" entry and deletes its local file. Returns false if the
     /// id wasn't found (already removed, stale UI) -- not an error, just a no-op.</summary>
     public static bool RemoveMarketplaceDownload(string id)
     {
-        var entries = LoadMarketplaceDownloads();
-        var entry = entries.FirstOrDefault(e => e.Id == id);
-        if (entry == null) return false;
+        lock (MarketplaceDownloadsLock)
+        {
+            var entries = LoadMarketplaceDownloadsUnlocked();
+            var entry = entries.FirstOrDefault(e => e.Id == id);
+            if (entry == null) return false;
 
-        entries.Remove(entry);
-        SaveMarketplaceDownloads(entries);
-        try { if (File.Exists(entry.Path)) File.Delete(entry.Path); } catch { /* best-effort */ }
-        return true;
+            entries.Remove(entry);
+            SaveMarketplaceDownloads(entries);
+            try { if (File.Exists(entry.Path)) File.Delete(entry.Path); } catch { /* best-effort */ }
+            return true;
+        }
     }
 
     static bool PathsPointToSameFile(string a, string b) =>
