@@ -31,7 +31,21 @@
 // GET /leaderboard?type=song|image
 //   -> { schools: [{ school, count }, ...] }, sorted by count descending. Per-team upload counts.
 //
-// No accounts -- anyone can upload. Deliberately small/simple for a first version.
+// POST /auth/verify   { idToken: "<Google ID token from the desktop app's OAuth flow>" }
+//   -> verifies the token's RS256 signature against Google's published JWKS, checks iss/aud/exp,
+//      upserts "user:<sub>" in KV with the profile, mints a random app session token stored as
+//      "session:<token>" -> sub (30-day TTL), returns { sessionToken, profile }.
+//   -> Scaffolded ahead of the app actually having a real Google OAuth Client ID configured
+//      (see GoogleAuthService.cs) -- safe to deploy now since nothing calls it until that's set.
+//   -> This is the ONLY place a Google identity gets trusted server-side. The desktop app also
+//      decodes the ID token locally for immediate display, but that's explicitly NOT
+//      signature-verified there -- only this endpoint's verification result should ever be
+//      trusted for anything that writes shared state (e.g. a future "link uploads to my
+//      account" feature).
+//
+// No accounts on uploads YET -- anyone can still upload anonymously via the owner-token system
+// above. /auth/verify exists so a real account system can be built on top without a second
+// migration later, but nothing currently requires being signed in.
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25MB -- generous for a song clip or a background image
 
@@ -56,6 +70,64 @@ function sanitizeSegment(s) {
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...cors(), "Content-Type": "application/json" } });
+}
+
+// Google's OAuth "Desktop app" client type -- ID tokens it issues always carry this issuer/
+// audience. Kept here (not in a KV/env binding) since it's public information, not a secret --
+// same reasoning as GoogleAuthService.ClientId on the app side.
+const GOOGLE_CLIENT_ID = "REPLACE_WITH_DESKTOP_OAUTH_CLIENT_ID.apps.googleusercontent.com";
+const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
+
+function base64UrlToUint8Array(b64url) {
+  const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/").padEnd(b64url.length + (4 - (b64url.length % 4)) % 4, "=");
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function base64UrlToJson(b64url) {
+  return JSON.parse(new TextDecoder().decode(base64UrlToUint8Array(b64url)));
+}
+
+let _jwksCache = null; // { keys, fetchedAt } -- Google's keys rotate infrequently; cache in-memory per isolate
+async function getGoogleJwks() {
+  if (_jwksCache && Date.now() - _jwksCache.fetchedAt < 60 * 60 * 1000) return _jwksCache.keys;
+  const res = await fetch(GOOGLE_JWKS_URL);
+  const data = await res.json();
+  _jwksCache = { keys: data.keys, fetchedAt: Date.now() };
+  return data.keys;
+}
+
+/// Verifies a Google-issued RS256 ID token's signature (via Web Crypto, no external library
+/// needed -- Workers ship SubtleCrypto) plus issuer/audience/expiry. Returns the decoded payload
+/// on success, or null on ANY failure -- callers must treat null as "not authenticated", never
+/// fall back to trusting the unverified payload.
+async function verifyGoogleIdToken(idToken) {
+  const parts = idToken.split(".");
+  if (parts.length !== 3) return null;
+  const [headerB64, payloadB64, sigB64] = parts;
+
+  let header, payload;
+  try { header = base64UrlToJson(headerB64); payload = base64UrlToJson(payloadB64); }
+  catch { return null; }
+
+  if (payload.aud !== GOOGLE_CLIENT_ID) return null;
+  if (payload.iss !== "https://accounts.google.com" && payload.iss !== "accounts.google.com") return null;
+  if (typeof payload.exp !== "number" || payload.exp * 1000 < Date.now()) return null;
+  if (!payload.sub) return null;
+
+  const keys = await getGoogleJwks();
+  const jwk = keys.find((k) => k.kid === header.kid && k.alg === "RS256");
+  if (!jwk) return null;
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+  const signature = base64UrlToUint8Array(sigB64);
+  const signedData = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
+  const valid = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", cryptoKey, signature, signedData);
+
+  return valid ? payload : null;
 }
 
 async function checkRateLimit(env, request) {
@@ -226,6 +298,35 @@ export default {
       await env.MARKETPLACE_FILES.delete(meta.key);
       await env.MARKETPLACE_META.delete(metaKey);
       return jsonResponse({ deleted: true });
+    }
+
+    if (url.pathname === "/auth/verify" && request.method === "POST") {
+      let body;
+      try { body = await request.json(); } catch { return new Response("bad request", { status: 400, headers: cors() }); }
+      const idToken = body?.idToken;
+      if (!idToken || typeof idToken !== "string") return new Response("bad request", { status: 400, headers: cors() });
+
+      const claims = await verifyGoogleIdToken(idToken);
+      if (!claims) return new Response("invalid token", { status: 401, headers: cors() });
+
+      const profile = {
+        sub: claims.sub,
+        email: claims.email ?? "",
+        name: claims.name ?? claims.email ?? "",
+        picture: claims.picture ?? null,
+      };
+      const existingRaw = await env.MARKETPLACE_META.get(`user:${claims.sub}`);
+      const existing = existingRaw ? JSON.parse(existingRaw) : null;
+      await env.MARKETPLACE_META.put(`user:${claims.sub}`, JSON.stringify({
+        ...profile,
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
+        lastSignInAt: new Date().toISOString(),
+      }));
+
+      const sessionToken = crypto.randomUUID() + crypto.randomUUID();
+      await env.MARKETPLACE_META.put(`session:${sessionToken}`, claims.sub, { expirationTtl: 60 * 60 * 24 * 30 });
+
+      return jsonResponse({ sessionToken, profile });
     }
 
     if (url.pathname.startsWith("/file/") && request.method === "GET") {

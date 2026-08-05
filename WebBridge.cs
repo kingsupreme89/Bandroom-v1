@@ -107,6 +107,101 @@ public sealed class WebBridge
 
     public bool RemoveMyDownload(string id) => ConfigStore.RemoveMarketplaceDownload(id);
 
+    // ---- Google sign-in (scaffolded -- see GoogleAuthService.ClientId, needs a real Google
+    // Cloud OAuth Client ID of type "Desktop app" before this can succeed) ----
+
+    /// <summary>Returns the current local session as JSON ({signedIn:false} if none), or null on
+    /// a corrupt/unreadable session file (treated as signed out).</summary>
+    public string GetCurrentUser()
+    {
+        var session = ConfigStore.LoadAuthSession();
+        return session == null
+            ? JsonSerializer.Serialize(new { signedIn = false })
+            : JsonSerializer.Serialize(new { signedIn = true, name = session.Name, email = session.Email, picture = session.Picture });
+    }
+
+    /// <summary>Runs the full browser-based Google sign-in flow (see GoogleAuthService), then
+    /// exchanges the resulting ID token with the marketplace worker's /auth/verify endpoint for
+    /// an app-level session token, and persists both locally. Returns the same shape as
+    /// GetCurrentUser on success, or {signedIn:false, error:"..."} on any failure -- the flow
+    /// depends on an external browser window and network calls, both of which can fail or be
+    /// abandoned by the user, so this must never throw past the WebView2 call boundary.</summary>
+    public async Task<string> SignInWithGoogle()
+    {
+        try
+        {
+            var profile = await GoogleAuthService.SignInAsync(CancellationToken.None);
+            if (profile == null)
+                return JsonSerializer.Serialize(new { signedIn = false, error = "Sign-in wasn't completed." });
+
+            using var http = new HttpClient();
+            var payload = JsonSerializer.Serialize(new { idToken = profile.IdToken });
+            using var response = await http.PostAsync(
+                "https://bandroom-marketplace.bandroom.workers.dev/auth/verify",
+                new StringContent(payload, System.Text.Encoding.UTF8, "application/json"));
+
+            if (!response.IsSuccessStatusCode)
+                return JsonSerializer.Serialize(new { signedIn = false, error = "Couldn't verify sign-in with the server." });
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            string sessionToken = doc.RootElement.TryGetProperty("sessionToken", out var st) ? st.GetString() ?? "" : "";
+            if (sessionToken.Length == 0)
+                return JsonSerializer.Serialize(new { signedIn = false, error = "Server didn't return a session." });
+
+            ConfigStore.SaveAuthSession(new ConfigStore.AuthSession
+            {
+                Sub = profile.Sub, Email = profile.Email, Name = profile.Name,
+                Picture = profile.Picture, SessionToken = sessionToken,
+            });
+
+            return JsonSerializer.Serialize(new { signedIn = true, name = profile.Name, email = profile.Email, picture = profile.Picture });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SignInWithGoogle failed", ex);
+            return JsonSerializer.Serialize(new { signedIn = false, error = "Sign-in failed -- try again." });
+        }
+    }
+
+    public void SignOutOfGoogle() => ConfigStore.ClearAuthSession();
+
+    /// <summary>Saves a user-cropped custom logo (base64 PNG bytes from the web crop tool's
+    /// canvas) as <paramref name="team"/>'s logo, replacing any existing one under any of
+    /// TeamLogo's recognized extensions -- matches the same "clear stale file under a different
+    /// extension" convention TeamBackgroundDownloadService already uses. Any team can be
+    /// re-logo'd this way; there's no accounts/ownership system to gate it against (this is a
+    /// single-user local app, not the marketplace).</summary>
+    public bool SaveCustomTeamLogo(string team, string base64Png)
+    {
+        if (string.IsNullOrWhiteSpace(team) || string.IsNullOrWhiteSpace(base64Png)) return false;
+        if (TeamColors.All.All(t => t.Name != team)) return false; // only real roster entries
+
+        try
+        {
+            byte[] bytes = Convert.FromBase64String(base64Png);
+            if (bytes.Length == 0 || bytes.Length > 10 * 1024 * 1024) return false; // sanity cap
+
+            Directory.CreateDirectory(ConfigStore.TeamLogosFolder);
+            string safeTeam = System.Text.RegularExpressions.Regex.Replace(team, @"[^\w\s&-]", "").Trim();
+            if (safeTeam.Length == 0) return false;
+
+            foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".webp" })
+            {
+                string oldPath = Path.Combine(ConfigStore.TeamLogosFolder, safeTeam + ext);
+                if (File.Exists(oldPath)) { try { File.Delete(oldPath); } catch { /* best-effort */ } }
+            }
+
+            string outPath = Path.Combine(ConfigStore.TeamLogosFolder, safeTeam + ".png");
+            File.WriteAllBytes(outPath, bytes);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write($"SaveCustomTeamLogo failed for \"{team}\"", ex);
+            return false;
+        }
+    }
+
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
     public void OpenSettings() => _host.OpenSettingsFromWeb();
     public void ShowUpdate() => _host.ShowUpdateDialogFromWeb();

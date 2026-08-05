@@ -31,6 +31,7 @@ internal static class ConfigStore
     /// the two folders would make FindImagePath's single-active-file convention ambiguous.</summary>
     public static readonly string DownloadedImagesFolder = Path.Combine(UserDataRoot, "DownloadedImages");
     static readonly string MarketplaceDownloadsManifestPath = Path.Combine(UserDataRoot, "marketplace_downloads.json");
+    static readonly string AuthSessionPath = Path.Combine(UserDataRoot, "auth_session.json");
     static readonly string FirstRunFlagPath = Path.Combine(UserDataRoot, ".firstrun_done");
     static readonly string ScorebugPresetPath = Path.Combine(UserDataRoot, "scorebug_preset.txt");
 
@@ -191,6 +192,39 @@ internal static class ConfigStore
             try { if (File.Exists(entry.Path)) File.Delete(entry.Path); } catch { /* best-effort */ }
             return true;
         }
+    }
+
+    /// <summary>Locally-persisted sign-in state -- just enough to show "signed in as X" and
+    /// re-attach to the Worker-issued app session on next launch without re-running the full
+    /// browser OAuth flow every time. The Google ID token itself is NOT stored here long-term
+    /// (it's short-lived and single-use for the /auth/verify exchange) -- only the resulting
+    /// app-level SessionToken from the Worker, which is what marketplace calls present instead.</summary>
+    public sealed record AuthSession
+    {
+        public string Sub { get; init; } = "";
+        public string Email { get; init; } = "";
+        public string Name { get; init; } = "";
+        public string? Picture { get; init; }
+        public string SessionToken { get; init; } = "";
+        public DateTime SignedInAt { get; init; } = DateTime.UtcNow;
+    }
+
+    public static AuthSession? LoadAuthSession()
+    {
+        if (!File.Exists(AuthSessionPath)) return null;
+        try { return JsonSerializer.Deserialize<AuthSession>(File.ReadAllText(AuthSessionPath), JsonOptions); }
+        catch { return null; } // corrupt session file -- just treat as signed out, don't crash startup
+    }
+
+    public static void SaveAuthSession(AuthSession session)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(AuthSessionPath, JsonSerializer.Serialize(session, JsonOptions));
+    }
+
+    public static void ClearAuthSession()
+    {
+        if (File.Exists(AuthSessionPath)) File.Delete(AuthSessionPath);
     }
 
     static bool PathsPointToSameFile(string a, string b) =>

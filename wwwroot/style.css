@@ -103,16 +103,33 @@ body {
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  clip-path: polygon(57.4% 0, 58.6% 0, 46.6% 100%, 45.4% 100%);
+  /* Centered exactly on the two halves' own clip-path cut line (56% top / 44% bottom, see
+     #backdrop-vs-away/#backdrop-vs-home above) -- this band used to sit ~2% off to the right of
+     that line at every point, so the glowing "LED" strip didn't actually line up with where the
+     two team backgrounds meet. A wider band (1.6% vs the old 1.2%) also reads more clearly as a
+     deliberate lit strip rather than a hairline. */
+  clip-path: polygon(56.8% 0, 55.2% 0, 43.2% 100%, 44.8% 100%);
   background: linear-gradient(to bottom,
     var(--away-color, var(--accent)) 0%, var(--away-color, var(--accent)) 50%,
     var(--home-color, var(--accent)) 50%, var(--home-color, var(--accent)) 100%);
   filter: drop-shadow(0 0 10px var(--away-color, var(--accent))) drop-shadow(0 0 10px var(--home-color, var(--accent)));
-  animation: vs-seam-pulse 1.8s ease-in-out infinite;
+  animation: vs-seam-pulse 1.6s ease-in-out infinite;
 }
 @keyframes vs-seam-pulse {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
+  /* Pulses actual glow size/intensity, not just opacity -- the old opacity-only pulse (0.6->1)
+     read as barely-there against a bright stadium photo background. Brightness + a second,
+     wider drop-shadow layer at peak make each team's color genuinely stand out and visibly
+     "breathe" the way an LED strip should. */
+  0%, 100% {
+    opacity: 0.75;
+    filter: brightness(1) drop-shadow(0 0 8px var(--away-color, var(--accent))) drop-shadow(0 0 8px var(--home-color, var(--accent)));
+  }
+  50% {
+    opacity: 1;
+    filter: brightness(1.35)
+      drop-shadow(0 0 16px var(--away-color, var(--accent))) drop-shadow(0 0 26px var(--away-color, var(--accent)))
+      drop-shadow(0 0 16px var(--home-color, var(--accent))) drop-shadow(0 0 26px var(--home-color, var(--accent)));
+  }
 }
 .backdrop-vs-half::before {
   /* Dark scrim so the logo/label read clearly over whatever stadium photo (or none) is behind. */
@@ -694,7 +711,8 @@ body {
    etc.) layer their own look on top; this is just the shared press feedback. */
 button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matchup-btn:active {
   filter: brightness(1.4);
-  box-shadow: 0 0 0 2px var(--accent), 0 0 12px 1px rgba(34, 211, 238, 0.6);
+  box-shadow: 0 0 0 2px var(--team-secondary, var(--accent)),
+    0 0 12px 1px color-mix(in srgb, var(--team-secondary, var(--accent)) 60%, transparent);
   transform: translateY(1px);
 }
 
@@ -1352,6 +1370,94 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   padding: 22px;
 }
 #btn-bandroom-upload-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Profile / Google sign-in -- same overlay shell as #logo-crop-overlay/#bandroom-upload-overlay. */
+#profile-overlay {
+  position: fixed; inset: 0; z-index: 65;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#profile-overlay[hidden] { display: none; }
+#profile-dialog { width: min(360px, 90vw); border-radius: var(--radius-panel); padding: 22px; }
+#profile-avatar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+#profile-avatar {
+  width: 48px; height: 48px; border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.06);
+}
+#profile-name { font-weight: 700; font-size: 14px; color: var(--text-primary); }
+#profile-email { font-size: 12px; color: var(--text-muted-2); }
+#btn-google-signin:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Custom team logo crop tool -- same overlay shell/[hidden] pattern as #bandroom-upload-overlay
+   above (same reason: ID selector's display:flex needs an explicit [hidden] override). */
+#logo-crop-overlay {
+  position: fixed; inset: 0; z-index: 65;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#logo-crop-overlay[hidden] { display: none; }
+#logo-crop-dialog {
+  width: min(460px, 90vw);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+}
+#logo-crop-viewport {
+  width: 260px; height: 260px;
+  margin: 4px auto 14px;
+  border-radius: 16px;
+  overflow: hidden;
+  position: relative;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  cursor: grab;
+}
+#logo-crop-viewport:active { cursor: grabbing; }
+#logo-crop-canvas {
+  width: 100%; height: 100%;
+  display: block;
+  touch-action: none;
+}
+#logo-crop-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 24px;
+  font-size: 12.5px;
+  color: var(--text-muted-2);
+  pointer-events: none;
+}
+#logo-crop-controls {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px;
+}
+#logo-crop-controls .btn-ghost { flex: 0 0 auto; }
+#logo-crop-zoom { flex: 1 1 auto; }
+#logo-crop-zoom:disabled { opacity: 0.4; }
+#btn-logo-crop-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Small edit-pencil affordance on team tiles in the main Teams panel -- lets a user jump
+   straight into the crop tool for that specific team without a separate settings screen. Only
+   rendered there (see renderTeamGridInto's showEditLogo param), not in the onboarding/matchup/
+   marketplace team grids, which are quick-pick contexts where this would just be noise. */
+.team-swatch-edit-logo {
+  position: absolute;
+  bottom: 4px; right: 4px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  transform: scale(0.85);
+}
+.team-swatch:hover .team-swatch-edit-logo { opacity: 1; transform: scale(1); }
+.team-swatch-edit-logo:hover { background: rgba(0, 0, 0, 0.8); }
 .save-profile-header {
   font-size: 16px;
   font-weight: 700;
@@ -1498,9 +1604,9 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
 }
 
 @keyframes panel-flash {
-  0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); border-color: var(--glass-border); }
-  30% { box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.5); border-color: var(--accent); }
-  100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); border-color: var(--glass-border); }
+  0% { box-shadow: 0 0 0 0 transparent; border-color: var(--glass-border); }
+  30% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--team-secondary, var(--accent)) 50%, transparent); border-color: var(--team-secondary, var(--accent)); }
+  100% { box-shadow: 0 0 0 0 transparent; border-color: var(--glass-border); }
 }
 .panel-flash { animation: panel-flash 0.9s ease-out; }
 

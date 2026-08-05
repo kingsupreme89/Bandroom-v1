@@ -65,6 +65,7 @@
              title rather than a persistent number, so it stays out of the way in the toolbar.
              The big ESPN-style bottom ticker is for upload activity, not this. -->
         <span id="presence-dot" class="presence-dot" title="Connecting…"></span>
+        <button id="btn-profile" class="icon-btn" title="Profile">👤</button>
         <button id="btn-update" class="btn-update dim" title="You're on the latest version">Up to date</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
         <div class="window-controls">
@@ -236,6 +237,63 @@
       </div>
       <div class="bandroom-album-grid bandroom-songs-grid" id="bandroom-songs-grid"><!-- populated by app.js --></div>
       <div class="bandroom-album-grid bandroom-images-grid" id="bandroom-images-grid" hidden><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- Profile -- Google sign-in scaffolded ahead of a real OAuth Client ID being configured
+       (see GoogleAuthService.cs). Shows "not signed in" state and a disabled-with-explanation
+       sign-in button until that's set up; the plumbing (session persistence, worker verification)
+       is real and ready, not a mockup. -->
+  <div id="profile-overlay" hidden>
+    <div id="profile-dialog" class="glass">
+      <div class="save-profile-header">Profile</div>
+      <div id="profile-signed-out">
+        <p class="save-profile-instructions">
+          Sign in with Google to keep your uploads and settings tied to your account across
+          devices. Optional -- everything in Bandroom still works fully signed out.
+        </p>
+        <button id="btn-google-signin" class="btn-primary">Sign in with Google</button>
+      </div>
+      <div id="profile-signed-in" hidden>
+        <div id="profile-avatar-row">
+          <img id="profile-avatar" alt="" />
+          <div>
+            <div id="profile-name"></div>
+            <div id="profile-email"></div>
+          </div>
+        </div>
+        <button id="btn-google-signout" class="btn-ghost">Sign Out</button>
+      </div>
+      <div class="save-profile-actions">
+        <button id="btn-close-profile" class="btn-ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom team logo crop tool -- upload any image, drag to reposition and use the slider to
+       zoom, and whatever's inside the square window is exactly what gets saved as that team's
+       logo everywhere in the app (team tiles, marketplace song tiles, etc). Fixed square output
+       is what keeps every logo uniform regardless of the source image's own shape/aspect ratio. -->
+  <input type="file" id="logo-crop-file-input" accept="image/*" hidden />
+  <div id="logo-crop-overlay" hidden>
+    <div id="logo-crop-dialog" class="glass">
+      <div class="save-profile-header" id="logo-crop-header">Set Team Logo</div>
+      <p class="save-profile-instructions">
+        Drag the image to reposition it, use the slider to zoom. Whatever shows inside the
+        square becomes the logo -- keep the important part centered.
+      </p>
+      <div id="logo-crop-viewport">
+        <canvas id="logo-crop-canvas" width="400" height="400"></canvas>
+        <div id="logo-crop-empty">Choose an image to get started</div>
+      </div>
+      <div id="logo-crop-controls">
+        <button id="btn-logo-crop-choose" class="btn-ghost">Choose Image...</button>
+        <input type="range" id="logo-crop-zoom" min="100" max="400" value="100" disabled />
+      </div>
+      <div class="save-profile-actions">
+        <button id="btn-logo-crop-cancel" class="btn-ghost">Cancel</button>
+        <button id="btn-logo-crop-confirm" class="btn-primary" disabled>Save Logo</button>
+      </div>
     </div>
   </div>
 

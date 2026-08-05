@@ -368,7 +368,62 @@ function setWatching(mode) {
   else { btn.classList.add("pill-off"); label.textContent = "Start Watching"; }
 }
 
+// ---- Profile / Google sign-in (scaffolded -- see GoogleAuthService.ClientId for setup status) ----
+async function openProfile() {
+  document.getElementById("profile-overlay").hidden = false;
+  await refreshProfileView();
+}
+function closeProfile() {
+  document.getElementById("profile-overlay").hidden = true;
+}
+async function refreshProfileView() {
+  if (!bridge) return;
+  let user;
+  try {
+    user = JSON.parse(await bridge.GetCurrentUser());
+  } catch (err) {
+    console.error("GetCurrentUser failed", err);
+    user = { signedIn: false };
+  }
+  document.getElementById("profile-signed-out").hidden = user.signedIn;
+  document.getElementById("profile-signed-in").hidden = !user.signedIn;
+  if (user.signedIn) {
+    document.getElementById("profile-name").textContent = user.name ?? "";
+    document.getElementById("profile-email").textContent = user.email ?? "";
+    const avatar = document.getElementById("profile-avatar");
+    if (user.picture) avatar.src = user.picture; else avatar.removeAttribute("src");
+  }
+}
+
 function wireControls() {
+  wireLogoCropTool();
+  document.getElementById("btn-profile").addEventListener("click", openProfile);
+  document.getElementById("btn-close-profile").addEventListener("click", closeProfile);
+  document.getElementById("btn-google-signin").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-google-signin");
+    btn.disabled = true;
+    btn.textContent = "Waiting for browser sign-in...";
+    try {
+      const result = JSON.parse(await bridge.SignInWithGoogle());
+      if (result.signedIn) {
+        showToast(`Signed in as ${result.name}.`);
+        await refreshProfileView();
+      } else {
+        showToast(result.error ?? "Sign-in isn't set up yet -- needs a Google OAuth Client ID configured first.");
+      }
+    } catch (err) {
+      console.error("SignInWithGoogle failed", err);
+      showToast("Sign-in failed -- try again.");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Sign in with Google";
+    }
+  });
+  document.getElementById("btn-google-signout").addEventListener("click", async () => {
+    try { await bridge.SignOutOfGoogle(); } catch (err) { console.error("SignOutOfGoogle failed", err); }
+    showToast("Signed out.");
+    await refreshProfileView();
+  });
   document.getElementById("btn-watch").addEventListener("click", async () => {
     if (!(state.matchupHome && state.matchupAway)) {
       showToast("Set Matchup first — pick both teams to unlock watching.");
@@ -581,6 +636,8 @@ function wireControls() {
     else if (!document.getElementById("bandroom-album-overlay").hidden) closeTeamAlbum();
     else if (!document.getElementById("bandroom-overlay").hidden) closeBandroomMarketplace();
     else if (!document.getElementById("my-downloads-overlay").hidden) closeMyDownloads();
+    else if (!document.getElementById("logo-crop-overlay").hidden) closeLogoCropTool();
+    else if (!document.getElementById("profile-overlay").hidden) closeProfile();
   });
 }
 
@@ -650,10 +707,10 @@ function closeTeamPicker() {
 }
 
 function renderTeamPickerGrid(filter) {
-  renderTeamGridInto("team-picker-grid", filter, (name) => { selectTeam(name); closeTeamPicker(); });
+  renderTeamGridInto("team-picker-grid", filter, (name) => { selectTeam(name); closeTeamPicker(); }, /*showEditLogo*/ true);
 }
 
-function renderTeamGridInto(gridId, filter, onPick) {
+function renderTeamGridInto(gridId, filter, onPick, showEditLogo = false) {
   const grid = document.getElementById(gridId);
   grid.innerHTML = "";
   const q = filter.trim().toLowerCase();
@@ -664,6 +721,17 @@ function renderTeamGridInto(gridId, filter, onPick) {
     sw.title = t.name;
     fillTeamSwatch(sw, t);
     sw.addEventListener("click", () => onPick(t.name));
+    if (showEditLogo && t.name !== "General") {
+      const editBtn = document.createElement("button");
+      editBtn.className = "team-swatch-edit-logo";
+      editBtn.title = `Set a custom logo for ${t.name}`;
+      editBtn.textContent = "✎"; // pencil
+      editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openLogoCropTool(t.name);
+      });
+      sw.appendChild(editBtn);
+    }
     grid.appendChild(sw);
   }
   squareUpTiles(grid);
@@ -1598,6 +1666,184 @@ function openMatchupDialog() {
   renderMatchupGrid("home", "");
   renderMatchupGrid("away", "");
   updateMatchupSubtext();
+}
+
+// ---- Custom team logo crop tool ---------------------------------------------------------
+// Draws the source image onto a fixed-size square canvas at a user-controlled pan/zoom, so
+// whatever's visible is a guaranteed 1:1 square regardless of the source image's own shape --
+// that's what keeps every team's logo uniform across the app no matter what file someone picks.
+const LOGO_CROP_SIZE = 400; // canvas pixel size AND the saved output size
+let _logoCropTeam = null;
+let _logoCropImg = null;
+let _logoCropScale = 1; // 1.0 = image's shorter edge exactly fills the square
+let _logoCropOffsetX = 0; // pan offset in canvas pixels
+let _logoCropOffsetY = 0;
+let _logoCropDragging = false;
+let _logoCropDragStart = null;
+
+function openLogoCropTool(teamName) {
+  _logoCropTeam = teamName;
+  _logoCropImg = null;
+  _logoCropScale = 1;
+  _logoCropOffsetX = 0;
+  _logoCropOffsetY = 0;
+  document.getElementById("logo-crop-header").textContent = `Set Logo — ${teamName}`;
+  document.getElementById("logo-crop-empty").hidden = false;
+  document.getElementById("logo-crop-zoom").disabled = true;
+  document.getElementById("logo-crop-zoom").value = 100;
+  document.getElementById("btn-logo-crop-confirm").disabled = true;
+  clearLogoCropCanvas();
+  document.getElementById("logo-crop-overlay").hidden = false;
+}
+
+function closeLogoCropTool() {
+  document.getElementById("logo-crop-overlay").hidden = true;
+  _logoCropTeam = null;
+  _logoCropImg = null;
+}
+
+function clearLogoCropCanvas() {
+  const canvas = document.getElementById("logo-crop-canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function onLogoCropFileChosen(e) {
+  const file = e.target.files?.[0];
+  e.target.value = ""; // allow re-choosing the same file later
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    _logoCropImg = img;
+    _logoCropScale = 1;
+    _logoCropOffsetX = 0;
+    _logoCropOffsetY = 0;
+    document.getElementById("logo-crop-empty").hidden = true;
+    document.getElementById("logo-crop-zoom").disabled = false;
+    document.getElementById("logo-crop-zoom").value = 100;
+    document.getElementById("btn-logo-crop-confirm").disabled = false;
+    drawLogoCrop();
+  };
+  img.onerror = () => showToast("Couldn't open that image -- try a different file.");
+  img.src = url;
+}
+
+function drawLogoCrop() {
+  const canvas = document.getElementById("logo-crop-canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, LOGO_CROP_SIZE, LOGO_CROP_SIZE);
+  if (!_logoCropImg) return;
+  const img = _logoCropImg;
+  // Base fit: cover the square with the image's shorter edge, before user zoom/pan.
+  const baseScale = LOGO_CROP_SIZE / Math.min(img.width, img.height);
+  const scale = baseScale * _logoCropScale;
+  const drawW = img.width * scale;
+  const drawH = img.height * scale;
+  const x = (LOGO_CROP_SIZE - drawW) / 2 + _logoCropOffsetX;
+  const y = (LOGO_CROP_SIZE - drawH) / 2 + _logoCropOffsetY;
+  ctx.drawImage(img, x, y, drawW, drawH);
+}
+
+function clampLogoCropOffsets() {
+  if (!_logoCropImg) return;
+  const img = _logoCropImg;
+  const baseScale = LOGO_CROP_SIZE / Math.min(img.width, img.height);
+  const scale = baseScale * _logoCropScale;
+  const drawW = img.width * scale;
+  const drawH = img.height * scale;
+  // Never let the image pan far enough to leave a gap at any edge of the square.
+  const maxOffX = Math.max(0, (drawW - LOGO_CROP_SIZE) / 2);
+  const maxOffY = Math.max(0, (drawH - LOGO_CROP_SIZE) / 2);
+  _logoCropOffsetX = Math.max(-maxOffX, Math.min(maxOffX, _logoCropOffsetX));
+  _logoCropOffsetY = Math.max(-maxOffY, Math.min(maxOffY, _logoCropOffsetY));
+}
+
+function wireLogoCropTool() {
+  document.getElementById("btn-logo-crop-choose").addEventListener("click", () =>
+    document.getElementById("logo-crop-file-input").click());
+  document.getElementById("logo-crop-file-input").addEventListener("change", onLogoCropFileChosen);
+  document.getElementById("btn-logo-crop-cancel").addEventListener("click", closeLogoCropTool);
+
+  const viewport = document.getElementById("logo-crop-viewport");
+  const canvas = document.getElementById("logo-crop-canvas");
+
+  const startDrag = (clientX, clientY) => {
+    if (!_logoCropImg) return;
+    _logoCropDragging = true;
+    _logoCropDragStart = { x: clientX, y: clientY, offX: _logoCropOffsetX, offY: _logoCropOffsetY };
+  };
+  const moveDrag = (clientX, clientY) => {
+    if (!_logoCropDragging) return;
+    // canvas is CSS-scaled to the 260px viewport but its internal resolution is LOGO_CROP_SIZE --
+    // convert screen-pixel drag distance into canvas-pixel offset so panning tracks the cursor.
+    const rect = canvas.getBoundingClientRect();
+    const scaleFactor = LOGO_CROP_SIZE / rect.width;
+    _logoCropOffsetX = _logoCropDragStart.offX + (clientX - _logoCropDragStart.x) * scaleFactor;
+    _logoCropOffsetY = _logoCropDragStart.offY + (clientY - _logoCropDragStart.y) * scaleFactor;
+    clampLogoCropOffsets();
+    drawLogoCrop();
+  };
+  const endDrag = () => { _logoCropDragging = false; _logoCropDragStart = null; };
+
+  viewport.addEventListener("mousedown", (e) => startDrag(e.clientX, e.clientY));
+  window.addEventListener("mousemove", (e) => moveDrag(e.clientX, e.clientY));
+  window.addEventListener("mouseup", endDrag);
+  viewport.addEventListener("touchstart", (e) => {
+    if (e.touches[0]) startDrag(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  viewport.addEventListener("touchmove", (e) => {
+    if (e.touches[0]) moveDrag(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  viewport.addEventListener("touchend", endDrag);
+
+  document.getElementById("logo-crop-zoom").addEventListener("input", (e) => {
+    _logoCropScale = Number(e.target.value) / 100;
+    clampLogoCropOffsets();
+    drawLogoCrop();
+  });
+
+  document.getElementById("btn-logo-crop-confirm").addEventListener("click", async () => {
+    if (!_logoCropImg || !_logoCropTeam) return;
+    const confirmBtn = document.getElementById("btn-logo-crop-confirm");
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Saving...";
+    try {
+      const dataUrl = canvas.toDataURL("image/png");
+      const base64 = dataUrl.split(",")[1];
+      const ok = bridge ? await bridge.SaveCustomTeamLogo(_logoCropTeam, base64) : false;
+      if (ok) {
+        showToast(`Saved a new logo for ${_logoCropTeam}.`);
+        await refreshTeamsAfterLogoChange();
+        closeLogoCropTool();
+      } else {
+        showToast("Couldn't save that logo -- try again.");
+      }
+    } catch (err) {
+      console.error("SaveCustomTeamLogo failed", err);
+      showToast("Couldn't save that logo -- try again.");
+    } finally {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Save Logo";
+    }
+  });
+}
+
+// Re-fetches state.teams (picking up the new logoUrl) and repaints whatever team UI is
+// currently visible, so the new logo shows immediately instead of needing a restart.
+async function refreshTeamsAfterLogoChange() {
+  if (!bridge) return;
+  try {
+    state.teams = JSON.parse(await bridge.GetTeams());
+  } catch (err) {
+    console.error("GetTeams refresh failed", err);
+    return;
+  }
+  if (!document.getElementById("team-picker-overlay").hidden)
+    renderTeamPickerGrid(document.getElementById("team-picker-search").value);
+  const active = state.teams.find((t) => t.name === state.activeTeam);
+  if (active) updateHeaderTeamBadge(active);
 }
 
 function closeMatchupDialog() {
