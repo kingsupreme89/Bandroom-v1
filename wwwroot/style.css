@@ -431,12 +431,13 @@ body {
 }
 .team-swatch {
   aspect-ratio: 1;
-  border-radius: 8px;
-  border: 2px solid transparent;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
   font-family: "Outfit", "Segoe UI", sans-serif;
   font-weight: 700;
   font-size: 13px;
@@ -444,8 +445,35 @@ body {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
   letter-spacing: 0.02em;
   overflow: hidden;
+  /* Raised "physical button" look matching the source logo sheets (chunky beveled metal/plastic
+     tiles) -- outer drop shadow for lift off the panel, inset highlight along the top-left edge
+     and inset shadow along the bottom-right edge to fake a bevel, plus a soft glossy sheen via
+     the ::before layer below. */
+  box-shadow:
+    0 3px 6px rgba(0, 0, 0, 0.35),
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    inset 1px 1px 0 rgba(255, 255, 255, 0.22),
+    inset -2px -3px 5px rgba(0, 0, 0, 0.35);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
   /* Monogram placeholder until real team logos are wired in (see WebBridge.Initials --
      swap for an <img> using a TeamLogos\ lookup once logo files exist). */
+}
+.team-swatch::before {
+  /* Glossy highlight sweeping across the top third -- the "3D button" sheen. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.08) 28%, rgba(255, 255, 255, 0) 55%);
+  pointer-events: none;
+  z-index: 2;
+}
+.team-swatch:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    inset 1px 1px 3px rgba(0, 0, 0, 0.4),
+    inset -1px -1px 0 rgba(255, 255, 255, 0.08);
 }
 .team-logo-img {
   /* Full-bleed tile fill, not a floating monogram -- these logo source images already
@@ -455,6 +483,8 @@ body {
   width: 100%; height: 100%;
   object-fit: cover;
   pointer-events: none;
+  position: relative;
+  z-index: 1;
 }
 .team-swatch.active { border-color: var(--text-primary); }
 .team-swatch:hover { filter: brightness(1.15); }
