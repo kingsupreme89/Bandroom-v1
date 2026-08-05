@@ -29,17 +29,34 @@ function enableDockMagnify(gridEl) {
   if (!gridEl) return;
   const maxScale = 2;
   const falloffPx = 100; // distance at which the effect has faded to ~0
-  gridEl.addEventListener("mousemove", (e) => {
+  // The magnify scale is set as an inline style every mousemove, which beats the stylesheet's
+  // .team-swatch:active press-down rule (inline always wins over a class selector) -- so
+  // without this, clicking a magnified tile silently ate the "physical press" feedback. Track
+  // whichever tile is currently pressed and fold a small extra shrink into its own scale calc
+  // instead of relying on :active at all.
+  let pressedTile = null;
+  const apply = (e) => {
     for (const tile of gridEl.querySelectorAll(".team-swatch")) {
       const r = tile.getBoundingClientRect();
       const dist = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
       const t = Math.max(0, 1 - dist / falloffPx);
-      const scale = 1 + (maxScale - 1) * t;
+      let scale = 1 + (maxScale - 1) * t;
+      if (tile === pressedTile) scale *= 0.96;
       tile.style.transform = scale > 1.01 ? `scale(${scale.toFixed(3)})` : "";
       tile.style.zIndex = scale > 1.01 ? String(Math.round(scale * 10)) : "";
     }
+  };
+  gridEl.addEventListener("mousemove", apply);
+  gridEl.addEventListener("mousedown", (e) => {
+    pressedTile = e.target.closest(".team-swatch");
+    apply(e);
+  });
+  gridEl.addEventListener("mouseup", (e) => {
+    pressedTile = null;
+    apply(e);
   });
   gridEl.addEventListener("mouseleave", () => {
+    pressedTile = null;
     for (const tile of gridEl.querySelectorAll(".team-swatch")) {
       tile.style.transform = "";
       tile.style.zIndex = "";
