@@ -20,6 +20,36 @@ document.addEventListener("click", (e) => {
   if (e.target.closest("button, .team-swatch, .rail-item, .category-row")) bridge?.PlayClickSound();
 }, true);
 
+/// True macOS-dock-style magnify: as the cursor slides across a grid of tiles, the tile under
+/// it scales up most and neighbors scale up a little (falling off with distance), same "wave"
+/// feel as a real dock -- not just a binary :hover pop. Bound once per grid container at init
+/// since the containers themselves (#team-grid, #team-picker-grid, etc.) are static in the DOM
+/// even though their .team-swatch children get torn down/rebuilt on every re-render.
+function enableDockMagnify(gridEl) {
+  if (!gridEl) return;
+  const maxScale = 2;
+  const falloffPx = 100; // distance at which the effect has faded to ~0
+  gridEl.addEventListener("mousemove", (e) => {
+    for (const tile of gridEl.querySelectorAll(".team-swatch")) {
+      const r = tile.getBoundingClientRect();
+      const dist = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+      const t = Math.max(0, 1 - dist / falloffPx);
+      const scale = 1 + (maxScale - 1) * t;
+      tile.style.transform = scale > 1.01 ? `scale(${scale.toFixed(3)})` : "";
+      tile.style.zIndex = scale > 1.01 ? String(Math.round(scale * 10)) : "";
+    }
+  });
+  gridEl.addEventListener("mouseleave", () => {
+    for (const tile of gridEl.querySelectorAll(".team-swatch")) {
+      tile.style.transform = "";
+      tile.style.zIndex = "";
+    }
+  });
+}
+for (const id of ["team-grid", "team-picker-grid", "matchup-away-grid", "matchup-home-grid", "onboarding-grid"]) {
+  enableDockMagnify(document.getElementById(id));
+}
+
 let state = {
   teams: [],
   categories: [],

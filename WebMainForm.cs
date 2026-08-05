@@ -544,13 +544,21 @@ public sealed class WebMainForm : Form
         {
             try
             {
+                // A pure sine tone reads as a "pop"/beep no matter how short the envelope is --
+                // a real mechanical click is closer to filtered noise: a very short burst with
+                // most of its energy dumped in the first millisecond, tiny bit of low-passing so
+                // it isn't harsh white-noise hiss. Quieter than before too, per user ask.
                 int sampleRate = 44100;
-                int n = 15 * sampleRate / 1000; // ~15ms tick
+                int n = 10 * sampleRate / 1000; // ~10ms
                 var buf = new float[n];
+                var rng = new Random();
+                float prev = 0f;
                 for (int i = 0; i < n; i++)
                 {
-                    float env = MathF.Pow(1f - (float)i / n, 1.5f);
-                    buf[i] = MathF.Sin(2 * MathF.PI * 1400f * i / sampleRate) * 0.28f * env;
+                    float env = MathF.Pow(1f - (float)i / n, 4f); // very fast decay -- most energy in the first ~2ms
+                    float noise = (float)(rng.NextDouble() * 2 - 1);
+                    prev = prev * 0.6f + noise * 0.4f; // light low-pass so it's a "tick" not harsh hiss
+                    buf[i] = prev * 0.14f * env;
                 }
                 var bytes = new byte[buf.Length * 2];
                 for (int i = 0; i < buf.Length; i++)

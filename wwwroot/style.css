@@ -508,14 +508,10 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   z-index: 1;
 }
 .team-swatch.active { border-color: var(--text-primary); }
-/* macOS-dock-style hover magnify: scale up 2x in place, raised above sibling tiles so it
-   isn't clipped/overlapped by the grid around it (see .team-swatch's transition/z-index and
-   .team-grid's overflow:visible above). */
-.team-swatch:hover {
-  filter: brightness(1.15);
-  transform: scale(2);
-  z-index: 5;
-}
+/* The actual dock-style scale-up (with neighbor falloff) is driven by inline transform/z-index
+   from enableDockMagnify() in app.js -- see .team-swatch's transition above for the easing,
+   and .team-grid's overflow:visible above so the scaled tile isn't clipped by the grid edge. */
+.team-swatch:hover { filter: brightness(1.15); }
 .team-swatch.configured { position: relative; }
 .team-swatch.configured::after {
   content: "";
@@ -739,6 +735,14 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
   gap: 10px;
   align-content: start;
+  /* Without this, grid's default align-items:stretch fights .team-swatch's aspect-ratio:1 --
+     the tile's width stays pinned to its 1fr column track but the height stretches to fill
+     the row, producing tall skinny bars instead of squares. align-content:start alone (above)
+     only stops leftover space between ROWS from spreading out; it doesn't stop an individual
+     item from being stretched to fill its own row. This is the real bug behind the
+     long-standing "squashed team picker tiles" report -- the earlier WebView2-cache theory
+     was a red herring. */
+  align-items: start;
 }
 .team-picker-grid .team-swatch { font-size: 14px; }
 
