@@ -27,6 +27,7 @@ public sealed class WebMainForm : Form
     public WebMainForm()
     {
         Text = "Bandroom";
+        Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
         Width = 1920;
         Height = 1080;
         StartPosition = FormStartPosition.CenterScreen;
@@ -48,8 +49,11 @@ public sealed class WebMainForm : Form
 
         FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); };
 
-        Load += async (_, _) => await InitWebViewAsync();
-        Load += (_, _) => InitAutoUpdater();
+        Load += async (_, _) =>
+        {
+            await InitWebViewAsync();
+            InitAutoUpdater();
+        };
     }
 
     async Task InitWebViewAsync()
@@ -104,7 +108,15 @@ public sealed class WebMainForm : Form
         PushCategories();
     }
 
-    void SaveCurrentTeamProfile() => ConfigStore.SaveProfile(Theme.ActiveTeam.Name, _config);
+    void SaveCurrentTeamProfile()
+    {
+        ConfigStore.SaveProfile(Theme.ActiveTeam.Name, _config);
+        RunOnUi(() =>
+        {
+            if (_webView.CoreWebView2 != null)
+                _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:profileschanged'))");
+        });
+    }
 
     public string ToggleWatchingFromWeb()
     {
@@ -252,6 +264,135 @@ public sealed class WebMainForm : Form
         Native.SendMessage(Handle, WM_NCLBUTTONDOWN, (IntPtr)HTCAPTION, IntPtr.Zero);
     }
 
+    public void MinimizeWindowFromWeb() => RunOnUi(() => WindowState = FormWindowState.Minimized);
+    public void MaximizeWindowFromWeb() => RunOnUi(() =>
+        WindowState = WindowState == FormWindowState.Maximized
+            ? FormWindowState.Normal
+            : FormWindowState.Maximized);
+    public void CloseWindowFromWeb() => RunOnUi(() => Close());
+
+    public void CopyCurrentToAllTeamsFromWeb()
+    {
+        var snapshot = _config.Select(e => new TriggerEntry { Trigger = e.Trigger, Event = e.Event, AudioFile = e.AudioFile }).ToList();
+        _ = Task.Run(() =>
+        {
+            foreach (var team in TeamColors.All)
+            {
+                if (team.Name == Theme.ActiveTeam.Name) continue;
+                ConfigStore.SaveProfile(team.Name, snapshot);
+            }
+            RunOnUi(() =>
+            {
+                if (_webView.CoreWebView2 != null)
+                    _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:profileschanged'))");
+                MessageBox.Show(this,
+                    $"Your current audio setup has been copied to all {TeamColors.All.Length - 1} teams.",
+                    "Profiles Applied", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            });
+        });
+    }
+
+    public void DeleteCurrentProfileFromWeb()
+    {
+        ConfigStore.DeleteProfile(Theme.ActiveTeam.Name);
+        _config = ConfigStore.BuildDefault();
+        ConfigStore.Save(_config);
+        PushCategories();
+        RunOnUi(() =>
+        {
+            if (_webView.CoreWebView2 != null)
+                _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:profileschanged'))");
+        });
+    }
+
+    public void ExportProfileFromWeb()
+    {
+        RunOnUi(() =>
+        {
+            using var dlg = new SaveFileDialog
+            {
+                Title = "Export Profile",
+                Filter = "Bandroom Profile (*.json)|*.json",
+                FileName = $"{Theme.ActiveTeam.Name}.json",
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            ConfigStore.SaveProfile(Path.GetFileNameWithoutExtension(dlg.FileName), _config);
+            File.Copy(
+                Path.Combine(ConfigStore.ProfilesFolder, Path.GetFileNameWithoutExtension(dlg.FileName) + ".json"),
+                dlg.FileName, overwrite: true);
+        });
+    }
+
+    public void ImportProfileFromWeb()
+    {
+        RunOnUi(() =>
+        {
+            using var dlg = new OpenFileDialog
+            {
+                Title = "Import Profile",
+                Filter = "Bandroom Profile (*.json)|*.json",
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            try
+            {
+                var imported = System.Text.Json.JsonSerializer.Deserialize<List<TriggerEntry>>(
+                    File.ReadAllText(dlg.FileName),
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (imported == null) return;
+                _config = imported;
+                ConfigStore.Save(_config);
+                SaveCurrentTeamProfile();
+                PushCategories();
+            }
+            catch
+            {
+                MessageBox.Show(this, "That file doesn't look like a valid Bandroom profile.", "Import Failed",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        });
+    }
+
+    static void PlayUpdateChime()
+    {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                int sampleRate = 44100;
+                float[] freqs = [523f, 659f, 784f, 1047f]; // C5 E5 G5 C6 — ascending major
+                int noteMs = 110, gapMs = 18;
+                int totalSamples = freqs.Length * ((noteMs + gapMs) * sampleRate / 1000);
+                var buf = new float[totalSamples];
+                int pos = 0;
+                foreach (float freq in freqs)
+                {
+                    int n = noteMs * sampleRate / 1000;
+                    int g = gapMs * sampleRate / 1000;
+                    for (int i = 0; i < n; i++)
+                    {
+                        float env = MathF.Pow(1f - (float)i / n, 0.4f);
+                        buf[pos++] = MathF.Sin(2 * MathF.PI * freq * i / sampleRate) * 0.32f * env;
+                    }
+                    for (int i = 0; i < g; i++) buf[pos++] = 0f;
+                }
+                var bytes = new byte[buf.Length * 2];
+                for (int i = 0; i < buf.Length; i++)
+                {
+                    short s = (short)(Math.Clamp(buf[i], -1f, 1f) * 32767);
+                    bytes[i * 2] = (byte)(s & 0xFF);
+                    bytes[i * 2 + 1] = (byte)(s >> 8);
+                }
+                var fmt = new NAudio.Wave.WaveFormat(sampleRate, 16, 1);
+                using var stream = new NAudio.Wave.RawSourceWaveStream(new MemoryStream(bytes), fmt);
+                using var wo = new NAudio.Wave.WaveOutEvent();
+                wo.Init(stream);
+                wo.Play();
+                while (wo.PlaybackState == NAudio.Wave.PlaybackState.Playing) Thread.Sleep(10);
+            }
+            catch { }
+        });
+    }
+
     void PushCategories()
     {
         if (_webView.CoreWebView2 == null) return;
@@ -319,11 +460,8 @@ public sealed class WebMainForm : Form
                 if (info.ReleasesToApply.Count == 0) return;
 
                 _updateAvailable = true;
-                RunOnUi(() =>
-                {
-                    if (_webView.CoreWebView2 != null)
-                        _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:updateavailable'))");
-                });
+                PlayUpdateChime();
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:updateavailable'))"));
             }
             catch (Exception ex)
             {
