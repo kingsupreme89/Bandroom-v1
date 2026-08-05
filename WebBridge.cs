@@ -132,7 +132,13 @@ public sealed class WebBridge
         {
             var profile = await GoogleAuthService.SignInAsync(CancellationToken.None);
             if (profile == null)
-                return JsonSerializer.Serialize(new { signedIn = false, error = "Sign-in wasn't completed." });
+                // The most common real cause of a silent timeout here (browser opened, never
+                // redirects back) is the OAuth consent screen still being in "Testing" mode --
+                // Google shows the user its own "Access blocked" page and never calls back to our
+                // local listener, so from here it's indistinguishable from "user closed the tab".
+                // Naming the likely cause beats a generic message that makes a real user think
+                // the feature is just broken.
+                return JsonSerializer.Serialize(new { signedIn = false, error = "Sign-in didn't complete. If your Google account isn't added as a test user yet, Google blocks sign-in silently -- check the OAuth consent screen's test user list, or close the browser tab and try again." });
 
             using var http = new HttpClient();
             var payload = JsonSerializer.Serialize(new { idToken = profile.IdToken });

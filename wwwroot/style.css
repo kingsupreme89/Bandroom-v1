@@ -34,6 +34,11 @@
 }
 
 * { box-sizing: border-box; }
+/* Browsers do NOT inherit font-family into form controls by default (button/select/input/
+   textarea use the OS's system font regardless of anything set on body) -- that's why every nav
+   pill, dropdown, and text input was quietly rendering in a different font than the rest of the
+   app (and the "Bandroom" wordmark) even though body already declares Outfit. */
+button, select, input, textarea { font-family: inherit; }
 html, body { height: 100%; margin: 0; overflow: hidden; }
 body {
   font-family: "Outfit", "Segoe UI", sans-serif;
@@ -250,11 +255,15 @@ body {
      Explicit ask: make this the loudest, most eye-catching thing in the header -- it's the
      brand mark. */
   background: linear-gradient(135deg, var(--team-secondary, var(--accent)) 0%, color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, #000) 100%);
-  color: #06222a;
+  /* The "B" itself is outlined, not solid-filled -- reads as a lit LED tube sitting inside the
+     team-colored badge rather than flat dark text sitting on top of it. Fill stays transparent
+     so the badge's own gradient shows straight through the letterform. */
+  color: transparent;
+  -webkit-text-stroke: 1.2px rgba(255, 255, 255, 0.92);
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.55), 0 0 1px rgba(6, 34, 42, 0.4);
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 19px; font-weight: 800;
   font-family: "Outfit", "Segoe UI", sans-serif;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   flex: none;
   position: relative;
   overflow: hidden;

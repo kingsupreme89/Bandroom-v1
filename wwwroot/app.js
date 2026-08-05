@@ -464,7 +464,18 @@ function wireControls() {
     await refreshProfileView();
   });
   document.getElementById("profile-favorite-team").addEventListener("change", async (e) => {
-    try { await bridge.SetFavoriteTeam(e.target.value); } catch (err) { console.error("SetFavoriteTeam failed", err); }
+    const team = e.target.value;
+    try {
+      await bridge.SetFavoriteTeam(team);
+      // Setting a favorite team also switches the app's active team/theme -- same effect as
+      // clicking that team's tile in the Teams panel (see selectTeam) -- so picking one here
+      // visibly does something instead of silently saving a preference nobody can see.
+      if (team) await selectTeam(team);
+      showToast(team ? `Favorite team set to ${team}.` : "Favorite team cleared.");
+    } catch (err) {
+      console.error("SetFavoriteTeam failed", err);
+      showToast("Couldn't save favorite team -- try again.");
+    }
   });
   document.getElementById("btn-watch").addEventListener("click", async () => {
     if (!(state.matchupHome && state.matchupAway)) {

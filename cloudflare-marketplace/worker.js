@@ -35,8 +35,8 @@
 //   -> verifies the token's RS256 signature against Google's published JWKS, checks iss/aud/exp,
 //      upserts "user:<sub>" in KV with the profile, mints a random app session token stored as
 //      "session:<token>" -> sub (30-day TTL), returns { sessionToken, profile }.
-//   -> Scaffolded ahead of the app actually having a real Google OAuth Client ID configured
-//      (see GoogleAuthService.cs) -- safe to deploy now since nothing calls it until that's set.
+//   -> Rate-limited per IP like /upload (see checkRateLimit) -- live and reachable now that a
+//      real Google OAuth Client ID is configured (see GoogleAuthService.cs).
 //   -> This is the ONLY place a Google identity gets trusted server-side. The desktop app also
 //      decodes the ID token locally for immediate display, but that's explicitly NOT
 //      signature-verified there -- only this endpoint's verification result should ever be
@@ -433,6 +433,15 @@ export default {
     }
 
     if (url.pathname === "/auth/verify" && request.method === "POST") {
+      // Now that sign-in is actually live (real Client ID configured), this was the one
+      // remaining mutating endpoint with zero rate limiting -- unbounded retries against it
+      // could still mint unlimited sessions (a KV write per success) toward the free-tier daily
+      // write cap, the same failure class already fixed on /list, /like, /report.
+      const allowedAuth = await checkRateLimit(env, request, "authverify", RATE_LIMIT_MAX_LIKES_REPORTS);
+      if (!allowedAuth) {
+        return new Response("too many sign-in attempts -- try again in a few minutes", { status: 429, headers: cors() });
+      }
+
       let body;
       try { body = await request.json(); } catch { return new Response("bad request", { status: 400, headers: cors() }); }
       const idToken = body?.idToken;
