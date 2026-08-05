@@ -433,6 +433,41 @@ public sealed class WebMainForm : Form
         Native.SendMessage(Handle, WM_NCLBUTTONDOWN, (IntPtr)HTCAPTION, IntPtr.Zero);
     }
 
+    /// <summary>FormBorderStyle.None (see the constructor) drops the OS-drawn window edges
+    /// entirely, which also drops the ability to resize by dragging them -- MaximizeWindow was
+    /// the only way to change the window size before this. Handling WM_NCHITTEST ourselves and
+    /// returning the standard HTLEFT/HTRIGHT/etc hit-test codes near the edges hands control
+    /// back to DefWndProc's normal resize/cursor behavior, without needing WS_THICKFRAME.</summary>
+    protected override void WndProc(ref Message m)
+    {
+        const int margin = 6;
+        if (m.Msg == Native.WM_NCHITTEST && WindowState == FormWindowState.Normal)
+        {
+            var cursor = PointToClient(new Point(m.LParam.ToInt32() & 0xFFFF, (m.LParam.ToInt32() >> 16) & 0xFFFF));
+            bool left = cursor.X <= margin, right = cursor.X >= ClientSize.Width - margin;
+            bool top = cursor.Y <= margin, bottom = cursor.Y >= ClientSize.Height - margin;
+
+            int hit = (left, right, top, bottom) switch
+            {
+                (true, false, true, false) => Native.HTTOPLEFT,
+                (false, true, true, false) => Native.HTTOPRIGHT,
+                (true, false, false, true) => Native.HTBOTTOMLEFT,
+                (false, true, false, true) => Native.HTBOTTOMRIGHT,
+                (true, false, false, false) => Native.HTLEFT,
+                (false, true, false, false) => Native.HTRIGHT,
+                (false, false, true, false) => Native.HTTOP,
+                (false, false, false, true) => Native.HTBOTTOM,
+                _ => Native.HTCLIENT,
+            };
+            if (hit != Native.HTCLIENT)
+            {
+                m.Result = (IntPtr)hit;
+                return;
+            }
+        }
+        base.WndProc(ref m);
+    }
+
     public void MinimizeWindowFromWeb() => RunOnUi(() => WindowState = FormWindowState.Minimized);
     public void MaximizeWindowFromWeb() => RunOnUi(() =>
         WindowState = WindowState == FormWindowState.Maximized

@@ -27,7 +27,7 @@
   --glass-border: rgba(255, 255, 255, 0.10);
   --glass-blur: 22px;
   --header-h: 56px;
-  --rail-w: 78px;
+  --rail-w: 88px;
   --side-w: 240px;
   --radius-panel: 24px;
   --radius-card: 14px;
@@ -341,12 +341,12 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   margin-left: 6px;
 }
 .wc-btn {
-  width: 28px; height: 28px;
-  border-radius: 6px;
+  width: 38px; height: 38px;
+  border-radius: 8px;
   border: none;
   background: transparent;
   color: var(--text-muted-2);
-  font-size: 14px;
+  font-size: 17px;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: background 0.15s, color 0.15s;
@@ -388,22 +388,22 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   border-radius: var(--radius-panel);
 }
 .rail-item {
-  width: 62px;
+  width: 72px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 8px 4px;
+  gap: 5px;
+  padding: 10px 4px;
   border-radius: 12px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
 }
-.rail-icon { font-size: 16px; line-height: 1; }
+.rail-icon { font-size: 20px; line-height: 1; }
 .rail-label {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
   white-space: nowrap;

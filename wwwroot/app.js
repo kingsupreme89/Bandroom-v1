@@ -20,47 +20,39 @@ document.addEventListener("click", (e) => {
   if (e.target.closest("button, .team-swatch, .rail-item, .category-row")) bridge?.PlayClickSound();
 }, true);
 
-/// True macOS-dock-style magnify: as the cursor slides across a grid of tiles, the tile under
-/// it scales up most and neighbors scale up a little (falling off with distance), same "wave"
-/// feel as a real dock -- not just a binary :hover pop. Bound once per grid container at init
-/// since the containers themselves (#team-grid, #team-picker-grid, etc.) are static in the DOM
-/// even though their .team-swatch children get torn down/rebuilt on every re-render.
+/// Hover magnify: only the exact tile under the cursor scales up (2x), no neighbor falloff --
+/// simpler/cleaner than a full dock-wave sweep, and cheaper (one tile touched per event instead
+/// of recomputing distance for every tile in the grid on every mousemove). Bound once per grid
+/// container at init since the containers themselves (#team-grid, #team-picker-grid, etc.) are
+/// static in the DOM even though their .team-swatch children get torn down/rebuilt on re-render.
 function enableDockMagnify(gridEl) {
   if (!gridEl) return;
-  const maxScale = 2;
-  const falloffPx = 100; // distance at which the effect has faded to ~0
-  // The magnify scale is set as an inline style every mousemove, which beats the stylesheet's
-  // .team-swatch:active press-down rule (inline always wins over a class selector) -- so
-  // without this, clicking a magnified tile silently ate the "physical press" feedback. Track
-  // whichever tile is currently pressed and fold a small extra shrink into its own scale calc
-  // instead of relying on :active at all.
-  let pressedTile = null;
-  const apply = (e) => {
-    for (const tile of gridEl.querySelectorAll(".team-swatch")) {
-      const r = tile.getBoundingClientRect();
-      const dist = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
-      const t = Math.max(0, 1 - dist / falloffPx);
-      let scale = 1 + (maxScale - 1) * t;
-      if (tile === pressedTile) scale *= 0.96;
-      tile.style.transform = scale > 1.01 ? `scale(${scale.toFixed(3)})` : "";
-      tile.style.zIndex = scale > 1.01 ? String(Math.round(scale * 10)) : "";
-    }
+  let current = null;
+  const setScale = (tile, scale) => {
+    tile.style.transform = scale > 1.01 ? `scale(${scale})` : "";
+    tile.style.zIndex = scale > 1.01 ? "5" : "";
   };
-  gridEl.addEventListener("mousemove", apply);
-  gridEl.addEventListener("mousedown", (e) => {
-    pressedTile = e.target.closest(".team-swatch");
-    apply(e);
-  });
-  gridEl.addEventListener("mouseup", (e) => {
-    pressedTile = null;
-    apply(e);
+  gridEl.addEventListener("mouseover", (e) => {
+    const tile = e.target.closest(".team-swatch");
+    if (!tile || tile === current) return;
+    if (current) setScale(current, 1);
+    current = tile;
+    setScale(tile, 2);
   });
   gridEl.addEventListener("mouseleave", () => {
-    pressedTile = null;
-    for (const tile of gridEl.querySelectorAll(".team-swatch")) {
-      tile.style.transform = "";
-      tile.style.zIndex = "";
-    }
+    if (current) setScale(current, 1);
+    current = null;
+  });
+  // The magnify scale is set as an inline style, which beats the stylesheet's
+  // .team-swatch:active press-down rule (inline always wins over a class selector) -- so
+  // without this, clicking a magnified tile silently ate the "physical press" feedback.
+  gridEl.addEventListener("mousedown", (e) => {
+    const tile = e.target.closest(".team-swatch");
+    if (tile === current) setScale(tile, 1.92);
+  });
+  gridEl.addEventListener("mouseup", (e) => {
+    const tile = e.target.closest(".team-swatch");
+    if (tile === current) setScale(tile, 2);
   });
 }
 for (const id of ["team-grid", "team-picker-grid", "matchup-away-grid", "matchup-home-grid", "onboarding-grid"]) {
@@ -153,6 +145,26 @@ function fillTeamSwatch(el, t) {
   }
 }
 
+// Forces every tile to a real square by measuring its rendered width and setting height to
+// match, instead of trusting CSS aspect-ratio + grid stretch -- two rounds of CSS-only fixes
+// (align-content, align-items) didn't resolve reports of squashed/non-square tiles in the team
+// picker and matchup grids, so this sidesteps the CSS grid sizing behavior entirely rather than
+// guessing at a third one. Re-measures on window resize since those dialogs are responsive-width.
+function squareUpTiles(gridEl) {
+  if (!gridEl) return;
+  requestAnimationFrame(() => {
+    const first = gridEl.querySelector(".team-swatch");
+    if (!first) return;
+    const w = first.getBoundingClientRect().width;
+    if (w < 1) return;
+    for (const t of gridEl.querySelectorAll(".team-swatch")) t.style.height = `${w}px`;
+  });
+}
+window.addEventListener("resize", () => {
+  for (const id of ["team-grid", "team-picker-grid", "matchup-away-grid", "matchup-home-grid", "onboarding-grid"])
+    squareUpTiles(document.getElementById(id));
+});
+
 function renderTeamGrid() {
   const grid = document.getElementById("team-grid");
   grid.innerHTML = "";
@@ -165,6 +177,7 @@ function renderTeamGrid() {
     sw.addEventListener("click", () => selectTeam(t.name));
     grid.appendChild(sw);
   }
+  squareUpTiles(grid);
 }
 
 async function updateProfileStatus() {
@@ -533,6 +546,7 @@ function renderTeamGridInto(gridId, filter, onPick) {
     sw.addEventListener("click", () => onPick(t.name));
     grid.appendChild(sw);
   }
+  squareUpTiles(grid);
 }
 
 async function maybeShowOnboarding() {
@@ -603,10 +617,12 @@ function openMatchupDialog() {
   const overlay = document.getElementById("matchup-overlay");
   document.getElementById("matchup-home-search").value = "";
   document.getElementById("matchup-away-search").value = "";
+  // Unhide BEFORE rendering: squareUpTiles measures rendered tile width via
+  // getBoundingClientRect, which is 0 while the overlay is still display:none.
+  overlay.hidden = false;
   renderMatchupGrid("home", "");
   renderMatchupGrid("away", "");
   updateMatchupSubtext();
-  overlay.hidden = false;
 }
 
 function closeMatchupDialog() {

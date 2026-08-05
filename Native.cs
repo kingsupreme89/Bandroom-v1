@@ -81,4 +81,18 @@ internal static class Native
     public const int VK_CONTROL = 0x11;
     public const int VK_SHIFT = 0x10;
     public const int VK_MENU = 0x12;
+
+    // Non-client hit-test values -- returning these from WM_NCHITTEST makes DefWndProc drive
+    // the standard OS resize/cursor behavior even on a FormBorderStyle.None window (which has
+    // no WS_THICKFRAME and so no OS-drawn resize border at all).
+    public const int WM_NCHITTEST = 0x0084;
+    public const int HTCLIENT = 1;
+    public const int HTLEFT = 10;
+    public const int HTRIGHT = 11;
+    public const int HTTOP = 12;
+    public const int HTTOPLEFT = 13;
+    public const int HTTOPRIGHT = 14;
+    public const int HTBOTTOM = 15;
+    public const int HTBOTTOMLEFT = 16;
+    public const int HTBOTTOMRIGHT = 17;
 }
