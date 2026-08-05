@@ -293,6 +293,8 @@ body {
   color: #3ddc84;
   font-size: 13px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
   cursor: pointer;
   white-space: nowrap;
   animation: update-pulse 2s ease-in-out infinite;
