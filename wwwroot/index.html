@@ -243,6 +243,23 @@
     </div>
   </div>
 
+  <!-- Update progress -- the app used to silently download then instantly relaunch itself the
+       moment a download finished, with zero on-screen feedback while it happened. This shows a
+       progress bar while downloading, then asks before restarting instead of doing it out from
+       under the user. -->
+  <div id="update-overlay" hidden>
+    <div id="update-dialog" class="glass">
+      <div class="update-header" id="update-header">Downloading update&hellip;</div>
+      <div class="update-progress-track">
+        <div class="update-progress-fill" id="update-progress-fill" style="width:0%"></div>
+      </div>
+      <p class="update-sub" id="update-sub">Hang tight, this only takes a moment.</p>
+      <div class="update-actions" id="update-actions" hidden>
+        <button id="btn-update-restart" class="btn-primary">Restart Now</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

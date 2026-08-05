@@ -769,7 +769,9 @@ public sealed class WebMainForm : Form
         // Used to silently do nothing if the background "is an update available" check
         // hadn't completed/succeeded yet (VPN hiccup, slow network, etc) -- clicking the
         // button looked broken with zero feedback. Now it always tries, and always tells
-        // the user something either way.
+        // the user something either way. Also now surfaces real download progress and asks
+        // before restarting -- it used to silently download then instantly relaunch the app
+        // out from under the user with zero warning, which read as the app randomly closing.
         _ = Task.Run(async () =>
         {
             try
@@ -784,18 +786,31 @@ public sealed class WebMainForm : Form
                     return;
                 }
 
-                await mgr.UpdateApp();
-                RunOnUi(() => UpdateManager.RestartApp());
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:updatedownloading'))"));
+
+                await mgr.UpdateApp(pct => RunOnUi(() =>
+                    _ = _webView.ExecuteScriptAsync($"window.dispatchEvent(new CustomEvent('bandroom:updateprogress', {{ detail: {pct} }}))")));
+
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:updateready'))"));
             }
             catch (Exception ex)
             {
                 CrashLog.Write("Auto-update install failed", ex);
-                RunOnUi(() => MessageBox.Show(this,
-                    "Update check/download failed -- check your internet connection (and VPN, if you use one) and try again.",
-                    "Bandroom Update", MessageBoxButtons.OK, MessageBoxIcon.Warning));
+                RunOnUi(() =>
+                {
+                    _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:updatefailed'))");
+                    MessageBox.Show(this,
+                        "Update check/download failed -- check your internet connection (and VPN, if you use one) and try again.",
+                        "Bandroom Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                });
             }
         });
     }
+
+    /// <summary>User clicks "Restart Now" on the post-download prompt (see bandroom:updateready
+    /// in app.js) -- the app no longer relaunches itself automatically the instant the download
+    /// finishes.</summary>
+    public void RestartForUpdateFromWeb() => RunOnUi(() => UpdateManager.RestartApp());
 
     void RunOnUi(Action action)
     {

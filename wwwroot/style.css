@@ -619,29 +619,54 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   flex: 0 0 auto;
 }
 .situations-list {
+  /* "Island" tabs: tiles that wrap into rows and settle toward the bottom of the panel,
+     instead of one song-per-line list -- explicit user ask. */
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-flow: row wrap;
+  align-content: flex-end;
+  align-items: flex-start;
+  gap: 8px;
   overflow-y: auto;
   min-height: 0;
 }
 .situation-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: var(--radius-card);
-  background: rgba(255, 255, 255, 0.03);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  flex: 1 1 240px;
+  max-width: 320px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.035);
   min-width: 0;
 }
 .situation-text { flex: 1 1 auto; min-width: 0; }
 .situation-name {
+  display: flex; align-items: center;
   font-size: 12.5px; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.situation-file { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.situation-row.situation-unconfirmed { opacity: 0.5; filter: grayscale(0.6); }
-.situation-row.situation-unconfirmed:hover { opacity: 0.75; }
+.situation-file { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.situation-row.situation-unconfirmed { opacity: 0.6; filter: grayscale(0.5); }
+.situation-row.situation-unconfirmed:hover { opacity: 0.85; }
+.situation-actions { width: 100%; }
+.situation-led {
+  width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 8px; flex: none;
+}
+.situation-led-off { background: var(--text-muted); opacity: 0.5; }
+.situation-led-green { background: #3ddc84; box-shadow: 0 0 6px rgba(61, 220, 132, 0.8); animation: situation-led-pulse-green 1.8s ease-in-out infinite; }
+.situation-led-amber { background: #facc15; box-shadow: 0 0 6px rgba(250, 204, 21, 0.8); animation: situation-led-pulse-amber 1.8s ease-in-out infinite; }
+@keyframes situation-led-pulse-green {
+  0%, 100% { box-shadow: 0 0 4px 0 rgba(61, 220, 132, 0.5); }
+  50%       { box-shadow: 0 0 10px 3px rgba(61, 220, 132, 0.9); }
+}
+@keyframes situation-led-pulse-amber {
+  0%, 100% { box-shadow: 0 0 4px 0 rgba(250, 204, 21, 0.5); }
+  50%       { box-shadow: 0 0 10px 3px rgba(250, 204, 21, 0.9); }
+}
 .situation-badge {
   display: inline-block;
   font-size: 9px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;
@@ -916,6 +941,39 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   font-weight: 600;
   cursor: pointer;
 }
+
+#update-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.6);
+}
+#update-overlay[hidden] { display: none; }
+#update-dialog {
+  width: min(420px, 90vw);
+  border-radius: var(--radius-panel);
+  padding: 24px;
+  text-align: center;
+}
+.update-header { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+.update-progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.update-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22d3ee, #3ddc84);
+  transition: width 0.25s ease;
+}
+.update-sub { font-size: 12.5px; color: var(--text-muted-2); margin: 12px 0 0; }
+.update-actions { margin-top: 18px; }
 
 .gametime-btn {
   padding: 10px 28px;

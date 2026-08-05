@@ -68,6 +68,7 @@ public sealed class WebBridge
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
     public void OpenSettings() => _host.OpenSettingsFromWeb();
     public void ShowUpdate() => _host.ShowUpdateDialogFromWeb();
+    public void RestartForUpdate() => _host.RestartForUpdateFromWeb();
     public void ResetTeamProfile() => _host.ResetTeamProfileFromWeb();
     public void OpenHelp() => _host.OpenHelpFromWeb();
     public void TriggerEffectsTest() => _host.TriggerEffectsTestFromWeb();

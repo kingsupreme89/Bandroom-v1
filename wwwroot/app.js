@@ -236,10 +236,14 @@ async function openSituations(category) {
   list.innerHTML = "";
   for (const ev of events) {
     const row = document.createElement("div");
+    // "Island" tile instead of a full-width list row: LED dot color says the status at a
+    // glance (assigned+confirmed = green pulse, assigned but unconfirmed = amber pulse,
+    // nothing assigned yet = dim/no pulse) without needing to read the badge text.
+    const ledClass = !ev.fileName ? "situation-led-off" : ev.confirmed ? "situation-led-green" : "situation-led-amber";
     row.className = "situation-row" + (ev.confirmed ? "" : " situation-unconfirmed");
     row.innerHTML = `
       <span class="situation-text">
-        <div class="situation-name">${ev.eventName}${ev.confirmed ? "" : ' <span class="situation-badge" title="Wired but not yet confirmed working in a live game">not yet confirmed</span>'}</div>
+        <div class="situation-name"><span class="situation-led ${ledClass}"></span>${ev.eventName}${ev.confirmed ? "" : ' <span class="situation-badge" title="Wired but not yet confirmed working in a live game">not yet confirmed</span>'}</div>
         <div class="situation-file">${ev.fileName ? ev.fileName : "Unassigned"}</div>
       </span>
       <span class="situation-actions">
@@ -426,6 +430,34 @@ function wireControls() {
     btn.title = "This looks like an older build than one you've already run -- click to update to the latest.";
     showToast("This is an older Bandroom build than one you've run before -- click \"Fix Version\" in the header to update.");
   });
+
+  // Update download/install progress -- see WebMainForm.ShowUpdateDialogFromWeb. Replaces the
+  // old silent-download-then-instant-relaunch flow with visible progress and a confirm step.
+  const updateOverlay = document.getElementById("update-overlay");
+  const updateHeader = document.getElementById("update-header");
+  const updateFill = document.getElementById("update-progress-fill");
+  const updateSub = document.getElementById("update-sub");
+  const updateActions = document.getElementById("update-actions");
+  window.addEventListener("bandroom:updatedownloading", () => {
+    updateHeader.textContent = "Downloading update…";
+    updateSub.textContent = "Hang tight, this only takes a moment.";
+    updateFill.style.width = "0%";
+    updateActions.hidden = true;
+    updateOverlay.hidden = false;
+  });
+  window.addEventListener("bandroom:updateprogress", (e) => {
+    updateFill.style.width = `${Math.max(0, Math.min(100, e.detail))}%`;
+  });
+  window.addEventListener("bandroom:updateready", () => {
+    updateHeader.textContent = "Update ready";
+    updateFill.style.width = "100%";
+    updateSub.textContent = "Restart Bandroom to finish installing.";
+    updateActions.hidden = false;
+  });
+  window.addEventListener("bandroom:updatefailed", () => {
+    updateOverlay.hidden = true;
+  });
+  document.getElementById("btn-update-restart").addEventListener("click", () => bridge?.RestartForUpdate());
 
   document.getElementById("header-team-badge").addEventListener("click", openTeamPicker);
   // Files dropped anywhere on the window get copied into Songs\ (normalized name) by the
