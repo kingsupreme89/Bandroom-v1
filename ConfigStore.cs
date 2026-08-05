@@ -23,6 +23,7 @@ internal static class ConfigStore
     public static readonly string SongsUploadedFolder = Path.Combine(SongsFolder, "uploaded");
     public static readonly string ProfilesFolder = Path.Combine(UserDataRoot, "Profiles");
     public static readonly string TeamBackgroundsFolder = Path.Combine(UserDataRoot, "TeamBackgrounds");
+    public static readonly string TeamLogosFolder = Path.Combine(UserDataRoot, "TeamLogos");
     static readonly string FirstRunFlagPath = Path.Combine(UserDataRoot, ".firstrun_done");
 
     /// <summary>One-time migration, run before anything else touches the folders above.
@@ -43,6 +44,7 @@ internal static class ConfigStore
         // overwrite) so a user who drops in their own custom image keeps it, while still
         // picking up any new default images a future release adds.
         MergeFolderIfNeeded(Path.Combine(AppContext.BaseDirectory, "TeamBackgrounds"), TeamBackgroundsFolder, overwrite: false);
+        MergeFolderIfNeeded(Path.Combine(AppContext.BaseDirectory, "TeamLogos"), TeamLogosFolder, overwrite: false);
     }
 
     static void MoveFileIfNewer(string oldPath, string newPath)
@@ -108,6 +110,7 @@ internal static class ConfigStore
         Directory.CreateDirectory(SongsFolder);
         Directory.CreateDirectory(ProfilesFolder);
         Directory.CreateDirectory(TeamBackgroundsFolder);
+        Directory.CreateDirectory(TeamLogosFolder);
 
         if (File.Exists(ConfigPath))
         {

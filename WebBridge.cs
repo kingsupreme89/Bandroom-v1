@@ -17,10 +17,18 @@ public sealed class WebBridge
         primary = ColorHex(t.Primary ?? t.Accent),
         secondary = ColorHex(t.Secondary ?? t.Primary ?? t.Accent),
         initials = Initials(t.Name),
+        logoUrl = LogoUrl(t.Name),
     }));
 
-    /// <summary>Placeholder badge text until real logos exist (see TeamLogos\ convention in
-    /// GetTeamBackgroundUrl-style lookup, once logo files are actually provided).</summary>
+    static string? LogoUrl(string teamName)
+    {
+        string? path = TeamLogo.FindImagePath(teamName);
+        if (path == null) return null;
+        return "https://teamlogo/" + Uri.EscapeDataString(Path.GetFileName(path));
+    }
+
+    /// <summary>Fallback badge text for teams without a logo file in TeamLogos\ (see
+    /// TeamLogo.FindImagePath) -- most of the roster still falls back to this monogram.</summary>
     static string Initials(string teamName)
     {
         var words = teamName.Split(' ', StringSplitOptions.RemoveEmptyEntries);

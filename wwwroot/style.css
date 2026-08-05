@@ -352,6 +352,12 @@ body {
   /* Monogram placeholder until real team logos are wired in (see WebBridge.Initials --
      swap for an <img> using a TeamLogos\ lookup once logo files exist). */
 }
+.team-logo-img {
+  width: 78%; height: 78%;
+  object-fit: contain;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.45));
+}
 .team-swatch.active { border-color: var(--text-primary); }
 .team-swatch:hover { filter: brightness(1.15); }
 .team-swatch.configured { position: relative; }
@@ -538,15 +544,16 @@ body {
 .team-picker-grid .team-swatch { font-size: 14px; }
 
 .matchup-btn {
-  padding: 4px 12px;
+  padding: 6px 14px;
   border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-muted-2);
+  border: 1px solid rgba(34, 211, 238, 0.5);
+  background: rgba(34, 211, 238, 0.08);
+  color: var(--text-primary);
   font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
 }
-.matchup-btn:hover { color: var(--text-primary); }
+.matchup-btn:hover { background: rgba(34, 211, 238, 0.16); border-color: rgba(34, 211, 238, 0.8); }
 
 #matchup-overlay {
   position: fixed;

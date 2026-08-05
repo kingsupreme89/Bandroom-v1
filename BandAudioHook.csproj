@@ -42,6 +42,9 @@
     <Content Include="TeamBackgrounds\**\*" Exclude="TeamBackgrounds_original_fullres\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="TeamLogos\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

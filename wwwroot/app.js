@@ -82,6 +82,18 @@ async function pollUserCount() {
   setTimeout(pollUserCount, 30000);
 }
 
+/// Shared fill for any team tile/badge: shows the real logo when TeamLogos\ has one for this
+/// team, otherwise falls back to the color-gradient + initials monogram. The gradient is always
+/// set (even with a logo) so it still shows through logos that have transparent backgrounds.
+function fillTeamSwatch(el, t) {
+  el.style.background = `linear-gradient(135deg, ${t.primary}, ${t.secondary})`;
+  if (t.logoUrl) {
+    el.innerHTML = `<img src="${t.logoUrl}" alt="${t.name}" class="team-logo-img" draggable="false">`;
+  } else {
+    el.textContent = t.initials ?? "";
+  }
+}
+
 function renderTeamGrid() {
   const grid = document.getElementById("team-grid");
   grid.innerHTML = "";
@@ -90,8 +102,7 @@ function renderTeamGrid() {
     const configured = state.savedProfiles.includes(t.name);
     sw.className = "team-swatch" + (t.name === state.activeTeam ? " active" : "") + (configured ? " configured" : "");
     sw.title = t.name + (configured ? " ✓" : "");
-    sw.style.background = `linear-gradient(135deg, ${t.primary}, ${t.secondary})`;
-    sw.textContent = t.initials ?? "";
+    fillTeamSwatch(sw, t);
     sw.addEventListener("click", () => selectTeam(t.name));
     grid.appendChild(sw);
   }
@@ -187,9 +198,8 @@ function updateHeaderTeamBadge(team) {
   const badge = document.getElementById("header-team-badge");
   if (!badge) return;
   if (team) {
-    badge.style.background = `linear-gradient(135deg, ${team.primary}, ${team.secondary})`;
-    badge.textContent = team.initials ?? "";
-    badge.title = `${team.name} -- click to change team`;
+    fillTeamSwatch(badge, team);
+    badge.title = `Editing ${team.name}'s sound profile -- click to switch (use Set Matchup for home/away)`;
   } else {
     badge.style.background = "rgba(255,255,255,0.08)";
     badge.textContent = "?";
@@ -377,8 +387,7 @@ function renderTeamGridInto(gridId, filter, onPick) {
     const sw = document.createElement("div");
     sw.className = "team-swatch" + (t.name === state.activeTeam ? " active" : "");
     sw.title = t.name;
-    sw.style.background = `linear-gradient(135deg, ${t.primary}, ${t.secondary})`;
-    sw.textContent = t.initials ?? "";
+    fillTeamSwatch(sw, t);
     sw.addEventListener("click", () => onPick(t.name));
     grid.appendChild(sw);
   }
