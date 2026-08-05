@@ -71,6 +71,15 @@
 
       <!-- Center: team background showing through, with a horizontal categories strip on top -->
       <div id="center-column">
+        <!-- Only shown once a matchup is set (see #btn-matchup). Assigning songs below always
+             edits ONE team's profile at a time (whichever is state.activeTeam) -- this bar makes
+             it obvious which side that is right now and gives a one-click way to flip to the
+             other, instead of having to hunt for the small header badge or the full team grid. -->
+        <div id="matchup-side-bar" class="glass" hidden>
+          <span class="matchup-side-label">Assigning songs for:</span>
+          <button class="matchup-side-btn" id="btn-side-away" data-side="away"></button>
+          <button class="matchup-side-btn" id="btn-side-home" data-side="home"></button>
+        </div>
         <div id="category-bar" class="glass">
           <div class="category-list" id="category-list"><!-- populated by app.js --></div>
         </div>

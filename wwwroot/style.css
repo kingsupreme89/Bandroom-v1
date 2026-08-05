@@ -420,6 +420,37 @@ body {
   padding: 14px 18px;
 }
 
+#matchup-side-bar {
+  border-radius: var(--radius-panel);
+  padding: 10px 18px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#matchup-side-bar[hidden] { display: none; }
+.matchup-side-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+.matchup-side-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.matchup-side-btn:hover { color: var(--text-primary); }
+.matchup-side-btn.active {
+  border-color: rgba(34, 211, 238, 0.7);
+  background: rgba(34, 211, 238, 0.14);
+  color: var(--text-primary);
+}
+
 #situations-panel {
   margin-top: 10px;
   border-radius: var(--radius-panel);

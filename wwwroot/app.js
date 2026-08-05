@@ -65,6 +65,7 @@ async function init() {
   renderCategories();
   setActiveTeam(state.activeTeam, /*fromInit*/ true);
   updateProfileStatus();
+  await loadMatchup();
   maybeShowOnboarding();
   pollUserCount();
 }
@@ -192,6 +193,27 @@ function setActiveTeam(name, fromInit = false) {
   document.documentElement.style.setProperty("--team-secondary", team?.secondary ?? "#22d3ee");
   updateProfileStatus();
   updateHeaderTeamBadge(team);
+  updateMatchupSideBar();
+}
+
+/// Shows a one-click Away/Home toggle above the situations list once a matchup is set, so it's
+/// obvious which team's profile you're currently assigning songs to (they're two separate
+/// profiles -- e.g. Alabama's Touchdown cue is independent from Arkansas's Touchdown cue -- and
+/// this is the fast way to flip between editing them instead of hunting for the team grid).
+function updateMatchupSideBar() {
+  const bar = document.getElementById("matchup-side-bar");
+  if (!bar) return;
+  if (!state.matchupHome || !state.matchupAway) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  const awayBtn = document.getElementById("btn-side-away");
+  const homeBtn = document.getElementById("btn-side-home");
+  awayBtn.textContent = `Away: ${state.matchupAway}`;
+  homeBtn.textContent = `Home: ${state.matchupHome}`;
+  awayBtn.classList.toggle("active", state.activeTeam === state.matchupAway);
+  homeBtn.classList.toggle("active", state.activeTeam === state.matchupHome);
 }
 
 function updateHeaderTeamBadge(team) {
@@ -341,6 +363,8 @@ function wireControls() {
   });
   document.getElementById("matchup-home-search").addEventListener("input", (e) => renderMatchupGrid("home", e.target.value));
   document.getElementById("matchup-away-search").addEventListener("input", (e) => renderMatchupGrid("away", e.target.value));
+  document.getElementById("btn-side-away").addEventListener("click", () => selectTeam(state.matchupAway));
+  document.getElementById("btn-side-home").addEventListener("click", () => selectTeam(state.matchupHome));
 
   document.getElementById("btn-save-profile-cancel").addEventListener("click", closeSaveProfileDialog);
   document.getElementById("btn-save-profile-confirm").addEventListener("click", confirmSaveProfile);
@@ -429,6 +453,7 @@ function updateMatchupLabel() {
   btn.textContent = state.matchupHome && state.matchupAway
     ? `${state.matchupAway} @ ${state.matchupHome}`
     : "Set Matchup";
+  updateMatchupSideBar();
 }
 
 async function loadMatchup() {
