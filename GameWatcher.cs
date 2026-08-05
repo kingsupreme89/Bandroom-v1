@@ -83,6 +83,12 @@ internal sealed class GameWatcher
     /// the same trigger repeatedly. Exposed in the UI's Settings panel, so not readonly.</summary>
     public static TimeSpan Cooldown = TimeSpan.FromSeconds(2);
 
+    // See the pause/unpause re-fire fix in RunAsync below -- these regions only clear their
+    // "Last" value (re-arming them to fire again) when the down/distance region actually
+    // changes, not just whenever their own OCR read goes blank.
+    static readonly HashSet<string> EventGatedRegions = new(StringComparer.OrdinalIgnoreCase) { "situation", "banner", "quarter" };
+    bool _downChangedThisTick;
+
     readonly List<WatchedRegion> _regions = new()
     {
         // Spans the FULL WIDTH of the bottom score-bug band rather than one tight box, because
@@ -204,8 +210,12 @@ internal sealed class GameWatcher
 
                     int cropX = rect.Left + (int)(winW * region.FxX);
                     int cropY = rect.Top + (int)(winH * region.FxY);
-                    int cropW = (int)(winW * region.FxW);
-                    int cropH = (int)(winH * region.FxH);
+                    // Clamp to at least 1px -- a tiny/minimized game window (or a preset with a
+                    // very small fractional height) can round FxW/FxH down to 0, and a 0x0
+                    // Bitmap throws ArgumentException, which would otherwise trip the outer
+                    // catch every single poll tick until the window is resized.
+                    int cropW = Math.Max(1, (int)(winW * region.FxW));
+                    int cropH = Math.Max(1, (int)(winH * region.FxH));
 
                     using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
                     using (var g = Graphics.FromImage(bmp))
@@ -245,15 +255,31 @@ internal sealed class GameWatcher
                         {
                             region.CooldownUntil = DateTime.UtcNow + Cooldown;
                             RegionChanged?.Invoke(region.Name, currentValue);
-                            if (region.Name == "down") DownChanged?.Invoke(currentValue);
+                            if (region.Name == "down") { DownChanged?.Invoke(currentValue); _downChangedThisTick = true; }
                         }
                     }
-                    else if (currentValue == null)
+                    else if (currentValue == null && !EventGatedRegions.Contains(region.Name))
                     {
                         // Banner/HUD text cleared -- reset so the SAME value can re-trigger
-                        // next time it appears (e.g. a second flag later in the game).
+                        // next time it appears (e.g. a second flag later in the game). NOT done
+                        // for situation/banner/quarter below -- see EventGatedRegions.
                         region.Last = null;
                     }
+                }
+
+                // situation/banner/quarter deliberately do NOT reset on blank OCR the way other
+                // regions do (see EventGatedRegions below) -- pausing the game covers the whole
+                // HUD, so on unpause the exact same "touchdown"/etc. text reappears and, without
+                // this gate, reads as a brand new event and re-fires the sound. Gating the reset
+                // on an actual down/distance change instead (a real new snap) means a pause that
+                // doesn't span a full play can never cause a re-fire, while a real next score
+                // (which always involves at least one down change first -- a new drive/kickoff)
+                // still re-arms normally.
+                if (_downChangedThisTick)
+                {
+                    foreach (var region in _regions)
+                        if (EventGatedRegions.Contains(region.Name)) region.Last = null;
+                    _downChangedThisTick = false;
                 }
 
                 await Task.Delay(400, ct);
@@ -288,8 +314,8 @@ internal sealed class GameWatcher
     {
         int cropX = rect.Left + (int)(winW * _activePreset.PossessionFxX);
         int cropY = rect.Top + (int)(winH * _activePreset.PossessionFxY);
-        int cropW = (int)(winW * _activePreset.PossessionFxW);
-        int cropH = (int)(winH * _activePreset.PossessionFxH);
+        int cropW = Math.Max(1, (int)(winW * _activePreset.PossessionFxW));
+        int cropH = Math.Max(1, (int)(winH * _activePreset.PossessionFxH));
 
         using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))

@@ -4,7 +4,7 @@ compatibility_date = "2024-01-01"
 
 # Created by `wrangler kv namespace create MARKETPLACE_META` -- paste the id it prints below.
 kv_namespaces = [
-  { binding = "MARKETPLACE_META", id = "REPLACE_WITH_KV_NAMESPACE_ID" }
+  { binding = "MARKETPLACE_META", id = "b36a497dc61a4355a5accfcdd4627bec" }
 ]
 
 # Created by `wrangler r2 bucket create bandroom-marketplace-files` -- bucket_name must match

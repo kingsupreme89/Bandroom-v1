@@ -65,6 +65,13 @@ public sealed class WebBridge
         return "https://teambg/" + Uri.EscapeDataString(Path.GetFileName(path));
     }
 
+    /// <summary>Downloads a Trophy Room image from the marketplace worker and sets it as
+    /// <paramref name="team"/>'s local background (see TeamBackgroundDownloadService /
+    /// TeamBackdrop.cs). Returns true on success; JS refreshes the backdrop afterward if that
+    /// team is currently showing.</summary>
+    public async Task<bool> DownloadAndSetTeamBackground(string team, string url) =>
+        await _host.DownloadAndSetTeamBackgroundFromWeb(team, url);
+
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
     public void OpenSettings() => _host.OpenSettingsFromWeb();
     public void ShowUpdate() => _host.ShowUpdateDialogFromWeb();

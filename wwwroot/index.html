@@ -29,8 +29,11 @@
   <div id="scrim"></div>
 
   <div id="app">
-    <!-- Header bar — id="drag-region" lets the whole bar be dragged via BeginDrag() on mousedown -->
-    <div id="header-bar" class="glass" id="drag-region">
+    <!-- Header bar -- actual dragging happens via #drag-handle (header-center) below, not this
+         element; a duplicate id="drag-region" attribute used to sit here too but was invalid
+         HTML (dead weight -- browsers only honor the first id on an element) and unreferenced
+         anywhere in app.js/style.css, so it's removed rather than fixed into something real. -->
+    <div id="header-bar" class="glass">
       <div class="header-left">
         <span class="brand-mark">B</span>
         <span class="brand-name">Bandroom</span>
@@ -182,20 +185,36 @@
 
   <!-- "The Bandroom" cloud marketplace -- same team icons/logos as everywhere else in the app
        (fillTeamSwatch), same dock-magnify hover. Picking a team opens its "album" below. -->
+  <!-- The Bandroom -- main marketplace hub. Search/select a team to jump to its own album
+       (same as always), OR browse "Newest Uploads" right here, Mac Finder-icon-view style,
+       across every team at once -- clicking any tile jumps straight into that team's album on
+       the right tab. No fake/placeholder content anywhere: if nothing's been uploaded yet, the
+       hub says so plainly instead of showing empty grid slots. -->
   <div id="bandroom-overlay" hidden>
     <div id="bandroom-picker" class="glass">
       <div class="team-picker-header">
         <span>The Bandroom</span>
         <button id="btn-close-bandroom" class="icon-btn">&times;</button>
       </div>
+      <p class="bandroom-instructions">
+        Search for a team below to open its Sound Bank / Trophy Room, or click anything in
+        Newest Uploads to jump straight to it. Every team has its own Sound Bank (songs) and
+        Trophy Room (background images) -- open one and hit <strong>+ Upload</strong> to
+        contribute.
+      </p>
+      <div class="bandroom-hub-section-label">Newest Uploads</div>
+      <div class="bandroom-recent-grid" id="bandroom-recent-grid"><!-- populated by app.js --></div>
+      <div class="bandroom-hub-section-label">Top Contributing Teams</div>
+      <div class="bandroom-leaderboard" id="bandroom-leaderboard"><!-- populated by app.js --></div>
+      <div class="bandroom-hub-section-label">Find a Team</div>
       <input type="text" id="bandroom-search" placeholder="Search teams..." class="team-picker-search" />
       <div class="team-picker-grid" id="bandroom-team-grid"><!-- populated by app.js --></div>
     </div>
   </div>
 
-  <!-- A team's album -- Sound Bank (songs, 6x5 grid) / Trophy Room (images, 5x5 scrollable
-       grid). Community uploads aren't live yet -- slots show as empty "+ Upload" tiles until
-       the upload backend exists, so the layout is real even though it's not wired to data. -->
+  <!-- A team's album -- Sound Bank (songs) / Trophy Room (images). Only real uploads render as
+       tiles; an empty team shows a clear "nothing here yet" message instead of a wall of empty
+       placeholder slots. -->
   <div id="bandroom-album-overlay" hidden>
     <div id="bandroom-album" class="glass">
       <div class="team-picker-header">
@@ -209,8 +228,13 @@
         <button class="bandroom-album-tab active" id="tab-sound-bank">Sound Bank</button>
         <button class="bandroom-album-tab" id="tab-trophy-room">Trophy Room</button>
       </div>
-      <div class="bandroom-album-grid bandroom-songs-grid" id="bandroom-songs-grid"><!-- 6x5, populated by app.js --></div>
-      <div class="bandroom-album-grid bandroom-images-grid" id="bandroom-images-grid" hidden><!-- 5x5 scrollable, populated by app.js --></div>
+      <p class="bandroom-instructions" id="bandroom-album-instructions"></p>
+      <div class="bandroom-album-toolbar">
+        <input type="text" id="bandroom-album-search" placeholder="Search this album..." class="team-picker-search" />
+        <button id="btn-bandroom-album-download-all" class="btn-ghost" title="Download every item in this album">Download All</button>
+      </div>
+      <div class="bandroom-album-grid bandroom-songs-grid" id="bandroom-songs-grid"><!-- populated by app.js --></div>
+      <div class="bandroom-album-grid bandroom-images-grid" id="bandroom-images-grid" hidden><!-- populated by app.js --></div>
     </div>
   </div>
 
@@ -268,6 +292,23 @@
       <div class="save-profile-actions">
         <button id="btn-save-profile-cancel" class="btn-ghost">Cancel</button>
         <button id="btn-save-profile-confirm" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Marketplace upload -- school is implicit (the album's own team, never re-typed), so this
+       only asks for the item's name per the upload spec. Reuses .save-profile-* dialog styling
+       verbatim so it doesn't look like a bolted-on feature. -->
+  <input type="file" id="bandroom-upload-file-input" hidden />
+  <div id="bandroom-upload-overlay" hidden>
+    <div id="bandroom-upload-dialog" class="glass">
+      <div class="save-profile-header" id="bandroom-upload-header">Upload</div>
+      <p class="save-profile-instructions" id="bandroom-upload-instructions"></p>
+      <input type="text" id="bandroom-upload-name" class="save-profile-input" placeholder="Name..." />
+      <div class="save-profile-subtext" id="bandroom-upload-subtext"></div>
+      <div class="save-profile-actions">
+        <button id="btn-bandroom-upload-cancel" class="btn-ghost">Cancel</button>
+        <button id="btn-bandroom-upload-confirm" class="btn-primary">Upload</button>
       </div>
     </div>
   </div>

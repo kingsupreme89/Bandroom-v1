@@ -290,13 +290,20 @@ body {
 .header-right { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
 
 /* Subtle "band members online" indicator -- just a dot, count lives in the tooltip so it
-   doesn't compete with the toolbar's other controls. */
+   doesn't compete with the toolbar's other controls. Glows in --team-secondary, the same color
+   driving the island/.glass outline pulse (see neon-pulse below), instead of a fixed green, so
+   it reads as part of the same team-colored glow language as the rest of the app. (Also fixes
+   a dead reference -- ticker-dot-pulse was never actually defined, so the dot never pulsed at
+   all; renamed to presence-dot-pulse with a real keyframe.) */
 .presence-dot {
   width: 7px; height: 7px; border-radius: 50%;
-  background: #3ddc84;
-  box-shadow: 0 0 5px rgba(61, 220, 132, 0.7);
+  background: var(--team-secondary, var(--accent));
   flex: none;
-  animation: ticker-dot-pulse 1.8s ease-in-out infinite;
+  animation: presence-dot-pulse 1.8s ease-in-out infinite;
+}
+@keyframes presence-dot-pulse {
+  0%, 100% { box-shadow: 0 0 4px 0 color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, transparent); }
+  50%      { box-shadow: 0 0 9px 2px color-mix(in srgb, var(--team-secondary, var(--accent)) 85%, transparent); }
 }
 
 /* Persistent bottom ticker, ESPN-style -- fixed team-colored "B" logo tile on the far left,
@@ -308,7 +315,7 @@ body {
   left: 0; right: 0; bottom: 0;
   display: flex;
   align-items: center;
-  height: 28px;
+  height: 44px;
   background: rgba(0, 0, 0, 0.35);
   border-top: 1px solid var(--glass-border);
   backdrop-filter: blur(var(--glass-blur));
@@ -317,9 +324,9 @@ body {
   overflow: hidden;
 }
 .ticker-logo {
-  width: 22px; height: 22px; border-radius: 6px;
-  font-size: 13px;
-  margin: 0 10px;
+  width: 32px; height: 32px; border-radius: 8px;
+  font-size: 17px;
+  margin: 0 14px;
   flex: none;
 }
 .ticker-track {
@@ -331,11 +338,11 @@ body {
 }
 .ticker-scroll {
   display: inline-block;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--text-muted);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
   padding-left: 100%;
-  animation: ticker-scroll-left 14s linear infinite;
+  animation: ticker-scroll-left 32s linear infinite;
 }
 @keyframes ticker-scroll-left {
   from { transform: translateX(0); }
@@ -368,6 +375,80 @@ body {
 }
 #bandroom-team-grid { overflow-y: auto; }
 
+.bandroom-instructions {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted-2);
+  margin: 8px 0 12px;
+  flex: 0 0 auto;
+}
+.bandroom-hub-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 4px 0 8px;
+  flex: 0 0 auto;
+}
+/* Mac Finder-style horizontal shelf, not a wrapping grid -- scrolls sideways so it never
+   competes with the team-search grid below it for vertical space. */
+.bandroom-recent-grid {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 0 0 auto;
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+}
+.bandroom-recent-empty {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  padding: 10px 2px 14px;
+  flex: 0 0 auto;
+}
+.bandroom-item-tile {
+  flex: 0 0 auto;
+  width: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  text-align: center;
+}
+.bandroom-item-thumb {
+  width: 88px; height: 88px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px;
+  overflow: hidden;
+  color: var(--text-muted-2);
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.bandroom-item-tile:hover .bandroom-item-thumb { transform: scale(1.06); filter: brightness(1.15); }
+.bandroom-item-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.bandroom-item-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.bandroom-item-school {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .bandroom-album-title { display: flex; align-items: center; gap: 10px; }
 .bandroom-album-icon { width: 28px; height: 28px; border-radius: 8px; flex: none; }
 
@@ -384,10 +465,22 @@ body {
 .bandroom-album-tab.active { background: var(--team-secondary, var(--accent)); color: #06222a; border-color: transparent; }
 
 .bandroom-album-grid { overflow-y: auto; min-height: 0; }
-/* Sound Bank: fixed 6 columns x 5 rows. */
+/* Sound Bank: 6 columns, as many rows as there are real uploads (+1 for the Upload tile). */
 .bandroom-songs-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
-/* Trophy Room: fixed 5 columns, scrolls vertically once rows exceed the panel's height. */
+/* Trophy Room: 5 columns, scrolls vertically once rows exceed the panel's height. */
 .bandroom-images-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+/* Real item tiles inside either album grid -- same look/hover as the horizontal hub shelf's
+   .bandroom-item-tile, just stretched to fill its grid cell instead of a fixed 88px. */
+.bandroom-album-grid .bandroom-item-tile { width: auto; }
+.bandroom-album-grid .bandroom-item-thumb { width: 100%; height: auto; aspect-ratio: 1; }
+.bandroom-empty-state {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 28px 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
 
 .bandroom-slot {
   aspect-ratio: 1;
@@ -419,6 +512,99 @@ body {
   50%      { box-shadow: 0 0 9px 1px color-mix(in srgb, var(--tile-color, var(--accent)) 45%, transparent); }
 }
 
+/* Hover action row on an in-album item tile (like/report/set-background/delete -- items 3/5/6/17).
+   Absolutely positioned over the thumb, hidden until hover/focus so it never crowds the tile's
+   normal name/school text. */
+.bandroom-item-tile { position: relative; }
+.bandroom-item-actions {
+  position: absolute;
+  top: 4px; left: 4px; right: 4px;
+  display: flex; flex-wrap: wrap; gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 2;
+}
+.bandroom-item-tile:hover .bandroom-item-actions,
+.bandroom-item-tile:focus-within .bandroom-item-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.bandroom-item-action {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(10, 14, 18, 0.72);
+  color: var(--text-primary);
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+}
+.bandroom-item-action:hover { background: rgba(20, 26, 32, 0.9); }
+.bandroom-item-action:disabled { opacity: 0.5; cursor: default; }
+.bandroom-item-action-danger { border-color: color-mix(in srgb, var(--danger, #e5484d) 55%, rgba(255,255,255,0.25)); }
+.bandroom-item-action-danger:hover { background: color-mix(in srgb, var(--danger, #e5484d) 35%, rgba(10,14,18,0.9)); }
+
+/* In-album search + bulk-download toolbar (items 7/21). */
+.bandroom-album-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex: 0 0 auto;
+}
+.bandroom-album-toolbar .team-picker-search { flex: 1 1 auto; margin: 0; }
+.bandroom-album-toolbar .btn-ghost { flex: 0 0 auto; white-space: nowrap; }
+
+/* Per-team leaderboard (item 19). */
+.bandroom-leaderboard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+  flex: 0 0 auto;
+}
+.bandroom-leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.bandroom-leaderboard-row:hover { background: rgba(255, 255, 255, 0.05); }
+.bandroom-leaderboard-rank { width: 24px; color: var(--text-muted); font-weight: 700; }
+.bandroom-leaderboard-school { flex: 1 1 auto; color: var(--text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bandroom-leaderboard-count { color: var(--text-muted); font-size: 11.5px; }
+
+/* First-run "point at The Bandroom" tooltip (item 16). */
+.onboarding-spotlight {
+  animation: onboarding-spotlight-pulse 1.4s ease-in-out infinite;
+  position: relative;
+  z-index: 30;
+}
+@keyframes onboarding-spotlight-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--team-secondary, var(--accent)) 25%, transparent); }
+}
+.onboarding-tooltip {
+  position: fixed;
+  z-index: 31;
+  max-width: 260px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(10, 14, 18, 0.92);
+  backdrop-filter: blur(8px);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
 .pill {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 7px 14px;
@@ -437,10 +623,22 @@ body {
 .pill-watching { color: #3ddc84; border-color: rgba(61, 220, 132, 0.4); }
 .pill-watching .watch-dot { background: #3ddc84; }
 
-/* Marketplace island tabs -- same pill shape as Start Watching, sized a touch bigger since
-   these are top-level destinations, not a toggle. */
+/* Start Watching stays disabled until Set Matchup has actually locked in both teams --
+   ToggleWatching already refused server-side ("no-matchup"), this just makes that visible up
+   front instead of letting the user press it and get an alert. */
+#btn-watch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+}
+#btn-watch:disabled:active { filter: grayscale(0.4); box-shadow: none; transform: none; }
+
+/* Marketplace island tabs -- identical pill shape/size to Start Watching so the whole header
+   row lines up on one baseline (used to run 8px/13.5px vs the base pill's 7px/13px, which made
+   these 2-3px taller and visibly out of line with the rest of the toolbar -- fixed by just
+   inheriting .pill's sizing instead of overriding it). */
 .marketplace-tabs { display: flex; align-items: center; gap: 6px; }
-.marketplace-tabs .pill { padding: 8px 16px; font-size: 13.5px; font-weight: 600; }
+.marketplace-tabs .pill { font-weight: 600; }
 .pill-marketplace { color: var(--text-secondary); }
 .pill-marketplace:hover { background: rgba(255, 255, 255, 0.08); }
 
@@ -1113,6 +1311,26 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   border-radius: var(--radius-panel);
   padding: 22px;
 }
+
+/* Same overlay shell as #save-profile-overlay -- and the same [hidden]-override fix already
+   applied to #team-picker-overlay/#bandroom-overlay/#bandroom-album-overlay this session (the
+   ID selector's display:flex otherwise beats [hidden]'s display:none on specificity). */
+#bandroom-upload-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#bandroom-upload-overlay[hidden] { display: none; }
+#bandroom-upload-dialog {
+  width: min(440px, 90vw);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+}
+#btn-bandroom-upload-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
 .save-profile-header {
   font-size: 16px;
   font-weight: 700;

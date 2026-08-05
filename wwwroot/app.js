@@ -3,6 +3,10 @@
 // preview) so the layout is still inspectable without the host app running.
 const bridge = window.chrome?.webview?.hostObjects?.bandroom ?? null;
 
+// The Bandroom community marketplace worker (cloudflare-marketplace/worker.js) -- R2 for files,
+// KV for name/school metadata. See that file for the exact /upload, /list, /file contract.
+const MARKETPLACE_URL = "https://bandroom-marketplace.bandroom.workers.dev";
+
 const categoryColors = {
   Downs: "#2f6f78",
   Scoring: "#2f7d55",
@@ -117,14 +121,35 @@ async function init() {
   maybeShowOnboarding();
   pollUserCount();
   loadChangelog();
+  pollTickerActivity();
 }
 
+// Populates the bottom ticker with real recent marketplace uploads (see fetchRecentUploads),
+// replacing the static "No uploads yet" placeholder once real data exists. Polls independently
+// of pollUserCount -- separate concerns, separate elements (see the pollUserCount fix above).
+async function pollTickerActivity() {
+  try {
+    const items = await fetchRecentUploads(8);
+    const el = document.getElementById("ticker-text");
+    if (items.length > 0) {
+      el.textContent = items
+        .map((it) => `${it.name} (${it.type === "song" ? "song" : "background"}) uploaded by ${it.school}`)
+        .join("      •      ");
+    }
+  } catch (err) {
+    console.error("pollTickerActivity failed", err);
+  }
+  setTimeout(pollTickerActivity, 60000);
+}
+
+// Was previously (wrongly) writing the online count into #ticker-text -- that element is the
+// upload-activity ticker (see the marketplace section below), not the presence indicator. The
+// presence-dot's tooltip is the actual online-count display and was never being updated at all
+// (permanently stuck on "Connecting..."); fixed to update that instead.
 async function pollUserCount() {
-  const el = document.getElementById("ticker-text");
+  const dot = document.getElementById("presence-dot");
   const count = bridge ? await bridge.GetActiveUserCount() : -1;
-  el.textContent = count < 0
-    ? "-- band members online"
-    : `${count} band member${count === 1 ? "" : "s"} online`;
+  dot.title = count < 0 ? "Connecting…" : `${count} band member${count === 1 ? "" : "s"} online`;
   setTimeout(pollUserCount, 30000);
 }
 
@@ -340,12 +365,21 @@ function setWatching(mode) {
 
 function wireControls() {
   document.getElementById("btn-watch").addEventListener("click", async () => {
-    const next = await bridge?.ToggleWatching();
-    if (next === "no-matchup") {
-      alert("Set Matchup first — Bandroom needs to know both teams' colors before it can watch the game.");
+    if (!(state.matchupHome && state.matchupAway)) {
+      showToast("Set Matchup first — pick both teams to unlock watching.");
       return;
     }
-    setWatching(next ?? (state.watching === "off" ? "watching" : "off"));
+    try {
+      const next = await bridge?.ToggleWatching();
+      if (next === "no-matchup") {
+        alert("Set Matchup first — Bandroom needs to know both teams' colors before it can watch the game.");
+        return;
+      }
+      setWatching(next ?? (state.watching === "off" ? "watching" : "off"));
+    } catch (err) {
+      console.error("ToggleWatching failed", err);
+      showToast("Couldn't toggle watching -- try again.");
+    }
   });
 
   document.getElementById("btn-settings").addEventListener("click", () => bridge?.OpenSettings());
@@ -380,7 +414,19 @@ function wireControls() {
   });
   document.getElementById("tab-sound-bank").addEventListener("click", () => setAlbumTab("songs"));
   document.getElementById("tab-trophy-room").addEventListener("click", () => setAlbumTab("images"));
+  document.getElementById("bandroom-album-search").addEventListener("input", onAlbumSearchInput);
+  document.getElementById("btn-bandroom-album-download-all").addEventListener("click", downloadAlbumAll);
   document.getElementById("btn-reset").addEventListener("click", () => bridge?.ResetTeamProfile());
+
+  document.getElementById("bandroom-upload-file-input").addEventListener("change", onUploadFileChosen);
+  document.getElementById("btn-bandroom-upload-cancel").addEventListener("click", closeUploadDialog);
+  document.getElementById("bandroom-upload-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "bandroom-upload-overlay") closeUploadDialog();
+  });
+  document.getElementById("btn-bandroom-upload-confirm").addEventListener("click", confirmUpload);
+  document.getElementById("bandroom-upload-name").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") confirmUpload();
+  });
 
   document.getElementById("slider-volume").addEventListener("input", (e) => {
     document.getElementById("volume-value").textContent = e.target.value;
@@ -518,7 +564,8 @@ function wireControls() {
     if (!document.getElementById("save-profile-overlay").hidden) closeSaveProfileDialog();
     if (!document.getElementById("matchup-overlay").hidden) closeMatchupDialog();
     // Album closes first if both happen to be open (it renders on top of the team-grid overlay).
-    if (!document.getElementById("bandroom-album-overlay").hidden) closeTeamAlbum();
+    if (!document.getElementById("bandroom-upload-overlay").hidden) closeUploadDialog();
+    else if (!document.getElementById("bandroom-album-overlay").hidden) closeTeamAlbum();
     else if (!document.getElementById("bandroom-overlay").hidden) closeBandroomMarketplace();
   });
 }
@@ -608,12 +655,319 @@ function renderTeamGridInto(gridId, filter, onPick) {
   squareUpTiles(grid);
 }
 
+// Every marketplace entry point below is wrapped defensively: state.teams may not have loaded
+// yet, a team's data can be malformed, or a DOM node can be missing mid-transition -- none of
+// that should throw past this boundary and leave an overlay stuck half-open/unclickable. On any
+// failure we log for diagnosis, force every marketplace overlay closed (a known-good state), and
+// toast the user instead of silently freezing.
+function marketplaceGuard(fn, label) {
+  try {
+    fn();
+  } catch (err) {
+    console.error(`Marketplace error (${label})`, err);
+    try {
+      document.getElementById("bandroom-overlay").hidden = true;
+      document.getElementById("bandroom-album-overlay").hidden = true;
+    } catch { /* DOM itself is gone -- nothing more we can do */ }
+    albumTeam = null;
+    showToast("The Bandroom hit a snag -- closed it. Try again.");
+  }
+}
+
+// ---- Marketplace data layer -------------------------------------------------------------
+// Thin wrappers over the cloudflare-marketplace worker's GET /list. Every call is defensive --
+// a network hiccup returns an empty list instead of throwing, since marketplaceGuard's job is
+// to keep the UI alive, not to surface raw fetch errors to the user.
+async function fetchUploadList(type, school) {
+  try {
+    const qs = new URLSearchParams({ type });
+    if (school) qs.set("school", school);
+    const res = await fetch(`${MARKETPLACE_URL}/list?${qs}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.items) ? data.items : [];
+  } catch (err) {
+    console.error(`fetchUploadList(${type}) failed`, err);
+    return [];
+  }
+}
+
+async function fetchRecentUploads(limit) {
+  const [songs, images] = await Promise.all([fetchUploadList("song"), fetchUploadList("image")]);
+  return [...songs, ...images]
+    .sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1))
+    .slice(0, limit);
+}
+
+// ---- "My uploads" tracking (item 5) ----------------------------------------------------
+// No accounts exist, so ownership is tracked purely client-side: the worker hands back a
+// one-time ownerToken at upload time (see worker.js POST /upload), which we stash in
+// localStorage keyed by item id. Only tiles whose id shows up here get a Delete button --
+// this browser/app-instance is the only place that ever sees its own token.
+const MY_UPLOADS_KEY = "bandroom:myUploads";
+
+function loadMyUploads() {
+  try {
+    const raw = localStorage.getItem(MY_UPLOADS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (err) {
+    console.error("loadMyUploads failed", err);
+    return {};
+  }
+}
+
+function recordMyUpload(type, uploadResult) {
+  if (!uploadResult?.id || !uploadResult?.ownerToken) return;
+  try {
+    const mine = loadMyUploads();
+    mine[uploadResult.id] = { type, ownerToken: uploadResult.ownerToken, at: Date.now() };
+    localStorage.setItem(MY_UPLOADS_KEY, JSON.stringify(mine));
+  } catch (err) {
+    console.error("recordMyUpload failed", err);
+  }
+}
+
+function myUploadToken(id) {
+  return loadMyUploads()[id]?.ownerToken ?? null;
+}
+
+function forgetMyUpload(id) {
+  try {
+    const mine = loadMyUploads();
+    delete mine[id];
+    localStorage.setItem(MY_UPLOADS_KEY, JSON.stringify(mine));
+  } catch (err) {
+    console.error("forgetMyUpload failed", err);
+  }
+}
+
+async function deleteUploadedItem(item) {
+  const token = myUploadToken(item.id);
+  if (!token) return false;
+  try {
+    const res = await fetch(`${MARKETPLACE_URL}/item/${item.type}/${encodeURIComponent(item.id)}`, {
+      method: "DELETE",
+      headers: { "X-Owner-Token": token },
+    });
+    if (!res.ok) throw new Error(`delete failed: ${res.status}`);
+    forgetMyUpload(item.id);
+    return true;
+  } catch (err) {
+    console.error("deleteUploadedItem failed", err);
+    return false;
+  }
+}
+
+async function reportUploadedItem(item) {
+  try {
+    const res = await fetch(`${MARKETPLACE_URL}/report/${item.type}/${encodeURIComponent(item.id)}`, { method: "POST" });
+    return res.ok;
+  } catch (err) {
+    console.error("reportUploadedItem failed", err);
+    return false;
+  }
+}
+
+async function likeUploadedItem(item) {
+  try {
+    const res = await fetch(`${MARKETPLACE_URL}/like/${item.type}/${encodeURIComponent(item.id)}`, { method: "POST" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data.likes === "number" ? data.likes : null;
+  } catch (err) {
+    console.error("likeUploadedItem failed", err);
+    return null;
+  }
+}
+
 function openBandroomMarketplace() {
-  document.getElementById("bandroom-overlay").hidden = false;
-  const search = document.getElementById("bandroom-search");
-  search.value = "";
-  renderBandroomTeamGrid("");
-  search.focus();
+  marketplaceGuard(() => {
+    document.getElementById("bandroom-overlay").hidden = false;
+    const search = document.getElementById("bandroom-search");
+    search.value = "";
+    renderBandroomTeamGrid("");
+    renderBandroomHub();
+    renderLeaderboard();
+    search.focus();
+  }, "openBandroomMarketplace");
+}
+
+/// Per-team upload leaderboard (item 19) -- combines song + image counts per school from the
+/// worker's /leaderboard endpoint and shows the top few. Best-effort: any failure just leaves
+/// the section empty rather than breaking the rest of the hub.
+async function renderLeaderboard() {
+  const el = document.getElementById("bandroom-leaderboard");
+  if (!el) return;
+  el.innerHTML = `<div class="bandroom-recent-empty">Loading...</div>`;
+  try {
+    const [songsRes, imagesRes] = await Promise.all([
+      fetch(`${MARKETPLACE_URL}/leaderboard?type=song`).then((r) => (r.ok ? r.json() : { schools: [] })),
+      fetch(`${MARKETPLACE_URL}/leaderboard?type=image`).then((r) => (r.ok ? r.json() : { schools: [] })),
+    ]);
+    if (document.getElementById("bandroom-overlay").hidden) return;
+
+    const combined = new Map();
+    for (const { school, count } of [...(songsRes.schools ?? []), ...(imagesRes.schools ?? [])]) {
+      combined.set(school, (combined.get(school) ?? 0) + count);
+    }
+    const top = [...combined.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+    el.innerHTML = "";
+    if (top.length === 0) {
+      el.innerHTML = `<div class="bandroom-recent-empty">No uploads yet -- be the first team on the board!</div>`;
+      return;
+    }
+    top.forEach(([school, count], i) => {
+      const row = document.createElement("div");
+      row.className = "bandroom-leaderboard-row";
+      row.innerHTML = `<span class="bandroom-leaderboard-rank">#${i + 1}</span>
+        <span class="bandroom-leaderboard-school">${school}</span>
+        <span class="bandroom-leaderboard-count">${count} upload${count === 1 ? "" : "s"}</span>`;
+      row.addEventListener("click", () => openTeamAlbum(school));
+      el.appendChild(row);
+    });
+  } catch (err) {
+    console.error("renderLeaderboard failed", err);
+    el.innerHTML = `<div class="bandroom-recent-empty">Couldn't load the leaderboard right now.</div>`;
+  }
+}
+
+async function renderBandroomHub() {
+  const grid = document.getElementById("bandroom-recent-grid");
+  grid.innerHTML = `<div class="bandroom-recent-empty">Loading...</div>`;
+  const items = await fetchRecentUploads(20);
+  // The overlay may have been closed (or a different one reopened) while this fetch was in
+  // flight -- bail instead of writing into a grid the user can no longer see, or worse, into a
+  // hub that's since been torn down.
+  if (document.getElementById("bandroom-overlay").hidden) return;
+  grid.innerHTML = "";
+  if (items.length === 0) {
+    grid.innerHTML = `<div class="bandroom-recent-empty">Nothing uploaded yet -- open any team's Sound Bank or Trophy Room and be the first!</div>`;
+    return;
+  }
+  for (const item of items) grid.appendChild(buildItemTile(item, /*inHub*/ true));
+}
+
+function buildItemTile(item, inHub) {
+  const tile = document.createElement("div");
+  tile.className = "bandroom-item-tile";
+  const thumb = document.createElement("div");
+  thumb.className = "bandroom-item-thumb";
+  if (item.type === "image") {
+    thumb.innerHTML = `<img src="${item.url}" alt="${item.name}" loading="lazy">`;
+  } else {
+    thumb.textContent = "\u{1F3B5}"; // musical note -- songs have no visual thumbnail
+  }
+  const name = document.createElement("div");
+  name.className = "bandroom-item-name";
+  name.textContent = item.name;
+  const school = document.createElement("div");
+  school.className = "bandroom-item-school";
+  school.textContent = item.school;
+  tile.append(thumb, name, school);
+  tile.title = `${item.name} -- ${item.school}`;
+  tile.addEventListener("click", (e) => {
+    if (e.target.closest(".bandroom-item-action")) return; // hover-button clicks handle themselves
+    if (inHub) {
+      // Jump straight into that upload's own team/tab, same as picking the team from search.
+      openTeamAlbum(item.school);
+      setAlbumTab(item.type === "song" ? "songs" : "images");
+    } else if (item.type === "song") {
+      previewSong(item);
+    }
+  });
+
+  // Hover action row -- only in an album view (not the hub, where tiles jump to the album
+  // instead of acting in place). Like/Report are always available; Set as Background only for
+  // Trophy Room images; Delete only shows on tiles this browser itself uploaded (item 5).
+  if (!inHub) {
+    const actions = document.createElement("div");
+    actions.className = "bandroom-item-actions";
+
+    const likeBtn = document.createElement("button");
+    likeBtn.className = "bandroom-item-action";
+    likeBtn.title = "Like this upload";
+    likeBtn.textContent = `♡ ${item.likes ?? 0}`;
+    likeBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      likeBtn.disabled = true;
+      const newCount = await likeUploadedItem(item);
+      if (newCount != null) { likeBtn.textContent = `♥ ${newCount}`; }
+      else { likeBtn.disabled = false; showToast("Couldn't like that right now."); }
+    });
+    actions.appendChild(likeBtn);
+
+    if (item.type === "image") {
+      const bgBtn = document.createElement("button");
+      bgBtn.className = "bandroom-item-action";
+      bgBtn.title = `Set as ${item.school}'s background`;
+      bgBtn.textContent = "\u{1F5BC} Set as Background";
+      bgBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        bgBtn.disabled = true;
+        bgBtn.textContent = "Saving...";
+        const ok = bridge ? await bridge.DownloadAndSetTeamBackground(item.school, item.url) : false;
+        if (ok) {
+          showToast(`Set as ${item.school}'s background!`);
+          if (state.activeTeam === item.school) applyBackground(item.school);
+        } else {
+          showToast("Couldn't set that background -- try again.");
+        }
+        bgBtn.disabled = false;
+        bgBtn.textContent = "\u{1F5BC} Set as Background";
+      });
+      actions.appendChild(bgBtn);
+    }
+
+    const reportBtn = document.createElement("button");
+    reportBtn.className = "bandroom-item-action";
+    reportBtn.title = "Report this upload";
+    reportBtn.textContent = "\u{1F6A9}";
+    reportBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      reportBtn.disabled = true;
+      const ok = await reportUploadedItem(item);
+      showToast(ok ? "Reported -- thanks for flagging it." : "Couldn't report that right now.");
+      if (!ok) reportBtn.disabled = false;
+    });
+    actions.appendChild(reportBtn);
+
+    if (myUploadToken(item.id)) {
+      const delBtn = document.createElement("button");
+      delBtn.className = "bandroom-item-action bandroom-item-action-danger";
+      delBtn.title = "Delete your upload";
+      delBtn.textContent = "\u{1F5D1}";
+      delBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        delBtn.disabled = true;
+        const ok = await deleteUploadedItem(item);
+        if (ok) {
+          showToast(`Deleted "${item.name}".`);
+          tile.remove();
+        } else {
+          showToast("Couldn't delete that -- try again.");
+          delBtn.disabled = false;
+        }
+      });
+      actions.appendChild(delBtn);
+    }
+
+    tile.appendChild(actions);
+  }
+
+  return tile;
+}
+
+let _previewAudio = null;
+function previewSong(item) {
+  try {
+    _previewAudio?.pause();
+    _previewAudio = new Audio(item.url);
+    _previewAudio.play().catch((err) => console.error("Song preview failed", err));
+  } catch (err) {
+    console.error("Song preview failed", err);
+  }
 }
 
 function closeBandroomMarketplace() {
@@ -627,66 +981,367 @@ function renderBandroomTeamGrid(filter) {
 let albumTeam = null;
 
 function openTeamAlbum(name) {
-  const team = state.teams.find((t) => t.name === name);
-  if (!team) return;
-  albumTeam = team;
-  document.getElementById("bandroom-overlay").hidden = true;
-  document.getElementById("bandroom-album-overlay").hidden = false;
-  fillTeamSwatch(document.getElementById("bandroom-album-icon"), team);
-  document.getElementById("bandroom-album-name").textContent = team.name;
-  setAlbumTab("songs");
+  marketplaceGuard(() => {
+    const team = state.teams.find((t) => t.name === name);
+    if (!team) return;
+    albumTeam = team;
+    document.getElementById("bandroom-overlay").hidden = true;
+    document.getElementById("bandroom-album-overlay").hidden = false;
+    fillTeamSwatch(document.getElementById("bandroom-album-icon"), team);
+    document.getElementById("bandroom-album-name").textContent = team.name;
+    setAlbumTab("songs");
+  }, "openTeamAlbum");
 }
 
 function closeTeamAlbum() {
   document.getElementById("bandroom-album-overlay").hidden = true;
+  _previewAudio?.pause();
   albumTeam = null;
 }
 
 function setAlbumTab(tab) {
-  // Guard against openTeamAlbum never having found a matching team (e.g. state.teams hasn't
-  // loaded yet) -- rendering would otherwise throw on albumTeam.secondary and leave the album
-  // in a half-broken state instead of just declining to open.
-  if (!albumTeam) return;
-  document.getElementById("tab-sound-bank").classList.toggle("active", tab === "songs");
-  document.getElementById("tab-trophy-room").classList.toggle("active", tab === "images");
-  document.getElementById("bandroom-songs-grid").hidden = tab !== "songs";
-  document.getElementById("bandroom-images-grid").hidden = tab !== "images";
-  if (tab === "songs") renderSoundBankGrid(); else renderTrophyRoomGrid();
+  marketplaceGuard(() => {
+    // Guard against openTeamAlbum never having found a matching team (e.g. state.teams hasn't
+    // loaded yet) -- rendering would otherwise throw on albumTeam.secondary and leave the album
+    // in a half-broken state instead of just declining to open.
+    if (!albumTeam) return;
+    document.getElementById("tab-sound-bank").classList.toggle("active", tab === "songs");
+    document.getElementById("tab-trophy-room").classList.toggle("active", tab === "images");
+    const songsGrid = document.getElementById("bandroom-songs-grid");
+    const imagesGrid = document.getElementById("bandroom-images-grid");
+    songsGrid.hidden = tab !== "songs";
+    imagesGrid.hidden = tab !== "images";
+    // Reset scroll on both grids every switch -- without this, flipping Sound Bank -> Trophy
+    // Room -> Sound Bank could leave a grid mid-scroll under its own hidden state, so it opens
+    // scrolled partway down instead of at the top the next time its tab is picked.
+    songsGrid.scrollTop = 0;
+    imagesGrid.scrollTop = 0;
+    const albumSearch = document.getElementById("bandroom-album-search");
+    if (albumSearch) albumSearch.value = "";
+    document.getElementById("bandroom-album-instructions").textContent = tab === "songs"
+      ? "Click a song to preview it. Hit + Upload to add your own -- it'll be compressed automatically and named after this team."
+      : "Click + Upload to add a background. Setting one as this team's live background is coming soon.";
+    if (tab === "songs") renderSoundBankGrid(); else renderTrophyRoomGrid();
+  }, "setAlbumTab");
 }
 
-// Sound Bank: fixed 6x5 grid (30 slots). Community upload backend doesn't exist yet -- every
-// slot renders as an empty "+ Upload Song" tile for now, labeled clearly, rather than faking
-// data. Once uploads are wired up, real entries (song name + school name, per the upload
-// prompt spec) replace the empty slots here.
-function renderSoundBankGrid() {
+// Cache of the currently-open album's items (per type), so the in-album search box (item 7)
+// can filter instantly client-side instead of re-hitting the worker on every keystroke.
+let _albumItemsCache = { songs: [], images: [] };
+
+async function renderSoundBankGrid() {
   const grid = document.getElementById("bandroom-songs-grid");
+  const team = albumTeam;
+  grid.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
+  const items = await fetchUploadList("song", team.name);
+  if (!albumTeam || albumTeam !== team || document.getElementById("bandroom-songs-grid").hidden) return;
+  _albumItemsCache.songs = items;
+  paintAlbumGrid("songs", getAlbumSearchFilter());
+}
+
+async function renderTrophyRoomGrid() {
+  const grid = document.getElementById("bandroom-images-grid");
+  const team = albumTeam;
+  grid.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
+  const items = await fetchUploadList("image", team.name);
+  if (!albumTeam || albumTeam !== team || document.getElementById("bandroom-images-grid").hidden) return;
+  _albumItemsCache.images = items;
+  paintAlbumGrid("images", getAlbumSearchFilter());
+}
+
+function getAlbumSearchFilter() {
+  return (document.getElementById("bandroom-album-search")?.value ?? "").trim().toLowerCase();
+}
+
+/// Renders whichever tab's grid is currently visible from the cached item list, filtered by the
+/// in-album search box -- called both after a fresh fetch and on every search keystroke, so
+/// searching never re-hits the network.
+function paintAlbumGrid(tab, filter) {
+  if (!albumTeam) return;
+  const isSongs = tab === "songs";
+  const grid = document.getElementById(isSongs ? "bandroom-songs-grid" : "bandroom-images-grid");
+  const team = albumTeam;
+  const all = isSongs ? _albumItemsCache.songs : _albumItemsCache.images;
+  const items = filter ? all.filter((it) => it.name.toLowerCase().includes(filter)) : all;
+
   grid.innerHTML = "";
-  for (let i = 0; i < 30; i++) {
-    const tile = document.createElement("div");
-    tile.className = "bandroom-slot bandroom-song-slot";
-    tile.innerHTML = `<span class="bandroom-slot-plus">+</span><span class="bandroom-slot-label">Upload Song</span>`;
-    tile.title = `${albumTeam.name} — upload a song`;
-    tile.addEventListener("click", () => alert("Community sound uploads are coming soon!"));
-    grid.appendChild(tile);
+  if (all.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "bandroom-empty-state";
+    empty.textContent = isSongs
+      ? `No songs uploaded for ${team.name} yet -- be the first!`
+      : `No background images uploaded for ${team.name} yet -- be the first!`;
+    grid.appendChild(empty);
+  } else if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "bandroom-empty-state";
+    empty.textContent = `No ${isSongs ? "songs" : "images"} match "${filter}".`;
+    grid.appendChild(empty);
+  } else {
+    for (const item of items) {
+      const tile = buildItemTile(item, /*inHub*/ false);
+      if (!isSongs) {
+        tile.querySelector(".bandroom-item-thumb").style.setProperty("--tile-color", team.secondary);
+        tile.querySelector(".bandroom-item-thumb").classList.add("bandroom-image-slot");
+      }
+      grid.appendChild(tile);
+    }
+  }
+  grid.appendChild(buildUploadTile(isSongs ? "song" : "image"));
+}
+
+function onAlbumSearchInput() {
+  const filter = getAlbumSearchFilter();
+  const isSongs = !document.getElementById("bandroom-songs-grid").hidden;
+  paintAlbumGrid(isSongs ? "songs" : "images", filter);
+}
+
+/// Bulk-download (item 21): sequential downloads of every currently-visible item in the album's
+/// active tab (respects the search filter, same as the grid it's downloading). No zipping --
+/// keeping this to native browser downloads avoids pulling in a zip library with no build step
+/// to vendor it through (same constraint noted on the audio compression path).
+async function downloadAlbumAll() {
+  if (!albumTeam) return;
+  const isSongs = !document.getElementById("bandroom-songs-grid").hidden;
+  const filter = getAlbumSearchFilter();
+  const all = isSongs ? _albumItemsCache.songs : _albumItemsCache.images;
+  const items = filter ? all.filter((it) => it.name.toLowerCase().includes(filter)) : all;
+  if (items.length === 0) { showToast("Nothing to download here."); return; }
+
+  showToast(`Downloading ${items.length} item${items.length === 1 ? "" : "s"}...`);
+  for (const item of items) {
+    try {
+      const res = await fetch(item.url);
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      // Prefer the real extension off the item's own URL (the worker's /file/<key> path keeps
+      // the original uploaded filename) so a pre-compression-era upload (or a fallback upload
+      // that kept its original format) doesn't get mislabeled -- falls back to the expected
+      // compressed-format extension only if the URL has none.
+      const urlExt = (item.url.split("?")[0].match(/\.([a-zA-Z0-9]{1,5})$/) || [])[1];
+      const ext = urlExt || (isSongs ? "webm" : "jpg");
+      a.download = `${sanitizeForFilename(albumTeam.name)}-${sanitizeForFilename(item.name)}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      // Small stagger between downloads -- firing many `a.click()` downloads back-to-back can
+      // get some of them silently dropped by the browser's download manager.
+      await new Promise((r) => setTimeout(r, 300));
+    } catch (err) {
+      console.error(`downloadAlbumAll failed for "${item.name}"`, err);
+    }
   }
 }
 
-// Trophy Room: 5x5 grid, scrolls if a team ever has more than fits (scrolling handled by CSS
-// overflow, not JS). Each filled tile would show the team's glowing pulse outline (same
-// technique as .situation-row's team-secondary glow) with a "Set as team background" option --
-// not wired yet since there's no real image data to show.
-function renderTrophyRoomGrid() {
-  const grid = document.getElementById("bandroom-images-grid");
-  grid.innerHTML = "";
-  for (let i = 0; i < 25; i++) {
-    const tile = document.createElement("div");
-    tile.className = "bandroom-slot bandroom-image-slot";
-    tile.style.setProperty("--tile-color", albumTeam.secondary);
-    tile.innerHTML = `<span class="bandroom-slot-plus">+</span><span class="bandroom-slot-label">Upload Image</span>`;
-    tile.title = `${albumTeam.name} — upload a background image`;
-    tile.addEventListener("click", () => alert("Community background uploads are coming soon!"));
-    grid.appendChild(tile);
+function sanitizeForFilename(s) {
+  return String(s ?? "file").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_").slice(0, 60) || "file";
+}
+
+function buildUploadTile(type) {
+  const tile = document.createElement("div");
+  tile.className = "bandroom-slot";
+  tile.innerHTML = `<span class="bandroom-slot-plus">+</span><span class="bandroom-slot-label">Upload ${type === "song" ? "Song" : "Image"}</span>`;
+  tile.title = `${albumTeam.name} — upload a ${type === "song" ? "song" : "background image"}`;
+  tile.addEventListener("click", () => openUploadPicker(type));
+  return tile;
+}
+
+// ---- Upload flow --------------------------------------------------------------------------
+// School is never re-typed here -- it's always the album's own team (albumTeam.name), per the
+// upload spec's "name AND school" requirement being satisfied implicitly by context instead of
+// asking the user to retype something already known.
+let pendingUpload = null; // { type, file }
+
+function openUploadPicker(type) {
+  pendingUpload = { type, file: null };
+  const input = document.getElementById("bandroom-upload-file-input");
+  input.accept = type === "song" ? "audio/*" : "image/*";
+  input.value = ""; // allow picking the same file twice in a row
+  input.click();
+}
+
+function onUploadFileChosen(e) {
+  const file = e.target.files?.[0];
+  if (!file || !pendingUpload) return;
+  pendingUpload.file = file;
+
+  const overlay = document.getElementById("bandroom-upload-overlay");
+  document.getElementById("bandroom-upload-header").textContent =
+    pendingUpload.type === "song" ? "Upload Song" : "Upload Background Image";
+  document.getElementById("bandroom-upload-instructions").textContent =
+    `Uploading to ${albumTeam.name}'s ${pendingUpload.type === "song" ? "Sound Bank" : "Trophy Room"}. `
+    + (pendingUpload.type === "song"
+      ? "It'll be compressed automatically so every upload plays at a consistent volume/size."
+      : "It'll be resized/compressed automatically so every Trophy Room image is a consistent size.");
+  const nameInput = document.getElementById("bandroom-upload-name");
+  nameInput.value = "";
+  document.getElementById("bandroom-upload-subtext").textContent = "";
+  document.getElementById("btn-bandroom-upload-confirm").disabled = false;
+  overlay.hidden = false;
+  nameInput.focus();
+}
+
+function closeUploadDialog() {
+  document.getElementById("bandroom-upload-overlay").hidden = true;
+  pendingUpload = null;
+}
+
+async function confirmUpload() {
+  if (!pendingUpload?.file || !albumTeam) return;
+  const name = document.getElementById("bandroom-upload-name").value.trim();
+  if (!name) {
+    document.getElementById("bandroom-upload-subtext").textContent = "Enter a name first.";
+    return;
   }
+
+  const confirmBtn = document.getElementById("btn-bandroom-upload-confirm");
+  const subtext = document.getElementById("bandroom-upload-subtext");
+  confirmBtn.disabled = true;
+
+  // Elapsed-time counter -- audio compression runs in real time (MediaRecorder has to play
+  // the clip through to capture it), so a long song with only a static "Compressing..."
+  // string reads as a hang. Ticks a spinner + "Xs elapsed" every 250ms until upload settles.
+  const spinnerFrames = ["⣾", "⣽", "⣻", "⣟", "⡿", "⢿"];
+  let spinnerIdx = 0;
+  const startedAt = Date.now();
+  let progressLabel = "Compressing";
+  const progressTimer = setInterval(() => {
+    const secs = ((Date.now() - startedAt) / 1000).toFixed(1);
+    spinnerIdx = (spinnerIdx + 1) % spinnerFrames.length;
+    subtext.textContent = `${spinnerFrames[spinnerIdx]} ${progressLabel}... (${secs}s)`;
+  }, 250);
+  const stopProgress = () => clearInterval(progressTimer);
+
+  try {
+    let uploadFile = pendingUpload.file;
+    try {
+      uploadFile = pendingUpload.type === "image"
+        ? await compressImageFile(pendingUpload.file)
+        : await compressAudioFile(pendingUpload.file);
+    } catch (err) {
+      // Compression is a nice-to-have, not a hard requirement -- if the browser can't do it
+      // (unsupported codec, huge file, etc.) fall back to the original file rather than
+      // blocking the upload entirely.
+      console.error("Upload compression failed, using original file", err);
+      uploadFile = pendingUpload.file;
+    }
+
+    progressLabel = "Uploading";
+    const form = new FormData();
+    form.append("type", pendingUpload.type);
+    form.append("name", name);
+    form.append("school", albumTeam.name);
+    form.append("file", uploadFile, uploadFile.name || pendingUpload.file.name);
+
+    const res = await fetch(`${MARKETPLACE_URL}/upload`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`upload failed: ${res.status} ${await res.text()}`);
+    const uploadResult = await res.json().catch(() => null);
+
+    stopProgress();
+    recordMyUpload(pendingUpload.type, uploadResult);
+    closeUploadDialog();
+    showToast(`Uploaded "${name}" to ${albumTeam.name}!`);
+    // Re-render whichever grid is currently visible for this album.
+    if (!document.getElementById("bandroom-songs-grid").hidden) renderSoundBankGrid();
+    if (!document.getElementById("bandroom-images-grid").hidden) renderTrophyRoomGrid();
+  } catch (err) {
+    stopProgress();
+    console.error("Upload failed", err);
+    subtext.textContent = "Upload failed -- check your connection and try again.";
+    confirmBtn.disabled = false;
+  }
+}
+
+/// Resizes/re-encodes an image client-side so every Trophy Room upload is a consistent max
+/// size/format instead of whatever resolution and format the user's original file happened to
+/// be -- caps the longer edge at 1600px and re-encodes as JPEG at a fixed quality.
+function compressImageFile(file) {
+  const MAX_DIM = 1600;
+  const QUALITY = 0.85;
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      const scale = Math.min(1, MAX_DIM / Math.max(width, height));
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => {
+        if (!blob) { reject(new Error("canvas.toBlob returned null")); return; }
+        resolve(new File([blob], renameExt(file.name, "jpg"), { type: "image/jpeg" }));
+      }, "image/jpeg", QUALITY);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("image failed to load")); };
+    img.src = url;
+  });
+}
+
+/// Re-encodes an audio clip client-side to Opus/WebM at a fixed bitrate using only native
+/// browser APIs (Web Audio decode + MediaRecorder capture -- no bundled encoder library, since
+/// there's no build step/bundler in this project to vendor one through). Runs in real time
+/// (MediaRecorder has to actually play the clip through to capture it), which is fine for the
+/// short trimmed clips this app deals with. 160kbps Opus is transparent/"HD" for spoken/music
+/// clips at a fraction of source WAV size.
+function compressAudioFile(file) {
+  const TARGET_BITRATE = 160000;
+  return new Promise((resolve, reject) => {
+    (async () => {
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor || !window.MediaRecorder) throw new Error("audio compression not supported in this environment");
+
+      const arrayBuffer = await file.arrayBuffer();
+      const audioCtx = new AudioContextCtor();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+      const dest = audioCtx.createMediaStreamDestination();
+      const src = audioCtx.createBufferSource();
+      src.buffer = audioBuffer;
+      src.connect(dest);
+
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm";
+      const recorder = new MediaRecorder(dest.stream, { mimeType, audioBitsPerSecond: TARGET_BITRATE });
+      const chunks = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        audioCtx.close().catch(() => {});
+        // If MediaRecorder never emitted a single dataavailable chunk (can happen for a
+        // very short clip, or a browser/driver hiccup), resolving with an empty File would
+        // "succeed" but upload a 0-byte, unplayable file. Reject instead so confirmUpload's
+        // fallback path uploads the original file -- silently corrupt beats silently empty.
+        const totalBytes = chunks.reduce((n, c) => n + c.size, 0);
+        if (totalBytes === 0) { reject(new Error("audio compression produced no data")); return; }
+        resolve(new File(chunks, renameExt(file.name, "webm"), { type: mimeType }));
+      };
+      recorder.onerror = (e) => { audioCtx.close().catch(() => {}); reject(e.error ?? new Error("MediaRecorder error")); };
+
+      recorder.start();
+      src.start(0);
+      // +200ms safety margin over the buffer's exact duration so the tail isn't clipped.
+      // Guard against a degenerate (zero/NaN-duration) decoded buffer -- a bad/corrupt source
+      // file could decode "successfully" into a buffer with no real length, and
+      // setTimeout(fn, NaN) never fires, which would hang the upload forever instead of
+      // falling back to the original file.
+      const stopDelayMs = Number.isFinite(audioBuffer.duration) && audioBuffer.duration > 0
+        ? audioBuffer.duration * 1000 + 200
+        : 200;
+      setTimeout(() => { try { recorder.stop(); } catch { /* already stopped */ } }, stopDelayMs);
+    })().catch(reject);
+  });
+}
+
+function renameExt(filename, ext) {
+  const base = (filename || "upload").replace(/\.[^./\\]+$/, "");
+  return `${base}.${ext}`;
 }
 
 async function maybeShowOnboarding() {
@@ -699,10 +1354,45 @@ async function maybeShowOnboarding() {
     state.activeTeam = name;
     setActiveTeam(name);
     overlay.hidden = true;
+    pointOutTheBandroom();
   };
   renderTeamGridInto("onboarding-grid", "", pick);
   document.getElementById("onboarding-search").addEventListener("input", (e) =>
     renderTeamGridInto("onboarding-grid", e.target.value, pick));
+}
+
+/// First-run onboarding only ever asked for a favorite team -- it never mentioned The Bandroom
+/// (the community marketplace) at all. Points a one-time highlight tooltip at that header button
+/// right after onboarding finishes, dismissed by clicking it (which also opens it) or by a timeout.
+function pointOutTheBandroom() {
+  const btn = document.getElementById("btn-bandroom-cloud");
+  if (!btn) return;
+  btn.classList.add("onboarding-spotlight");
+
+  const tip = document.createElement("div");
+  tip.className = "onboarding-tooltip";
+  tip.textContent = "New here? Check out The Bandroom -- a community library of songs and backgrounds other bands have shared.";
+  document.body.appendChild(tip);
+
+  const positionTip = () => {
+    const r = btn.getBoundingClientRect();
+    tip.style.top = `${r.bottom + 10}px`;
+    tip.style.left = `${Math.max(8, r.left + r.width / 2 - tip.offsetWidth / 2)}px`;
+  };
+  requestAnimationFrame(positionTip);
+
+  let dismissed = false;
+  const dismiss = () => {
+    if (dismissed) return;
+    dismissed = true;
+    btn.classList.remove("onboarding-spotlight");
+    tip.remove();
+    btn.removeEventListener("click", dismiss);
+    window.removeEventListener("resize", positionTip);
+  };
+  btn.addEventListener("click", dismiss);
+  window.addEventListener("resize", positionTip);
+  setTimeout(dismiss, 9000);
 }
 
 function showToast(text) {
@@ -730,9 +1420,24 @@ function updateMatchupLabel() {
     btn.textContent = state.matchupHome && state.matchupAway
       ? `${state.matchupAway} @ ${state.matchupHome}`
       : "Set Matchup";
+    // Clicking this again (whether or not a matchup is already picked) reopens the dialog --
+    // openMatchupDialog() only refuses while state.matchupLocked (mid-game), so this is already
+    // the "change matchup teams" entry point, not just the first-time picker.
     btn.title = "Pick who's home and away for this game";
   }
+  updateWatchGate();
   updateMatchupSideBar();
+}
+
+// Start Watching stays disabled until both matchup teams are actually picked -- previously it
+// was always clickable and just alerted "no-matchup" after a round trip to the host. Gating it
+// client-side makes the requirement visible up front instead of discovered by clicking.
+function updateWatchGate() {
+  const btn = document.getElementById("btn-watch");
+  if (!btn) return;
+  const ready = !!(state.matchupHome && state.matchupAway);
+  btn.disabled = !ready;
+  btn.title = ready ? "Toggle watching" : "Set Matchup first to unlock watching";
 }
 
 async function loadMatchup() {

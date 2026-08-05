@@ -148,6 +148,16 @@ public sealed class WebMainForm : Form
         return byCategory;
     }
 
+    /// <summary>Downloads a Trophy Room image and saves it as <paramref name="team"/>'s local
+    /// background (see TeamBackgroundDownloadService). This is a plain download, not a UI
+    /// mutation, so it deliberately does NOT need to run on the UI thread -- only the caller
+    /// (WebBridge, itself called from WebView2's own thread) awaits the result.</summary>
+    public async Task<bool> DownloadAndSetTeamBackgroundFromWeb(string team, string url)
+    {
+        string? saved = await TeamBackgroundDownloadService.DownloadAndSaveAsync(team, url);
+        return saved != null;
+    }
+
     public void SelectTeamFromWeb(string name)
     {
         var team = TeamColors.All.FirstOrDefault(t => t.Name == name);
