@@ -15,6 +15,7 @@ const categoryColors = {
 let state = {
   teams: [],
   categories: [],
+  savedProfiles: [],
   activeTeam: "General",
   watching: "off", // off | waiting | watching
 };
@@ -24,6 +25,7 @@ async function init() {
     state.teams = JSON.parse(await bridge.GetTeams());
     state.categories = JSON.parse(await bridge.GetCategories());
     state.activeTeam = await bridge.GetActiveTeam();
+    document.getElementById("app-version").textContent = "v" + await bridge.GetAppVersion();
   } else {
     state.teams = [{ name: "General", primary: "#22d3ee", secondary: "#22d3ee" }];
     state.categories = [
@@ -35,9 +37,11 @@ async function init() {
       { name: "Hype", assigned: 0, total: 7 },
     ];
   }
+  if (bridge) state.savedProfiles = JSON.parse(await bridge.GetSavedProfiles());
   renderTeamGrid();
   renderCategories();
   setActiveTeam(state.activeTeam, /*fromInit*/ true);
+  updateProfileStatus();
   wireControls();
 }
 
@@ -46,13 +50,24 @@ function renderTeamGrid() {
   grid.innerHTML = "";
   for (const t of state.teams) {
     const sw = document.createElement("div");
-    sw.className = "team-swatch" + (t.name === state.activeTeam ? " active" : "");
-    sw.title = t.name;
+    const configured = state.savedProfiles.includes(t.name);
+    sw.className = "team-swatch" + (t.name === state.activeTeam ? " active" : "") + (configured ? " configured" : "");
+    sw.title = t.name + (configured ? " ✓" : "");
     sw.style.background = `linear-gradient(135deg, ${t.primary}, ${t.secondary})`;
     sw.textContent = t.initials ?? "";
     sw.addEventListener("click", () => selectTeam(t.name));
     grid.appendChild(sw);
   }
+}
+
+function updateProfileStatus() {
+  const el = document.getElementById("profile-status");
+  if (!el) return;
+  const configured = state.savedProfiles.includes(state.activeTeam);
+  const total = state.savedProfiles.length;
+  el.innerHTML = configured
+    ? `<span class="profile-saved">&#10003; ${state.activeTeam} saved &mdash; ${total} team${total !== 1 ? "s" : ""} configured</span>`
+    : `<span class="profile-unsaved">No tracks assigned yet for ${state.activeTeam}</span>`;
 }
 
 function renderCategories() {
@@ -118,9 +133,9 @@ async function selectTeam(name) {
 function setActiveTeam(name, fromInit = false) {
   document.getElementById("team-name").textContent = name;
   applyBackground(name);
-
   const team = state.teams.find((t) => t.name === name);
   document.documentElement.style.setProperty("--team-secondary", team?.secondary ?? "#22d3ee");
+  updateProfileStatus();
 }
 
 async function applyBackground(name) {
@@ -152,6 +167,19 @@ function wireControls() {
   });
 
   document.getElementById("btn-settings").addEventListener("click", () => bridge?.OpenSettings());
+  document.getElementById("btn-minimize").addEventListener("click", () => bridge?.MinimizeWindow());
+  document.getElementById("btn-maximize").addEventListener("click", () => bridge?.MaximizeWindow());
+  document.getElementById("btn-close").addEventListener("click", () => bridge?.CloseWindow());
+
+  document.getElementById("btn-copy-all").addEventListener("click", () => bridge?.CopyCurrentToAllTeams());
+  document.getElementById("btn-export-profile").addEventListener("click", () => bridge?.ExportProfile());
+  document.getElementById("btn-import-profile").addEventListener("click", () => bridge?.ImportProfile());
+  document.getElementById("btn-delete-profile").addEventListener("click", () => bridge?.DeleteCurrentProfile());
+
+  // Drag the borderless window by pulling on the header center region
+  document.getElementById("drag-handle").addEventListener("mousedown", (e) => {
+    if (e.button === 0) bridge?.BeginDrag();
+  });
   document.getElementById("btn-update").addEventListener("click", () => bridge?.ShowUpdate());
   document.getElementById("btn-reset").addEventListener("click", () => bridge?.ResetTeamProfile());
 
@@ -187,6 +215,11 @@ function wireControls() {
 
   window.addEventListener("bandroom:refresh", refreshCategories);
   window.addEventListener("bandroom:watchstate", (e) => setWatching(e.detail));
+  window.addEventListener("bandroom:profileschanged", async () => {
+    if (bridge) state.savedProfiles = JSON.parse(await bridge.GetSavedProfiles());
+    renderTeamGrid();
+    updateProfileStatus();
+  });
   window.addEventListener("bandroom:updateavailable", () => {
     document.getElementById("btn-update").hidden = false;
   });

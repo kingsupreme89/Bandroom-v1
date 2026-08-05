@@ -10,13 +10,14 @@
   <div id="scrim"></div>
 
   <div id="app">
-    <!-- Header bar -->
-    <div id="header-bar" class="glass">
+    <!-- Header bar — id="drag-region" lets the whole bar be dragged via BeginDrag() on mousedown -->
+    <div id="header-bar" class="glass" id="drag-region">
       <div class="header-left">
         <span class="brand-mark">B</span>
         <span class="brand-name">Bandroom</span>
+        <span id="app-version" class="app-version"></span>
       </div>
-      <div class="header-center">
+      <div class="header-center" id="drag-handle">
         <span id="team-name">General</span>
         <span class="header-sep">·</span>
         <span>Live Session</span>
@@ -28,6 +29,11 @@
         </button>
         <button id="btn-update" class="btn-update" title="Update available" hidden>&#8593; Update</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
+        <div class="window-controls">
+          <button id="btn-minimize" class="wc-btn wc-min" title="Minimize">&#8211;</button>
+          <button id="btn-maximize" class="wc-btn wc-max" title="Maximize">&#9633;</button>
+          <button id="btn-close"    class="wc-btn wc-close" title="Close">&#10005;</button>
+        </div>
       </div>
     </div>
 
@@ -40,11 +46,23 @@
         <button class="rail-item" data-action="help"><span class="rail-icon">?</span><span class="rail-label">Help</span></button>
       </div>
 
-      <!-- Left panel: team grid only -->
+      <!-- Left panel: team grid + profiles -->
       <div class="side-panel glass" id="left-panel">
         <div class="panel-section">
           <div class="panel-title">Team</div>
           <div class="team-grid" id="team-grid"><!-- populated by app.js --></div>
+        </div>
+        <div class="panel-section" id="profiles-section">
+          <div class="panel-title">Profiles</div>
+          <div id="profile-status" class="profile-status"></div>
+          <div class="profile-actions">
+            <button class="btn-ghost" id="btn-copy-all" title="Apply current team's tracks to every team">Apply to All Teams</button>
+            <div class="profile-io">
+              <button class="btn-ghost" id="btn-export-profile">Export</button>
+              <button class="btn-ghost" id="btn-import-profile">Import</button>
+              <button class="btn-ghost btn-danger" id="btn-delete-profile" title="Clear this team's saved profile">Delete</button>
+            </div>
+          </div>
         </div>
       </div>
 

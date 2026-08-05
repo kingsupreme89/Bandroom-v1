@@ -8,13 +8,15 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>Bandroom</AssemblyName>
     <RootNamespace>Bandroom</RootNamespace>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- Squirrel's aware-app detector only scans .exe files — it never sees attributes on
+       Bandroom.dll, and the .NET 5+ apphost.exe is a native stub with no CLR metadata to hold
+       AssemblyMetadataAttribute anyway. A "<exe>.squirrel" sidecar containing the version is the
+       detector's documented fallback, so ship one next to the apphost every build. -->
   <ItemGroup>
-    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-      <_Parameter1>SquirrelAwareVersion</_Parameter1>
-      <_Parameter2>1</_Parameter2>
-    </AssemblyAttribute>
+    <Content Include="Bandroom.exe.squirrel" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

@@ -33,6 +33,9 @@ public sealed class WebBridge
 
     public string GetActiveTeam() => Theme.ActiveTeam.Name;
 
+    public string GetAppVersion() =>
+        System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "dev";
+
     public void SelectTeam(string name) => _host.SelectTeamFromWeb(name);
 
     public string? GetTeamBackgroundUrl(string teamName)
@@ -66,6 +69,15 @@ public sealed class WebBridge
     public void SetReverb(string key) => _host.SetReverbFromWeb(key);
 
     public void BeginDrag() => _host.BeginWindowDrag();
+    public void MinimizeWindow() => _host.MinimizeWindowFromWeb();
+    public void MaximizeWindow() => _host.MaximizeWindowFromWeb();
+    public void CloseWindow() => _host.CloseWindowFromWeb();
+
+    public string GetSavedProfiles() => JsonSerializer.Serialize(ConfigStore.ListProfiles());
+    public void CopyCurrentToAllTeams() => _host.CopyCurrentToAllTeamsFromWeb();
+    public void DeleteCurrentProfile() => _host.DeleteCurrentProfileFromWeb();
+    public void ExportProfile() => _host.ExportProfileFromWeb();
+    public void ImportProfile() => _host.ImportProfileFromWeb();
 
     static string ColorHex(System.Drawing.Color c) => $"#{c.R:x2}{c.G:x2}{c.B:x2}";
 }
