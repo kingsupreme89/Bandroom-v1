@@ -375,6 +375,27 @@ body {
 }
 #bandroom-team-grid { overflow-y: auto; }
 
+/* My Downloads -- same overlay shell as #bandroom-overlay/#bandroom-album-overlay above, and
+   the exact same [hidden]-override fix required for the same reason: the ID selector's
+   `display: flex` otherwise beats the browser's default `[hidden] { display: none }` on
+   specificity, so the panel would technically un-hide but never actually render as a positioned,
+   backdropped modal -- it'd just sit inert in normal document flow, invisible/unusable. */
+#my-downloads-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#my-downloads-overlay[hidden] { display: none; }
+#my-downloads {
+  width: min(720px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  border-radius: 16px;
+}
+#my-downloads-grid { overflow-y: auto; }
+
 .bandroom-instructions {
   font-size: 12.5px;
   line-height: 1.5;
