@@ -51,7 +51,13 @@ internal static class AudioPlayer
 
     /// <param name="volumeOverride">If set, used instead of MasterVolume -- lets side-aware
     /// events (home/away) play at their own independently-configured volume.</param>
-    public static void Play(string path, float? volumeOverride = null)
+    /// <param name="interruptPrevious">True for real in-game trigger cues (Touchdown, PAT,
+    /// Kickoff, etc, via WebMainForm.FireEvent): the newest event on the field is what's
+    /// actually happening right now, so it should cut off whatever cue is still playing from
+    /// a moment ago rather than overlap with it -- explicit user call: "second event always
+    /// takes priority." Left false for one-off UI chimes (app open, GAMETIME, update) that have
+    /// no reason to fight over the speaker.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
@@ -61,6 +67,8 @@ internal static class AudioPlayer
                 return; // this exact clip already fired too recently -- different clips don't block each other
             _lastFireByPath[path] = DateTime.UtcNow;
         }
+
+        if (interruptPrevious) StopAll();
 
         float volume = volumeOverride ?? MasterVolume;
 

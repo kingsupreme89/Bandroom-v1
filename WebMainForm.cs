@@ -77,6 +77,7 @@ public sealed class WebMainForm : Form
             await InitWebViewAsync();
             InitAutoUpdater();
             UserCountService.StartHeartbeat(_lifetimeCts.Token);
+            PlayDraftChime();
         };
         FormClosing += (_, _) => _lifetimeCts.Cancel();
     }
@@ -202,7 +203,7 @@ public sealed class WebMainForm : Form
     {
         SetGameTeamsFromWeb(homeName, awayName);
         _matchupLocked = true;
-        PlayGametimeChime();
+        PlayDraftChime();
     }
 
     public bool IsMatchupLockedFromWeb() => _matchupLocked;
@@ -520,75 +521,36 @@ public sealed class WebMainForm : Form
         });
     }
 
-    /// <summary>Short two-tone "horn stab" confirming GAMETIME was pressed -- same synthesized
-    /// approach as PlayUpdateChime (no embedded audio asset needed), just punchier/lower so it
-    /// reads as a kickoff signal rather than a notification ping.</summary>
-    static void PlayGametimeChime()
+    /// <summary>The shared "draft chime" (Assets\nfl-draft-chime.mp3) used for every moment
+    /// that should grab attention: app open, GAMETIME pressed, and a new update detected --
+    /// including while the app is already running unattended on someone else's machine, which
+    /// is the normal case (it's always left open on one computer), so the update path fires
+    /// this too, not just at launch.</summary>
+    static void PlayDraftChime()
     {
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                int sampleRate = 44100;
-                float[] freqs = [220f, 220f, 330f]; // low horn, low horn, punch up
-                int noteMs = 130, gapMs = 30;
-                int totalSamples = freqs.Length * ((noteMs + gapMs) * sampleRate / 1000);
-                var buf = new float[totalSamples];
-                int pos = 0;
-                foreach (float freq in freqs)
-                {
-                    int n = noteMs * sampleRate / 1000;
-                    int g = gapMs * sampleRate / 1000;
-                    for (int i = 0; i < n; i++)
-                    {
-                        float env = MathF.Pow(1f - (float)i / n, 0.3f);
-                        // A little second harmonic mixed in so it reads as a horn, not a pure sine beep.
-                        float sample = MathF.Sin(2 * MathF.PI * freq * i / sampleRate)
-                                     + MathF.Sin(2 * MathF.PI * freq * 2 * i / sampleRate) * 0.25f;
-                        buf[pos++] = sample * 0.34f * env;
-                    }
-                    for (int i = 0; i < g; i++) buf[pos++] = 0f;
-                }
-                var bytes = new byte[buf.Length * 2];
-                for (int i = 0; i < buf.Length; i++)
-                {
-                    short s = (short)(Math.Clamp(buf[i], -1f, 1f) * 32767);
-                    bytes[i * 2] = (byte)(s & 0xFF);
-                    bytes[i * 2 + 1] = (byte)(s >> 8);
-                }
-                var fmt = new NAudio.Wave.WaveFormat(sampleRate, 16, 1);
-                using var stream = new NAudio.Wave.RawSourceWaveStream(new MemoryStream(bytes), fmt);
-                using var wo = new NAudio.Wave.WaveOutEvent();
-                wo.Init(stream);
-                wo.Play();
-                while (wo.PlaybackState == NAudio.Wave.PlaybackState.Playing) Thread.Sleep(10);
-            }
-            catch { }
-        });
+        string path = Path.Combine(AppContext.BaseDirectory, "Assets", "nfl-draft-chime.mp3");
+        AudioPlayer.Play(path);
     }
 
-    static void PlayUpdateChime()
+    /// <summary>Every button/tile press in the UI calls this via WebBridge.PlayClickSound (see
+    /// app.js's document-level click delegate) -- a tiny synthesized tick, not the draft chime,
+    /// so ordinary UI navigation doesn't compete with real event cues. Generated in-memory like
+    /// the old chime methods used to be, since a ~15ms tick doesn't need a bundled asset. Skips
+    /// the AudioPlayer cooldown/fade pipeline entirely -- that machinery is built for full clips,
+    /// and would only add latency here.</summary>
+    public void PlayUiClickSoundFromWeb()
     {
         _ = Task.Run(() =>
         {
             try
             {
                 int sampleRate = 44100;
-                float[] freqs = [523f, 659f, 784f, 1047f]; // C5 E5 G5 C6 — ascending major
-                int noteMs = 110, gapMs = 18;
-                int totalSamples = freqs.Length * ((noteMs + gapMs) * sampleRate / 1000);
-                var buf = new float[totalSamples];
-                int pos = 0;
-                foreach (float freq in freqs)
+                int n = 15 * sampleRate / 1000; // ~15ms tick
+                var buf = new float[n];
+                for (int i = 0; i < n; i++)
                 {
-                    int n = noteMs * sampleRate / 1000;
-                    int g = gapMs * sampleRate / 1000;
-                    for (int i = 0; i < n; i++)
-                    {
-                        float env = MathF.Pow(1f - (float)i / n, 0.4f);
-                        buf[pos++] = MathF.Sin(2 * MathF.PI * freq * i / sampleRate) * 0.32f * env;
-                    }
-                    for (int i = 0; i < g; i++) buf[pos++] = 0f;
+                    float env = MathF.Pow(1f - (float)i / n, 1.5f);
+                    buf[i] = MathF.Sin(2 * MathF.PI * 1400f * i / sampleRate) * 0.28f * env;
                 }
                 var bytes = new byte[buf.Length * 2];
                 for (int i = 0; i < buf.Length; i++)
@@ -602,7 +564,7 @@ public sealed class WebMainForm : Form
                 using var wo = new NAudio.Wave.WaveOutEvent();
                 wo.Init(stream);
                 wo.Play();
-                while (wo.PlaybackState == NAudio.Wave.PlaybackState.Playing) Thread.Sleep(10);
+                while (wo.PlaybackState == NAudio.Wave.PlaybackState.Playing) Thread.Sleep(5);
             }
             catch { }
         });
@@ -619,7 +581,7 @@ public sealed class WebMainForm : Form
     void FireEvent(TriggerEntry entry, float? volumeOverride = null)
     {
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
-            AudioPlayer.Play(entry.AudioFile, volumeOverride);
+            AudioPlayer.Play(entry.AudioFile, volumeOverride, interruptPrevious: true);
     }
 
     void OnWindowFoundChanged(bool found)
@@ -734,7 +696,7 @@ public sealed class WebMainForm : Form
                 if (info.ReleasesToApply.Count == 0) return;
 
                 _updateAvailable = true;
-                PlayUpdateChime();
+                PlayDraftChime();
                 RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:updateavailable'))"));
             }
             catch (Exception ex)

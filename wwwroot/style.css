@@ -440,6 +440,11 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   /* No inner scroll box here on purpose -- the side panel itself scrolls (.side-panel has
      overflow-y: auto), so a second nested scroll area just clipped the last row mid-tile. */
 }
+.team-grid, .matchup-grid, .team-picker-grid {
+  /* Lets the dock-style hover magnify (below) actually draw over neighboring tiles instead
+     of getting clipped at the grid's own edge. */
+  overflow: visible;
+}
 .team-swatch {
   aspect-ratio: 1;
   border-radius: 10px;
@@ -465,7 +470,8 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
     0 1px 0 rgba(255, 255, 255, 0.08) inset,
     inset 1px 1px 0 rgba(255, 255, 255, 0.22),
     inset -2px -3px 5px rgba(0, 0, 0, 0.35);
-  transition: transform 0.08s ease, box-shadow 0.08s ease;
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.08s ease;
+  z-index: 1;
   /* Monogram placeholder until real team logos are wired in (see WebBridge.Initials --
      swap for an <img> using a TeamLogos\ lookup once logo files exist). */
 }
@@ -481,7 +487,11 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
 }
 .team-swatch:active {
   transform: translateY(1px) scale(0.98);
+  /* Lights up in the team's own color on press (--tile-color, set per-tile in fillTeamSwatch)
+     instead of the generic accent-cyan every other button uses -- explicit user ask. */
   box-shadow:
+    0 0 0 2px var(--tile-color, var(--accent)),
+    0 0 16px 3px var(--tile-color, var(--accent)),
     0 1px 2px rgba(0, 0, 0, 0.35),
     inset 1px 1px 3px rgba(0, 0, 0, 0.4),
     inset -1px -1px 0 rgba(255, 255, 255, 0.08);
@@ -498,7 +508,14 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   z-index: 1;
 }
 .team-swatch.active { border-color: var(--text-primary); }
-.team-swatch:hover { filter: brightness(1.15); }
+/* macOS-dock-style hover magnify: scale up 2x in place, raised above sibling tiles so it
+   isn't clipped/overlapped by the grid around it (see .team-swatch's transition/z-index and
+   .team-grid's overflow:visible above). */
+.team-swatch:hover {
+  filter: brightness(1.15);
+  transform: scale(2);
+  z-index: 5;
+}
 .team-swatch.configured { position: relative; }
 .team-swatch.configured::after {
   content: "";

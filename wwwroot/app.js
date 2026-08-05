@@ -12,6 +12,14 @@ const categoryColors = {
   Hype: "#2f6f78",
 };
 
+// Universal UI click tick -- one delegate covers every button/tile in the app (including ones
+// rendered dynamically later, like situation rows) instead of wiring a sound call into every
+// individual click handler above. Capture phase so it fires before the element's own handler
+// runs, matching the instant "physical press" feel of the CSS :active flash it accompanies.
+document.addEventListener("click", (e) => {
+  if (e.target.closest("button, .team-swatch, .rail-item, .category-row")) bridge?.PlayClickSound();
+}, true);
+
 let state = {
   teams: [],
   categories: [],
@@ -90,6 +98,7 @@ async function pollUserCount() {
 /// set (even with a logo) so it still shows through logos that have transparent backgrounds.
 function fillTeamSwatch(el, t) {
   el.style.background = `linear-gradient(135deg, ${t.primary}, ${t.secondary})`;
+  el.style.setProperty("--tile-color", t.primary); // press glow + dock-hover ring use the team's own color
   if (t.logoUrl) {
     el.innerHTML = `<img src="${t.logoUrl}" alt="${t.name}" class="team-logo-img" draggable="false">`;
   } else {

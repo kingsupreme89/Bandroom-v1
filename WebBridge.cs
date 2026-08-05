@@ -139,6 +139,7 @@ public sealed class WebBridge
     public void SetGameTeams(string home, string away) => _host.SetGameTeamsFromWeb(home, away);
     public string? GetGameTeams() => _host.GetGameTeamsFromWeb();
     public void ConfirmGametime(string home, string away) => _host.ConfirmGametimeFromWeb(home, away);
+    public void PlayClickSound() => _host.PlayUiClickSoundFromWeb();
     public bool IsMatchupLocked() => _host.IsMatchupLockedFromWeb();
     public void CopyCurrentToAllTeams() => _host.CopyCurrentToAllTeamsFromWeb();
     public void DeleteCurrentProfile() => _host.DeleteCurrentProfileFromWeb();
