@@ -66,6 +66,7 @@ public sealed class WebMainForm : Form
         _watcher.DownChanged += OnDownChanged;
         _watcher.RegionChanged += OnRegionChanged;
         _watcher.PossessionChanged += side => _possession = side;
+        _watcher.TackleForLossDetected += OnTackleForLoss;
         _watcher.ResolveTeamColor = ResolveTeamColor;
         _watcher.Log += OnLog;
 
@@ -231,6 +232,13 @@ public sealed class WebMainForm : Form
     {
         var config = side == "home" ? _homeConfig : _awayConfig;
         var entry = config?.FirstOrDefault(e => e.Event == eventName);
+        if (entry != null) FireEvent(entry, side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume);
+    }
+
+    void FireTriggerForSide(string side, string trigger)
+    {
+        var config = side == "home" ? _homeConfig : _awayConfig;
+        var entry = config?.FirstOrDefault(e => e.Trigger.Equals(trigger, StringComparison.OrdinalIgnoreCase));
         if (entry != null) FireEvent(entry, side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume);
     }
 
@@ -615,12 +623,36 @@ public sealed class WebMainForm : Form
         });
     }
 
+    /// <summary>The offense (whoever the live possession color says has the ball) just showed a
+    /// negative distance-to-go -- that only happens on a penalty or a loss of yards, and since we
+    /// already know who's on offense, we know their opponent's Defense caused it.</summary>
+    void OnTackleForLoss()
+    {
+        RunOnUi(() =>
+        {
+            if (_homeConfig == null || _awayConfig == null || _possession == null) return;
+            string defenseSide = _possession == "home" ? "away" : "home";
+            FireEventForSide(defenseSide, "Defense: Tackle for Loss");
+        });
+    }
+
     void OnDownChanged(string? down)
     {
         RunOnUi(() =>
         {
             if (down == null) return;
-            var entry = _config.FirstOrDefault(e => e.Trigger.Equals($"down:{down}", StringComparison.OrdinalIgnoreCase));
+            string trigger = $"down:{down}";
+
+            // Same live possession-color read that routes Touchdown/PAT/Kickoff/Turnover --
+            // the down ribbon is colored for whichever team is on offense, so once a Matchup
+            // is locked in we know whose profile should fire.
+            if (_homeConfig != null && _awayConfig != null && _possession != null)
+            {
+                FireTriggerForSide(_possession, trigger);
+                return;
+            }
+
+            var entry = _config.FirstOrDefault(e => e.Trigger.Equals(trigger, StringComparison.OrdinalIgnoreCase));
             if (entry != null) FireEvent(entry);
         });
     }
@@ -637,6 +669,8 @@ public sealed class WebMainForm : Form
     {
         ["touchdown"] = "Offense: Touchdown Scored",
         ["turnover"] = "Defense: Turnover Forced",
+        ["pat_good"] = "Offense: PAT Made",
+        ["kickoff"] = "Other: Opening Kickoff",
     };
 
     void OnRegionChanged(string region, string? value)

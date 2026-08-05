@@ -441,14 +441,18 @@ body {
   color: rgba(255, 255, 255, 0.92);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
   letter-spacing: 0.02em;
+  overflow: hidden;
   /* Monogram placeholder until real team logos are wired in (see WebBridge.Initials --
      swap for an <img> using a TeamLogos\ lookup once logo files exist). */
 }
 .team-logo-img {
-  width: 78%; height: 78%;
-  object-fit: contain;
+  /* Full-bleed tile fill, not a floating monogram -- these logo source images already
+     come as their own square tile (solid/gradient background baked in), so no per-team
+     transparency prep is needed. Just stretch to cover the swatch and let border-radius
+     clip the corners via the parent's overflow:hidden. */
+  width: 100%; height: 100%;
+  object-fit: cover;
   pointer-events: none;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.45));
 }
 .team-swatch.active { border-color: var(--text-primary); }
 .team-swatch:hover { filter: brightness(1.15); }
@@ -580,6 +584,18 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .situation-file { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.situation-row.situation-unconfirmed { opacity: 0.5; filter: grayscale(0.6); }
+.situation-row.situation-unconfirmed:hover { opacity: 0.75; }
+.situation-badge {
+  display: inline-block;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;
+  padding: 1px 6px; margin-left: 6px;
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.15);
+  color: #facc15;
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  vertical-align: middle;
+}
 .situation-actions { display: flex; gap: 6px; flex: 0 0 auto; }
 .situation-btn {
   padding: 5px 10px;

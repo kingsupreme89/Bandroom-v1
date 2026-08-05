@@ -37,6 +37,7 @@ internal static class CategoryMap
         ["Defense: Turnover Forced"] = "Turnovers",
         ["Defense: Iced Game by Turnover"] = "Turnovers",
         ["Defense: Safety"] = "Scoring",
+        ["Defense: Tackle for Loss"] = "Downs",
 
         ["Other: Opening Kickoff"] = "Special Teams",
         ["Other: Second-Half Kickoff"] = "Special Teams",

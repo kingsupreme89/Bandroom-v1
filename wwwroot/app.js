@@ -158,10 +158,10 @@ async function openSituations(category) {
   list.innerHTML = "";
   for (const ev of events) {
     const row = document.createElement("div");
-    row.className = "situation-row";
+    row.className = "situation-row" + (ev.confirmed ? "" : " situation-unconfirmed");
     row.innerHTML = `
       <span class="situation-text">
-        <div class="situation-name">${ev.eventName}</div>
+        <div class="situation-name">${ev.eventName}${ev.confirmed ? "" : ' <span class="situation-badge" title="Wired but not yet confirmed working in a live game">not yet confirmed</span>'}</div>
         <div class="situation-file">${ev.fileName ? ev.fileName : "Unassigned"}</div>
       </span>
       <span class="situation-actions">

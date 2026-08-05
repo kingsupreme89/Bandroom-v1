@@ -185,43 +185,21 @@ internal static class ConfigStore
             new() { Trigger = "flag:on", Event = "Penalty Flag", AudioFile = "" },
         };
 
-        // The game's official "Assignable Sound Events" list (Offense / Defense / Other).
-        string[] events =
-        {
-            "Offense: Earned First Down","Offense: Earned First Down (Big Gain)","Offense: Earned First Down (Midfield)",
-            "Offense: Touchdown Scored","Offense: Second Down","Offense: Second Down (Midfield)","Offense: Third Down",
-            "Offense: Field Goal Made","Offense: Drive Starter","Offense: 2-Point Conversion Made","Offense: PAT Made",
-            "Offense: Iced Game by First Down","Offense: Victory in Hand",
-            "Defense: Touchdown Scored","Defense: Third Down","Defense: Third Down (Loss)","Defense: Fourth Down",
-            "Defense: Fourth Down (Loss)","Defense: Second Down","Defense: Second Down (Midfield)","Defense: Second Down (Loss)",
-            "Defense: Field Goal Missed by Opponent","Defense: Drive Starter","Defense: Turnover Forced",
-            "Defense: Iced Game by Turnover","Defense: Safety",
-            "Other: Opening Kickoff","Other: Second-Half Kickoff","Other: Opening Kickoff on Kick",
-            "Other: Kickoff on Kick (Kicking)","Other: Kickoff on Kick (Receiving)","Other: Pregame Take the Field",
-            "Other: Start of 2nd Quarter","Other: Start of 4th Quarter"
-        };
-
-        string[] banks = { "", "Ctrl+", "Shift+", "Alt+" };
-        string[] digits = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0" };
-
-        // Confirmed via live scorebug screenshots: these 4 states are OCR-detectable
-        // (see GameWatcher's "situation" region), so they get an auto-trigger instead of
-        // a hotkey. Everything else still needs a manual Numpad press for now.
+        // The game's official "Assignable Sound Events" list -- trimmed to only the ones
+        // GameWatcher can actually detect by watching the screen (see GameWatcher's "situation"
+        // region). Manual Numpad-hotkey triggers for the rest of the official list were scrapped
+        // (they were never a real feature -- nobody's going to memorize 29 numpad combos mid-game).
         var autoDetected = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["Offense: Touchdown Scored"] = "situation:touchdown",
             ["Offense: PAT Made"] = "situation:pat_good",
             ["Other: Opening Kickoff"] = "situation:kickoff",
             ["Defense: Turnover Forced"] = "situation:turnover",
+            ["Defense: Tackle for Loss"] = "loss:tfl",
         };
 
-        for (int i = 0; i < events.Length; i++)
-        {
-            string trigger = autoDetected.TryGetValue(events[i], out var stateTrigger)
-                ? stateTrigger
-                : $"key:{banks[i / 10]}Numpad{digits[i % 10]}";
-            list.Add(new TriggerEntry { Trigger = trigger, Event = events[i], AudioFile = "" });
-        }
+        foreach (var (eventName, trigger) in autoDetected)
+            list.Add(new TriggerEntry { Trigger = trigger, Event = eventName, AudioFile = "" });
 
         return list;
     }

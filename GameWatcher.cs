@@ -41,6 +41,17 @@ internal sealed class GameWatcher
     /// possession never fires.</summary>
     public Func<Color, string?>? ResolveTeamColor;
 
+    /// <summary>Fires when the down/distance ribbon shows a negative distance-to-go (e.g.
+    /// "3rd & -4") -- confirmed via a live screenshot that the ribbon reads down and distance
+    /// together as one string ("3rd & 7"), so no new OCR region was needed, just a wider regex
+    /// on the same "down" crop already in use. Side-agnostic -- the host attributes it to
+    /// whichever side is NOT the current possession color, since a negative distance means the
+    /// offense (the possession side) just lost yards.</summary>
+    public event Action? TackleForLossDetected;
+    static readonly Regex DistancePattern = new(@"&\s*(-?\d+)", RegexOptions.IgnoreCase);
+    string? _lastDistanceRaw;
+    DateTime _lossCooldownUntil;
+
     string? _lastPossession;
     DateTime _possessionCooldownUntil;
 
@@ -162,7 +173,11 @@ internal sealed class GameWatcher
                         Log?.Invoke($"[{region.Name}] OCR read: \"{trimmedText}\"");
                     }
 
-                    if (region.Name == "down") SamplePossession(bmp);
+                    if (region.Name == "down")
+                    {
+                        SamplePossession(bmp);
+                        CheckForLossOfYards(text);
+                    }
 
                     var match = region.Pattern.Match(text);
                     string? currentValue = match.Success ? NormalizeMatch(region.Name, match.Value) : null;
@@ -247,6 +262,31 @@ internal sealed class GameWatcher
                     PossessionChanged?.Invoke(side);
                 }
             }
+        }
+    }
+
+    /// <summary>Reads the distance-to-go out of the SAME "down" crop already OCR'd this pass
+    /// (e.g. "3rd &amp; -4") and edge-triggers TackleForLossDetected when it goes negative --
+    /// confirmed via live screenshot that down+distance render as one string, so no separate
+    /// region/calibration was needed.</summary>
+    void CheckForLossOfYards(string text)
+    {
+        var match = DistancePattern.Match(text);
+        string? distanceRaw = match.Success ? match.Groups[1].Value : null;
+        if (distanceRaw == _lastDistanceRaw) return;
+        _lastDistanceRaw = distanceRaw;
+        if (distanceRaw == null) return;
+
+        if (int.TryParse(distanceRaw, out int distance) && distance < 0)
+        {
+            if (DateTime.UtcNow < _lossCooldownUntil)
+            {
+                Log?.Invoke($"[loss] suppressed re-fire of \"{distanceRaw}\" (cooldown)");
+                return;
+            }
+            _lossCooldownUntil = DateTime.UtcNow + Cooldown;
+            Log?.Invoke($"[loss] tackle for loss detected (& {distanceRaw})");
+            TackleForLossDetected?.Invoke();
         }
     }
 
