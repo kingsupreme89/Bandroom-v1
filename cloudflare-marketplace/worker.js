@@ -80,7 +80,7 @@ function jsonResponse(body, status = 200) {
 // Google's OAuth "Desktop app" client type -- ID tokens it issues always carry this issuer/
 // audience. Kept here (not in a KV/env binding) since it's public information, not a secret --
 // same reasoning as GoogleAuthService.ClientId on the app side.
-const GOOGLE_CLIENT_ID = "REPLACE_WITH_DESKTOP_OAUTH_CLIENT_ID.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = "4767958466-o8cc22j3kdikkfedfromva3df4llsbg8.apps.googleusercontent.com";
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 
 function base64UrlToUint8Array(b64url) {

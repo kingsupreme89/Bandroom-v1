@@ -22,7 +22,7 @@ internal static class GoogleAuthService
     // A Desktop-app client ID is not a secret in the traditional sense (PKCE covers that), but
     // don't wire in a Web-application-type client ID here -- Google's redirect URI rules for that
     // type don't allow the loopback pattern this code relies on.
-    public const string ClientId = "REPLACE_WITH_DESKTOP_OAUTH_CLIENT_ID.apps.googleusercontent.com";
+    public const string ClientId = "4767958466-o8cc22j3kdikkfedfromva3df4llsbg8.apps.googleusercontent.com";
 
     const string AuthEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
     const string TokenEndpoint = "https://oauth2.googleapis.com/token";
