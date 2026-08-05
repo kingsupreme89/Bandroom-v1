@@ -19,6 +19,7 @@ public sealed class WebMainForm : Form
     List<TriggerEntry> _config = new();
     readonly KeyboardHook _hook = new();
     readonly GameWatcher _watcher = new();
+    readonly CancellationTokenSource _lifetimeCts = new();
     WebView2 _webView = null!;
     bool _updateAvailable;
     bool _watching;
@@ -56,7 +57,9 @@ public sealed class WebMainForm : Form
         {
             await InitWebViewAsync();
             InitAutoUpdater();
+            UserCountService.StartHeartbeat(_lifetimeCts.Token);
         };
+        FormClosing += (_, _) => _lifetimeCts.Cancel();
     }
 
     async Task InitWebViewAsync()

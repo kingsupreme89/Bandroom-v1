@@ -33,6 +33,10 @@ public sealed class WebBridge
 
     public string GetActiveTeam() => Theme.ActiveTeam.Name;
 
+    /// <summary>Live "people running Bandroom right now" count, or -1 if the ticker isn't
+    /// configured/reachable -- JS treats -1 as "hide the ticker entirely".</summary>
+    public async Task<int> GetActiveUserCount() => await UserCountService.GetCountAsync() ?? -1;
+
     public bool IsFirstRun() => ConfigStore.IsFirstRun();
 
     public void CompleteFirstRun(string teamName)

@@ -44,6 +44,20 @@ async function init() {
   updateProfileStatus();
   wireControls();
   maybeShowOnboarding();
+  pollUserCount();
+}
+
+async function pollUserCount() {
+  if (!bridge) return;
+  const el = document.getElementById("user-count");
+  const count = await bridge.GetActiveUserCount();
+  if (count < 0) {
+    el.hidden = true;
+  } else {
+    el.hidden = false;
+    el.textContent = `· ${count} watching now`;
+  }
+  setTimeout(pollUserCount, 30000);
 }
 
 function renderTeamGrid() {
