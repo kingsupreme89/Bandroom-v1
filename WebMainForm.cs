@@ -37,6 +37,9 @@ public sealed class WebMainForm : Form
         KeyPreview = true;
 
         _webView = new WebView2 { Dock = DockStyle.Fill };
+        ((Control)_webView).AllowDrop = true;
+        _webView.DragEnter += OnSongDragEnter;
+        _webView.DragDrop += OnSongDragDrop;
         Controls.Add(_webView);
 
         _config = ConfigStore.LoadOrCreate();
@@ -75,6 +78,23 @@ public sealed class WebMainForm : Form
         core.AddHostObjectToScript("bandroom", new WebBridge(this));
 
         _webView.Source = new Uri("https://appassets/index.html");
+    }
+
+    void OnSongDragEnter(object? sender, DragEventArgs e)
+    {
+        e.Effect = e.Data?.GetDataPresent(DataFormats.FileDrop) == true ? DragDropEffects.Copy : DragDropEffects.None;
+    }
+
+    void OnSongDragDrop(object? sender, DragEventArgs e)
+    {
+        if (e.Data?.GetData(DataFormats.FileDrop) is not string[] paths) return;
+        int imported = 0;
+        foreach (var path in paths)
+            if (ConfigStore.ImportIntoSongsLibrary(path) != null) imported++;
+
+        if (imported > 0)
+            RunOnUi(() => _ = _webView.ExecuteScriptAsync(
+                $"window.dispatchEvent(new CustomEvent('bandroom:songsimported', {{ detail: {imported} }}))"));
     }
 
     // --- Called from WebBridge (JS -> C#) ---
@@ -427,12 +447,17 @@ public sealed class WebMainForm : Form
         });
     }
 
+    // Regions whose matched value IS the trigger key ("situation:kickoff", "banner:touchdown")
+    // rather than a fixed on/off toggle ("flag:on") -- see GameWatcher.NormalizeMatch.
+    static readonly HashSet<string> ValueKeyedRegions = new(StringComparer.OrdinalIgnoreCase) { "situation", "banner" };
+
     void OnRegionChanged(string region, string? value)
     {
         if (region == "down") return;
         RunOnUi(() =>
         {
-            var entry = _config.FirstOrDefault(e => e.Trigger.Equals($"{region}:on", StringComparison.OrdinalIgnoreCase));
+            string triggerKey = ValueKeyedRegions.Contains(region) ? $"{region}:{value}" : $"{region}:on";
+            var entry = _config.FirstOrDefault(e => e.Trigger.Equals(triggerKey, StringComparison.OrdinalIgnoreCase));
             if (entry != null) FireEvent(entry);
         });
     }

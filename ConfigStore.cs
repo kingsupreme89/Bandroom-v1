@@ -8,6 +8,39 @@ internal static class ConfigStore
     public static readonly string SongsFolder = Path.Combine(AppContext.BaseDirectory, "Songs");
     public static readonly string ProfilesFolder = Path.Combine(AppContext.BaseDirectory, "Profiles");
     public static readonly string TeamBackgroundsFolder = Path.Combine(AppContext.BaseDirectory, "TeamBackgrounds");
+    static readonly string FirstRunFlagPath = Path.Combine(AppContext.BaseDirectory, ".firstrun_done");
+
+    /// <summary>True until the onboarding wizard has been completed once. Gated on a marker
+    /// file rather than a triggers.json field so it survives profile resets/imports.</summary>
+    public static bool IsFirstRun() => !File.Exists(FirstRunFlagPath);
+
+    public static void MarkFirstRunDone() => File.WriteAllText(FirstRunFlagPath, DateTime.UtcNow.ToString("O"));
+
+    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac" };
+
+    /// <summary>Copies a dropped/browsed audio file into Songs\ with its display name
+    /// normalized to ALL CAPS, for a consistent library (drag-and-drop import never actually
+    /// copied files before -- BrowseForFile just referenced wherever the original lived).
+    /// Returns the new path, or null if the source isn't a recognized audio file.</summary>
+    public static string? ImportIntoSongsLibrary(string sourcePath)
+    {
+        string ext = Path.GetExtension(sourcePath);
+        if (!AudioExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase)) return null;
+
+        Directory.CreateDirectory(SongsFolder);
+        string baseName = Path.GetFileNameWithoutExtension(sourcePath).ToUpperInvariant();
+        string destPath = Path.Combine(SongsFolder, baseName + ext);
+        int suffix = 2;
+        while (File.Exists(destPath) && !PathsPointToSameFile(sourcePath, destPath))
+            destPath = Path.Combine(SongsFolder, $"{baseName} ({suffix++}){ext}");
+
+        if (!PathsPointToSameFile(sourcePath, destPath))
+            File.Copy(sourcePath, destPath, overwrite: false);
+        return destPath;
+    }
+
+    static bool PathsPointToSameFile(string a, string b) =>
+        string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
 
     static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
 
@@ -103,11 +136,23 @@ internal static class ConfigStore
         string[] banks = { "", "Ctrl+", "Shift+", "Alt+" };
         string[] digits = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0" };
 
+        // Confirmed via live scorebug screenshots: these 4 states are OCR-detectable
+        // (see GameWatcher's "situation" region), so they get an auto-trigger instead of
+        // a hotkey. Everything else still needs a manual Numpad press for now.
+        var autoDetected = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Offense: Touchdown Scored"] = "situation:touchdown",
+            ["Offense: PAT Made"] = "situation:pat_good",
+            ["Other: Opening Kickoff"] = "situation:kickoff",
+            ["Defense: Turnover Forced"] = "situation:turnover",
+        };
+
         for (int i = 0; i < events.Length; i++)
         {
-            string bank = banks[i / 10];
-            string digit = digits[i % 10];
-            list.Add(new TriggerEntry { Trigger = $"key:{bank}Numpad{digit}", Event = events[i], AudioFile = "" });
+            string trigger = autoDetected.TryGetValue(events[i], out var stateTrigger)
+                ? stateTrigger
+                : $"key:{banks[i / 10]}Numpad{digits[i % 10]}";
+            list.Add(new TriggerEntry { Trigger = trigger, Event = events[i], AudioFile = "" });
         }
 
         return list;

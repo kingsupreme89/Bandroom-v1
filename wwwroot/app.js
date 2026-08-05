@@ -43,6 +43,7 @@ async function init() {
   setActiveTeam(state.activeTeam, /*fromInit*/ true);
   updateProfileStatus();
   wireControls();
+  maybeShowOnboarding();
 }
 
 function renderTeamGrid() {
@@ -223,6 +224,12 @@ function wireControls() {
   window.addEventListener("bandroom:updateavailable", () => {
     document.getElementById("btn-update").hidden = false;
   });
+  // Files dropped anywhere on the window get copied into Songs\ (normalized name) by the
+  // native DragDrop handler in WebMainForm.cs; re-render so newly imported tracks show up
+  // in any open Assign dialog / situation list right away.
+  window.addEventListener("bandroom:songsimported", async (e) => {
+    showToast(`Imported ${e.detail} song${e.detail === 1 ? "" : "s"} to your Sound Bank`);
+  });
 
   document.getElementById("btn-close-picker").addEventListener("click", closeTeamPicker);
   document.getElementById("team-picker-overlay").addEventListener("click", (e) => {
@@ -247,7 +254,11 @@ function closeTeamPicker() {
 }
 
 function renderTeamPickerGrid(filter) {
-  const grid = document.getElementById("team-picker-grid");
+  renderTeamGridInto("team-picker-grid", filter, (name) => { selectTeam(name); closeTeamPicker(); });
+}
+
+function renderTeamGridInto(gridId, filter, onPick) {
+  const grid = document.getElementById(gridId);
   grid.innerHTML = "";
   const q = filter.trim().toLowerCase();
   for (const t of state.teams) {
@@ -257,9 +268,34 @@ function renderTeamPickerGrid(filter) {
     sw.title = t.name;
     sw.style.background = `linear-gradient(135deg, ${t.primary}, ${t.secondary})`;
     sw.textContent = t.initials ?? "";
-    sw.addEventListener("click", () => { selectTeam(t.name); closeTeamPicker(); });
+    sw.addEventListener("click", () => onPick(t.name));
     grid.appendChild(sw);
   }
+}
+
+async function maybeShowOnboarding() {
+  if (!bridge || !(await bridge.IsFirstRun())) return;
+  const overlay = document.getElementById("onboarding-overlay");
+  overlay.hidden = false;
+
+  const pick = async (name) => {
+    await bridge.CompleteFirstRun(name);
+    state.activeTeam = name;
+    setActiveTeam(name);
+    overlay.hidden = true;
+  };
+  renderTeamGridInto("onboarding-grid", "", pick);
+  document.getElementById("onboarding-search").addEventListener("input", (e) =>
+    renderTeamGridInto("onboarding-grid", e.target.value, pick));
+}
+
+function showToast(text) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = text;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add("toast-visible"));
+  setTimeout(() => { t.classList.remove("toast-visible"); setTimeout(() => t.remove(), 300); }, 2600);
 }
 
 function flashPanel(el) {

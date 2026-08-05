@@ -126,6 +126,21 @@
     </div>
   </div>
 
+  <!-- First-run onboarding -- shown once (gated by ConfigStore.IsFirstRun) to pick a
+       favorite team before the app is used normally, like the game's own team-select. -->
+  <div id="onboarding-overlay" hidden>
+    <div id="onboarding" class="glass">
+      <div class="onboarding-header">
+        <span class="brand-mark">B</span>
+        <span class="brand-name">Welcome to Bandroom</span>
+      </div>
+      <p class="onboarding-sub">Bandroom plays your sounds automatically while you watch CFB 27 --
+        pick your team to get started. You can change this anytime from the Teams panel.</p>
+      <input type="text" id="onboarding-search" placeholder="Search teams..." class="team-picker-search" />
+      <div class="team-picker-grid" id="onboarding-grid"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

@@ -108,7 +108,7 @@ internal sealed class AssignTrackForm : Form
         };
         if (ofd.ShowDialog(this) == DialogResult.OK)
         {
-            AssignedPath = ofd.FileName;
+            AssignedPath = ConfigStore.ImportIntoSongsLibrary(ofd.FileName) ?? ofd.FileName;
             DialogResult = DialogResult.OK;
             Close();
         }

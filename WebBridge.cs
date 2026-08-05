@@ -33,6 +33,14 @@ public sealed class WebBridge
 
     public string GetActiveTeam() => Theme.ActiveTeam.Name;
 
+    public bool IsFirstRun() => ConfigStore.IsFirstRun();
+
+    public void CompleteFirstRun(string teamName)
+    {
+        _host.SelectTeamFromWeb(teamName);
+        ConfigStore.MarkFirstRunDone();
+    }
+
     public string GetAppVersion() =>
         System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "dev";
 

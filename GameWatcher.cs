@@ -53,6 +53,28 @@ internal sealed class GameWatcher
             FxX = 0, FxY = 0, FxW = 0, FxH = 0,
             Pattern = new Regex(@"\b(FLAG|PENALTY)\b", RegexOptions.IgnoreCase),
         },
+        // Same crop box as "down" -- confirmed via live screenshots that the scorebug's
+        // rightmost segment cycles through down/distance AND these situational states,
+        // just with a different background color per state. TOUCHDOWN is included on a
+        // hunch but hasn't been confirmed to appear in this small box (it may only show
+        // in the separate full-screen banner below) -- watch the log line for it in a
+        // real game and drop it here if it never fires.
+        new WatchedRegion
+        {
+            Name = "situation",
+            FxX = 0.65, FxY = 0.85, FxW = 0.14, FxH = 0.09,
+            Pattern = new Regex(@"\b(KICKOFF|PAT\s*GOOD|TOUCHDOWN|INTERCEPTED|FUMBLE|TURNOVER)\b", RegexOptions.IgnoreCase),
+        },
+        // The big full-screen scoring banner (e.g. "TOUCHDOWN") -- a wide white ribbon
+        // across the middle-bottom of the screen, NOT the small persistent scorebug.
+        // NOT calibrated yet (FxW/FxH left at 0). Grab a live screenshot at the moment
+        // it appears and fill in the fractions the same way "down" was calibrated.
+        new WatchedRegion
+        {
+            Name = "banner",
+            FxX = 0, FxY = 0, FxW = 0, FxH = 0,
+            Pattern = new Regex(@"\b(TOUCHDOWN|FIELD GOAL|SAFETY)\b", RegexOptions.IgnoreCase),
+        },
     };
 
     CancellationTokenSource? _cts;
@@ -126,7 +148,7 @@ internal sealed class GameWatcher
                     }
 
                     var match = region.Pattern.Match(text);
-                    string? currentValue = match.Success ? match.Value.ToLowerInvariant() : null;
+                    string? currentValue = match.Success ? NormalizeMatch(region.Name, match.Value) : null;
 
                     if (currentValue != null && currentValue != region.Last)
                     {
@@ -167,6 +189,22 @@ internal sealed class GameWatcher
                 try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { break; }
             }
         }
+    }
+
+    /// <summary>Collapses OCR-noisy variants ("PATGOOD", "PAT  GOOD") of "situation"/"banner"
+    /// matches down to a stable key used in triggers.json (situation:pat_good, etc).
+    /// "down"/"flag" matches pass through as plain lowercase, unchanged from before.</summary>
+    static string NormalizeMatch(string regionName, string rawMatch)
+    {
+        string collapsed = Regex.Replace(rawMatch, @"\s+", " ").Trim().ToLowerInvariant();
+        if (regionName != "situation" && regionName != "banner") return collapsed;
+
+        return collapsed switch
+        {
+            "intercepted" or "fumble" or "turnover" => "turnover",
+            "field goal" => "fieldgoal",
+            _ => collapsed.Replace(" ", "_"),
+        };
     }
 
     static async Task<string> OcrBitmapAsync(OcrEngine engine, Bitmap bmp)
