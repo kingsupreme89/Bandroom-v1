@@ -151,6 +151,7 @@ public sealed class WebMainForm : Form
         ConfigStore.Save(_config);
         string target = string.IsNullOrWhiteSpace(name) ? Theme.ActiveTeam.Name : name.Trim();
         ConfigStore.SaveProfile(target, _config);
+        RefreshHomeAwayConfigIfNeeded(target);
         RunOnUi(() =>
         {
             if (_webView.CoreWebView2 != null)
@@ -217,11 +218,25 @@ public sealed class WebMainForm : Form
     void SaveCurrentTeamProfile()
     {
         ConfigStore.SaveProfile(Theme.ActiveTeam.Name, _config);
+        RefreshHomeAwayConfigIfNeeded(Theme.ActiveTeam.Name);
         RunOnUi(() =>
         {
             if (_webView.CoreWebView2 != null)
                 _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:profileschanged'))");
         });
+    }
+
+    /// <summary>Keeps the live home/away snapshots (read by FireEventForSide during a real game)
+    /// in sync with whatever was just saved to disk. _homeConfig/_awayConfig are separate
+    /// in-memory copies loaded once when the matchup is confirmed (see SetGameTeamsFromWeb) --
+    /// without this, assigning/saving Home or Away's songs AFTER the matchup was already set had
+    /// no effect on actual gameplay until the matchup was re-confirmed from scratch.</summary>
+    void RefreshHomeAwayConfigIfNeeded(string savedTeamName)
+    {
+        if (_homeTeam is { } home && string.Equals(home.Name, savedTeamName, StringComparison.OrdinalIgnoreCase))
+            _homeConfig = ConfigStore.LoadProfile(savedTeamName);
+        if (_awayTeam is { } away && string.Equals(away.Name, savedTeamName, StringComparison.OrdinalIgnoreCase))
+            _awayConfig = ConfigStore.LoadProfile(savedTeamName);
     }
 
     public string ToggleWatchingFromWeb()

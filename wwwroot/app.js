@@ -68,6 +68,7 @@ async function init() {
   await loadMatchup();
   maybeShowOnboarding();
   pollUserCount();
+  loadChangelog();
 }
 
 async function pollUserCount() {
@@ -377,35 +378,43 @@ function wireControls() {
   });
 
   document.getElementById("btn-help").addEventListener("click", () => bridge?.OpenHelp());
-  document.getElementById("btn-changelog").addEventListener("click", openChangelog);
-  document.getElementById("btn-close-changelog").addEventListener("click", closeChangelog);
-  document.getElementById("changelog-overlay").addEventListener("click", (e) => {
-    if (e.target.id === "changelog-overlay") closeChangelog();
-  });
 
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     if (!document.getElementById("team-picker-overlay").hidden) closeTeamPicker();
     if (!document.getElementById("save-profile-overlay").hidden) closeSaveProfileDialog();
     if (!document.getElementById("matchup-overlay").hidden) closeMatchupDialog();
-    if (!document.getElementById("changelog-overlay").hidden) closeChangelog();
   });
 }
 
-async function openChangelog() {
-  const overlay = document.getElementById("changelog-overlay");
-  overlay.hidden = false;
+/// Release notes written as filler by release.ps1's default -Notes param when a release ships
+/// with no real bullet points -- never counts as a "feature" or gets shown as one.
+const CHANGELOG_FILLER_PATTERN = /full changelog/i;
+
+/// Loaded once on startup into the always-visible "What's New" section of the Adjust panel
+/// (not behind a button -- a button meant nobody ever saw it). Flattens real feature bullets
+/// across releases (newest first) and caps at 10 so the panel doesn't grow unbounded; the
+/// "See full changelog on GitHub" link only appears once at least 10 real bullets have actually
+/// been shown, never as a stand-in for a release that shipped with no real notes.
+async function loadChangelog() {
   const list = document.getElementById("changelog-list");
+  if (!list) return;
   list.innerHTML = `<div class="changelog-empty">Loading...</div>`;
 
   const entries = bridge ? JSON.parse(await bridge.GetChangelog()) : [];
-  if (entries.length === 0) {
+  const usable = entries
+    .map((e) => ({ ...e, notes: e.notes.filter((n) => !CHANGELOG_FILLER_PATTERN.test(n)) }))
+    .filter((e) => e.notes.length > 0);
+
+  if (usable.length === 0) {
     list.innerHTML = `<div class="changelog-empty">Couldn't load release notes right now.</div>`;
     return;
   }
 
   list.innerHTML = "";
-  for (const e of entries) {
+  let shownBullets = 0;
+  for (const e of usable) {
+    if (shownBullets >= 10) break;
     const row = document.createElement("div");
     row.className = "changelog-entry";
     const notes = e.notes.map((n) => `<li>${n}</li>`).join("");
@@ -415,13 +424,20 @@ async function openChangelog() {
         <span class="changelog-date">${e.publishedAt}</span>
         ${e.prerelease ? `<span class="changelog-prerelease">Beta</span>` : ""}
       </div>
-      ${notes ? `<ul class="changelog-notes">${notes}</ul>` : ""}`;
+      <ul class="changelog-notes">${notes}</ul>`;
     list.appendChild(row);
+    shownBullets += e.notes.length;
   }
-}
 
-function closeChangelog() {
-  document.getElementById("changelog-overlay").hidden = true;
+  if (shownBullets >= 10) {
+    const link = document.createElement("a");
+    link.className = "changelog-full-link";
+    link.href = "https://github.com/kingsupreme89/Bandroom-v1/releases";
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = "See the full changelog on GitHub →";
+    list.appendChild(link);
+  }
 }
 
 function openTeamPicker() {
