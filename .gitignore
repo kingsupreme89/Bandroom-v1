@@ -18,6 +18,9 @@ Thumbs.db
 
 # App data
 WebView2Data/
+
+# Secrets -- never committed. See GoogleAuthService.cs's ClientSecret property for what goes here.
+google_client_secret.local.txt
 Crash*.txt
 
 # Release archives

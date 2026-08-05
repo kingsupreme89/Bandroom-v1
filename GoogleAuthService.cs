@@ -24,6 +24,33 @@ internal static class GoogleAuthService
     // type don't allow the loopback pattern this code relies on.
     public const string ClientId = "4767958466-o8cc22j3kdikkfedfromva3df4llsbg8.apps.googleusercontent.com";
 
+    // Google issues a "client secret" even for Desktop-app OAuth clients, and its own docs say
+    // PKCE means it isn't needed as a security measure for this client type -- but in practice
+    // Google's token endpoint still rejects the exchange with invalid_client if it's omitted for
+    // "installed" app clients, even with a valid PKCE code_verifier. This is exactly why sign-in
+    // was silently failing after the browser step succeeded: the token exchange was 400ing and
+    // getting swallowed as a plain null return.
+    //
+    // NOT hardcoded here despite Google's stance that installed-app secrets aren't meaningfully
+    // confidential -- this repo is public on GitHub, and GitHub's own push protection correctly
+    // blocked the first attempt at committing it inline. Read from a local, gitignored file
+    // instead (see .gitignore's "google_client_secret.local.txt" entry) so the build works on
+    // this machine without the secret ever touching git history. If you're setting this up fresh:
+    // create that file next to BandAudioHook.csproj containing just the secret from the Google
+    // Cloud Console credentials JSON, nothing else.
+    static readonly string ClientSecretPath = Path.Combine(AppContext.BaseDirectory, "google_client_secret.local.txt");
+    static string? _clientSecretCache;
+    static string? ClientSecret
+    {
+        get
+        {
+            if (_clientSecretCache != null) return _clientSecretCache;
+            try { _clientSecretCache = File.Exists(ClientSecretPath) ? File.ReadAllText(ClientSecretPath).Trim() : null; }
+            catch { _clientSecretCache = null; }
+            return _clientSecretCache;
+        }
+    }
+
     const string AuthEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
     const string TokenEndpoint = "https://oauth2.googleapis.com/token";
     const string Scope = "openid email profile";
@@ -113,9 +140,18 @@ internal static class GoogleAuthService
 
     static async Task<GoogleProfile?> ExchangeCodeAsync(string code, string codeVerifier, string redirectUri)
     {
+        string? clientSecret = ClientSecret;
+        if (clientSecret == null)
+        {
+            CrashLog.Write("Google token exchange skipped", new Exception(
+                $"google_client_secret.local.txt not found at {ClientSecretPath} -- sign-in cannot complete without it."));
+            return null;
+        }
+
         var form = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["client_id"] = ClientId,
+            ["client_secret"] = clientSecret,
             ["code"] = code,
             ["code_verifier"] = codeVerifier,
             ["redirect_uri"] = redirectUri,
@@ -123,10 +159,22 @@ internal static class GoogleAuthService
         });
 
         using var response = await Http.PostAsync(TokenEndpoint, form);
-        if (!response.IsSuccessStatusCode) return null;
+        string responseBody = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+        {
+            // This used to fail silently (plain `return null`), which is exactly why sign-in
+            // looked broken with zero explanation -- log the real response so the next attempt
+            // is diagnosable instead of a guessing game.
+            CrashLog.Write($"Google token exchange failed ({(int)response.StatusCode}): {responseBody}", new Exception("token exchange failed"));
+            return null;
+        }
 
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        if (!doc.RootElement.TryGetProperty("id_token", out var idTokenEl)) return null;
+        using var doc = JsonDocument.Parse(responseBody);
+        if (!doc.RootElement.TryGetProperty("id_token", out var idTokenEl))
+        {
+            CrashLog.Write($"Google token exchange succeeded but had no id_token: {responseBody}", new Exception("missing id_token"));
+            return null;
+        }
         string idToken = idTokenEl.GetString() ?? "";
 
         // Decoded here for immediate local display only (name/email/picture in the profile tab).
