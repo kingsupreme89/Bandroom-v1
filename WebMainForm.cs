@@ -101,8 +101,10 @@ public sealed class WebMainForm : Form
         core.SetVirtualHostNameToFolderMapping("teamlogo", ConfigStore.TeamLogosFolder, CoreWebView2HostResourceAccessKind.Allow);
         Directory.CreateDirectory(ConfigStore.DownloadedImagesFolder);
         Directory.CreateDirectory(ConfigStore.SongsUploadedFolder);
+        Directory.CreateDirectory(ConfigStore.AvatarFolder);
         core.SetVirtualHostNameToFolderMapping("downloadedimages", ConfigStore.DownloadedImagesFolder, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("downloadedsongs", ConfigStore.SongsUploadedFolder, CoreWebView2HostResourceAccessKind.Allow);
+        core.SetVirtualHostNameToFolderMapping("avatar", ConfigStore.AvatarFolder, CoreWebView2HostResourceAccessKind.Allow);
 
         core.AddHostObjectToScript("bandroom", new WebBridge(this));
 
@@ -219,30 +221,64 @@ public sealed class WebMainForm : Form
         SetGameTeamsFromWeb(homeName, awayName);
         _matchupLocked = true;
         PlayGametimeSound();
-        RecordGameWatched();
+        RecordGameWatched(homeName, awayName);
     }
 
-    /// <summary>Bumps the universal profile's lifetime "games watched" counter -- see
-    /// ConfigStore.UserProfile. Fire-and-forget cloud sync, local save is what actually matters
-    /// here since it must never delay/interrupt GAMETIME locking in.</summary>
-    static void RecordGameWatched()
+    /// <summary>Bumps the universal profile's lifetime "games watched" counter, per-team
+    /// breakdown, and daily streak -- see ConfigStore.UserProfile. Fire-and-forget cloud sync,
+    /// local save is what actually matters here since it must never delay/interrupt GAMETIME
+    /// locking in.</summary>
+    static void RecordGameWatched(string homeName, string awayName)
     {
         var current = ConfigStore.LoadUserProfile();
-        var updated = current with { GamesWatched = current.GamesWatched + 1 };
+        var byTeam = new Dictionary<string, int>(current.GamesWatchedByTeam);
+        foreach (var team in new[] { homeName, awayName })
+            byTeam[team] = byTeam.GetValueOrDefault(team) + 1;
+
+        // Local date, not UTC -- "daily streak" means the user's own calendar day. Using UTC
+        // here would make the streak reset (or double-count) around the user's local midnight
+        // for anyone not near UTC, which would look broken even with genuinely consecutive days
+        // of real play.
+        var today = DateTime.Now.Date;
+        int streak = current.StreakCurrentDays;
+        if (current.StreakLastActiveDate == today)
+        {
+            // Already counted today -- leave streak as-is.
+        }
+        else if (current.StreakLastActiveDate == today.AddDays(-1))
+        {
+            streak += 1; // consecutive day
+        }
+        else
+        {
+            streak = 1; // gap in usage (or first-ever game) -- streak restarts
+        }
+
+        var updated = current with
+        {
+            GamesWatched = current.GamesWatched + 1,
+            GamesWatchedByTeam = byTeam,
+            StreakCurrentDays = streak,
+            StreakLastActiveDate = today,
+        };
         ConfigStore.SaveUserProfile(updated);
         _ = ProfileSyncService.PushAsync(updated);
     }
 
     static DateTime _lastSongTriggerCloudSync = DateTime.MinValue;
 
-    /// <summary>Bumps "songs triggered" for every real in-game cue (FireEvent), including down:*
-    /// triggers which fire on nearly every single play -- the local file write stays per-trigger
-    /// (cheap), but the cloud push is throttled to at most once every 30s so a live game never
-    /// turns into a rapid-fire network hammer against the marketplace worker.</summary>
-    static void RecordSongTriggered()
+    /// <summary>Bumps "songs triggered" (lifetime total + per-event breakdown, for "most-triggered
+    /// event") for every real in-game cue (FireEvent), including down:* triggers which fire on
+    /// nearly every single play -- the local file write stays per-trigger (cheap), but the cloud
+    /// push is throttled to at most once every 30s so a live game never turns into a rapid-fire
+    /// network hammer against the marketplace worker.</summary>
+    static void RecordSongTriggered(string eventName)
     {
         var current = ConfigStore.LoadUserProfile();
-        var updated = current with { SongsTriggered = current.SongsTriggered + 1 };
+        var eventCounts = new Dictionary<string, int>(current.EventCounts);
+        if (!string.IsNullOrWhiteSpace(eventName))
+            eventCounts[eventName] = eventCounts.GetValueOrDefault(eventName) + 1;
+        var updated = current with { SongsTriggered = current.SongsTriggered + 1, EventCounts = eventCounts };
         ConfigStore.SaveUserProfile(updated);
 
         if (DateTime.UtcNow - _lastSongTriggerCloudSync < TimeSpan.FromSeconds(30)) return;
@@ -613,6 +649,76 @@ public sealed class WebMainForm : Form
         });
     }
 
+    /// <summary>Exports the whole universal profile (favorite team + lifetime stats, NOT a
+    /// single team's song assignments -- see ExportProfileFromWeb above for that) as a standalone
+    /// JSON file.</summary>
+    public void ExportUserProfileFromWeb()
+    {
+        RunOnUi(() =>
+        {
+            using var dlg = new SaveFileDialog
+            {
+                Title = "Export Universal Profile",
+                Filter = "Bandroom Universal Profile (*.json)|*.json",
+                FileName = "bandroom-profile.json",
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            try
+            {
+                var profile = ConfigStore.LoadUserProfile();
+                File.WriteAllText(dlg.FileName, System.Text.Json.JsonSerializer.Serialize(
+                    profile, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write($"ExportUserProfileFromWeb failed for \"{dlg.FileName}\"", ex);
+                MessageBox.Show(this, "Couldn't export the profile -- see crash.log.", "Export Failed",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        });
+    }
+
+    public void ImportUserProfileFromWeb()
+    {
+        RunOnUi(() =>
+        {
+            using var dlg = new OpenFileDialog
+            {
+                Title = "Import Universal Profile",
+                Filter = "Bandroom Universal Profile (*.json)|*.json",
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            try
+            {
+                var imported = System.Text.Json.JsonSerializer.Deserialize<ConfigStore.UserProfile>(
+                    File.ReadAllText(dlg.FileName),
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (imported == null) return;
+
+                // AvatarFileName is a LOCAL file reference (see ConfigStore.AvatarFolder) --
+                // meaningless if this profile was exported from a different device/install, where
+                // that exact file never existed here. Importing it unchecked would silently point
+                // the avatar at a file that 404s. Clear it unless the referenced file genuinely
+                // exists on THIS device.
+                if (imported.AvatarFileName != null &&
+                    !File.Exists(Path.Combine(ConfigStore.AvatarFolder, imported.AvatarFileName)))
+                {
+                    imported = imported with { AvatarFileName = null };
+                }
+
+                ConfigStore.SaveUserProfile(imported);
+                _ = ProfileSyncService.PushAsync(imported);
+                _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:profileimported'))");
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write($"ImportUserProfileFromWeb failed for \"{dlg.FileName}\"", ex);
+                MessageBox.Show(this, "That file doesn't look like a valid Bandroom universal profile.", "Import Failed",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        });
+    }
+
     /// <summary>The shared "draft chime" (Assets\nfl-draft-chime.mp3) used for attention-moments
     /// that AREN'T the GAMETIME press: app open, and a new update detected -- including while the
     /// app is already running unattended on someone else's machine, which is the normal case
@@ -692,7 +798,7 @@ public sealed class WebMainForm : Form
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
         {
             AudioPlayer.Play(entry.AudioFile, volumeOverride, interruptPrevious: true);
-            RecordSongTriggered();
+            RecordSongTriggered(entry.Event);
             // Names exactly which trigger OCR just read as a small on-screen flash, so a user can
             // confirm what fired without digging through logs -- this call isn't gated on
             // _webView.CoreWebView2 being non-null elsewhere in this file only because FireEvent

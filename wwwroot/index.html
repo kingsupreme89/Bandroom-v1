@@ -65,6 +65,7 @@
              title rather than a persistent number, so it stays out of the way in the toolbar.
              The big ESPN-style bottom ticker is for upload activity, not this. -->
         <span id="presence-dot" class="presence-dot" title="Connecting…"></span>
+        <button id="btn-jump-favorite-team" class="icon-btn" title="Jump to favorite team" hidden>⭐</button>
         <button id="btn-profile" class="icon-btn" title="Profile">👤</button>
         <button id="btn-update" class="btn-update dim" title="You're on the latest version">Up to date</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
@@ -246,7 +247,20 @@
        is real and ready, not a mockup. -->
   <div id="profile-overlay" hidden>
     <div id="profile-dialog" class="glass">
-      <div class="save-profile-header">Profile</div>
+      <!-- Avatar -- local custom upload (works signed-out) shown if set, else the Google picture
+           if signed in, else the team badge fallback. Separate from the Google avatar so
+           signed-out users still get a personalized picture. -->
+      <input type="file" id="profile-avatar-file-input" accept="image/*" hidden />
+      <div id="profile-avatar-row">
+        <img id="profile-avatar" alt="" hidden />
+        <button id="btn-profile-avatar-upload" class="icon-btn" title="Change avatar">📷</button>
+        <div id="profile-identity">
+          <div id="profile-name"></div>
+          <div id="profile-email"></div>
+          <div id="profile-member-since"></div>
+        </div>
+      </div>
+
       <div id="profile-signed-out">
         <p class="save-profile-instructions">
           Sign in with Google to keep your uploads and settings tied to your account across
@@ -255,15 +269,9 @@
         <button id="btn-google-signin" class="btn-primary">Sign in with Google</button>
       </div>
       <div id="profile-signed-in" hidden>
-        <div id="profile-avatar-row">
-          <img id="profile-avatar" alt="" />
-          <div>
-            <div id="profile-name"></div>
-            <div id="profile-email"></div>
-          </div>
-        </div>
         <button id="btn-google-signout" class="btn-ghost">Sign Out</button>
       </div>
+
       <!-- Universal profile -- favorite team + lifetime stats. Distinct from the per-team "Save
            Profile" feature (song-to-situation assignments for one team); this is one record per
            install, works fully signed-out, and mirrors to the cloud when signed in with Google
@@ -271,12 +279,49 @@
       <div class="save-profile-header" id="profile-favorite-header">Favorite Team</div>
       <select id="profile-favorite-team" class="team-picker-search"></select>
 
+      <div class="save-profile-header" id="profile-rival-header">Rival Team</div>
+      <select id="profile-rival-team" class="team-picker-search"></select>
+
+      <div class="save-profile-header" id="profile-bio-header">Bio</div>
+      <input type="text" id="profile-bio-input" class="save-profile-input" maxlength="140" placeholder="A short tagline about you..." />
+
+      <div class="save-profile-header" id="profile-level-header">Level <span id="profile-level-num">1</span></div>
+      <div id="profile-achievements"><!-- populated by app.js --></div>
+
       <div class="save-profile-header" id="profile-stats-header">Stats</div>
       <div id="profile-stats-grid">
         <div class="profile-stat"><span id="profile-stat-games">0</span><label>Games Watched</label></div>
         <div class="profile-stat"><span id="profile-stat-songs">0</span><label>Songs Triggered</label></div>
         <div class="profile-stat"><span id="profile-stat-uploads">0</span><label>Uploads</label></div>
         <div class="profile-stat"><span id="profile-stat-downloads">0</span><label>Downloads</label></div>
+        <div class="profile-stat"><span id="profile-stat-streak">0</span><label>Day Streak</label></div>
+        <div class="profile-stat"><span id="profile-stat-likes">0</span><label>Likes Received</label></div>
+      </div>
+      <div id="profile-most-triggered"></div>
+      <div id="profile-top-uploader-badge" hidden>🏆 Top Uploader for <span></span></div>
+
+      <div class="save-profile-header" id="profile-record-header">Favorite Team Record</div>
+      <div id="profile-record-row">
+        <span id="profile-record-text">0-0</span>
+        <button id="btn-record-win" class="btn-ghost">Log Win</button>
+        <button id="btn-record-loss" class="btn-ghost">Log Loss</button>
+      </div>
+
+      <div class="save-profile-header" id="profile-by-team-header">Games Watched by Team</div>
+      <div id="profile-by-team-list"><!-- populated by app.js, top 5 --></div>
+
+      <div class="save-profile-header" id="profile-uploads-header">My Uploads</div>
+      <div id="profile-my-uploads-list"><!-- populated by app.js from local upload tracking --></div>
+
+      <label id="profile-toasts-toggle-row">
+        <input type="checkbox" id="profile-toasts-toggle" checked />
+        Show toast notifications
+      </label>
+
+      <div class="save-profile-actions" id="profile-io-actions">
+        <button id="btn-export-user-profile" class="btn-ghost">Export Profile</button>
+        <button id="btn-import-user-profile" class="btn-ghost">Import Profile</button>
+        <button id="btn-reset-user-profile-stats" class="btn-ghost">Reset Stats</button>
       </div>
 
       <div class="save-profile-actions">

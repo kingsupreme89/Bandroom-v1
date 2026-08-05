@@ -9,7 +9,12 @@ namespace SupremeStadiumSoundSelector;
 /// profile" follow the account across devices/reinstalls. Local storage (ConfigStore.UserProfile)
 /// is always the real source of truth for THIS device; every call here is safe to fire-and-forget
 /// since any failure (signed out, network down, worker unreachable) just means the next successful
-/// sync catches up -- nothing here is ever allowed to block or fail local save/load.</summary>
+/// sync catches up -- nothing here is ever allowed to block or fail local save/load.
+///
+/// NOT synced: Bio's local-only 140-char cap is enforced client-side too, AvatarFileName (a local
+/// file reference -- meaningless on another device, so it never round-trips through the cloud),
+/// ToastsEnabled (a per-device preference, not something that should follow you), CreatedAt
+/// (each device's local "first save" timestamp is its own, not merged).</summary>
 internal static class ProfileSyncService
 {
     const string BaseUrl = "https://bandroom-marketplace.bandroom.workers.dev";
@@ -24,12 +29,19 @@ internal static class ProfileSyncService
             string payload = JsonSerializer.Serialize(new
             {
                 favoriteTeam = profile.FavoriteTeam,
+                rivalTeam = profile.RivalTeam,
+                bio = profile.Bio,
                 stats = new
                 {
                     gamesWatched = profile.GamesWatched,
                     songsTriggered = profile.SongsTriggered,
                     marketplaceUploads = profile.MarketplaceUploads,
                     marketplaceDownloads = profile.MarketplaceDownloads,
+                    favoriteTeamWins = profile.FavoriteTeamWins,
+                    favoriteTeamLosses = profile.FavoriteTeamLosses,
+                    streakCurrentDays = profile.StreakCurrentDays,
+                    eventCounts = profile.EventCounts,
+                    gamesWatchedByTeam = profile.GamesWatchedByTeam,
                 },
             });
             using var request = new HttpRequestMessage(HttpMethod.Put, $"{BaseUrl}/profile")
@@ -59,20 +71,41 @@ internal static class ProfileSyncService
             var root = doc.RootElement;
             if (!root.TryGetProperty("found", out var foundEl) || foundEl.ValueKind != JsonValueKind.True) return null;
 
-            string? favoriteTeam = root.TryGetProperty("favoriteTeam", out var ft) && ft.ValueKind == JsonValueKind.String
-                ? ft.GetString() : null;
+            string? GetStr(JsonElement el, string name) =>
+                el.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+            string? favoriteTeam = GetStr(root, "favoriteTeam");
+            string? rivalTeam = GetStr(root, "rivalTeam");
+            string? bio = GetStr(root, "bio");
             var stats = root.TryGetProperty("stats", out var st) ? st : default;
+
             int GetInt(string name) =>
                 stats.ValueKind == JsonValueKind.Object && stats.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number
                     ? v.GetInt32() : 0;
 
+            Dictionary<string, int> GetDict(string name)
+            {
+                var result = new Dictionary<string, int>();
+                if (stats.ValueKind == JsonValueKind.Object && stats.TryGetProperty(name, out var obj) && obj.ValueKind == JsonValueKind.Object)
+                    foreach (var prop in obj.EnumerateObject())
+                        if (prop.Value.ValueKind == JsonValueKind.Number) result[prop.Name] = prop.Value.GetInt32();
+                return result;
+            }
+
             return new ConfigStore.UserProfile
             {
                 FavoriteTeam = favoriteTeam,
+                RivalTeam = rivalTeam,
+                Bio = bio,
                 GamesWatched = GetInt("gamesWatched"),
                 SongsTriggered = GetInt("songsTriggered"),
                 MarketplaceUploads = GetInt("marketplaceUploads"),
                 MarketplaceDownloads = GetInt("marketplaceDownloads"),
+                FavoriteTeamWins = GetInt("favoriteTeamWins"),
+                FavoriteTeamLosses = GetInt("favoriteTeamLosses"),
+                StreakCurrentDays = GetInt("streakCurrentDays"),
+                EventCounts = GetDict("eventCounts"),
+                GamesWatchedByTeam = GetDict("gamesWatchedByTeam"),
             };
         }
         catch { return null; }

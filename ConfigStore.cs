@@ -242,7 +242,30 @@ internal static class ConfigStore
         public int SongsTriggered { get; init; }
         public int MarketplaceUploads { get; init; }
         public int MarketplaceDownloads { get; init; }
+
+        // -- Profile tab expansion (20-suggestion batch) --
+        public string? Bio { get; init; }
+        public string? RivalTeam { get; init; }
+        /// <summary>Per-event trigger counts (key = TriggerEntry.Event, e.g. "Offense: Touchdown
+        /// Scored") -- powers "most-triggered event". Only ever grows; never trimmed.</summary>
+        public Dictionary<string, int> EventCounts { get; init; } = new();
+        /// <summary>Per-team games-watched counts (key = team name, counted for BOTH home and away
+        /// whenever that team appears in a GAMETIME confirmation) -- powers the per-team breakdown.</summary>
+        public Dictionary<string, int> GamesWatchedByTeam { get; init; } = new();
+        public int StreakCurrentDays { get; init; }
+        public DateTime? StreakLastActiveDate { get; init; }
+        /// <summary>Manually recorded via the Profile tab -- Bandroom has no way to auto-detect a
+        /// final score, so these are user-reported, not auto-detected.</summary>
+        public int FavoriteTeamWins { get; init; }
+        public int FavoriteTeamLosses { get; init; }
+        public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
+        public bool ToastsEnabled { get; init; } = true;
+        /// <summary>Filename (not full path) of a custom local avatar under UserDataRoot\Avatar\,
+        /// shown instead of the Google avatar -- available signed-out too, unlike the Google one.</summary>
+        public string? AvatarFileName { get; init; }
     }
+
+    public static readonly string AvatarFolder = Path.Combine(UserDataRoot, "Avatar");
 
     public static UserProfile LoadUserProfile()
     {

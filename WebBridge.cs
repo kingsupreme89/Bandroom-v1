@@ -117,7 +117,11 @@ public sealed class WebBridge
         var session = ConfigStore.LoadAuthSession();
         return session == null
             ? JsonSerializer.Serialize(new { signedIn = false })
-            : JsonSerializer.Serialize(new { signedIn = true, name = session.Name, email = session.Email, picture = session.Picture });
+            : JsonSerializer.Serialize(new
+            {
+                signedIn = true, name = session.Name, email = session.Email, picture = session.Picture,
+                signedInAt = session.SignedInAt.ToString("O"),
+            });
     }
 
     /// <summary>Runs the full browser-based Google sign-in flow (see GoogleAuthService), then
@@ -171,11 +175,32 @@ public sealed class WebBridge
             var cloudProfile = await ProfileSyncService.PullAsync(sessionToken);
             var merged = cloudProfile == null ? localProfile : new ConfigStore.UserProfile
             {
+                // Identity/preference fields: local wins if set, cloud fills in only if local is
+                // empty -- never let signing in on a second device silently overwrite a choice
+                // already made on this one.
                 FavoriteTeam = localProfile.FavoriteTeam ?? cloudProfile.FavoriteTeam,
+                RivalTeam = localProfile.RivalTeam ?? cloudProfile.RivalTeam,
+                Bio = localProfile.Bio ?? cloudProfile.Bio,
+                // Lifetime counters only ever go up -- max() is always safe, can never discard
+                // real local history.
                 GamesWatched = Math.Max(localProfile.GamesWatched, cloudProfile.GamesWatched),
                 SongsTriggered = Math.Max(localProfile.SongsTriggered, cloudProfile.SongsTriggered),
                 MarketplaceUploads = Math.Max(localProfile.MarketplaceUploads, cloudProfile.MarketplaceUploads),
                 MarketplaceDownloads = Math.Max(localProfile.MarketplaceDownloads, cloudProfile.MarketplaceDownloads),
+                FavoriteTeamWins = Math.Max(localProfile.FavoriteTeamWins, cloudProfile.FavoriteTeamWins),
+                FavoriteTeamLosses = Math.Max(localProfile.FavoriteTeamLosses, cloudProfile.FavoriteTeamLosses),
+                StreakCurrentDays = Math.Max(localProfile.StreakCurrentDays, cloudProfile.StreakCurrentDays),
+                // Per-key dictionaries: union of both sides, max value per key -- same reasoning
+                // as the plain counters above, just applied per-entry instead of to one total.
+                EventCounts = MergeCounts(localProfile.EventCounts, cloudProfile.EventCounts),
+                GamesWatchedByTeam = MergeCounts(localProfile.GamesWatchedByTeam, cloudProfile.GamesWatchedByTeam),
+                // Local-only, deliberately not touched by the merge: StreakLastActiveDate,
+                // FavoriteTeam avatar file, ToastsEnabled, CreatedAt (see ProfileSyncService's
+                // class-level comment for why each of these stays per-device).
+                StreakLastActiveDate = localProfile.StreakLastActiveDate,
+                ToastsEnabled = localProfile.ToastsEnabled,
+                AvatarFileName = localProfile.AvatarFileName,
+                CreatedAt = localProfile.CreatedAt,
             };
             ConfigStore.SaveUserProfile(merged);
             _ = ProfileSyncService.PushAsync(merged); // write the merged result back so both sides agree
@@ -191,6 +216,17 @@ public sealed class WebBridge
 
     public void SignOutOfGoogle() => ConfigStore.ClearAuthSession();
 
+    /// <summary>Union of two count dictionaries, max value per shared key -- see the sign-in
+    /// merge above for why (same "counters only go up" reasoning as the plain numeric fields,
+    /// applied per-entry).</summary>
+    static Dictionary<string, int> MergeCounts(Dictionary<string, int> a, Dictionary<string, int> b)
+    {
+        var result = new Dictionary<string, int>(a);
+        foreach (var (key, value) in b)
+            result[key] = Math.Max(result.GetValueOrDefault(key), value);
+        return result;
+    }
+
     // ---- Universal profile (favorite team + lifetime stats) --------------------------------
     // Distinct from the per-team "Save Profile" feature (ConfigProfileManager), which saves
     // song-to-situation assignments for ONE team. This is one record per install, always saved
@@ -200,22 +236,146 @@ public sealed class WebBridge
     public string GetUserProfile()
     {
         var p = ConfigStore.LoadUserProfile();
+
+        string? topEvent = null;
+        int topEventCount = 0;
+        foreach (var (evt, count) in p.EventCounts)
+            if (count > topEventCount) { topEvent = evt; topEventCount = count; }
+
+        // A fun number, not a precise science -- rewards a mix of watching, triggering, and
+        // contributing to the marketplace rather than any single stat dominating.
+        int totalActivity = p.GamesWatched * 5 + p.SongsTriggered + p.MarketplaceUploads * 10 + p.MarketplaceDownloads * 2;
+        int level = 1 + totalActivity / 50;
+
+        var achievements = new List<object>
+        {
+            new { id = "favorite_team_set", label = "Picked a Favorite Team", unlocked = p.FavoriteTeam != null },
+            new { id = "first_upload", label = "First Upload", unlocked = p.MarketplaceUploads >= 1 },
+            new { id = "first_download", label = "First Download", unlocked = p.MarketplaceDownloads >= 1 },
+            new { id = "ten_games", label = "10 Games Watched", unlocked = p.GamesWatched >= 10 },
+            new { id = "hundred_games", label = "100 Games Watched", unlocked = p.GamesWatched >= 100 },
+            new { id = "hundred_songs", label = "100 Songs Triggered", unlocked = p.SongsTriggered >= 100 },
+            new { id = "thousand_songs", label = "1,000 Songs Triggered", unlocked = p.SongsTriggered >= 1000 },
+            new { id = "week_streak", label = "7-Day Streak", unlocked = p.StreakCurrentDays >= 7 },
+        };
+
         return JsonSerializer.Serialize(new
         {
             favoriteTeam = p.FavoriteTeam,
+            rivalTeam = p.RivalTeam,
+            bio = p.Bio,
             gamesWatched = p.GamesWatched,
             songsTriggered = p.SongsTriggered,
             marketplaceUploads = p.MarketplaceUploads,
             marketplaceDownloads = p.MarketplaceDownloads,
+            gamesWatchedByTeam = p.GamesWatchedByTeam,
+            mostTriggeredEvent = topEvent,
+            mostTriggeredCount = topEventCount,
+            streakCurrentDays = p.StreakCurrentDays,
+            favoriteTeamWins = p.FavoriteTeamWins,
+            favoriteTeamLosses = p.FavoriteTeamLosses,
+            createdAt = p.CreatedAt.ToString("O"),
+            toastsEnabled = p.ToastsEnabled,
+            avatarUrl = p.AvatarFileName != null ? "https://avatar/" + Uri.EscapeDataString(p.AvatarFileName) : null,
+            level,
+            achievements,
         });
     }
 
     public void SetFavoriteTeam(string team)
     {
-        var updated = ConfigStore.LoadUserProfile() with { FavoriteTeam = team };
+        var updated = ConfigStore.LoadUserProfile() with { FavoriteTeam = string.IsNullOrWhiteSpace(team) ? null : team };
         ConfigStore.SaveUserProfile(updated);
         _ = ProfileSyncService.PushAsync(updated);
     }
+
+    public void SetRivalTeam(string team)
+    {
+        var updated = ConfigStore.LoadUserProfile() with { RivalTeam = string.IsNullOrWhiteSpace(team) ? null : team };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    public void SetBio(string bio)
+    {
+        string trimmed = (bio ?? "").Trim();
+        if (trimmed.Length > 140) trimmed = trimmed[..140]; // short tagline, not an essay
+        var updated = ConfigStore.LoadUserProfile() with { Bio = trimmed.Length == 0 ? null : trimmed };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    public void SetToastsEnabled(bool enabled)
+    {
+        var updated = ConfigStore.LoadUserProfile() with { ToastsEnabled = enabled };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    /// <summary>Manually recorded result for the favorite team's game -- Bandroom has no way to
+    /// OCR a final score, so this is user-reported via a button in the Profile tab, not
+    /// auto-detected from GAMETIME/gameplay.</summary>
+    public void RecordFavoriteTeamResult(bool win)
+    {
+        var current = ConfigStore.LoadUserProfile();
+        var updated = win
+            ? current with { FavoriteTeamWins = current.FavoriteTeamWins + 1 }
+            : current with { FavoriteTeamLosses = current.FavoriteTeamLosses + 1 };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    /// <summary>Resets lifetime STATS only (games/songs/uploads/downloads/streak/event-counts/
+    /// win-loss) -- deliberately keeps favorite team, rival, bio, and avatar, since those are
+    /// identity choices, not counters. Distinct from ResetTeamProfile, which resets a single
+    /// team's song-to-situation assignments and has nothing to do with the universal profile.</summary>
+    public void ResetUserProfileStats()
+    {
+        var current = ConfigStore.LoadUserProfile();
+        var updated = current with
+        {
+            GamesWatched = 0, SongsTriggered = 0, MarketplaceUploads = 0, MarketplaceDownloads = 0,
+            EventCounts = new(), GamesWatchedByTeam = new(),
+            StreakCurrentDays = 0, StreakLastActiveDate = null,
+            FavoriteTeamWins = 0, FavoriteTeamLosses = 0,
+        };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    /// <summary>Saves a base64 PNG as the local custom avatar (shown instead of the Google
+    /// picture, and available signed-out too) -- same crop-tool-output convention as
+    /// SaveCustomTeamLogo below, just a single fixed file rather than one per team.</summary>
+    public bool UploadAvatar(string base64Png)
+    {
+        if (string.IsNullOrWhiteSpace(base64Png)) return false;
+        try
+        {
+            byte[] bytes = Convert.FromBase64String(base64Png);
+            if (bytes.Length == 0 || bytes.Length > 10 * 1024 * 1024) return false;
+
+            Directory.CreateDirectory(ConfigStore.AvatarFolder);
+            const string fileName = "avatar.png";
+            File.WriteAllBytes(Path.Combine(ConfigStore.AvatarFolder, fileName), bytes);
+
+            var updated = ConfigStore.LoadUserProfile() with { AvatarFileName = fileName };
+            ConfigStore.SaveUserProfile(updated);
+            _ = ProfileSyncService.PushAsync(updated);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("UploadAvatar failed", ex);
+            return false;
+        }
+    }
+
+    /// <summary>Exports the whole universal profile (favorite team, stats, bio, everything) as a
+    /// standalone JSON file via a native Save dialog -- separate from ConfigProfileManager's
+    /// per-team export, which only covers song-to-situation assignments for one team.</summary>
+    public void ExportUserProfile() => _host.ExportUserProfileFromWeb();
+
+    public void ImportUserProfile() => _host.ImportUserProfileFromWeb();
 
     /// <summary>Called from app.js right after a marketplace upload actually succeeds (not on
     /// every attempt) -- bumps the local lifetime counter and mirrors it to the cloud profile if

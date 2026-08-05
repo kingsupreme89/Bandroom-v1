@@ -102,6 +102,11 @@ async function init() {
     try {
       state.savedProfiles = JSON.parse(await bridge.GetSavedProfiles());
     } catch (err) { console.error("GetSavedProfiles failed", err); }
+    try {
+      const userProfile = JSON.parse(await bridge.GetUserProfile());
+      state.toastsEnabled = userProfile.toastsEnabled !== false;
+      updateFavoriteTeamJumpButton(userProfile.favoriteTeam);
+    } catch (err) { console.error("GetUserProfile (startup) failed", err); }
   } else {
     state.teams = [{ name: "General", primary: "#22d3ee", secondary: "#22d3ee" }];
     state.categories = [
@@ -387,30 +392,26 @@ async function refreshProfileView() {
   }
   document.getElementById("profile-signed-out").hidden = user.signedIn;
   document.getElementById("profile-signed-in").hidden = !user.signedIn;
-  if (user.signedIn) {
-    document.getElementById("profile-name").textContent = user.name ?? "";
-    document.getElementById("profile-email").textContent = user.email ?? "";
-    const avatar = document.getElementById("profile-avatar");
-    if (user.picture) avatar.src = user.picture; else avatar.removeAttribute("src");
-  }
+  document.getElementById("profile-name").textContent = user.signedIn ? (user.name ?? "") : "Not signed in";
+  document.getElementById("profile-email").textContent = user.signedIn ? (user.email ?? "") : "";
+  const memberSince = document.getElementById("profile-member-since");
+  memberSince.textContent = user.signedIn && user.signedInAt
+    ? `Signed in on this device since ${new Date(user.signedInAt).toLocaleDateString()}` : "";
+  // Google's picture is only used as a fallback -- a local custom avatar (works signed-out too,
+  // see UploadAvatar) always wins if one's been set.
+  state.googleAvatarUrl = user.signedIn ? (user.picture ?? null) : null;
   await refreshUniversalProfileView();
 }
 
-// ---- Universal profile: favorite team + lifetime stats (works fully signed-out; syncs to the
-// cloud automatically once signed in -- see WebBridge.GetUserProfile/SetFavoriteTeam). ----
-async function refreshUniversalProfileView() {
-  const select = document.getElementById("profile-favorite-team");
-  // Rebuild whenever the option count doesn't match state.teams (+1 for the blank placeholder)
-  // -- NOT just "if empty". state.teams starts as [] and fills in asynchronously after GetTeams()
-  // resolves; if the profile overlay is opened before that finishes, a naive "only populate once"
-  // guard would permanently lock the dropdown to just "Choose a team..." for the whole session,
-  // since it'd never get a second chance to see the real list.
-  if (select.options.length !== state.teams.length + 1) {
+function populateTeamSelect(select, includeBlank) {
+  if (select.options.length !== state.teams.length + (includeBlank ? 1 : 0)) {
     select.innerHTML = "";
-    const blank = document.createElement("option");
-    blank.value = "";
-    blank.textContent = "Choose a team...";
-    select.appendChild(blank);
+    if (includeBlank) {
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "Choose a team...";
+      select.appendChild(blank);
+    }
     for (const team of state.teams) {
       const opt = document.createElement("option");
       opt.value = team.name;
@@ -418,6 +419,24 @@ async function refreshUniversalProfileView() {
       select.appendChild(opt);
     }
   }
+}
+
+function updateFavoriteTeamJumpButton(favoriteTeam) {
+  const btn = document.getElementById("btn-jump-favorite-team");
+  btn.hidden = !favoriteTeam;
+  btn.dataset.team = favoriteTeam ?? "";
+}
+
+// ---- Universal profile: favorite team + lifetime stats (works fully signed-out; syncs to the
+// cloud automatically once signed in -- see WebBridge.GetUserProfile/SetFavoriteTeam). ----
+async function refreshUniversalProfileView() {
+  // Rebuild whenever the option count doesn't match state.teams (+1 for the blank placeholder on
+  // favorite) -- NOT just "if empty". state.teams starts as [] and fills in asynchronously after
+  // GetTeams() resolves; if the profile overlay is opened before that finishes, a naive
+  // "only populate once" guard would permanently lock the dropdown empty for the whole session,
+  // since it'd never get a second chance to see the real list.
+  populateTeamSelect(document.getElementById("profile-favorite-team"), true);
+  populateTeamSelect(document.getElementById("profile-rival-team"), true);
 
   let profile;
   try {
@@ -427,11 +446,118 @@ async function refreshUniversalProfileView() {
     return;
   }
 
-  select.value = profile.favoriteTeam ?? "";
+  state.toastsEnabled = profile.toastsEnabled !== false;
+  updateFavoriteTeamJumpButton(profile.favoriteTeam);
+
+  document.getElementById("profile-favorite-team").value = profile.favoriteTeam ?? "";
+  document.getElementById("profile-rival-team").value = profile.rivalTeam ?? "";
+  document.getElementById("profile-bio-input").value = profile.bio ?? "";
+  document.getElementById("profile-toasts-toggle").checked = state.toastsEnabled;
+
   document.getElementById("profile-stat-games").textContent = profile.gamesWatched ?? 0;
   document.getElementById("profile-stat-songs").textContent = profile.songsTriggered ?? 0;
   document.getElementById("profile-stat-uploads").textContent = profile.marketplaceUploads ?? 0;
   document.getElementById("profile-stat-downloads").textContent = profile.marketplaceDownloads ?? 0;
+  document.getElementById("profile-stat-streak").textContent = profile.streakCurrentDays ?? 0;
+  document.getElementById("profile-level-num").textContent = profile.level ?? 1;
+
+  const mostTriggered = document.getElementById("profile-most-triggered");
+  mostTriggered.textContent = profile.mostTriggeredEvent
+    ? `Most-triggered event: ${profile.mostTriggeredEvent} (${profile.mostTriggeredCount}x)` : "";
+
+  document.getElementById("profile-record-text").textContent =
+    `${profile.favoriteTeamWins ?? 0}-${profile.favoriteTeamLosses ?? 0}`;
+
+  // Avatar: local custom upload wins over the Google picture, which wins over showing nothing
+  // (falls back to the header's team-badge look via CSS when hidden).
+  const avatarImg = document.getElementById("profile-avatar");
+  const avatarUrl = profile.avatarUrl ?? state.googleAvatarUrl;
+  if (avatarUrl) { avatarImg.src = avatarUrl; avatarImg.hidden = false; } else { avatarImg.hidden = true; }
+
+  renderProfileAchievements(profile.achievements ?? []);
+  renderProfileByTeamList(profile.gamesWatchedByTeam ?? {});
+  await renderProfileMyUploads();
+}
+
+function renderProfileAchievements(achievements) {
+  const el = document.getElementById("profile-achievements");
+  el.innerHTML = "";
+  for (const a of achievements) {
+    const badge = document.createElement("span");
+    badge.className = "achievement-badge" + (a.unlocked ? " unlocked" : "");
+    badge.textContent = a.label;
+    badge.title = a.unlocked ? "Unlocked!" : "Not yet unlocked";
+    el.appendChild(badge);
+  }
+}
+
+function renderProfileByTeamList(byTeam) {
+  const el = document.getElementById("profile-by-team-list");
+  const top5 = Object.entries(byTeam).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  el.innerHTML = top5.length
+    ? top5.map(([team, count]) => `<div class="profile-by-team-row"><span>${team}</span><span>${count}</span></div>`).join("")
+    : `<div class="profile-by-team-row-empty">No games watched yet.</div>`;
+}
+
+// "My Uploads" + "Likes Received" + "Top Uploader" all derive from data already on hand
+// client-side (the local ownerToken tracking used for delete eligibility, plus the same /list
+// and /leaderboard calls the marketplace tabs already make) -- no new server endpoint needed.
+// Known limitation: uploads aren't tied to a signed-in account server-side yet (see worker.js),
+// so this only ever reflects uploads made from THIS device/browser profile, not "everything this
+// Google account has ever uploaded anywhere".
+// Reopening Profile fast enough to fire a second renderProfileMyUploads before the first's
+// fetches resolve could otherwise let the OLDER call's slower response land last and overwrite
+// the correct render with stale data -- this token makes every call check "am I still the most
+// recent call" before touching the DOM.
+let _profileMyUploadsRenderToken = 0;
+
+async function renderProfileMyUploads() {
+  const myToken = ++_profileMyUploadsRenderToken;
+  const mine = loadMyUploads();
+  const ids = Object.keys(mine);
+  const listEl = document.getElementById("profile-my-uploads-list");
+  const likesEl = document.getElementById("profile-stat-likes");
+  const badgeEl = document.getElementById("profile-top-uploader-badge");
+
+  if (ids.length === 0) {
+    listEl.innerHTML = `<div class="profile-by-team-row-empty">No uploads from this device yet.</div>`;
+    likesEl.textContent = "0";
+    badgeEl.hidden = true;
+    return;
+  }
+
+  try {
+    const [songs, images, songBoard, imageBoard] = await Promise.all([
+      fetchUploadList("song"), fetchUploadList("image"),
+      fetch(`${MARKETPLACE_URL}/leaderboard?type=song`).then((r) => (r.ok ? r.json() : { schools: [] })),
+      fetch(`${MARKETPLACE_URL}/leaderboard?type=image`).then((r) => (r.ok ? r.json() : { schools: [] })),
+    ]);
+    if (myToken !== _profileMyUploadsRenderToken) return; // a newer call already started -- don't clobber it
+    const allItems = [...songs, ...images];
+    const myItems = allItems.filter((item) => ids.includes(item.id));
+
+    listEl.innerHTML = myItems.length
+      ? myItems.map((item) => `<div class="profile-by-team-row"><span>${item.school} — ${item.name}</span><span>${item.likes ?? 0}♥</span></div>`).join("")
+      : `<div class="profile-by-team-row-empty">Uploads from this device aren't showing yet -- they may still be indexing.</div>`;
+
+    const totalLikes = myItems.reduce((sum, item) => sum + (item.likes ?? 0), 0);
+    likesEl.textContent = totalLikes;
+
+    const mySchools = new Set(myItems.map((item) => item.school));
+    const allBoard = [...songBoard.schools, ...imageBoard.schools];
+    const maxCount = allBoard.length ? Math.max(...allBoard.map((s) => s.count)) : 0;
+    const topSchool = maxCount > 0 ? allBoard.find((s) => mySchools.has(s.school) && s.count === maxCount) : null;
+    if (topSchool) {
+      badgeEl.hidden = false;
+      badgeEl.querySelector("span").textContent = topSchool.school;
+    } else {
+      badgeEl.hidden = true;
+    }
+  } catch (err) {
+    if (myToken !== _profileMyUploadsRenderToken) return;
+    console.error("renderProfileMyUploads failed", err);
+    listEl.innerHTML = `<div class="profile-by-team-row-empty">Couldn't load upload details right now.</div>`;
+  }
 }
 
 function wireControls() {
@@ -471,11 +597,80 @@ function wireControls() {
       // clicking that team's tile in the Teams panel (see selectTeam) -- so picking one here
       // visibly does something instead of silently saving a preference nobody can see.
       if (team) await selectTeam(team);
+      updateFavoriteTeamJumpButton(team); // otherwise the header star button stays stale until Profile is closed/reopened
       showToast(team ? `Favorite team set to ${team}.` : "Favorite team cleared.");
     } catch (err) {
       console.error("SetFavoriteTeam failed", err);
       showToast("Couldn't save favorite team -- try again.");
     }
+  });
+  document.getElementById("profile-rival-team").addEventListener("change", async (e) => {
+    try {
+      await bridge.SetRivalTeam(e.target.value);
+      showToast(e.target.value ? `Rival team set to ${e.target.value}.` : "Rival team cleared.");
+    } catch (err) {
+      console.error("SetRivalTeam failed", err);
+      showToast("Couldn't save rival team -- try again.");
+    }
+  });
+  document.getElementById("profile-bio-input").addEventListener("change", async (e) => {
+    try { await bridge.SetBio(e.target.value); } catch (err) { console.error("SetBio failed", err); }
+  });
+  document.getElementById("profile-toasts-toggle").addEventListener("change", async (e) => {
+    state.toastsEnabled = e.target.checked; // set locally first so this exact toggle-off doesn't toast itself
+    try { await bridge.SetToastsEnabled(e.target.checked); } catch (err) { console.error("SetToastsEnabled failed", err); }
+    showToast(e.target.checked ? "Toasts enabled." : "Toasts disabled.");
+  });
+  document.getElementById("btn-record-win").addEventListener("click", async () => {
+    try {
+      await bridge.RecordFavoriteTeamResult(true);
+      showToast("Logged a win!");
+      await refreshUniversalProfileView();
+    } catch (err) { console.error("RecordFavoriteTeamResult(win) failed", err); }
+  });
+  document.getElementById("btn-record-loss").addEventListener("click", async () => {
+    try {
+      await bridge.RecordFavoriteTeamResult(false);
+      showToast("Logged a loss.");
+      await refreshUniversalProfileView();
+    } catch (err) { console.error("RecordFavoriteTeamResult(loss) failed", err); }
+  });
+  document.getElementById("btn-export-user-profile").addEventListener("click", () => bridge.ExportUserProfile());
+  document.getElementById("btn-import-user-profile").addEventListener("click", () => bridge.ImportUserProfile());
+  window.addEventListener("bandroom:profileimported", async () => {
+    showToast("Profile imported.");
+    await refreshUniversalProfileView();
+  });
+  document.getElementById("btn-reset-user-profile-stats").addEventListener("click", async () => {
+    if (!confirm("Reset all lifetime stats (games watched, songs triggered, streak, record)? Your favorite team, rival, bio, and avatar are kept.")) return;
+    try {
+      await bridge.ResetUserProfileStats();
+      showToast("Stats reset.");
+      await refreshUniversalProfileView();
+    } catch (err) { console.error("ResetUserProfileStats failed", err); }
+  });
+  document.getElementById("btn-profile-avatar-upload").addEventListener("click", () => {
+    document.getElementById("profile-avatar-file-input").click();
+  });
+  document.getElementById("profile-avatar-file-input").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = ""; // allow re-selecting the same file next time
+    if (!file) return;
+    try {
+      const compressed = await compressImageFile(file);
+      const buf = await compressed.arrayBuffer();
+      const base64 = btoa(new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""));
+      const ok = await bridge.UploadAvatar(base64);
+      if (ok) { showToast("Avatar updated."); await refreshProfileView(); }
+      else showToast("Couldn't save avatar -- try a different image.");
+    } catch (err) {
+      console.error("Avatar upload failed", err);
+      showToast("Couldn't process that image.");
+    }
+  });
+  document.getElementById("btn-jump-favorite-team").addEventListener("click", async (e) => {
+    const team = e.currentTarget.dataset.team;
+    if (team) await selectTeam(team);
   });
   document.getElementById("btn-watch").addEventListener("click", async () => {
     if (!(state.matchupHome && state.matchupAway)) {
@@ -1651,6 +1846,7 @@ function pointOutTheBandroom() {
 }
 
 function showToast(text) {
+  if (state.toastsEnabled === false) return; // Profile tab's "Show toast notifications" toggle
   const t = document.createElement("div");
   t.className = "toast";
   t.textContent = text;

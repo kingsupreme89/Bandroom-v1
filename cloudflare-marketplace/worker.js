@@ -391,23 +391,53 @@ export default {
         if (!existing || (!existing.favoriteTeam && !existing.stats)) {
           return jsonResponse({ found: false });
         }
-        return jsonResponse({ found: true, favoriteTeam: existing.favoriteTeam ?? null, stats: existing.stats ?? {} });
+        return jsonResponse({
+          found: true,
+          favoriteTeam: existing.favoriteTeam ?? null,
+          rivalTeam: existing.rivalTeam ?? null,
+          bio: existing.bio ?? null,
+          stats: existing.stats ?? {},
+        });
       }
 
-      // PUT -- merge favoriteTeam/stats into whatever profile fields /auth/verify already wrote
-      // (email/name/picture/createdAt) rather than overwriting them.
+      // PUT -- merge into whatever profile fields /auth/verify already wrote (email/name/
+      // picture/createdAt) rather than overwriting them. Dictionary fields (eventCounts,
+      // gamesWatchedByTeam) and the object cap below exist because the client already tracks an
+      // unbounded set of keys (one per event/team) -- capped at 200 entries each so a corrupt or
+      // malicious client can't grow this KV value without bound.
       let body;
       try { body = await request.json(); } catch { return new Response("bad request", { status: 400, headers: cors() }); }
+
+      function capObject(obj) {
+        if (!obj || typeof obj !== "object") return {};
+        const entries = Object.entries(obj).slice(0, 200);
+        const out = {};
+        // NOT sanitizeSegment(k) -- these keys are internal event/team names like "Offense:
+        // Touchdown Scored", never rendered raw as HTML or used as a filesystem/KV path segment
+        // the way sanitizeSegment's other callers use it. Stripping characters (it strips ":")
+        // was silently splitting one local key into two different keys once round-tripped
+        // through the cloud, fragmenting "most-triggered event" stats. Just cap length.
+        for (const [k, v] of entries) out[k.slice(0, 80)] = Number(v) || 0;
+        return out;
+      }
+
       const favoriteTeam = typeof body?.favoriteTeam === "string" ? sanitizeSegment(body.favoriteTeam) : (existing?.favoriteTeam ?? null);
+      const rivalTeam = typeof body?.rivalTeam === "string" ? sanitizeSegment(body.rivalTeam) : (existing?.rivalTeam ?? null);
+      const bio = typeof body?.bio === "string" ? body.bio.slice(0, 140) : (existing?.bio ?? null);
       const stats = body?.stats && typeof body.stats === "object" ? {
         gamesWatched: Number(body.stats.gamesWatched) || 0,
         songsTriggered: Number(body.stats.songsTriggered) || 0,
         marketplaceUploads: Number(body.stats.marketplaceUploads) || 0,
         marketplaceDownloads: Number(body.stats.marketplaceDownloads) || 0,
+        favoriteTeamWins: Number(body.stats.favoriteTeamWins) || 0,
+        favoriteTeamLosses: Number(body.stats.favoriteTeamLosses) || 0,
+        streakCurrentDays: Number(body.stats.streakCurrentDays) || 0,
+        eventCounts: capObject(body.stats.eventCounts),
+        gamesWatchedByTeam: capObject(body.stats.gamesWatchedByTeam),
       } : (existing?.stats ?? {});
 
-      await env.MARKETPLACE_META.put(userKey, JSON.stringify({ ...(existing ?? {}), favoriteTeam, stats }));
-      return jsonResponse({ favoriteTeam, stats });
+      await env.MARKETPLACE_META.put(userKey, JSON.stringify({ ...(existing ?? {}), favoriteTeam, rivalTeam, bio, stats }));
+      return jsonResponse({ favoriteTeam, rivalTeam, bio, stats });
     }
 
     if (url.pathname.startsWith("/item/") && request.method === "DELETE") {

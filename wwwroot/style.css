@@ -1387,7 +1387,13 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   background: rgba(6, 7, 8, 0.55);
 }
 #profile-overlay[hidden] { display: none; }
-#profile-dialog { width: min(360px, 90vw); border-radius: var(--radius-panel); padding: 22px; }
+#profile-dialog {
+  width: min(400px, 90vw);
+  max-height: 85vh;
+  overflow-y: auto;
+  border-radius: var(--radius-panel);
+  padding: 22px;
+}
 #profile-avatar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 #profile-avatar {
   width: 48px; height: 48px; border-radius: 50%;
@@ -1395,9 +1401,69 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   border: 1px solid var(--glass-border);
   background: rgba(255, 255, 255, 0.06);
 }
+#btn-profile-avatar-upload { font-size: 15px; padding: 6px; border-radius: 50%; width: 30px; height: 30px; }
+#profile-identity { flex: 1 1 auto; min-width: 0; }
 #profile-name { font-weight: 700; font-size: 14px; color: var(--text-primary); }
 #profile-email { font-size: 12px; color: var(--text-muted-2); }
+#profile-member-since { font-size: 11px; color: var(--text-muted-2); margin-top: 2px; }
 #btn-google-signin:disabled { opacity: 0.5; cursor: not-allowed; }
+
+#profile-favorite-header, #profile-rival-header, #profile-bio-header, #profile-level-header,
+#profile-record-header, #profile-by-team-header, #profile-uploads-header {
+  margin-top: 18px;
+  display: flex; align-items: center; gap: 8px;
+}
+#profile-level-num {
+  font-size: 12px; font-weight: 700;
+  color: #06222a;
+  background: var(--team-secondary, var(--accent));
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+#profile-bio-input { width: 100%; box-sizing: border-box; }
+#profile-achievements { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.achievement-badge {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  color: var(--text-muted-2);
+  background: rgba(255, 255, 255, 0.03);
+  opacity: 0.5;
+}
+.achievement-badge.unlocked {
+  color: #06222a;
+  background: var(--team-secondary, var(--accent));
+  border-color: transparent;
+  opacity: 1;
+  font-weight: 600;
+}
+#profile-most-triggered { font-size: 12px; color: var(--text-muted-2); margin-top: 8px; }
+#profile-top-uploader-badge {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--team-secondary, var(--accent));
+}
+#profile-record-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+#profile-record-text { font-size: 16px; font-weight: 700; min-width: 48px; }
+#profile-by-team-list, #profile-my-uploads-list { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.profile-by-team-row {
+  display: flex; justify-content: space-between;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.profile-by-team-row-empty { font-size: 12px; color: var(--text-muted-2); padding: 4px 2px; }
+#profile-toasts-toggle-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 18px;
+  font-size: 13px;
+  color: var(--text-muted-2);
+  cursor: pointer;
+}
+#profile-io-actions { margin-top: 16px; flex-wrap: wrap; }
 
 /* Custom team logo crop tool -- same overlay shell/[hidden] pattern as #bandroom-upload-overlay
    above (same reason: ID selector's display:flex needs an explicit [hidden] override). */
@@ -1491,7 +1557,7 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
 }
 .save-profile-input:focus { border-color: var(--team-secondary, var(--glass-border)); }
 #profile-favorite-header, #profile-stats-header { margin-top: 18px; }
-#profile-favorite-team {
+#profile-favorite-team, #profile-rival-team {
   width: 100%;
   box-sizing: border-box;
   margin: 0 0 4px;
@@ -1502,12 +1568,12 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
    closed control itself. color-scheme:dark above gets the browser's own popup chrome (scrollbar,
    default background) into dark mode; explicitly styling <option> here (Chromium, unlike some
    other engines, does honor background-color/color on individual options) finishes the job. */
-#profile-favorite-team option {
+#profile-favorite-team option, #profile-rival-team option {
   background: #12181d;
   color: var(--text-primary);
 }
-#profile-favorite-team option:checked,
-#profile-favorite-team option:hover {
+#profile-favorite-team option:checked, #profile-favorite-team option:hover,
+#profile-rival-team option:checked, #profile-rival-team option:hover {
   background: var(--team-secondary, var(--accent));
   color: #06222a;
 }
