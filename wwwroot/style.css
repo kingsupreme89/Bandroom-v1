@@ -624,10 +624,23 @@ body {
    Absolutely positioned over the thumb, hidden until hover/focus so it never crowds the tile's
    normal name/school text. */
 .bandroom-item-tile { position: relative; }
+/* Bounded to the thumb's own box (top/left/right/BOTTOM, not just top/left/right) with
+   overflow:hidden -- a tile can carry up to 6 action buttons at once (like, download,
+   report, delete-your-own, admin-edit, admin-delete). The old flex-wrap layout had no
+   bottom bound, so once a tile had enough buttons to wrap past one row, the extra rows
+   spilled out of the thumb and overlapped the tile's own name/school text (and could bleed
+   into neighboring tiles) -- the "garbled stacked badges" bug. A fixed 4-column icon grid
+   keeps every combination at 2 rows max, and overflow:hidden guarantees nothing outside the
+   thumb bounds is ever drawn (or clickable, since hidden overflow is also un-hit-testable). */
 .bandroom-item-actions {
   position: absolute;
-  top: 4px; left: 4px; right: 4px;
-  display: flex; flex-wrap: wrap; gap: 4px;
+  top: 4px; left: 4px; right: 4px; bottom: 4px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: min-content;
+  align-content: start;
+  gap: 3px;
+  overflow: hidden;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
@@ -641,14 +654,16 @@ body {
 .bandroom-item-action {
   font-size: 10px;
   font-weight: 600;
-  padding: 3px 6px;
-  border-radius: 999px;
+  padding: 3px 2px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: rgba(10, 14, 18, 0.72);
   color: var(--text-primary);
   cursor: pointer;
   backdrop-filter: blur(4px);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .bandroom-item-action:hover { background: rgba(20, 26, 32, 0.9); }
 .bandroom-item-action:disabled { opacity: 0.5; cursor: default; }

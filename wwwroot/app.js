@@ -11,6 +11,41 @@ const MARKETPLACE_URL = "https://bandroom-marketplace.bandroom.workers.dev";
 // Stays false for every real end-user build (see WebBridge.cs's AdminTokenPath comment).
 let _isAdminMode = false;
 
+// ---- Global JS crash guard -------------------------------------------------------------
+// A JS exception thrown inside one render function (e.g. buildItemTile) used to be able to
+// take out the whole page silently -- WebView2's console shows it, but nothing in-app signals
+// that anything failed, so the user is left staring at a half-broken screen with no clue.
+// These two handlers catch (1) synchronous throws that escape all the way to the top
+// (window.onerror) and (2) rejected Promises nobody ever attached a .catch to
+// (unhandledrejection) -- the two ways a JS error can go fully unhandled in a browser context.
+// Deliberately loud (console.error, same as every other catch block in this file) rather than
+// swallowed -- the goal is "don't let the UI die", not "hide that something broke" during dev.
+// showToast is a function declaration further down this same file; declarations are hoisted,
+// so calling it from here (registered at load time, long before it fires) is safe.
+let _lastJsErrorToastAt = 0;
+function _notifyJsError(label, detail) {
+  console.error(`[global-error-guard] ${label}`, detail);
+  try {
+    // Rate-limited to one toast every 4s -- a render loop that keeps throwing (e.g. once per
+    // animation frame) would otherwise carpet-bomb the screen with toasts, which is its own
+    // kind of "the UI is unusable" failure mode.
+    const now = Date.now();
+    if (now - _lastJsErrorToastAt > 4000) {
+      _lastJsErrorToastAt = now;
+      showToast("Something went wrong rendering part of the UI.");
+    }
+  } catch (toastErr) {
+    // showToast itself must never be able to turn error-reporting into a second error.
+    console.error("[global-error-guard] showToast failed while reporting an error", toastErr);
+  }
+}
+window.addEventListener("error", (e) => {
+  _notifyJsError("Uncaught error", e.error ?? e.message ?? e);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  _notifyJsError("Unhandled promise rejection", e.reason ?? e);
+});
+
 // The usercount worker (cloudflare-usercount/worker.js) also carries the Discord chat relay --
 // GET /discord/messages?after=<id> -- since it already has the lightweight per-isolate caching
 // pattern this needed and didn't require standing up a whole new worker for one endpoint.
@@ -1156,6 +1191,28 @@ async function deleteUploadedItem(item) {
   }
 }
 
+// Owner-scoped rename/re-categorize, for a regular uploader fixing a typo in their own upload --
+// same worker.js PATCH /item/<type>/<id> the admin edit uses, just authenticated with the
+// uploader's own ownerToken (X-Owner-Token) instead of X-Admin-Token. Server-side sanitization
+// (sanitizeSegment) is identical either way, so this can't reopen the stored-XSS class of bug the
+// admin path already had fixed. Returns the server's { id, name, school } on success, or null.
+async function editUploadedItem(item, newName, newSchool) {
+  const token = myUploadToken(item.id);
+  if (!token) return null;
+  try {
+    const res = await fetch(`${MARKETPLACE_URL}/item/${item.type}/${encodeURIComponent(item.id)}`, {
+      method: "PATCH",
+      headers: { "X-Owner-Token": token, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newName, school: newSchool }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error("editUploadedItem failed", err);
+    return null;
+  }
+}
+
 async function downloadMarketplaceItem(item) {
   try {
     const raw = await bridge.DownloadMarketplaceItem(item.type, item.name, item.school, item.url);
@@ -1640,6 +1697,30 @@ function buildItemTile(item, inHub) {
     actions.appendChild(reportBtn);
 
     if (myUploadToken(item.id)) {
+      const editBtn = document.createElement("button");
+      editBtn.className = "bandroom-item-action";
+      editBtn.title = "Edit your upload's name/school";
+      editBtn.textContent = "\u{270F}\u{FE0F}";
+      editBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const newName = prompt("Edit name:", item.name);
+        if (newName === null) return;
+        const newSchool = prompt("Edit school/team:", item.school ?? "");
+        if (newSchool === null) return;
+        editBtn.disabled = true;
+        const result = await editUploadedItem(item, newName, newSchool);
+        if (result) {
+          showToast(`Updated "${result.name}".`);
+          item.name = result.name;
+          item.school = result.school;
+          renderBandroomHub();
+        } else {
+          showToast("Couldn't update that -- try again.");
+        }
+        editBtn.disabled = false;
+      });
+      actions.appendChild(editBtn);
+
       const delBtn = document.createElement("button");
       delBtn.className = "bandroom-item-action bandroom-item-action-danger";
       delBtn.title = "Delete your upload";
@@ -1667,7 +1748,12 @@ function buildItemTile(item, inHub) {
       const adminEditBtn = document.createElement("button");
       adminEditBtn.className = "bandroom-item-action bandroom-item-action-admin";
       adminEditBtn.title = "Admin: Edit";
-      adminEditBtn.textContent = "\u{1F6E0} ADMIN";
+      // Icon-only (no "ADMIN" text label) -- with like/download/report/delete/admin-edit/
+      // admin-delete all sharing one small tile's hover row, the old text pills were wide
+      // enough to force multiple wrapped rows that overflowed the thumb and overlapped the
+      // tile's name/school text below (the "garbled stacked badges" bug). Gold border/color
+      // still marks these as admin-only, same as before.
+      adminEditBtn.textContent = "\u{1F6E0}";
       adminEditBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
         const newName = prompt("Admin edit -- name:", item.name);
@@ -1691,7 +1777,7 @@ function buildItemTile(item, inHub) {
       const adminDelBtn = document.createElement("button");
       adminDelBtn.className = "bandroom-item-action bandroom-item-action-admin bandroom-item-action-danger";
       adminDelBtn.title = "Admin: Delete";
-      adminDelBtn.textContent = "\u{1F6E0} ADMIN \u{1F5D1}";
+      adminDelBtn.textContent = "\u{1F6E0}\u{1F5D1}"; // icon-only, see adminEditBtn comment above
       adminDelBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
         adminDelBtn.disabled = true;

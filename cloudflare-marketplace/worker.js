@@ -26,10 +26,15 @@
 //      build ever has this token (see admin_token.local.txt in the C# app) -- it is
 //      deliberately never shipped in the public installer.
 //
-// PATCH /item/<type>/<id>   header: X-Admin-Token: <ADMIN_TOKEN>   body: { name?, school? }
-//   -> admin-exclusive metadata edit, no ownerToken fallback (403/401 without a valid admin
-//      token). Updates only `name`/`school` on the item -- `id`/`key`/`ownerToken` and any
-//      counters (likes/reports/views/downloads) are never touched by this endpoint.
+// PATCH /item/<type>/<id>   header: X-Admin-Token: <ADMIN_TOKEN>  OR  X-Owner-Token: <ownerToken>
+//                           body: { name?, school? }
+//   -> metadata edit. Either the admin token (bypasses ownership, same as DELETE's admin
+//      override) or the item's own ownerToken (same one returned at /upload time, same one
+//      DELETE's owner path already checks) can rename/re-categorize -- a regular uploader can
+//      now fix a typo in their own upload without deleting and re-uploading. Both paths run
+//      through the same sanitizeSegment() the /upload path uses. Updates only `name`/`school` --
+//      `id`/`key`/`ownerToken` and any counters (likes/reports/views/downloads) are never
+//      touched by this endpoint.
 //
 // POST /report/<type>/<id>
 //   -> increments a report counter for that item (KV). No auth needed -- cheap first pass at
@@ -565,13 +570,11 @@ export default {
     }
 
     if (url.pathname.startsWith("/item/") && request.method === "PATCH") {
-      // Admin-exclusive metadata edit -- no ownerToken fallback here at all, unlike DELETE.
-      const adminToken = request.headers.get("x-admin-token");
-      const isAdmin = !!env.ADMIN_TOKEN && !!adminToken && adminToken === env.ADMIN_TOKEN;
-      if (!isAdmin) {
-        return new Response("forbidden -- admin token required", { status: 403, headers: cors() });
-      }
-
+      // Metadata edit -- either the app owner's admin token (bypasses ownership, same as
+      // DELETE's admin override), OR the uploader's own X-Owner-Token for THIS item (same
+      // ownerToken minted at /upload time and already used by DELETE's owner path). No other
+      // auth grants this -- an owner token only ever authorizes editing/deleting the one item
+      // it was issued for.
       const parts = url.pathname.slice("/item/".length).split("/");
       const [type, id] = parts;
       if ((type !== "song" && type !== "image") || !id) {
@@ -581,6 +584,15 @@ export default {
       const raw = await env.MARKETPLACE_META.get(metaKey);
       if (!raw) return new Response("not found", { status: 404, headers: cors() });
       const meta = JSON.parse(raw);
+
+      const adminToken = request.headers.get("x-admin-token");
+      const isAdmin = !!env.ADMIN_TOKEN && !!adminToken && adminToken === env.ADMIN_TOKEN;
+      if (!isAdmin) {
+        const ownerToken = request.headers.get("x-owner-token");
+        if (!ownerToken || ownerToken !== meta.ownerToken) {
+          return new Response("forbidden -- owner or admin token required", { status: 403, headers: cors() });
+        }
+      }
 
       let body;
       try {
