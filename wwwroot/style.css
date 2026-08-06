@@ -1215,6 +1215,12 @@ button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matc
   border: 1px solid rgba(250, 204, 21, 0.35);
   vertical-align: middle;
 }
+/* Bug 3: "Coming Soon" pill for the ~26/33 triggers wired/assignable but not yet in
+   WebBridge.ConfirmedTriggers -- same amber family as the existing unconfirmed LED so it reads
+   as one visual language, just a clearer, less jargon-y label than "not yet confirmed". Kept as
+   its own class (not a rename of .situation-badge) so it's trivial to restyle/relabel later
+   without touching the base badge shared by anything else that might reuse it. */
+.situation-badge-coming-soon { background: rgba(250, 204, 21, 0.18); }
 .situation-actions { display: flex; gap: 6px; flex: 0 0 auto; }
 .situation-btn {
   padding: 5px 10px;

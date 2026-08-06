@@ -81,6 +81,7 @@ let state = {
   matchupHome: null,
   matchupAway: null,
   matchupLocked: false,
+  currentSituationsCategory: null,
 };
 
 async function init() {
@@ -272,6 +273,11 @@ async function openSituations(category) {
   const list = document.getElementById("situations-list");
   document.getElementById("situations-title").textContent = category === "All" ? "All Situations" : category;
   panel.hidden = false;
+  // Remember which category is showing so selectTeam() can re-pull the newly active team's
+  // OWN assignments into this same panel -- without this, switching Away/Home while the
+  // panel is open left it showing whichever team's data happened to be fetched last (looked
+  // like both sides shared identical assignments, since the DOM was simply never refreshed).
+  state.currentSituationsCategory = category;
 
   const events = bridge ? JSON.parse(await bridge.GetEventsForCategory(category)) : [];
   list.innerHTML = "";
@@ -284,7 +290,7 @@ async function openSituations(category) {
     row.className = "situation-row" + (ev.confirmed ? "" : " situation-unconfirmed");
     row.innerHTML = `
       <span class="situation-text">
-        <div class="situation-name"><span class="situation-led ${ledClass}"></span>${ev.eventName}${ev.confirmed ? "" : ' <span class="situation-badge" title="Wired but not yet confirmed working in a live game">not yet confirmed</span>'}</div>
+        <div class="situation-name"><span class="situation-led ${ledClass}"></span>${ev.eventName}${ev.confirmed ? "" : ' <span class="situation-badge situation-badge-coming-soon" title="Wired and assignable, but not yet confirmed firing in a live game -- could work, just hasn\'t been verified">Coming Soon</span>'}</div>
         <div class="situation-file">${ev.fileName ? ev.fileName : "Unassigned"}</div>
       </span>
       <span class="situation-actions">
@@ -309,6 +315,16 @@ async function selectTeam(name) {
   if (bridge) await bridge.SelectTeam(name);
   setActiveTeam(name);
   renderTeamGrid();
+  // ROOT CAUSE FIX (Bug 1a): bridge.SelectTeam swaps the backend's in-memory profile to the
+  // newly active team correctly, but the situations panel (if left open while flipping
+  // Away/Home) was never told to re-fetch -- it just kept displaying whatever GetEventsForCategory
+  // result was already sitting in the DOM from before the switch, which made both sides look
+  // identical. Re-run openSituations for whichever category is currently showing so it re-pulls
+  // straight from the now-active team's real, freshly-loaded profile.
+  if (state.currentSituationsCategory && !document.getElementById("situations-panel").hidden) {
+    await openSituations(state.currentSituationsCategory);
+  }
+  await refreshCategories();
 }
 
 function setActiveTeam(name, fromInit = false) {
@@ -799,6 +815,7 @@ function wireControls() {
 
   document.getElementById("btn-close-situations").addEventListener("click", () => {
     document.getElementById("situations-panel").hidden = true;
+    state.currentSituationsCategory = null;
   });
 
   window.addEventListener("bandroom:refresh", refreshCategories);

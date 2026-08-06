@@ -833,7 +833,11 @@ public sealed class WebMainForm : Form
 
     /// <summary>The offense (whoever the live possession color says has the ball) just showed a
     /// negative distance-to-go -- that only happens on a penalty or a loss of yards, and since we
-    /// already know who's on offense, we know their opponent's Defense caused it.</summary>
+    /// already know who's on offense, we know their opponent's Defense caused it.
+    /// NOT gated by <see cref="HomeOnlyEventsForNow"/> -- this away-side TFL detection is
+    /// considered "concrete"/solid (side-agnostic distance read, confirmed via live screenshot
+    /// per the comments on GameWatcher.CheckForLossOfYards), so the owner explicitly asked to
+    /// leave it firing for both sides while everything else gets simplified to home-only.</summary>
     void OnTackleForLoss()
     {
         RunOnUi(() =>
@@ -843,6 +847,12 @@ public sealed class WebMainForm : Form
             FireEventForSide(defenseSide, "Defense: Tackle for Loss");
         });
     }
+
+    /// <summary>Temporary simplification, requested by the owner ahead of a major push: only the
+    /// HOME team's events should fire for now. Away-side firing (via FireTriggerForSide/
+    /// FireEventForSide below) is disabled, not deleted, so it's a one-line revert once away-side
+    /// support is wanted again. Tackle-for-Loss is deliberately exempt -- see OnTackleForLoss.</summary>
+    const bool HomeOnlyEventsForNow = true;
 
     void OnDownChanged(string? down)
     {
@@ -856,7 +866,11 @@ public sealed class WebMainForm : Form
             // is locked in we know whose profile should fire.
             if (_homeConfig != null && _awayConfig != null && _possession != null)
             {
-                FireTriggerForSide(_possession, trigger);
+                // Simplified-for-now: only fire when HOME is on offense (see HomeOnlyEventsForNow).
+                // Original away-aware call, commented out rather than deleted:
+                //   FireTriggerForSide(_possession, trigger);
+                bool sideAllowed = HomeOnlyEventsForNow ? _possession == "home" : true;
+                if (sideAllowed) FireTriggerForSide(_possession, trigger);
                 return;
             }
 
@@ -889,7 +903,12 @@ public sealed class WebMainForm : Form
             if (region == "situation" && value != null && _homeConfig != null && _awayConfig != null
                 && _possession != null && SideAwareEvents.TryGetValue(value, out var eventName))
             {
-                FireEventForSide(_possession, eventName);
+                // Simplified-for-now: only fire when HOME is the side attributed to this
+                // situation (see HomeOnlyEventsForNow). Original away-aware call, commented out
+                // rather than deleted:
+                //   FireEventForSide(_possession, eventName);
+                bool sideAllowed = HomeOnlyEventsForNow ? _possession == "home" : true;
+                if (sideAllowed) FireEventForSide(_possession, eventName);
                 return;
             }
 
