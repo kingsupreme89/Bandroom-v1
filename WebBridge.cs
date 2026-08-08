@@ -179,8 +179,17 @@ public sealed class WebBridge
 
         try
         {
+            // BUG FIX (Session 11, task 1 verification): this used to hardcode "song" here
+            // regardless of entry.Type, so any track recorded as "pa" (see LocalTrackEntry.Type --
+            // set from PromptDialog.ShowTrackNaming's Song/PA choice, see ImportLocalSongFromWeb
+            // above) got uploaded to the marketplace mis-tagged as a plain song. That silently
+            // mis-indexes it: it'd show up in the Songs shelf/list instead of wherever PA clips
+            // are meant to be filtered to, with no error anywhere since the worker's isValidType
+            // accepts "pa" just as happily as "song" -- the bug was purely in which string got
+            // sent, not a rejected upload. entry.Type is only ever "song" or "pa" (see its own
+            // doc comment) so this is safe without extra validation here.
             using var form = new System.Net.Http.MultipartFormDataContent();
-            form.Add(new System.Net.Http.StringContent("song"), "type");
+            form.Add(new System.Net.Http.StringContent(entry.Type), "type");
             form.Add(new System.Net.Http.StringContent(entry.Name), "name");
             form.Add(new System.Net.Http.StringContent(school), "school");
             var bytes = await File.ReadAllBytesAsync(entry.Path);
