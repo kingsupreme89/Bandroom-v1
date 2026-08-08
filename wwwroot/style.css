@@ -2963,6 +2963,40 @@ input, select, textarea, [contenteditable] {
   flex: 0 0 auto;
 }
 
+/* Favorite Team picker (task queue item 3) -- opens from #profile-dialog (z-index: 100), so this
+   needs a higher z-index to stack above it, same reasoning as every other "dialog opened from
+   another dialog" overlay in this file. */
+#favorite-team-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.7);
+}
+#favorite-team-overlay[hidden] { display: none; }
+#favorite-team-dialog {
+  width: min(900px, 90vw);
+  height: min(620px, 85vh);
+  border-radius: var(--radius-panel);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+#favorite-team-dialog .onboarding-header { justify-content: space-between; margin-bottom: 0; }
+.profile-favorite-team-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font: inherit;
+}
+
 @keyframes panel-flash {
   0% { box-shadow: 0 0 0 0 transparent; border-color: var(--glass-border); }
   30% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--team-secondary, var(--accent)) 50%, transparent); border-color: var(--team-secondary, var(--accent)); }

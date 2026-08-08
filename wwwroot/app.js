@@ -687,7 +687,6 @@ async function refreshUniversalProfileView() {
   // GetTeams() resolves; if the profile overlay is opened before that finishes, a naive
   // "only populate once" guard would permanently lock the dropdown empty for the whole session,
   // since it'd never get a second chance to see the real list.
-  populateTeamSelect(document.getElementById("profile-favorite-team"), true);
   populateTeamSelect(document.getElementById("profile-rival-team"), true);
 
   let profile;
@@ -701,7 +700,7 @@ async function refreshUniversalProfileView() {
   state.toastsEnabled = profile.toastsEnabled !== false;
   updateFavoriteTeamJumpButton(profile.favoriteTeam);
 
-  document.getElementById("profile-favorite-team").value = profile.favoriteTeam ?? "";
+  document.getElementById("profile-favorite-team-label").textContent = profile.favoriteTeam || "None selected";
   document.getElementById("profile-rival-team").value = profile.rivalTeam ?? "";
   document.getElementById("profile-bio-input").value = profile.bio ?? "";
   document.getElementById("profile-toasts-toggle").checked = state.toastsEnabled;
@@ -1074,21 +1073,7 @@ function wireControls() {
     showToast("Signed out.");
     await refreshProfileView();
   });
-  document.getElementById("profile-favorite-team").addEventListener("change", async (e) => {
-    const team = e.target.value;
-    try {
-      await bridge.SetFavoriteTeam(team);
-      // Setting a favorite team also switches the app's active team/theme -- same effect as
-      // clicking that team's tile in the Teams panel (see selectTeam) -- so picking one here
-      // visibly does something instead of silently saving a preference nobody can see.
-      if (team) await selectTeam(team);
-      updateFavoriteTeamJumpButton(team); // otherwise the header star button stays stale until Profile is closed/reopened
-      showToast(team ? `Favorite team set to ${team}.` : "Favorite team cleared.");
-    } catch (err) {
-      console.error("SetFavoriteTeam failed", err);
-      showToast("Couldn't save favorite team -- try again.");
-    }
-  });
+  document.getElementById("btn-profile-favorite-team").addEventListener("click", openFavoriteTeamCoverflow);
   document.getElementById("profile-rival-team").addEventListener("change", async (e) => {
     try {
       await bridge.SetRivalTeam(e.target.value);
@@ -3357,6 +3342,103 @@ function shiftOnboardingCoverflow(dir) {
   idx = ((idx + dir) % teams.length + teams.length) % teams.length;
   _onboardingPicked = teams[idx].name;
   renderOnboardingCoverflow(filter);
+}
+
+// ---- Favorite Team picker (task queue item 3, Session 10) -----------------------------
+// Was a plain <select> in the Profile dialog -- the owner's "should be the coverflow" -- now the
+// same cover-flow carousel pattern as onboarding directly above (which itself mirrors Set
+// Matchup's). Kept as its own set of functions rather than sharing renderOnboardingCoverflow
+// outright: that function is wired to onboarding-specific element ids and a first-run-only
+// "CompleteFirstRun" confirm action, and forcing a shared function to take an id-prefix/callback
+// parameter for one more caller wasn't worth the indirection. matchupCoverflowTeams and
+// fillTeamSwatch -- the actual reusable primitives -- ARE reused, same as onboarding does.
+let _favoriteCoverflowPicked = null;
+let _favoriteCoverflowWired = false;
+
+function openFavoriteTeamCoverflow() {
+  const overlay = document.getElementById("favorite-team-overlay");
+  if (!overlay) return;
+  overlay.hidden = false;
+  _favoriteCoverflowPicked = document.getElementById("profile-favorite-team-label")?.textContent;
+  if (_favoriteCoverflowPicked === "None selected") _favoriteCoverflowPicked = null;
+  const search = document.getElementById("favorite-team-search");
+  search.value = "";
+  renderFavoriteCoverflow("");
+
+  // Bound once -- reopening this overlay on every Favorite Team click would otherwise stack up
+  // duplicate listeners, same guard pattern as _hubSortListenerBound elsewhere in this file.
+  if (!_favoriteCoverflowWired) {
+    _favoriteCoverflowWired = true;
+    search.addEventListener("input", (e) => renderFavoriteCoverflow(e.target.value));
+    document.querySelectorAll("#favorite-team-dialog .coverflow-arrow").forEach((btn) => {
+      btn.addEventListener("click", () => shiftFavoriteCoverflow(parseInt(btn.dataset.dir, 10)));
+    });
+    document.getElementById("btn-close-favorite-team").addEventListener("click", () => { overlay.hidden = true; });
+    document.getElementById("btn-favorite-team-confirm").addEventListener("click", async () => {
+      const team = _favoriteCoverflowPicked;
+      try {
+        await bridge.SetFavoriteTeam(team ?? "");
+        // Setting a favorite team also switches the app's active team/theme -- same effect as
+        // clicking that team's tile in the Teams panel (see selectTeam) -- so picking one here
+        // visibly does something instead of silently saving a preference nobody can see. Same
+        // behavior the old <select>'s change handler had.
+        if (team) await selectTeam(team);
+        updateFavoriteTeamJumpButton(team); // otherwise the header star button stays stale until Profile is closed/reopened
+        document.getElementById("profile-favorite-team-label").textContent = team || "None selected";
+        showToast(team ? `Favorite team set to ${team}.` : "Favorite team cleared.");
+      } catch (err) {
+        console.error("SetFavoriteTeam failed", err);
+        showToast("Couldn't save favorite team -- try again.");
+      }
+      overlay.hidden = true;
+    });
+  }
+}
+
+function renderFavoriteCoverflow(filter) {
+  const track = document.getElementById("favorite-team-track");
+  const nameEl = document.getElementById("favorite-team-name");
+  if (!track || !nameEl) return;
+  const teams = matchupCoverflowTeams(filter);
+  track.innerHTML = "";
+  if (!teams.length) {
+    nameEl.textContent = "No teams found";
+    document.getElementById("btn-favorite-team-confirm").disabled = true;
+    return;
+  }
+
+  let centerIdx = teams.findIndex((t) => t.name === _favoriteCoverflowPicked);
+  if (centerIdx === -1) centerIdx = 0;
+
+  const positions = [[-2, "cf-l2"], [-1, "cf-l1"], [0, "cf-center"], [1, "cf-r1"], [2, "cf-r2"]];
+  for (const [offset, cls] of positions) {
+    const idx = ((centerIdx + offset) % teams.length + teams.length) % teams.length;
+    const t = teams[idx];
+    const tile = document.createElement("div");
+    tile.className = "team-swatch " + cls;
+    tile.title = t.name;
+    fillTeamSwatch(tile, t);
+    tile.addEventListener("click", () => {
+      _favoriteCoverflowPicked = t.name;
+      renderFavoriteCoverflow(filter);
+    });
+    track.appendChild(tile);
+  }
+
+  _favoriteCoverflowPicked = teams[centerIdx].name;
+  nameEl.textContent = _favoriteCoverflowPicked;
+  document.getElementById("btn-favorite-team-confirm").disabled = false;
+}
+
+function shiftFavoriteCoverflow(dir) {
+  const filter = document.getElementById("favorite-team-search")?.value || "";
+  const teams = matchupCoverflowTeams(filter);
+  if (!teams.length) return;
+  let idx = teams.findIndex((t) => t.name === _favoriteCoverflowPicked);
+  if (idx === -1) idx = 0;
+  idx = ((idx + dir) % teams.length + teams.length) % teams.length;
+  _favoriteCoverflowPicked = teams[idx].name;
+  renderFavoriteCoverflow(filter);
 }
 
 /// First-run onboarding only ever asked for a favorite team -- it never mentioned The Bandroom

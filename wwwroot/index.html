@@ -445,8 +445,18 @@
            Profile" feature (song-to-situation assignments for one team); this is one record per
            install, works fully signed-out, and mirrors to the cloud when signed in with Google
            so it can follow the account across devices (see ConfigStore.UserProfile). -->
+      <!-- Task queue item 3 (Session 10): "should be the coverflow" -- was a plain <select>
+           dropdown, the only favorite-team picker in the app that wasn't the cover-flow carousel
+           onboarding/Set Matchup already use. Now a button showing the current pick that opens
+           #favorite-team-overlay, the same cover-flow component (see openFavoriteTeamCoverflow/
+           renderFavoriteCoverflow in app.js, sharing matchupCoverflowTeams/cf-l2../coverflow-*
+           classes with onboarding and Set Matchup) instead of a second implementation. Rival Team
+           stays a plain select -- the owner's ask was specifically about "the favorite-team
+           screen", not every team-picking control in the app. -->
       <div class="save-profile-header" id="profile-favorite-header">Favorite Team</div>
-      <select id="profile-favorite-team" class="team-picker-search"></select>
+      <button id="btn-profile-favorite-team" class="team-picker-search profile-favorite-team-btn" type="button">
+        <span id="profile-favorite-team-label">None selected</span>
+      </button>
 
       <div class="save-profile-header" id="profile-rival-header">Rival Team</div>
       <select id="profile-rival-team" class="team-picker-search"></select>
@@ -737,6 +747,27 @@
       </div>
       <div class="coverflow-name" id="onboarding-name"></div>
       <button id="btn-onboarding-confirm" class="btn-primary">Confirm Team</button>
+    </div>
+  </div>
+
+  <!-- Favorite Team picker (task queue item 3) -- opened from the Profile dialog's Favorite Team
+       button. Same cover-flow carousel/markup shape as onboarding above (coverflow-stage/
+       coverflow-track/coverflow-name, cf-l2..cf-r2 tile positions), explicit Confirm step for the
+       same reason onboarding has one: browsing shouldn't silently lock in a pick. -->
+  <div id="favorite-team-overlay" hidden>
+    <div id="favorite-team-dialog" class="glass">
+      <div class="onboarding-header">
+        <span class="brand-name">Choose Your Favorite Team</span>
+        <button id="btn-close-favorite-team" class="icon-btn" title="Close">&times;</button>
+      </div>
+      <input type="text" id="favorite-team-search" placeholder="Search teams..." class="team-picker-search" />
+      <div class="coverflow-stage">
+        <button class="coverflow-arrow coverflow-arrow-left" data-dir="-1" title="Previous team">&#8249;</button>
+        <div class="coverflow-track" id="favorite-team-track"></div>
+        <button class="coverflow-arrow coverflow-arrow-right" data-dir="1" title="Next team">&#8250;</button>
+      </div>
+      <div class="coverflow-name" id="favorite-team-name"></div>
+      <button id="btn-favorite-team-confirm" class="btn-primary">Confirm Team</button>
     </div>
   </div>
 
