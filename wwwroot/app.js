@@ -2611,6 +2611,12 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName) {
       _clipperAssignLibrary = [];
     }
   }
+  // Team filter intentionally NOT reset here -- reopening Assign for a different event while
+  // browsing "UGA only" is a reasonable thing to keep, same as the marketplace hub keeps its
+  // last sort choice across opens.
+  const teamSearch = document.getElementById("clipper-assign-team-search");
+  if (teamSearch) teamSearch.value = "";
+  renderClipperAssignTeamSidebar("");
   renderClipperAssignList("");
 }
 
@@ -2624,78 +2630,173 @@ function closeClipperAssign() {
   _clipperAssignTrigger = null;
 }
 
+// Which team the sidebar currently has selected -- null means "All Teams" (no filter). Module
+// level so it survives re-renders while the assign popup stays open (e.g. typing in the search
+// box shouldn't reset the team you just picked).
+let _clipperAssignTeamFilter = null;
+
+// Source -> section label, in display order. Matches the "source" tag GetTrackLibraryFromWeb
+// (WebMainForm.cs) now stamps on every entry -- keep these two lists in sync if a new source
+// folder is ever added there, or new files will silently fall into "Imported Files" instead of
+// getting their own labeled section.
+const CLIPPER_ASSIGN_SOURCE_LABELS = {
+  marketplace: "Marketplace Downloads",
+  trimmed: "Trimmed Clips",
+  local: "Your Imports",
+  uploaded: "Imported Files",
+};
+const CLIPPER_ASSIGN_SOURCE_ORDER = ["marketplace", "trimmed", "local", "uploaded"];
+
+/// Builds one song row -- same Play/Stop/DL per-row transport as before, factored out so both
+/// the grouped assign list and any future reuse share one implementation instead of drifting.
+function buildClipperAssignRow(item, list) {
+  const row = document.createElement("div");
+  row.className = "clipper-assign-row";
+  row.title = item.path;
+
+  const name = document.createElement("span");
+  name.className = "clipper-assign-row-name";
+  name.textContent = item.name;
+  row.appendChild(name);
+
+  // Condensed per-row transport -- same Play/Stop the toolbar above already does (just
+  // scoped to this row's file instead of whatever's currently selected), plus DL to
+  // register this library file in My Downloads (see AddLibraryFileToDownloadsFromWeb) so
+  // it's reachable there too instead of only by re-browsing the whole Songs folder.
+  const actions = document.createElement("span");
+  actions.className = "clipper-assign-row-actions";
+
+  const playBtn = document.createElement("button");
+  playBtn.className = "clipper-assign-row-btn";
+  playBtn.title = "Play";
+  playBtn.textContent = "▶";
+  playBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    _previewAudio?.pause();
+    bridge?.PreviewLocalFile(item.path);
+  });
+  actions.appendChild(playBtn);
+
+  const stopBtn = document.createElement("button");
+  stopBtn.className = "clipper-assign-row-btn";
+  stopBtn.title = "Stop";
+  stopBtn.textContent = "⏹";
+  stopBtn.addEventListener("click", (e) => { e.stopPropagation(); bridge?.StopPreview(); });
+  actions.appendChild(stopBtn);
+
+  const dlBtn = document.createElement("button");
+  dlBtn.className = "clipper-assign-row-btn";
+  dlBtn.title = "Add to My Downloads";
+  dlBtn.textContent = "⬇";
+  dlBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    dlBtn.disabled = true;
+    const ok = await bridge?.AddLibraryFileToDownloads(item.path);
+    showToast(ok ? `Added "${item.name}" to My Downloads.` : "Couldn't add that -- try again.");
+    dlBtn.disabled = false;
+  });
+  actions.appendChild(dlBtn);
+
+  row.appendChild(actions);
+
+  row.addEventListener("click", () => {
+    list.querySelectorAll(".clipper-assign-row.selected").forEach((r) => r.classList.remove("selected"));
+    row.classList.add("selected");
+    _clipperAssignSelectedPath = item.path;
+    document.getElementById("btn-clipper-assign-select").disabled = false;
+  });
+  return row;
+}
+
+/// Task queue item 1 (Session 10): the flat song list mixed marketplace downloads, drag-drop/
+/// Browse imports, trimmed clips, and the "import my own song" pipeline with zero labeling --
+/// "way too many songs, I don't even know where they came from." Root cause (see
+/// GetTrackLibraryFromWeb in WebMainForm.cs): those really are three different physical folders
+/// under ConfigStore.SongsFolder, scanned together with no source tag. The default song pack was
+/// NOT part of this -- it's never copied into SongsFolder at all, so it isn't in this list.
+/// Fixed by tagging each entry with its source folder/origin server-side and grouping by that
+/// tag here, same shape as the marketplace hub's section-labeled shelves.
+///
+/// Also: item.path is a real, distinct filesystem path per entry, and GetTrackLibraryFromWeb
+/// already Distinct()s by full path -- so two rows with the SAME display name are never the
+/// exact same file counted twice, they're two different files that happen to share a name (e.g.
+/// a marketplace download and a locally trimmed clip both named "Defense_Tackle for Loss"). The
+/// per-row tooltip (row.title = item.path) plus the new source-section header disambiguates them
+/// instead of silently merging them -- don't "fix" this by deduping on name, that would hide a
+/// real second file the user can still assign separately.
 function renderClipperAssignList(filter) {
   const list = document.getElementById("clipper-assign-list");
   list.innerHTML = "";
   const q = filter.toLowerCase().trim();
-  const items = (_clipperAssignLibrary || []).filter((it) => !q || it.name.toLowerCase().includes(q));
+  const teamQ = _clipperAssignTeamFilter ? _clipperAssignTeamFilter.toLowerCase() : null;
+  const items = (_clipperAssignLibrary || []).filter((it) => {
+    if (q && !it.name.toLowerCase().includes(q)) return false;
+    // Song files carry no structured team metadata outside marketplace downloads/trimmed clips
+    // (which bake the team name into the filename, e.g. "UGA - Fight Song" / "UGA-FightSong") --
+    // a plain drag-drop import or local recording has no team association at all, so team
+    // filtering is a best-effort filename substring match, not a guaranteed-accurate index.
+    if (teamQ && !it.name.toLowerCase().includes(teamQ)) return false;
+    return true;
+  });
   if (!items.length) {
-    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No songs found${q ? " for that search" : " in the Songs library"}.</div>`;
+    const reason = teamQ ? ` for ${_clipperAssignTeamFilter}` : "";
+    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No songs found${q ? " for that search" : reason || " in the Songs library"}.</div>`;
     return;
   }
-  for (const item of items) {
-    const row = document.createElement("div");
-    row.className = "clipper-assign-row";
-    row.title = item.path;
 
-    const name = document.createElement("span");
-    name.className = "clipper-assign-row-name";
-    name.textContent = item.name;
-    row.appendChild(name);
+  for (const source of CLIPPER_ASSIGN_SOURCE_ORDER) {
+    const group = items.filter((it) => (it.source || "uploaded") === source);
+    if (!group.length) continue;
+    const header = document.createElement("div");
+    header.className = "clipper-assign-section-label";
+    header.textContent = `${CLIPPER_ASSIGN_SOURCE_LABELS[source]} (${group.length})`;
+    list.appendChild(header);
+    for (const item of group) list.appendChild(buildClipperAssignRow(item, list));
+  }
+}
 
-    // Condensed per-row transport -- same Play/Stop the toolbar above already does (just
-    // scoped to this row's file instead of whatever's currently selected), plus DL to
-    // register this library file in My Downloads (see AddLibraryFileToDownloadsFromWeb) so
-    // it's reachable there too instead of only by re-browsing the whole Songs folder.
-    const actions = document.createElement("span");
-    actions.className = "clipper-assign-row-actions";
+/// Team sidebar (task queue item 2) -- same team-swatch grid used by the marketplace hub's
+/// "Your Library" sidebar (renderTeamGridInto), reused rather than reinvented. "All Teams" is a
+/// synthetic first entry (not a real team) that clears _clipperAssignTeamFilter.
+function renderClipperAssignTeamSidebar(filter) {
+  const grid = document.getElementById("clipper-assign-team-grid");
+  if (!grid) return;
+  grid.innerHTML = "";
 
-    const playBtn = document.createElement("button");
-    playBtn.className = "clipper-assign-row-btn";
-    playBtn.title = "Play";
-    playBtn.textContent = "▶";
-    playBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      _previewAudio?.pause();
-      bridge?.PreviewLocalFile(item.path);
-    });
-    actions.appendChild(playBtn);
+  const allTile = document.createElement("div");
+  allTile.className = "team-swatch" + (_clipperAssignTeamFilter === null ? " active" : "");
+  allTile.title = "All Teams";
+  allTile.textContent = "All";
+  allTile.style.display = "flex";
+  allTile.style.alignItems = "center";
+  allTile.style.justifyContent = "center";
+  allTile.style.fontSize = "10px";
+  allTile.style.fontWeight = "700";
+  allTile.addEventListener("click", () => {
+    _clipperAssignTeamFilter = null;
+    renderClipperAssignTeamSidebar(document.getElementById("clipper-assign-team-search")?.value ?? "");
+    renderClipperAssignList(document.getElementById("clipper-assign-search")?.value ?? "");
+  });
 
-    const stopBtn = document.createElement("button");
-    stopBtn.className = "clipper-assign-row-btn";
-    stopBtn.title = "Stop";
-    stopBtn.textContent = "⏹";
-    stopBtn.addEventListener("click", (e) => { e.stopPropagation(); bridge?.StopPreview(); });
-    actions.appendChild(stopBtn);
-
-    const dlBtn = document.createElement("button");
-    dlBtn.className = "clipper-assign-row-btn";
-    dlBtn.title = "Add to My Downloads";
-    dlBtn.textContent = "⬇";
-    dlBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      dlBtn.disabled = true;
-      const ok = await bridge?.AddLibraryFileToDownloads(item.path);
-      showToast(ok ? `Added "${item.name}" to My Downloads.` : "Couldn't add that -- try again.");
-      dlBtn.disabled = false;
-    });
-    actions.appendChild(dlBtn);
-
-    row.appendChild(actions);
-
-    row.addEventListener("click", () => {
-      list.querySelectorAll(".clipper-assign-row.selected").forEach((r) => r.classList.remove("selected"));
-      row.classList.add("selected");
-      _clipperAssignSelectedPath = item.path;
-      document.getElementById("btn-clipper-assign-select").disabled = false;
-    });
-    list.appendChild(row);
+  // renderTeamGridInto clears the grid itself (grid.innerHTML = "") first thing -- build the
+  // synthetic "All" tile above but only insert it AFTER this call, or it gets wiped along with
+  // everything else. It isn't one of state.teams, so renderTeamGridInto can never render it for us.
+  renderTeamGridInto("clipper-assign-team-grid", filter ?? "", (name) => {
+    _clipperAssignTeamFilter = name;
+    renderClipperAssignTeamSidebar(document.getElementById("clipper-assign-team-search")?.value ?? "");
+    renderClipperAssignList(document.getElementById("clipper-assign-search")?.value ?? "");
+  });
+  grid.insertBefore(allTile, grid.firstChild);
+  if (_clipperAssignTeamFilter) {
+    const activeSwatch = [...grid.querySelectorAll(".team-swatch")].find((el) => el.title === _clipperAssignTeamFilter);
+    activeSwatch?.classList.add("active");
   }
 }
 
 function initClipperAssign() {
   document.getElementById("btn-clipper-close-assign").addEventListener("click", closeClipperAssign);
   document.getElementById("clipper-assign-search").addEventListener("input", (e) => renderClipperAssignList(e.target.value));
+  document.getElementById("clipper-assign-team-search")?.addEventListener("input", (e) => renderClipperAssignTeamSidebar(e.target.value));
 
   document.getElementById("btn-clipper-assign-play").addEventListener("click", () => {
     if (!_clipperAssignSelectedPath) return;

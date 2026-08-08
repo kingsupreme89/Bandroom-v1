@@ -1308,6 +1308,39 @@ input, select, textarea, [contenteditable] {
 #clipper-assign[hidden] { display: none; }
 #clipper-assign { display: flex; flex-direction: column; gap: 10px; }
 .clipper-assign-meta { display: flex; align-items: baseline; gap: 10px; }
+
+/* Team sidebar (task queue item 2) -- same sidebar+main split as #bandroom-picker's "Your
+   Library" sidebar (see .bandroom-sidebar/.bandroom-main rules above), reused here with its own
+   selector scope (.clipper-assign-sidebar/.clipper-assign-main) instead of overloading the
+   #bandroom-picker-scoped rules, since this lives in a differently-shaped parent (a column flex
+   panel, not #bandroom-picker's grid). */
+.clipper-assign-body {
+  display: flex;
+  gap: 16px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.clipper-assign-sidebar {
+  flex: 0 0 180px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 260px;
+  border-right: 1px solid var(--glass-border);
+  padding-right: 14px;
+}
+.clipper-assign-sidebar .team-picker-grid {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  overflow-y: auto;
+}
+.clipper-assign-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 #clipper-assign-event { font-size: 13px; font-weight: 700; color: var(--text-primary); }
 #clipper-assign-current { font-size: 12px; color: var(--text-muted); }
 .clipper-assign-toolbar { display: flex; align-items: center; gap: 10px; }
@@ -1367,6 +1400,22 @@ input, select, textarea, [contenteditable] {
 .clipper-assign-row-btn:hover { background: var(--team-secondary, var(--accent)); color: var(--team-secondary-ink, #06222a); }
 .clipper-assign-row-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .clipper-assign-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Section headers grouping the song list by source (task queue item 1) -- reuses
+   .bandroom-hub-section-label's look-and-feel via shared properties rather than inheriting the
+   class directly, since that class also carries flex/justify-content rules tailored to hosting a
+   sort <select>, which these headers don't have. */
+.clipper-assign-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 10px 0 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--glass-border);
+}
+.clipper-assign-section-label:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+
 .clipper-title {
   font-size: 12px;
   font-weight: 700;

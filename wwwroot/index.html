@@ -221,12 +221,26 @@
               <span id="clipper-assign-event"></span>
               <span id="clipper-assign-current"></span>
             </div>
-            <div class="clipper-assign-toolbar">
-              <button id="btn-clipper-assign-play" class="preview-bar-btn" title="Play selected">▶</button>
-              <button id="btn-clipper-assign-stop" class="preview-bar-btn" title="Stop">⏹</button>
-              <input type="text" id="clipper-assign-search" class="team-picker-search" placeholder="Search songs..." />
+            <!-- Team sidebar (task queue item 2) -- same "Your Library" sidebar pattern as the
+                 marketplace hub (#bandroom-sidebar/.team-picker-grid, see openBandroomMarketplace
+                 in app.js), reused rather than a new component. Picking a team filters the song
+                 list on the right to that team's songs (trimmed clips / marketplace downloads
+                 whose name references the team); "All Teams" clears the filter. -->
+            <div class="clipper-assign-body">
+              <div class="bandroom-sidebar clipper-assign-sidebar">
+                <div class="bandroom-hub-section-label">Teams</div>
+                <input type="text" id="clipper-assign-team-search" placeholder="Search teams..." class="team-picker-search" />
+                <div class="team-picker-grid" id="clipper-assign-team-grid"><!-- populated by app.js --></div>
+              </div>
+              <div class="clipper-assign-main">
+                <div class="clipper-assign-toolbar">
+                  <button id="btn-clipper-assign-play" class="preview-bar-btn" title="Play selected">▶</button>
+                  <button id="btn-clipper-assign-stop" class="preview-bar-btn" title="Stop">⏹</button>
+                  <input type="text" id="clipper-assign-search" class="team-picker-search" placeholder="Search songs..." />
+                </div>
+                <div id="clipper-assign-list" class="clipper-assign-list"></div>
+              </div>
             </div>
-            <div id="clipper-assign-list" class="clipper-assign-list"></div>
             <div class="clipper-assign-actions">
               <button id="btn-clipper-assign-select" class="btn-primary" disabled>Assign Selected</button>
               <button id="btn-clipper-assign-browse" class="btn-ghost">Browse for file...</button>
