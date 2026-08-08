@@ -133,6 +133,23 @@ internal sealed class GameWatcher
     // down value here, separately from the edge-triggering region.Last, and never null it out.
     string? _lastKnownDown;
 
+    // Same "sticky, never nulled on a blank read" pattern as _lastKnownDown above, applied to
+    // score/quarter after a real live bug: FieldGoalPATHelper/FieldGoalMissedHelper/SafetyHelper
+    // all fire on a single-tick HomeScore/AwayScore delta with no debounce. Score/quarter OCR
+    // regions blank out (region.Last -> null -> RouteEngineTick treats as 0) not just between
+    // plays but during pause menus, replay overlays, and cutscenes where the scorebug isn't drawn
+    // at all -- so a real score like 14 would read as a blank/0 tick while paused, then jump back
+    // to 14 on resume. That "0 -> 14" (or any transient single-digit misread landing on exactly a
+    // +1/+2/+3 delta) reads to the evaluators as a PAT/2-point/field-goal having just happened,
+    // firing real audio for an event that never occurred -- reported live as "random song on the
+    // pause screen" and duplicate/incorrect audio. Fix: RouteEngineTick now reads these sticky
+    // fields (updated only on a real parsed value, exactly like _lastKnownDown) instead of the
+    // region's raw (blank-able) Last, so a score/quarter that never actually changed produces a
+    // delta of 0 through any stretch of blank OCR ticks, no matter how long.
+    string? _lastKnownAwayScore;
+    string? _lastKnownHomeScore;
+    string? _lastKnownQuarter;
+
     readonly List<WatchedRegion> _regions = new()
     {
         // Spans the FULL WIDTH of the bottom score-bug band rather than one tight box, because
@@ -388,6 +405,9 @@ internal sealed class GameWatcher
                     string? currentValue = match.Success ? NormalizeMatch(region.Name, match.Value) : null;
 
                     if (region.Name == "down" && currentValue != null) _lastKnownDown = currentValue;
+                    if (region.Name == "awayscore" && currentValue != null) _lastKnownAwayScore = currentValue;
+                    if (region.Name == "homescore" && currentValue != null) _lastKnownHomeScore = currentValue;
+                    if (region.Name == "quarter" && currentValue != null) _lastKnownQuarter = currentValue;
 
                     if (currentValue != null && currentValue != region.Last)
                     {
@@ -736,22 +756,22 @@ internal sealed class GameWatcher
         if (_eventRouter == null) return;
 
         var situationRegion = _regions.FirstOrDefault(r => r.Name == "situation");
-        var quarterRegion = _regions.FirstOrDefault(r => r.Name == "quarter");
-        var awayScoreRegion = _regions.FirstOrDefault(r => r.Name == "awayscore");
-        var homeScoreRegion = _regions.FirstOrDefault(r => r.Name == "homescore");
         var clockRegion = _regions.FirstOrDefault(r => r.Name == "clock");
         var penaltyAgainstRegion = _regions.FirstOrDefault(r => r.Name == "penaltyagainst");
 
         int down = ParseOrdinal(_lastKnownDown);
-        int quarter = ParseOrdinal(quarterRegion?.Last);
+        int quarter = ParseOrdinal(_lastKnownQuarter);
         string? situation = situationRegion?.Last;
 
         int yardsToGo = 0;
         if (_lastDistanceRaw != null && int.TryParse(_lastDistanceRaw, out int d))
             yardsToGo = d;
 
-        int awayScore = int.TryParse(awayScoreRegion?.Last, out int aScore) ? aScore : 0;
-        int homeScore = int.TryParse(homeScoreRegion?.Last, out int hScore) ? hScore : 0;
+        // Sticky last-known values, not the raw region reads -- see the _lastKnownAwayScore/
+        // _lastKnownHomeScore/_lastKnownQuarter field comments for why (blank OCR during a pause
+        // menu/replay must never look like a score dropping to 0 and rebounding).
+        int awayScore = int.TryParse(_lastKnownAwayScore, out int aScore) ? aScore : 0;
+        int homeScore = int.TryParse(_lastKnownHomeScore, out int hScore) ? hScore : 0;
         int timeRemainingSeconds = ParseClockToSeconds(clockRegion?.Last);
 
         // "penaltyagainst" holds "Against <Team Name>" text while the penalty decision overlay

@@ -79,6 +79,15 @@ public sealed class WebMainForm : Form
         _watcher.Log += OnLog;
         _watcher.ActivePreset = ScorebugPreset.GetByName(ConfigStore.LoadScorebugPresetName());
 
+        // Lead-in whistle: the clip itself (if one was ever set via TrimmerForm's "Set as
+        // Lead-In Whistle") lives at a fixed path and survives restarts on its own; only the
+        // on/off toggle needs its own persisted flag (see ConfigStore.LoadLeadInWhistleEnabled).
+        if (File.Exists(ConfigStore.LeadInWhistlePath))
+        {
+            AudioPlayer.LeadInClipPath = ConfigStore.LeadInWhistlePath;
+            AudioPlayer.LeadInEnabled = ConfigStore.LoadLeadInWhistleEnabled();
+        }
+
         FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); };
 
         Load += async (_, _) =>
@@ -536,10 +545,31 @@ public sealed class WebMainForm : Form
         PushCategories();
     }
 
+    /// <summary>Manual Preview button on an assign card -- deliberately NOT routed through
+    /// FireEvent (that's for real in-game firing: it records SongsTriggered/EventCounts stats
+    /// and toasts "bandroom:triggerfired", neither of which should happen just because someone
+    /// clicked Preview while assigning a song). Uses AudioPlayer's isPreview path so playback
+    /// starts instantly (no PreRollSeconds delay) and repeated clicks on the same clip always
+    /// play (no FireCooldown gate) -- both of those exist for real game cues, not previewing.</summary>
     public void PreviewEventFromWeb(string trigger)
     {
         var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
-        if (entry != null) FireEvent(entry);
+        if (entry == null) return;
+        float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
+        if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
+            AudioPlayer.Play(entry.AudioFile, AudioPlayer.MasterVolume * eventVolumeScale, interruptPrevious: true, isPreview: true);
+        if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
+            AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isPreview: true);
+    }
+
+    public int GetEventVolumeFromWeb(string trigger) => _config.FirstOrDefault(e => e.Trigger == trigger)?.Volume ?? 100;
+
+    public void SetEventVolumeFromWeb(string trigger, int percent)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        entry.Volume = Math.Clamp(percent, 0, 100);
+        SaveCurrentTeamProfile();
     }
 
     public void StopPreviewFromWeb() => AudioPlayer.StopAll();
@@ -619,6 +649,14 @@ public sealed class WebMainForm : Form
     /// concurrently with (not instead of) the main song for the same event. See AudioPlayer.PaVolume.</summary>
     public void SetPaVolumeFromWeb(int percent) => AudioPlayer.PaVolume = percent / 100f;
     public int GetPaVolumeFromWeb() => (int)(AudioPlayer.PaVolume * 100);
+
+    public bool GetLeadInWhistleAvailableFromWeb() => !string.IsNullOrWhiteSpace(AudioPlayer.LeadInClipPath) && File.Exists(AudioPlayer.LeadInClipPath);
+    public bool GetLeadInWhistleEnabledFromWeb() => AudioPlayer.LeadInEnabled;
+    public void SetLeadInWhistleEnabledFromWeb(bool enabled)
+    {
+        AudioPlayer.LeadInEnabled = enabled;
+        ConfigStore.SaveLeadInWhistleEnabled(enabled);
+    }
 
     /// <summary>"Fire Sensitivity" slider -- delay in seconds before a fired cue starts fading
     /// out. No fade-in: AudioPlayer.Play already jumps straight to full volume, only the
@@ -913,9 +951,15 @@ public sealed class WebMainForm : Form
 
     void FireEvent(TriggerEntry entry, float? volumeOverride = null)
     {
+        // Per-event volume (TriggerEntry.Volume, 0-100) is a multiplier on top of whichever base
+        // volume this call would already use -- lets one card be balanced quieter/louder without
+        // touching Master/Home/Away/PA.
+        float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
+
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
         {
-            AudioPlayer.Play(entry.AudioFile, volumeOverride, interruptPrevious: true);
+            float mainVolume = (volumeOverride ?? AudioPlayer.MasterVolume) * eventVolumeScale;
+            AudioPlayer.Play(entry.AudioFile, mainVolume, interruptPrevious: true);
             RecordSongTriggered(entry.Event);
 
             // PA Announcer layer: plays concurrently with the main cue above, not instead of it,
@@ -923,7 +967,7 @@ public sealed class WebMainForm : Form
             // main clip that was just started a line above. Fired after, not before, the main
             // Play() call for the same reason (StopAll stops everything already in ActiveOutputs).
             if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
-                AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume, interruptPrevious: false);
+                AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false);
             // Names exactly which trigger OCR just read as a small on-screen flash, so a user can
             // confirm what fired without digging through logs -- this call isn't gated on
             // _webView.CoreWebView2 being non-null elsewhere in this file only because FireEvent

@@ -30,6 +30,13 @@ internal static class AudioPlayer
     public static double FadeStartSeconds = 10.0;
     public static double FadeOutDuration = 4.5;
 
+    /// <summary>Owner request: a short cue (e.g. a band whistle) prepended immediately before
+    /// every real triggered clip AND every manual preview, with zero gap -- like a drum major's
+    /// whistle before the band hits, not a separate sound followed by a pause. Off by default
+    /// until a clip is actually assigned via LeadInClipPath.</summary>
+    public static bool LeadInEnabled = false;
+    public static string? LeadInClipPath = null;
+
     static readonly object Lock = new();
     static readonly List<WaveOutEvent> ActiveOutputs = new();
 
@@ -113,15 +120,23 @@ internal static class AudioPlayer
     /// a moment ago rather than overlap with it -- explicit user call: "second event always
     /// takes priority." Left false for one-off UI chimes (app open, GAMETIME, update) that have
     /// no reason to fight over the speaker.</param>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false)
+    /// <param name="isPreview">True for manual Preview-button playback (assign cards, trimmer).
+    /// Skips PreRollSeconds (owner: preview clicks must start audio instantly, the pre-roll gap
+    /// is only meaningful for real game triggers) and skips the FireCooldown gate (owner: without
+    /// this, clicking Preview on the same clip twice within 20s silently played nothing, with no
+    /// error -- looked exactly like a broken/unassigned event).</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
-        lock (Lock)
+        if (!isPreview)
         {
-            if (_lastFireByPath.TryGetValue(path, out var last) && DateTime.UtcNow - last < FireCooldown)
-                return; // this exact clip already fired too recently -- different clips don't block each other
-            _lastFireByPath[path] = DateTime.UtcNow;
+            lock (Lock)
+            {
+                if (_lastFireByPath.TryGetValue(path, out var last) && DateTime.UtcNow - last < FireCooldown)
+                    return; // this exact clip already fired too recently -- different clips don't block each other
+                _lastFireByPath[path] = DateTime.UtcNow;
+            }
         }
 
         if (interruptPrevious) StopAll();
@@ -132,12 +147,13 @@ internal static class AudioPlayer
         {
             try
             {
-                Thread.Sleep((int)(PreRollSeconds * 1000)); // brief delay so it doesn't feel like it's stepping on the trigger moment
+                if (!isPreview) Thread.Sleep((int)(PreRollSeconds * 1000)); // brief delay so it doesn't feel like it's stepping on the trigger moment
 
                 using var reader = new AudioFileReader(path);
                 using var output = new WaveOutEvent();
                 lock (Lock) ActiveOutputs.Add(output);
                 reader.Volume = volume;
+                AudioFileReader? leadInReader = null;
 
                 try
                 {
@@ -150,6 +166,18 @@ internal static class AudioPlayer
                     {
                         var (roomSize, damp, wet, width) = ReverbPresets.Get(preset);
                         source = new ReverbProvider(source, roomSize, damp, wet, width);
+                    }
+
+                    // Lead-in whistle: built from the main clip's post-mono/pre-reverb WaveFormat
+                    // so SequencedSampleProvider can hand off from one to the other mid-stream on
+                    // a single WaveOutEvent -- that's what makes it gapless (no Stop/re-Init
+                    // between the two clips, which is where an audible click/pause would come from).
+                    // Owner request: applies to preview playback too (isPreview only skips the
+                    // pre-roll delay/cooldown gate, not the whistle -- previews should sound like
+                    // the real in-game cue).
+                    {
+                        var leadIn = BuildLeadInProvider(source.WaveFormat, out leadInReader);
+                        if (leadIn != null) source = new SequencedSampleProvider(leadIn, source);
                     }
 
                     output.Init(source.ToWaveProvider());
@@ -180,6 +208,7 @@ internal static class AudioPlayer
                 finally
                 {
                     lock (Lock) ActiveOutputs.Remove(output);
+                    leadInReader?.Dispose();
                 }
             }
             catch (Exception ex)
@@ -187,5 +216,68 @@ internal static class AudioPlayer
                 CrashLog.Write("Playback error", ex);
             }
         });
+    }
+
+    /// <summary>Builds the lead-in whistle as an ISampleProvider resampled/channel-matched to
+    /// `targetFormat` so it can feed the same WaveOutEvent as the main clip via
+    /// SequencedSampleProvider (mismatched sample rate/channel count would otherwise either throw
+    /// or play back garbled). Returns null (no whistle) if disabled, unset, missing, or unreadable
+    /// -- a broken lead-in clip should never block the real event's own audio from playing.
+    /// `reader` is returned separately so the caller can dispose it once playback finishes.</summary>
+    static ISampleProvider? BuildLeadInProvider(WaveFormat targetFormat, out AudioFileReader? reader)
+    {
+        reader = null;
+        if (!LeadInEnabled || string.IsNullOrWhiteSpace(LeadInClipPath) || !File.Exists(LeadInClipPath))
+            return null;
+
+        try
+        {
+            reader = new AudioFileReader(LeadInClipPath) { Volume = MasterVolume };
+            ISampleProvider src = reader.WaveFormat.Channels == 1
+                ? new MonoToStereoSampleProvider(reader)
+                : reader;
+            if (src.WaveFormat.SampleRate != targetFormat.SampleRate)
+                src = new WdlResamplingSampleProvider(src, targetFormat.SampleRate);
+            return src;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("Lead-in whistle load failed", ex);
+            reader?.Dispose();
+            reader = null;
+            return null;
+        }
+    }
+}
+
+/// <summary>Plays `first` to completion, then seamlessly continues with `second` on the same
+/// underlying stream/WaveOutEvent -- no Stop/re-Init between them, which is what keeps the
+/// hand-off gapless. Both providers must already share sample rate and channel count.</summary>
+sealed class SequencedSampleProvider : ISampleProvider
+{
+    readonly ISampleProvider _first;
+    readonly ISampleProvider _second;
+    bool _onSecond;
+
+    public SequencedSampleProvider(ISampleProvider first, ISampleProvider second)
+    {
+        if (first.WaveFormat.SampleRate != second.WaveFormat.SampleRate ||
+            first.WaveFormat.Channels != second.WaveFormat.Channels)
+            throw new ArgumentException("Sequenced providers must share sample rate and channel count.");
+        _first = first;
+        _second = second;
+    }
+
+    public WaveFormat WaveFormat => _second.WaveFormat;
+
+    public int Read(float[] buffer, int offset, int count)
+    {
+        if (!_onSecond)
+        {
+            int read = _first.Read(buffer, offset, count);
+            if (read > 0) return read;
+            _onSecond = true;
+        }
+        return _second.Read(buffer, offset, count);
     }
 }

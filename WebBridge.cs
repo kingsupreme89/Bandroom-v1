@@ -808,6 +808,8 @@ public sealed class WebBridge
     public void AssignPaEvent(string trigger) => _host.OpenAssignPaTrackFromWeb(trigger);
     public void PreviewEvent(string trigger) => _host.PreviewEventFromWeb(trigger);
     public void StopPreview() => _host.StopPreviewFromWeb();
+    public int GetEventVolume(string trigger) => _host.GetEventVolumeFromWeb(trigger);
+    public void SetEventVolume(string trigger, int percent) => _host.SetEventVolumeFromWeb(trigger, percent);
 
     public void SetVolume(int percent) => _host.SetVolumeFromWeb(percent);
     public void SetHomeVolume(int percent) => _host.SetHomeVolumeFromWeb(percent);
@@ -816,6 +818,9 @@ public sealed class WebBridge
     public int GetAwayVolume() => _host.GetAwayVolumeFromWeb();
     public void SetPaVolume(int percent) => _host.SetPaVolumeFromWeb(percent);
     public int GetPaVolume() => _host.GetPaVolumeFromWeb();
+    public bool GetLeadInWhistleAvailable() => _host.GetLeadInWhistleAvailableFromWeb();
+    public bool GetLeadInWhistleEnabled() => _host.GetLeadInWhistleEnabledFromWeb();
+    public void SetLeadInWhistleEnabled(bool enabled) => _host.SetLeadInWhistleEnabledFromWeb(enabled);
     public void SetFadeDelay(int seconds) => _host.SetFadeDelayFromWeb(seconds);
     public void SetReverb(string key) => _host.SetReverbFromWeb(key);
 

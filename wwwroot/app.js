@@ -155,6 +155,15 @@ async function init() {
       // for every real end-user install (no admin_token.local.txt ships in the installer).
       _isAdminMode = await bridge.IsAdminMode();
     } catch (err) { console.error("IsAdminMode failed", err); }
+    try {
+      // Lead-in whistle toggle only makes sense once a whistle clip actually exists (set via
+      // TrimmerForm's "Set as Lead-In Whistle") -- hidden otherwise so an empty toggle for a
+      // feature that isn't configured yet doesn't clutter the Mixer panel.
+      const whistleAvailable = await bridge.GetLeadInWhistleAvailable();
+      document.getElementById("leadin-whistle-section").hidden = !whistleAvailable;
+      if (whistleAvailable)
+        document.getElementById("toggle-leadin-whistle").checked = await bridge.GetLeadInWhistleEnabled();
+    } catch (err) { console.error("GetLeadInWhistleAvailable/Enabled failed", err); }
   } else {
     state.teams = [{ name: "General", primary: "#22d3ee", secondary: "#22d3ee" }];
     state.categories = [
@@ -347,11 +356,17 @@ async function openSituations(category) {
         <div class="situation-file">${ev.fileName ? ev.fileName : "Unassigned"}</div>
         <div class="situation-file situation-file-pa">PA: ${ev.paFileName ? ev.paFileName : "none"}</div>
       </span>
-      <span class="situation-actions">
+      <span class="situation-actions" style="position: relative;">
         <button class="situation-btn" data-act="assign">Assign / Edit</button>
         <button class="situation-btn situation-btn-pa" data-act="assign-pa" title="Assign a PA Announcer clip that plays alongside the main song for this situation">Assign PA</button>
         <button class="situation-btn" data-act="preview" ${ev.fileName ? "" : "disabled"}>Preview</button>
         <button class="situation-btn" data-act="stop">Stop</button>
+        <button class="situation-btn situation-btn-volume" data-act="volume" title="Adjust this event's own volume">&#128266;</button>
+        <div class="situation-volume-popover" hidden>
+          <input type="range" min="0" max="100" value="100" class="slider situation-volume-slider" />
+          <span class="situation-volume-value">100%</span>
+          <button class="situation-volume-close" title="Close">&times;</button>
+        </div>
       </span>`;
     row.querySelector('[data-act="assign"]').addEventListener("click", async () => {
       await bridge?.AssignEvent(ev.trigger);
@@ -365,8 +380,39 @@ async function openSituations(category) {
     });
     row.querySelector('[data-act="preview"]').addEventListener("click", () => bridge?.PreviewEvent(ev.trigger));
     row.querySelector('[data-act="stop"]').addEventListener("click", () => bridge?.StopPreview());
+    wireSituationVolumePopover(row, ev.trigger);
     list.appendChild(row);
   }
+}
+
+/// Volume button on an event card pops out a small slider (+ close/X) instead of a permanent
+/// on-card control -- owner explicitly asked for this same "click to pop out, X to close"
+/// pattern here as the PA volume model. Only one popover open at a time (closes any other card's
+/// popover first) so they don't pile up across a long situations list.
+function wireSituationVolumePopover(row, trigger) {
+  const btn = row.querySelector('[data-act="volume"]');
+  const popover = row.querySelector(".situation-volume-popover");
+  const slider = row.querySelector(".situation-volume-slider");
+  const valueLabel = row.querySelector(".situation-volume-value");
+  const closeBtn = row.querySelector(".situation-volume-close");
+
+  const closePopover = () => { popover.hidden = true; };
+
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (!popover.hidden) { closePopover(); return; }
+    document.querySelectorAll(".situation-volume-popover").forEach((p) => { p.hidden = true; });
+    const current = bridge ? await bridge.GetEventVolume(trigger) : 100;
+    slider.value = current;
+    valueLabel.textContent = `${current}%`;
+    popover.hidden = false;
+  });
+  closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
+  slider.addEventListener("input", (e) => {
+    valueLabel.textContent = `${e.target.value}%`;
+    bridge?.SetEventVolume(trigger, Number(e.target.value));
+  });
+  slider.addEventListener("click", (e) => e.stopPropagation());
 }
 
 async function selectTeam(name) {
@@ -849,6 +895,9 @@ function wireControls() {
   document.getElementById("slider-pa-volume").addEventListener("input", (e) => {
     document.getElementById("pa-volume-value").textContent = e.target.value;
     bridge?.SetPaVolume(Number(e.target.value));
+  });
+  document.getElementById("toggle-leadin-whistle").addEventListener("change", (e) => {
+    bridge?.SetLeadInWhistleEnabled(e.target.checked);
   });
   document.getElementById("slider-sensitivity").addEventListener("input", (e) => {
     document.getElementById("sensitivity-value").textContent = e.target.value;

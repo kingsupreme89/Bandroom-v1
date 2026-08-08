@@ -27,6 +27,10 @@ internal static class ConfigStore
     /// own manifest (local_tracks.json below) for the My Downloads tab's "Share to Marketplace"
     /// button, which only ever applies to tracks that came through THIS pipeline.</summary>
     public static readonly string LocalTracksFolder = Path.Combine(SongsFolder, "local");
+    /// <summary>Single global lead-in whistle clip (TrimmerForm's "Set as Lead-In Whistle"
+    /// writes here, always the same filename -- there's only ever one active whistle at a time,
+    /// same "single global setting" model as AudioPlayer.CurrentReverb/PreRollSeconds).</summary>
+    public static readonly string LeadInWhistlePath = Path.Combine(SongsFolder, "leadin_whistle.wav");
     public static readonly string ProfilesFolder = Path.Combine(UserDataRoot, "Profiles");
     public static readonly string TeamBackgroundsFolder = Path.Combine(UserDataRoot, "TeamBackgrounds");
     public static readonly string TeamLogosFolder = Path.Combine(UserDataRoot, "TeamLogos");
@@ -42,6 +46,7 @@ internal static class ConfigStore
     static readonly string UserProfilePath = Path.Combine(UserDataRoot, "user_profile.json");
     static readonly string FirstRunFlagPath = Path.Combine(UserDataRoot, ".firstrun_done");
     static readonly string ScorebugPresetPath = Path.Combine(UserDataRoot, "scorebug_preset.txt");
+    static readonly string LeadInWhistleEnabledPath = Path.Combine(UserDataRoot, "leadin_whistle_enabled.txt");
 
     /// <summary>Where the installer would have bundled the default song pack, if this build
     /// includes it (dev builds and any future full build still do -- see BundleDefaultSongs in
@@ -76,6 +81,18 @@ internal static class ConfigStore
     {
         Directory.CreateDirectory(UserDataRoot);
         File.WriteAllText(ScorebugPresetPath, name);
+    }
+
+    /// <summary>Persists the Mixer panel's Lead-In Whistle on/off toggle across restarts --
+    /// without this, the whistle would silently default back on every launch just because the
+    /// clip file still exists on disk, ignoring a user who explicitly turned it off last session.</summary>
+    public static bool LoadLeadInWhistleEnabled() =>
+        !File.Exists(LeadInWhistleEnabledPath) || File.ReadAllText(LeadInWhistleEnabledPath).Trim() != "false";
+
+    public static void SaveLeadInWhistleEnabled(bool enabled)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(LeadInWhistleEnabledPath, enabled ? "true" : "false");
     }
 
     /// <summary>

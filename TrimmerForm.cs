@@ -101,7 +101,12 @@ internal sealed class TrimmerForm : Form
         _waveformPanel.Paint += WaveformPanel_Paint;
         _waveformPanel.MouseDown += WaveformPanel_MouseDown;
         _waveformPanel.MouseMove += WaveformPanel_MouseMove;
-        _waveformPanel.MouseUp += (_, _) => _draggingHandle = null;
+        _waveformPanel.MouseUp += (_, _) =>
+        {
+            bool wasEnd = _draggingHandle == "end";
+            _draggingHandle = null;
+            if (wasEnd) PreviewEndTail();
+        };
 
         int maxTenths = (int)(_totalDuration.TotalSeconds * 10);
 
@@ -158,12 +163,24 @@ internal sealed class TrimmerForm : Form
         _btnStop = new GlassButton { Text = "Stop", Left = 140, Top = 296, Width = 90, Height = 32, Font = btnFont };
         _btnStop.Click += (_, _) => StopPreview();
 
+        // Owner request: releasing the End handle (drag or arrow keys) should immediately play
+        // the last few seconds up to the new end point, so you can hear exactly where the clip
+        // cuts off without a separate "Preview Trim" click + waiting through the whole clip.
+        _sldEnd.MouseUp += (_, _) => PreviewEndTail();
+        _sldEnd.KeyUp += (_, _) => PreviewEndTail();
+
         var btnCancel = new GlassButton { Text = "Cancel", Left = 572, Top = 344, Width = 100, Height = 32, Font = btnFont };
         btnCancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
 
         _btnSave = new GlassButton { Text = "Save & Name", Left = 12, Top = 344, Width = 180, Height = 32, Font = btnFont };
         Theme.StyleButton(_btnSave, primary: true);
         _btnSave.Click += (_, _) => SaveTrimmed();
+
+        // Owner request: clip a whistle straight out of an existing song without going through
+        // the team/song-name prompts SaveTrimmed uses for real event cues -- this is a
+        // single-purpose utility clip, not a library track.
+        var btnSaveAsWhistle = new GlassButton { Text = "Set as Lead-In Whistle", Left = 200, Top = 344, Width = 200, Height = 32, Font = btnFont };
+        btnSaveAsWhistle.Click += (_, _) => SaveTrimmedAsLeadInWhistle();
 
         Controls.Add(lblFile);
         Controls.Add(_lblDuration);
@@ -177,6 +194,7 @@ internal sealed class TrimmerForm : Form
         Controls.Add(_btnPreview);
         Controls.Add(_btnStop);
         Controls.Add(_btnSave);
+        Controls.Add(btnSaveAsWhistle);
         Controls.Add(btnCancel);
     }
 
@@ -281,8 +299,23 @@ internal sealed class TrimmerForm : Form
     {
         var range = GetRange();
         if (range == null) return;
-        var (start, end) = range.Value;
+        PlayRange(range.Value.start, range.Value.end);
+    }
 
+    /// <summary>Plays the last 4 seconds of the current end point (clamped to not cross the
+    /// start handle) -- fired on End-slider release, see the MouseUp/KeyUp wiring above.</summary>
+    const double EndTailPreviewSeconds = 4.0;
+    void PreviewEndTail()
+    {
+        var range = GetRange();
+        if (range == null) return;
+        var (start, end) = range.Value;
+        var tailStart = TimeSpan.FromSeconds(Math.Max(start.TotalSeconds, end.TotalSeconds - EndTailPreviewSeconds));
+        PlayRange(tailStart, end);
+    }
+
+    void PlayRange(TimeSpan start, TimeSpan end)
+    {
         StopPreview();
 
         var reader = new AudioFileReader(_sourcePath) { Volume = AudioPlayer.MasterVolume };
@@ -377,6 +410,45 @@ internal sealed class TrimmerForm : Form
         catch (Exception ex)
         {
             MessageBox.Show(this, $"Couldn't save trimmed file: {ex.Message}", "Trim", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    /// <summary>Owner request: trim a whistle straight out of an existing song and use it
+    /// directly as the pre-clip lead-in, no team/song naming prompt (this isn't a library track,
+    /// just a utility clip) and no per-clip file -- always overwrites ConfigStore.LeadInWhistlePath
+    /// since there's only ever one active whistle at a time. Sets AudioPlayer.LeadInClipPath/
+    /// LeadInEnabled directly so it's live immediately, same as every other Mixer-panel setting.</summary>
+    void SaveTrimmedAsLeadInWhistle()
+    {
+        var range = GetRange();
+        if (range == null) return;
+        var (start, end) = range.Value;
+
+        StopPreview();
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.SongsFolder);
+            using var reader = new AudioFileReader(_sourcePath);
+            var offset = new OffsetSampleProvider(reader)
+            {
+                SkipOver = start,
+                Take = end - start,
+            };
+            var normalized = NormalizeAndLimit(offset);
+            WaveFileWriter.CreateWaveFile16(ConfigStore.LeadInWhistlePath, normalized);
+
+            AudioPlayer.LeadInClipPath = ConfigStore.LeadInWhistlePath;
+            AudioPlayer.LeadInEnabled = true;
+            SavedFilePath = ConfigStore.LeadInWhistlePath;
+
+            MessageBox.Show(this, "Lead-in whistle set -- it'll play before every real triggered clip until you turn it off in the Mixer panel.", "Lead-In Whistle", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Couldn't save whistle clip: {ex.Message}", "Trim", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 

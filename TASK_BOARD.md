@@ -1,4 +1,42 @@
-# Bandroom Task Board — Last Updated: 2026-08-07 (orchestrator pass)
+# Bandroom Task Board — Last Updated: 2026-08-08 (Claude orchestrator pass)
+
+## Claude → Orchestrator (2026-08-08)
+- [FIXED, NEEDS LIVE VERIFICATION] Live testers reported: random song firing on the pause
+  screen, occasional double audio, "1st down" song firing inconsistently. Root cause found in
+  `GameWatcher.cs` `RouteEngineTick()`: `awayscore`/`homescore`/`quarter` regions fed
+  `PlaySnapshot` straight from `region.Last`, which nulls (reads as 0) on ANY blank OCR tick --
+  not just between plays, but during pause menus/replay overlays/cutscenes where the scorebug
+  isn't drawn at all. `FieldGoalPATHelper`/`FieldGoalMissedHelper`/`SafetyHelper` all fire on a
+  single-tick `HomeScore+AwayScore` delta with no debounce -- a real score (e.g. 14) blanking to
+  0 on a pause screen then rebounding to 14 on resume reads as "+14 just happened," and any
+  transient single-digit OCR misread landing on exactly +1/+2/+3 would false-fire a PAT/2pt/FG
+  cue outright. Fixed using the same "sticky last-known value, never nulled on blank" pattern
+  already proven for `_lastKnownDown` (Session5 bug #3): added `_lastKnownAwayScore`/
+  `_lastKnownHomeScore`/`_lastKnownQuarter`, updated only on a real parsed OCR value,
+  `RouteEngineTick` now reads these instead of the raw region `.Last`. `Bandroom.Core` rebuilds
+  clean; `BandAudioHook.csproj` (where `GameWatcher.cs` actually lives) could NOT be rebuilt to
+  confirm at time of writing -- `Bandroom.exe` was running locally and locking the output DLL.
+  **Next session/whoever picks this up: rebuild `BandAudioHook.csproj` first thing and confirm
+  0 errors before trusting this fix is live**, then watch `ocr_debug.log` during an actual pause
+  menu for a `HomeScore`/`AwayScore` snapshot value that no longer drops to 0.
+- [KNOWN, NOT YET FIXED] Deep-audit pass (background agent, full report given to owner) on
+  Cline's last uncommitted push found: `bridge.DuplicateProfile(...)` (app.js:1305, wired to a
+  real right-click context-menu item) calls a `WebBridge` method that doesn't exist -- throws on
+  click, user-reachable. `bridge?.PlaySoundboardSlot(...)` and `bridge.ScanDynastySave()` are
+  the same class of bug but currently unreachable (soundboard UI permanently hidden; Dynasty
+  scan has no caller at all). Also: `wwwroot/ui-bot.js` auto-runs 1.5s after every page load in
+  production and can pop a user-visible "UI Bot: N critical, N warnings found" toast -- looks
+  like a dev diagnostic left wired into the shipped build rather than gated behind a debug flag,
+  needs an owner decision on whether to gate it or remove it before the next push.
+- [IN PROGRESS] Owner-requested audio engine changes, both build-verified in isolation (not yet
+  confirmed against a locked `BandAudioHook.csproj` build, see above): (1) `AudioPlayer.Play` /
+  `WebMainForm.PreviewEventFromWeb` now take an `isPreview` path that skips the 1s pre-roll delay
+  and skips the 20s same-file `FireCooldown` for manual Preview-button clicks only -- real
+  in-game triggers keep both. (2) `TrimmerForm.cs`: releasing the End slider/handle (drag or
+  arrow keys) now auto-previews the last 4 seconds up to the new end point. (3) New optional
+  gapless "lead-in whistle" playback path (`AudioPlayer.LeadInEnabled`/`LeadInClipPath`,
+  `SequencedSampleProvider`) -- off by default, needs the owner's actual whistle clip and a UI
+  toggle wired in before it's usable end-to-end.
 
 ## Cline → Orchestrator
 - [20:5x] CONFIRMED ROOT CAUSE — "event trigger system hasn't fired on both pushes" (user report,

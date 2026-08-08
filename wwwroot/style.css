@@ -1981,6 +1981,31 @@ input, select, textarea, [contenteditable] {
 .situation-file { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .situation-file-pa { opacity: 0.7; }
 .situation-btn-pa { border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 40%, var(--glass-border)); color: var(--team-secondary, var(--accent)); }
+.situation-btn-volume { padding-left: 8px; padding-right: 8px; }
+.situation-volume-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel-bg, #1a1d24);
+  border: 1px solid color-mix(in srgb, var(--team-secondary, var(--accent)) 40%, var(--glass-border));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.situation-volume-slider { width: 110px; }
+.situation-volume-value { font-size: 11px; color: var(--text-muted); min-width: 32px; }
+.situation-volume-close {
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0 2px;
+}
+.situation-volume-close:hover { color: var(--text-primary); }
+
+.toggle-row { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
+.toggle-row input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
 
 .side-panel {
   width: var(--side-w);
