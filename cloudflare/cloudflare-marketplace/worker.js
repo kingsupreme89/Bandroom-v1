@@ -340,6 +340,7 @@ export default {
         items.push({
           ...pub,
           likes: meta.likes ?? 0,
+          dislikes: meta.dislikes ?? 0,
           reports: meta.reports ?? 0,
           // ?? 0 -- items uploaded before this field existed have no views/downloads in KV yet.
           views: meta.views ?? 0,
@@ -403,6 +404,28 @@ export default {
       meta.likes = (meta.likes ?? 0) + 1;
       await env.MARKETPLACE_META.put(metaKey, JSON.stringify(meta));
       return jsonResponse({ likes: meta.likes });
+    }
+
+    // POST /dislike/<type>/<id> -- symmetric with /like above: same rate-limit bucket
+    // (RATE_LIMIT_MAX_LIKES_REPORTS), same no-de-dup tradeoff (no accounts to de-dup against),
+    // just increments a separate `dislikes` counter instead of `likes`.
+    if (url.pathname.startsWith("/dislike/") && request.method === "POST") {
+      const parts = url.pathname.slice("/dislike/".length).split("/");
+      const [type, id] = parts;
+      if (!isValidType(type) || !id) {
+        return new Response("bad request", { status: 400, headers: cors() });
+      }
+      const allowedDislike = await checkRateLimit(env, request, "like", RATE_LIMIT_MAX_LIKES_REPORTS);
+      if (!allowedDislike) {
+        return new Response("too many actions -- try again in a few minutes", { status: 429, headers: cors() });
+      }
+      const metaKey = `meta:${type}:${id}`;
+      const raw = await env.MARKETPLACE_META.get(metaKey);
+      if (!raw) return new Response("not found", { status: 404, headers: cors() });
+      const meta = JSON.parse(raw);
+      meta.dislikes = (meta.dislikes ?? 0) + 1;
+      await env.MARKETPLACE_META.put(metaKey, JSON.stringify(meta));
+      return jsonResponse({ dislikes: meta.dislikes });
     }
 
     if (url.pathname.startsWith("/report/") && request.method === "POST") {

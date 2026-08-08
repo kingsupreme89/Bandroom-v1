@@ -1484,6 +1484,20 @@ async function likeUploadedItem(item) {
   }
 }
 
+// Symmetric with likeUploadedItem -- separate /dislike endpoint + counter on the worker
+// (cloudflare/cloudflare-marketplace/worker.js), same fire-and-report shape.
+async function dislikeUploadedItem(item) {
+  try {
+    const res = await fetch(`${MARKETPLACE_URL}/dislike/${item.type}/${encodeURIComponent(item.id)}`, { method: "POST" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data.dislikes === "number" ? data.dislikes : null;
+  } catch (err) {
+    console.error("dislikeUploadedItem failed", err);
+    return null;
+  }
+}
+
 let _hubSortListenerBound = false;
 
 function openBandroomMarketplace() {
@@ -1996,6 +2010,19 @@ function buildItemTile(item, inHub) {
       else { likeBtn.disabled = false; showToast("Couldn't like that right now."); }
     });
     actions.appendChild(likeBtn);
+
+    const dislikeBtn = document.createElement("button");
+    dislikeBtn.className = "bandroom-item-action";
+    dislikeBtn.title = "Dislike this upload";
+    dislikeBtn.textContent = `\u{1F44E} ${item.dislikes ?? 0}`;
+    dislikeBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      dislikeBtn.disabled = true;
+      const newCount = await dislikeUploadedItem(item);
+      if (newCount != null) { dislikeBtn.textContent = `\u{1F44E} ${newCount}`; }
+      else { dislikeBtn.disabled = false; showToast("Couldn't register that right now."); }
+    });
+    actions.appendChild(dislikeBtn);
 
     const dlBtn = document.createElement("button");
     dlBtn.className = "bandroom-item-action";
