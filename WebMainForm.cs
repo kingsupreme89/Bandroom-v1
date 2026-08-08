@@ -697,6 +697,18 @@ public sealed class WebMainForm : Form
 
     public void ClearTrackAssignmentFromWeb(string trigger, bool isPa) => AssignTrackFileFromWeb(trigger, isPa, "");
 
+    /// <summary>DL button on a song-picker row in the clipping island -- files there already
+    /// live in ConfigStore.SongsFolder, so this doesn't copy/move anything, it just registers
+    /// the file in the My Downloads manifest (same one local imports use, see
+    /// ConfigStore.RecordLocalTrack) so it shows up sorted there too instead of only being
+    /// reachable by re-browsing the whole Songs library every time.</summary>
+    public bool AddLibraryFileToDownloadsFromWeb(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return false;
+        ConfigStore.RecordLocalTrack(Path.GetFileNameWithoutExtension(path), path);
+        return true;
+    }
+
     /// <summary>Native OpenFileDialog for "Browse for file..." on the island -- there's no web
     /// equivalent that can hand back a real filesystem path (a web &lt;input type=file&gt; only
     /// exposes a Blob, not a path AudioPlayer can play from), so this stays a native call same as

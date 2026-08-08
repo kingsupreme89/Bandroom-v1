@@ -1306,15 +1306,15 @@ input, select, textarea, [contenteditable] {
   padding: 6px;
 }
 .clipper-assign-row {
-  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 10px;
   border-radius: 7px;
   font-size: 13.5px;
   font-weight: 500;
   color: var(--text-primary);
   cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .clipper-assign-row:hover { background: rgba(255, 255, 255, 0.08); }
 .clipper-assign-row.selected {
@@ -1322,6 +1322,32 @@ input, select, textarea, [contenteditable] {
   color: var(--text-primary);
   font-weight: 600;
 }
+.clipper-assign-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.clipper-assign-row-actions {
+  flex: none;
+  display: flex;
+  gap: 3px;
+}
+.clipper-assign-row-btn {
+  flex: none;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-size: 10px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+}
+.clipper-assign-row-btn:hover { background: var(--team-secondary, var(--accent)); color: var(--team-secondary-ink, #06222a); }
+.clipper-assign-row-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .clipper-assign-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .clipper-title {
   font-size: 12px;

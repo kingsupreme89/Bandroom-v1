@@ -2327,8 +2327,53 @@ function renderClipperAssignList(filter) {
   for (const item of items) {
     const row = document.createElement("div");
     row.className = "clipper-assign-row";
-    row.textContent = item.name;
     row.title = item.path;
+
+    const name = document.createElement("span");
+    name.className = "clipper-assign-row-name";
+    name.textContent = item.name;
+    row.appendChild(name);
+
+    // Condensed per-row transport -- same Play/Stop the toolbar above already does (just
+    // scoped to this row's file instead of whatever's currently selected), plus DL to
+    // register this library file in My Downloads (see AddLibraryFileToDownloadsFromWeb) so
+    // it's reachable there too instead of only by re-browsing the whole Songs folder.
+    const actions = document.createElement("span");
+    actions.className = "clipper-assign-row-actions";
+
+    const playBtn = document.createElement("button");
+    playBtn.className = "clipper-assign-row-btn";
+    playBtn.title = "Play";
+    playBtn.textContent = "▶";
+    playBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      _previewAudio?.pause();
+      bridge?.PreviewLocalFile(item.path);
+    });
+    actions.appendChild(playBtn);
+
+    const stopBtn = document.createElement("button");
+    stopBtn.className = "clipper-assign-row-btn";
+    stopBtn.title = "Stop";
+    stopBtn.textContent = "⏹";
+    stopBtn.addEventListener("click", (e) => { e.stopPropagation(); bridge?.StopPreview(); });
+    actions.appendChild(stopBtn);
+
+    const dlBtn = document.createElement("button");
+    dlBtn.className = "clipper-assign-row-btn";
+    dlBtn.title = "Add to My Downloads";
+    dlBtn.textContent = "⬇";
+    dlBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      dlBtn.disabled = true;
+      const ok = await bridge?.AddLibraryFileToDownloads(item.path);
+      showToast(ok ? `Added "${item.name}" to My Downloads.` : "Couldn't add that -- try again.");
+      dlBtn.disabled = false;
+    });
+    actions.appendChild(dlBtn);
+
+    row.appendChild(actions);
+
     row.addEventListener("click", () => {
       list.querySelectorAll(".clipper-assign-row.selected").forEach((r) => r.classList.remove("selected"));
       row.classList.add("selected");
@@ -2832,21 +2877,76 @@ function renameExt(filename, ext) {
   return `${base}.${ext}`;
 }
 
+let _onboardingPicked = null;
+
 async function maybeShowOnboarding() {
   if (!bridge || !(await bridge.IsFirstRun())) return;
   const overlay = document.getElementById("onboarding-overlay");
   overlay.hidden = false;
 
-  const pick = async (name) => {
-    await bridge.CompleteFirstRun(name);
-    state.activeTeam = name;
-    setActiveTeam(name);
+  renderOnboardingCoverflow("");
+  document.getElementById("onboarding-search").addEventListener("input", (e) =>
+    renderOnboardingCoverflow(e.target.value));
+  document.querySelectorAll("#onboarding .coverflow-arrow").forEach((btn) => {
+    btn.addEventListener("click", () => shiftOnboardingCoverflow(parseInt(btn.dataset.dir, 10)));
+  });
+  document.getElementById("btn-onboarding-confirm").addEventListener("click", async () => {
+    if (!_onboardingPicked) return;
+    await bridge.CompleteFirstRun(_onboardingPicked);
+    state.activeTeam = _onboardingPicked;
+    setActiveTeam(_onboardingPicked);
     overlay.hidden = true;
     pointOutTheBandroom();
-  };
-  renderTeamGridInto("onboarding-grid", "", pick);
-  document.getElementById("onboarding-search").addEventListener("input", (e) =>
-    renderTeamGridInto("onboarding-grid", e.target.value, pick));
+  });
+}
+
+/// Same cover-flow pattern as renderMatchupCoverflow (matchupCoverflowTeams filter, cf-l2/l1/
+/// center/r1/r2 positions) but a single team column with an explicit Confirm step instead of
+/// browsing-is-picking -- first-run team choice shouldn't lock in on a stray arrow click.
+function renderOnboardingCoverflow(filter) {
+  const track = document.getElementById("onboarding-track");
+  const nameEl = document.getElementById("onboarding-name");
+  if (!track || !nameEl) return;
+  const teams = matchupCoverflowTeams(filter);
+  track.innerHTML = "";
+  if (!teams.length) {
+    nameEl.textContent = "No teams found";
+    document.getElementById("btn-onboarding-confirm").disabled = true;
+    return;
+  }
+
+  let centerIdx = teams.findIndex((t) => t.name === _onboardingPicked);
+  if (centerIdx === -1) centerIdx = 0;
+
+  const positions = [[-2, "cf-l2"], [-1, "cf-l1"], [0, "cf-center"], [1, "cf-r1"], [2, "cf-r2"]];
+  for (const [offset, cls] of positions) {
+    const idx = ((centerIdx + offset) % teams.length + teams.length) % teams.length;
+    const t = teams[idx];
+    const tile = document.createElement("div");
+    tile.className = "team-swatch " + cls;
+    tile.title = t.name;
+    fillTeamSwatch(tile, t);
+    tile.addEventListener("click", () => {
+      _onboardingPicked = t.name;
+      renderOnboardingCoverflow(filter);
+    });
+    track.appendChild(tile);
+  }
+
+  _onboardingPicked = teams[centerIdx].name;
+  nameEl.textContent = _onboardingPicked;
+  document.getElementById("btn-onboarding-confirm").disabled = false;
+}
+
+function shiftOnboardingCoverflow(dir) {
+  const filter = document.getElementById("onboarding-search")?.value || "";
+  const teams = matchupCoverflowTeams(filter);
+  if (!teams.length) return;
+  let idx = teams.findIndex((t) => t.name === _onboardingPicked);
+  if (idx === -1) idx = 0;
+  idx = ((idx + dir) % teams.length + teams.length) % teams.length;
+  _onboardingPicked = teams[idx].name;
+  renderOnboardingCoverflow(filter);
 }
 
 /// First-run onboarding only ever asked for a favorite team -- it never mentioned The Bandroom

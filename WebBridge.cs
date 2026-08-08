@@ -966,6 +966,7 @@ public sealed class WebBridge
     public void PreviewLocalFile(string path) => _host.PreviewLocalFileFromWeb(path);
     public void AssignTrackFile(string trigger, bool isPa, string path) => _host.AssignTrackFileFromWeb(trigger, isPa, path);
     public void ClearTrackAssignment(string trigger, bool isPa) => _host.ClearTrackAssignmentFromWeb(trigger, isPa);
+    public bool AddLibraryFileToDownloads(string path) => _host.AddLibraryFileToDownloadsFromWeb(path);
     public string? BrowseForAudioFile() => _host.BrowseForAudioFileFromWeb();
     public void OpenTrimmer(string trigger, bool isPa) => _host.OpenTrimmerFromWeb(trigger, isPa);
     public int GetEventVolume(string trigger) => _host.GetEventVolumeFromWeb(trigger);
