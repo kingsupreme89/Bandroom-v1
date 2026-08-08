@@ -370,7 +370,7 @@ async function openSituations(category) {
       </span>`;
     row.querySelector('[data-act="assign"]').addEventListener("click", () => openClipperAssign(ev.trigger, ev.eventName, false, ev.fileName));
     row.querySelector('[data-act="assign-pa"]').addEventListener("click", () => openClipperAssign(ev.trigger, ev.eventName, true, ev.paFileName));
-    row.querySelector('[data-act="preview"]').addEventListener("click", () => bridge?.PreviewEvent(ev.trigger));
+    row.querySelector('[data-act="preview"]').addEventListener("click", () => { _previewAudio?.pause(); bridge?.PreviewEvent(ev.trigger); });
     row.querySelector('[data-act="stop"]').addEventListener("click", () => bridge?.StopPreview());
     wireSituationVolumePopover(row, ev.trigger);
     list.appendChild(row);
@@ -1036,8 +1036,11 @@ function wireControls() {
   document.getElementById("matchup-overlay").addEventListener("click", (e) => {
     if (e.target.id === "matchup-overlay") closeMatchupDialog();
   });
-  document.getElementById("matchup-home-search").addEventListener("input", (e) => renderMatchupGrid("home", e.target.value));
-  document.getElementById("matchup-away-search").addEventListener("input", (e) => renderMatchupGrid("away", e.target.value));
+  document.getElementById("matchup-home-search").addEventListener("input", (e) => renderMatchupCoverflow("home", e.target.value));
+  document.getElementById("matchup-away-search").addEventListener("input", (e) => renderMatchupCoverflow("away", e.target.value));
+  document.querySelectorAll(".coverflow-arrow").forEach((btn) => {
+    btn.addEventListener("click", () => shiftCoverflow(btn.dataset.side, parseInt(btn.dataset.dir, 10)));
+  });
   document.getElementById("btn-side-away").addEventListener("click", () => selectTeam(state.matchupAway));
   document.getElementById("btn-side-home").addEventListener("click", () => selectTeam(state.matchupHome));
 
@@ -1982,6 +1985,7 @@ let _previewRaf = null;
 function previewSong(item) {
   try {
     _previewAudio?.pause();
+    bridge?.StopPreview(); // stop any native (local-file) preview -- separate audio pathway
     _previewAudio = new Audio(item.url);
     _previewAudio.crossOrigin = "anonymous";
     _previewAudio.play().catch((err) => console.error("Song preview failed", err));
@@ -2208,7 +2212,9 @@ function initClipperAssign() {
   document.getElementById("clipper-assign-search").addEventListener("input", (e) => renderClipperAssignList(e.target.value));
 
   document.getElementById("btn-clipper-assign-play").addEventListener("click", () => {
-    if (_clipperAssignSelectedPath) bridge?.PreviewLocalFile(_clipperAssignSelectedPath);
+    if (!_clipperAssignSelectedPath) return;
+    _previewAudio?.pause(); // stop any JS-pathway preview first -- separate audio output
+    bridge?.PreviewLocalFile(_clipperAssignSelectedPath);
   });
   document.getElementById("btn-clipper-assign-stop").addEventListener("click", () => bridge?.StopPreview());
 
@@ -2346,7 +2352,7 @@ function setAlbumTab(tab) {
     if (albumSearch) albumSearch.value = "";
     document.getElementById("bandroom-album-instructions").textContent = tab === "songs"
       ? "Click a song to preview it. Hit + Upload to add your own -- it'll be compressed automatically and named after this team."
-      : "Click + Upload to add a background. Setting one as this team's live background is coming soon.";
+      : "Click + Upload to add a background. Hit \u{1F5BC} Set as Background on any image to make it this team's live background.";
     if (tab === "songs") renderSoundBankGrid(); else renderTrophyRoomGrid();
   }, "setAlbumTab");
 }
@@ -2801,8 +2807,8 @@ function openMatchupDialog() {
   // Unhide BEFORE rendering: squareUpTiles measures rendered tile width via
   // getBoundingClientRect, which is 0 while the overlay is still display:none.
   overlay.hidden = false;
-  renderMatchupGrid("home", "");
-  renderMatchupGrid("away", "");
+  renderMatchupCoverflow("home", "");
+  renderMatchupCoverflow("away", "");
   updateMatchupSubtext();
 }
 
@@ -3283,21 +3289,62 @@ function closeMatchupDialog() {
   document.getElementById("matchup-overlay").hidden = true;
 }
 
-function renderMatchupGrid(side, filter) {
-  const gridId = side === "home" ? "matchup-home-grid" : "matchup-away-grid";
-  renderTeamGridInto(gridId, filter, (name) => {
-    if (side === "home") state.matchupHome = name; else state.matchupAway = name;
-    renderMatchupGrid(side, document.getElementById(`matchup-${side}-search`).value);
-    updateMatchupSubtext();
-  });
-  // renderTeamGridInto only marks state.activeTeam as active -- overlay the actual
-  // matchup pick for this column too, since it's independent of the sidebar's team.
-  const picked = side === "home" ? state.matchupHome : state.matchupAway;
-  if (picked) {
-    document.querySelectorAll(`#${gridId} .team-swatch`).forEach((sw) => {
-      if (sw.title === picked) sw.classList.add("active");
-    });
+/// Cover-flow team select (CFB 27 team-select reference) -- browsing IS picking, same as the
+/// reference screen: the center tile is always the currently-picked team for that side, and
+/// cycling (arrows or clicking a side tile) immediately updates state.matchupHome/Away and the
+/// name label. GAMETIME is the real commit point, not this.
+function matchupCoverflowTeams(filter) {
+  const q = (filter || "").trim().toLowerCase();
+  return state.teams.filter((t) => t.name !== "General" && (!q || t.name.toLowerCase().includes(q)));
+}
+
+function renderMatchupCoverflow(side, filter) {
+  const track = document.getElementById(`matchup-${side}-track`);
+  const nameEl = document.getElementById(`matchup-${side}-name`);
+  if (!track || !nameEl) return;
+  const teams = matchupCoverflowTeams(filter);
+  track.innerHTML = "";
+  if (!teams.length) {
+    nameEl.textContent = "No teams found";
+    return;
   }
+
+  const picked = side === "home" ? state.matchupHome : state.matchupAway;
+  let centerIdx = teams.findIndex((t) => t.name === picked);
+  if (centerIdx === -1) centerIdx = 0;
+
+  const positions = [[-2, "cf-l2"], [-1, "cf-l1"], [0, "cf-center"], [1, "cf-r1"], [2, "cf-r2"]];
+  for (const [offset, cls] of positions) {
+    const idx = ((centerIdx + offset) % teams.length + teams.length) % teams.length;
+    const t = teams[idx];
+    const tile = document.createElement("div");
+    tile.className = "team-swatch " + cls;
+    tile.title = t.name;
+    fillTeamSwatch(tile, t);
+    tile.addEventListener("click", () => {
+      if (side === "home") state.matchupHome = t.name; else state.matchupAway = t.name;
+      renderMatchupCoverflow(side, filter);
+      updateMatchupSubtext();
+    });
+    track.appendChild(tile);
+  }
+
+  const centerTeam = teams[centerIdx];
+  nameEl.textContent = centerTeam.name;
+  if (side === "home") state.matchupHome = centerTeam.name; else state.matchupAway = centerTeam.name;
+  updateMatchupSubtext();
+}
+
+function shiftCoverflow(side, dir) {
+  const filter = document.getElementById(`matchup-${side}-search`)?.value || "";
+  const teams = matchupCoverflowTeams(filter);
+  if (!teams.length) return;
+  const picked = side === "home" ? state.matchupHome : state.matchupAway;
+  let idx = teams.findIndex((t) => t.name === picked);
+  if (idx === -1) idx = 0;
+  idx = ((idx + dir) % teams.length + teams.length) % teams.length;
+  if (side === "home") state.matchupHome = teams[idx].name; else state.matchupAway = teams[idx].name;
+  renderMatchupCoverflow(side, filter);
 }
 
 function updateMatchupSubtext() {

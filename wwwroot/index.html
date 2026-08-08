@@ -537,15 +537,29 @@
         new one.
       </p>
       <div class="matchup-columns">
+        <!-- Cover-flow team select, same idea as CFB 27's own team-select screen: center tile
+             large/sharp, neighbors tilted+faded, arrows or click-a-tile to cycle. Browsing IS
+             picking (the name label updates live as you cycle), matching the reference screen
+             instead of a separate confirm step -- GAMETIME below is the real commit point. -->
         <div class="matchup-column">
           <div class="matchup-column-title">Away</div>
           <input type="text" id="matchup-away-search" placeholder="Search teams..." class="team-picker-search" />
-          <div class="team-picker-grid matchup-grid" id="matchup-away-grid"></div>
+          <div class="coverflow-stage">
+            <button class="coverflow-arrow coverflow-arrow-left" data-side="away" data-dir="-1" title="Previous team">&#8249;</button>
+            <div class="coverflow-track" id="matchup-away-track"></div>
+            <button class="coverflow-arrow coverflow-arrow-right" data-side="away" data-dir="1" title="Next team">&#8250;</button>
+          </div>
+          <div class="coverflow-name" id="matchup-away-name"></div>
         </div>
         <div class="matchup-column">
           <div class="matchup-column-title">Home</div>
           <input type="text" id="matchup-home-search" placeholder="Search teams..." class="team-picker-search" />
-          <div class="team-picker-grid matchup-grid" id="matchup-home-grid"></div>
+          <div class="coverflow-stage">
+            <button class="coverflow-arrow coverflow-arrow-left" data-side="home" data-dir="-1" title="Previous team">&#8249;</button>
+            <div class="coverflow-track" id="matchup-home-track"></div>
+            <button class="coverflow-arrow coverflow-arrow-right" data-side="home" data-dir="1" title="Next team">&#8250;</button>
+          </div>
+          <div class="coverflow-name" id="matchup-home-name"></div>
         </div>
       </div>
       <div class="save-profile-subtext" id="matchup-subtext"></div>
