@@ -46,6 +46,26 @@ public sealed class WebMainForm : Form
 
     public WebMainForm()
     {
+        // BUG FIX (Session 11, urgent/live): window rendered far too small on scaled/high-res
+        // displays (Discord report, v1.0.50, "very small screen when DLing the most recent
+        // release" -- screenshot showed the whole app shrunk into a tiny corner of the screen).
+        // Root cause: this form never set AutoScaleMode, so WinForms defaulted to
+        // AutoScaleMode.Font -- which scales controls by a font-metric ratio computed against
+        // whatever font size the OS's current DPI happens to produce, NOT the actual per-monitor
+        // scale factor. Program.cs already opts the whole app into
+        // Application.SetHighDpiMode(HighDpiMode.PerMonitorV2) (for OCR capture math -- see its
+        // own comment on GetWindowRect/CopyFromScreen needing physical pixels), but a
+        // PerMonitorV2-aware app needs AutoScaleMode.Dpi on every form, not Font -- Font-based
+        // autoscale and PerMonitorV2 DPI awareness are two different, incompatible scaling
+        // systems, and mixing them is a well-documented WinForms footgun whose classic symptom is
+        // exactly this: the window renders far smaller than its designed size. Explicitly set to
+        // Dpi so WinForms scales this form using the real per-monitor DPI value instead of a
+        // mismatched font-metric guess. MUST be set before any Size/Width/Height assignment below
+        // -- WinForms captures AutoScaleDimensions from the form's state at the point autoscale
+        // is applied (on handle creation / Load), and changing the mode after sizing has already
+        // been requested doesn't retroactively fix a scale pass that already ran wrong.
+        AutoScaleMode = AutoScaleMode.Dpi;
+
         Text = "Bandroom";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
         Width = 1920;
