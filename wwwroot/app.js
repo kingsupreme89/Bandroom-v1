@@ -812,9 +812,234 @@ async function renderProfileMyUploads() {
   }
 }
 
+// ---- Help & Guide dashboard (task queue item 2, Session 11) --------------------------------
+// ~40 real, verified tips (deliberately NOT reusing TIPS_DATABASE further below, which mixes in
+// features that don't exist in Bandroom -- "Dynasty mode", "Recruiting tracker", "Bowl
+// projections", etc -- this list only covers things actually in this codebase) plus a full
+// ELI7 install/feature/FAQ guide, opened from the new sidebar Help pill.
+const HELP_TIPS = [
+  "Press Ctrl+K anytime to open the command palette and jump straight to any screen.",
+  "Click a team's tile in the Team panel to make it the active team -- its color becomes the whole app's glow color.",
+  "Set Matchup lets you pick a Home and Away team so Bandroom can auto-switch which team's songs play.",
+  "The little star button in the header jumps straight to your favorite team.",
+  "You can search for a team by typing in any team-picker search box instead of scrolling.",
+  "The Bandroom marketplace lets you download songs and background images other users have shared.",
+  "You can upload your own songs to a team's Sound Bank from that team's album view.",
+  "Every upload gets a Like and a Dislike button -- your feedback helps good uploads rise to the top.",
+  "The Popular Songs shelf in the marketplace hub is ranked by downloads + likes combined.",
+  "The Top Team Background Uploads shelf shows real backgrounds from the default pack.",
+  "Downloaded songs and images show up in My Downloads, not directly in your Songs library.",
+  "You can Share Profile to send your whole team's song setup to other Bandroom users.",
+  "Load Profile from Others applies someone else's shared song setup, matched by filename to your own library.",
+  "The Assign / Edit button on any situation opens the Clipper -- Bandroom's built-in song picker.",
+  "The Clipper's song list is grouped by where each file came from: Marketplace Downloads, Trimmed Clips, Your Imports, and Imported Files.",
+  "Use the team sidebar inside the Clipper to filter the song list down to one team's songs.",
+  "Trim lets you cut a song down to just the part you want, and normalizes the volume automatically.",
+  "The Default Song Pack is a one-time optional download that fills every team with real songs.",
+  "Importing the Default Song Pack never overwrites a song you already picked yourself.",
+  "You can move the Default Song Pack to a different folder or drive from the command palette.",
+  "Team Backgrounds are the big photo behind the whole app -- pick one per team.",
+  "You can set a custom background for any team from the Sound Bank or from My Downloads.",
+  "Set Matchup uses a cover-flow carousel, just like picking your favorite team -- swipe or click the arrows.",
+  "Your Favorite Team is set from your Profile, using the same cover-flow picker as Set Matchup.",
+  "PA Announcer clips play alongside your regular songs to make big moments feel like a real broadcast.",
+  "The Lead-In Whistle plays a short whistle sound right before some songs kick in.",
+  "You can turn the Lead-In Whistle on or off without needing to delete the clip itself.",
+  "The header's Bandroom title glows in your active team's main color.",
+  "If a team's main color is too close to black, Bandroom automatically uses their second color instead so it's still visible.",
+  "The bottom clipper island is where you preview and control whatever song is currently playing.",
+  "You can Export your team's whole profile to a file and Import it back later, or on another PC.",
+  "Apply to All Teams copies your current team's song setup to every other team at once.",
+  "Streamer Mode hides your personal info so it's safe to have on screen while broadcasting.",
+  "The Discord panel lets you chat without leaving Bandroom.",
+  "Command Palette entries like Reset Team Profile are there for one-off actions you don't need a button for all the time.",
+  "You can preview any marketplace song before deciding to download it.",
+  "The Profile dashboard tracks stats like games watched, songs triggered, and your win/loss record.",
+  "Achievements unlock automatically as you use Bandroom more -- no need to do anything extra.",
+  "The Settings panel (gear icon) has audio timing controls like fade-out and re-fire cooldown.",
+  "You can pick which Scorebug preset Bandroom watches for, to match how your game is set up on screen.",
+];
+
+let _helpGuideRendered = false;
+function initHelpGuide() {
+  const overlay = document.getElementById("help-guide-overlay");
+  const pill = document.getElementById("btn-help-pill");
+  if (!overlay || !pill) return;
+
+  pill.addEventListener("click", () => {
+    overlay.hidden = false;
+    if (!_helpGuideRendered) {
+      _helpGuideRendered = true;
+      renderHelpTips();
+      document.getElementById("help-guide-full").innerHTML = HELP_GUIDE_HTML;
+    }
+  });
+  document.getElementById("btn-close-help-guide").addEventListener("click", () => { overlay.hidden = true; });
+
+  document.querySelectorAll(".help-guide-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".help-guide-tab").forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      document.getElementById("help-guide-tips").hidden = tab.dataset.tab !== "tips";
+      document.getElementById("help-guide-full").hidden = tab.dataset.tab !== "guide";
+    });
+  });
+}
+
+function renderHelpTips() {
+  const el = document.getElementById("help-guide-tips");
+  el.innerHTML = HELP_TIPS.map((tip, i) =>
+    `<div class="help-tip-row"><span class="help-tip-num">${i + 1}.</span><span>${sanitizeHTML(tip)}</span></div>`
+  ).join("");
+}
+
+// Written so a 7-year-old could follow it: short sentences, explain WHY not just WHAT, no jargon
+// without immediately explaining it. Covers every real feature verified as of Session 11 --
+// marketplace, clipper/assign, default song pack + relocation, team backgrounds, matchup/
+// coverflow picking, PA announcer, lead-in whistle, and a FAQ section for common confusion
+// points. Static HTML string (not built from smaller pieces) so it's easy to read/edit as one
+// document -- update this whenever a real feature changes, it's the definitive "how Bandroom
+// works" reference the owner asked for.
+const HELP_GUIDE_HTML = `
+<div class="help-guide-section">
+  <h3>What is Bandroom?</h3>
+  <p>Bandroom listens to your college football game and plays songs and sounds automatically,
+  like a real band would. When your team scores a touchdown, Bandroom notices and plays your
+  touchdown song. You don't have to click anything during the game -- Bandroom does it for you.</p>
+</div>
+<div class="help-guide-section">
+  <h3>Getting started (first launch)</h3>
+  <ul>
+    <li>The very first time you open Bandroom, it asks you to pick your favorite team. You'll see
+    team logos slide by like a carousel -- click the arrows or click a logo to move it to the
+    middle, then press <strong>Confirm Team</strong>.</li>
+    <li>Right after that, Bandroom points out <strong>The Bandroom</strong> button -- that's the
+    community marketplace where other people's songs and pictures live.</li>
+    <li>You don't need to do anything else to start playing -- Bandroom already has some default
+    songs it can use, and you can download a much bigger free pack (see "Default Song Pack" below).</li>
+  </ul>
+</div>
+<div class="help-guide-section">
+  <h3>Picking teams and setting a matchup</h3>
+  <ul>
+    <li><strong>Active team</strong>: click any team in the left-side Team panel. Whichever team
+    you click becomes the "active" team, and the whole app changes color to match that team.</li>
+    <li><strong>Set Matchup</strong>: use this before you start watching a game. It lets you pick a
+    Home team and an Away team. Once both are picked, Bandroom automatically knows which team's
+    songs to play depending on who has the ball.</li>
+    <li>Both the favorite-team picker and Set Matchup use the same sliding carousel of team logos
+    -- it's the same picker everywhere, so once you've learned it once, you know it everywhere.</li>
+  </ul>
+</div>
+<div class="help-guide-section">
+  <h3>The Sound Bank and The Bandroom marketplace</h3>
+  <p>Every team has its own <strong>Sound Bank</strong> -- a folder of that team's songs and
+  background pictures. <strong>The Bandroom</strong> is the shared marketplace where every
+  Bandroom user in the world can upload and download from each other's Sound Banks.</p>
+  <ul>
+    <li><strong>Downloading</strong>: open a team's Sound Bank, find a song or picture you like,
+    and press the download button. It gets saved to <strong>My Downloads</strong> on your
+    computer -- it doesn't automatically become one of your assigned songs, you still have to
+    assign it (see "Assigning songs" below).</li>
+    <li><strong>Uploading</strong>: open a team's Sound Bank and press "+ Upload". Pick a song or
+    picture from your computer, give it a clear name (like "UGA 3rd Down Stop" -- team name +
+    what situation it's for), and Bandroom uploads it for everyone to use. Songs get automatically
+    trimmed and evened out in volume so they sound consistent with everyone else's uploads.</li>
+    <li><strong>Like / Dislike</strong>: every upload has a heart (like) and a thumbs-down
+    (dislike) button. This is just feedback -- it doesn't delete anything, it just helps good
+    uploads stand out.</li>
+    <li><strong>Popular Songs shelf</strong>: on the marketplace's front page, songs are ranked by
+    how many downloads and likes they've gotten, so the best stuff floats to the top.</li>
+    <li><strong>Share Profile / Load Profile from Others</strong>: this is different from
+    uploading a single song -- it shares your WHOLE team's setup (which song plays for which
+    situation) so someone else can copy it in one click, instead of assigning 30+ songs by hand.</li>
+  </ul>
+</div>
+<div class="help-guide-section">
+  <h3>Assigning songs (the Clipper)</h3>
+  <p>Every game situation (like "Touchdown" or "3rd Down Stop") needs a song assigned to it before
+  Bandroom can play it. Click <strong>Assign / Edit</strong> on any situation to open the
+  <strong>Clipper</strong> -- Bandroom's built-in song picker.</p>
+  <ul>
+    <li>The song list is grouped into sections so you can tell where each song came from:
+    <strong>Marketplace Downloads</strong> (songs you got from other users), <strong>Trimmed
+    Clips</strong> (songs you cut down yourself), <strong>Your Imports</strong> (songs from the
+    "import my own song" flow), and <strong>Imported Files</strong> (anything you dragged in or
+    browsed for directly).</li>
+    <li>Use the <strong>team sidebar</strong> next to the song list to narrow the list down to one
+    team's songs, instead of scrolling through everything.</li>
+    <li>Click a song, then press <strong>Assign Selected</strong> to lock it in for that
+    situation.</li>
+    <li><strong>Trim</strong> opens a tool that lets you cut a long song down to just the exciting
+    part, and automatically makes the volume consistent so nothing is way louder or quieter than
+    everything else.</li>
+  </ul>
+</div>
+<div class="help-guide-section">
+  <h3>Default Song Pack</h3>
+  <p>Instead of finding and assigning every single song yourself, Bandroom offers a big,
+  free, one-time download called the <strong>Default Song Pack</strong> -- thousands of songs
+  already sorted by team and situation. When you import it, Bandroom automatically fills in any
+  situation you HAVEN'T already picked a song for -- it will never replace a song you chose
+  yourself.</p>
+  <ul>
+    <li>Because the pack is huge (a few gigabytes), you download it from a link that opens in your
+    web browser, then come back to Bandroom and press <strong>Locate &amp; Import</strong> to
+    point Bandroom at the file you downloaded.</li>
+    <li>You can see exactly where the pack is saved on your computer, or move it to a different
+    folder or drive (handy if your main drive is small), from the command palette (press Ctrl+K
+    and search "song pack").</li>
+  </ul>
+</div>
+<div class="help-guide-section">
+  <h3>Team Backgrounds</h3>
+  <p>The big picture behind the whole app is called a <strong>Team Background</strong>. Every team
+  can have its own. You can pick one from a team's Sound Bank, download one someone else uploaded
+  and set it from My Downloads, or upload your own custom picture.</p>
+</div>
+<div class="help-guide-section">
+  <h3>PA Announcer and Lead-In Whistle</h3>
+  <ul>
+    <li><strong>PA Announcer</strong> clips are short voice clips (like a real stadium announcer)
+    that can play alongside your regular songs, to make big plays feel like a real broadcast.</li>
+    <li><strong>Lead-In Whistle</strong> is a short referee-whistle sound that can play right
+    before certain songs start, like the real whistle that starts a play. You can turn it on or
+    off, or replace the whistle clip with your own sound.</li>
+  </ul>
+</div>
+<div class="help-guide-section">
+  <h3>Settings</h3>
+  <p>Click the gear icon to open Settings. This is where you control things that apply to the
+  whole app, not just one team: how loud everything plays, how much time passes before a song
+  fades out, reverb (makes songs sound like they're echoing in a real stadium), and which
+  <strong>Scorebug preset</strong> Bandroom should look for on your screen (this tells Bandroom
+  where the score/clock/down-and-distance numbers are, so it can read them correctly).</p>
+</div>
+<div class="help-guide-section">
+  <h3>Frequently Asked Questions</h3>
+  <ul>
+    <li><strong>Nothing plays when I score -- why?</strong> Make sure that situation actually has
+    a song assigned (open the Clipper and check), and that you've set a matchup so Bandroom knows
+    which team is which.</li>
+    <li><strong>Why don't I see a song I just uploaded?</strong> Uploads sometimes take a few
+    seconds to show up everywhere after uploading -- try refreshing the list. It's already
+    uploaded successfully, it just takes a moment to spread everywhere.</li>
+    <li><strong>Did downloading the Default Song Pack overwrite my own songs?</strong> No --
+    importing the pack only fills in situations you haven't assigned a song to yet. Anything you
+    picked yourself is always kept.</li>
+    <li><strong>Can I use my own music?</strong> Yes -- drag and drop a song file onto Bandroom, or
+    use the import/browse buttons in the Clipper, and it'll be added to your own library.</li>
+    <li><strong>Is any of this required?</strong> No -- everything in this guide (marketplace,
+    default pack, PA announcer, whistle, backgrounds) is optional. Bandroom works with just you
+    picking your own songs by hand if that's all you want.</li>
+  </ul>
+</div>
+`;
+
 function wireControls() {
   wireLogoCropTool();
   wireBgCropTool();
+  initHelpGuide();
   document.getElementById("btn-profile").addEventListener("click", openProfile);
   document.getElementById("btn-close-profile").addEventListener("click", closeProfile);
   document.getElementById("btn-google-signin").addEventListener("click", async () => {

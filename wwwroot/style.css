@@ -2185,6 +2185,117 @@ input, select, textarea, [contenteditable] {
   padding: 10px;
   overflow-y: auto;
 }
+
+/* Help pill (task queue item 2, Session 11) -- anchored to the bottom of #left-panel via
+   margin-top: auto (the panel is already a column flexbox, see .side-panel above), team-color
+   pulse-glow reusing the standing neon-pulse keyframe + --team-secondary, same var every other
+   pulsing border in the app keys off (see #header-bar/.side-panel). Pill shape matches
+   .pill-marketplace/.pill-rainbow elsewhere rather than inventing new button chrome. */
+.help-pill {
+  /* margin-top: auto alone only pushes the pill via flex ordering -- .side-panel is
+     overflow-y: auto, so on a tall sidebar the pill would scroll out of view along with
+     everything else instead of staying reachable. position: sticky pins it to the bottom
+     of the scrollable area itself regardless of content length. */
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--team-secondary, var(--accent)) 45%, var(--glass-border));
+  background: var(--window-bg);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  animation: neon-pulse 3.2s ease-in-out infinite;
+}
+.help-pill:hover { background: rgba(255, 255, 255, 0.09); }
+.help-pill-icon {
+  flex: none;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--team-secondary, var(--accent));
+  color: var(--team-secondary-ink, #06222a);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800;
+}
+
+/* Help & Guide dashboard -- same overlay/glass-island shape as #bandroom-picker (see its rules
+   above): centered fixed overlay, .glass panel, its own header row + close button. */
+#help-guide-overlay {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#help-guide-overlay[hidden] { display: none; }
+#help-guide-dialog {
+  width: min(760px, 92vw);
+  height: min(720px, 88vh);
+  padding: 20px;
+  border-radius: var(--radius-panel);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  animation: neon-pulse 3.2s ease-in-out infinite;
+}
+.help-guide-tabs { display: flex; gap: 8px; flex: 0 0 auto; }
+.help-guide-tab {
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.help-guide-tab:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.08); }
+.help-guide-tab.active {
+  color: var(--team-secondary-ink, #06222a);
+  background: var(--team-secondary, var(--accent));
+  border-color: transparent;
+}
+.help-guide-body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.help-guide-panel { height: 100%; overflow-y: auto; padding-right: 8px; }
+.help-guide-panel[hidden] { display: none; }
+
+.help-tip-row {
+  display: flex;
+  gap: 10px;
+  padding: 9px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.help-tip-num {
+  flex: none;
+  color: var(--team-secondary, var(--accent));
+  font-weight: 700;
+  width: 26px;
+}
+
+.help-guide-section { margin-bottom: 22px; }
+.help-guide-section h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--team-secondary, var(--accent));
+  margin: 0 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.help-guide-section p, .help-guide-section li {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+.help-guide-section ul { margin: 6px 0; padding-left: 20px; }
+.help-guide-section strong { color: var(--team-secondary, var(--accent)); }
 .panel-section { padding: 0 0 12px; }
 .panel-title {
   font-size: 12px;

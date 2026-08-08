@@ -121,6 +121,39 @@
             </div>
           </div>
         </div>
+        <!-- Help pill (task queue item 2, Session 11) -- anchored to the bottom of the sidebar,
+             pulses in the active team's color via the standing neon-pulse keyframe (same one
+             #header-bar/.side-panel already use), opens #help-guide-overlay: a glass-panel
+             dashboard with ~40 tips and a full ELI7 walkthrough. This is deliberately separate
+             from the rail's "?" button above (bridge.ShowHelp -> native ShortcutsForm, keyboard
+             shortcuts only) -- that one stays as-is, this is the new comprehensive in-app guide. -->
+        <button id="btn-help-pill" class="help-pill" title="Help &amp; Guide">
+          <span class="help-pill-icon">?</span>
+          <span>Help &amp; Guide</span>
+        </button>
+      </div>
+
+      <!-- Help & Guide dashboard (task queue item 2) -- glass island, same shape as the
+           marketplace hub (sidebar-style tab switcher + scrolling main pane). Tips tab: short
+           rotating-style list of ~40 real tips (NOT the pre-existing TIPS_DATABASE further down
+           this file, which mixes in features that don't actually exist in Bandroom like "Dynasty
+           mode"/"Recruiting tracker" -- this list is grounded only in real, verified features).
+           Guide tab: full ELI7 install + feature + FAQ walkthrough. -->
+      <div id="help-guide-overlay" hidden>
+        <div id="help-guide-dialog" class="glass">
+          <div class="team-picker-header">
+            <span>Help &amp; Guide</span>
+            <button id="btn-close-help-guide" class="icon-btn">&times;</button>
+          </div>
+          <div class="help-guide-tabs">
+            <button class="help-guide-tab active" data-tab="tips">Tips &amp; Tricks</button>
+            <button class="help-guide-tab" data-tab="guide">Full Guide</button>
+          </div>
+          <div class="help-guide-body">
+            <div id="help-guide-tips" class="help-guide-panel"><!-- populated by app.js from HELP_TIPS --></div>
+            <div id="help-guide-full" class="help-guide-panel" hidden><!-- populated by app.js from HELP_GUIDE_HTML --></div>
+          </div>
+        </div>
       </div>
 
       <!-- Load Profile from Others -- lists shared profiles for the active team, applies
