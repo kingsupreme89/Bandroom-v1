@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>Bandroom Updates</title>
+        <link>https://github.com/kingsupreme89/Bandroom-v1</link>
+        <description>Audio cues for College Football 27</description>
+        <language>en-us</language>
+
+        <item>
+            <title>Version 1.0.0 - Initial Release</title>
+            <description>
+                <![CDATA[
+                <ul>
+                    <li>Initial Bandroom release</li>
+                    <li>WebView2 UI with glassmorphism design</li>
+                    <li>Stadium sound event detection</li>
+                    <li>Auto-update system (this!)</li>
+                </ul>
+                ]]>
+            </description>
+            <pubDate>Tue, 04 Aug 2026 12:00:00 GMT</pubDate>
+            <enclosure
+                url="https://github.com/kingsupreme89/Bandroom-v1/releases/download/v1.0.0/Bandroom-v1.0.0.zip"
+                sparkle:version="1.0.0"
+                sparkle:os="windows"
+                type="application/zip"
+                length="231424000" />
+        </item>
+    </channel>
+</rss>

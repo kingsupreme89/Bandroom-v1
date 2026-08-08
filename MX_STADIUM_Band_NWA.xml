@@ -1,0 +1,39 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<partition guid="8bcb6c3e-a59a-42cb-98dd-bad2ec2b4274" primaryInstance="d8c03060-3c52-4d09-86b6-f398db27eded">
+	<instance guid="d8c03060-3c52-4d09-86b6-f398db27eded" type="NewWaveAsset" exported="true">
+		<field name="Name">Sound/CFB/CoreAudio/Samples/Stadium/Band/MX_STADIUM_Band_NWA</field>
+		<array name="Chunks" type="SoundDataChunk">
+			<item>
+				<complex type="SoundDataChunk">
+					<field name="ChunkId">24dc32ac-df5e-a1e7-3066-76433153a1b0</field>
+					<field name="ChunkSize">163974424</field>
+				</complex>
+			</item>
+		</array>
+		<field name="Policy" ref="Globals/Sound/AudioSystem\\cfbe04fa-fc69-45ce-8515-575f583ef4c5" partitionGuid="f3fd10f1-6218-11e1-9522-daa1d3935ced" />
+		<field name="RequestPriority">2</field>
+		<field name="PrimePriority">2</field>
+		<field name="ChannelCount">2</field>
+		<field name="StreamingMode">0</field>
+		<field name="VoicePriority">2</field>
+		<array name="DataDefinedParameterTypesForTweaking" type="TypeInfoRef" />
+		<field name="DefaultSelectionBehavior" ref="588b5828-8795-4068-8fe8-a058d7f78d1d" />
+		<field name="StreamPool" ref="Globals/Sound/AudioSystem\\92458491-29ef-07ed-6911-b75f61a5ca35" partitionGuid="f3fd10f1-6218-11e1-9522-daa1d3935ced" />
+		<field name="DebugDataId">0000000000000000000000000000000000000000</field>
+		<field name="ParentInstanceGuid">00000000-0000-0000-0000-000000000000</field>
+		<field name="ControlParameterCount">2</field>
+		<field name="IsSeekable">false</field>
+		<field name="SelectionParameterCount">2</field>
+	</instance>
+	<instance guid="588b5828-8795-4068-8fe8-a058d7f78d1d" type="NewWavePrivateSelectionBehaviorData" exported="true">
+		<field name="BehaviorType" ref="9cc31240-0507-492f-8500-f2df4cb3a345" />
+		<field name="ScoringMode">NewWaveSelectionScoringMode_Score</field>
+		<field name="HistoryEntryCount">1</field>
+		<field name="Owner" ref="d8c03060-3c52-4d09-86b6-f398db27eded" />
+	</instance>
+	<instance guid="9cc31240-0507-492f-8500-f2df4cb3a345" type="NewWaveSelectionBehaviorTypeRandom" exported="true">
+		<field name="CommitSelectionFunction" typeName="" />
+		<field name="GetScoreFunction" typeName="053C32BA-5FF9-69A8-7CB7-1A217488736B" />
+		<field name="RandomizeCandidates">true</field>
+	</instance>
+</partition>

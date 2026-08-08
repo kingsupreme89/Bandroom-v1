@@ -1,0 +1,14 @@
+name = "bandroom-marketplace"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Created by `wrangler kv namespace create MARKETPLACE_META` -- paste the id it prints below.
+kv_namespaces = [
+  { binding = "MARKETPLACE_META", id = "b36a497dc61a4355a5accfcdd4627bec" }
+]
+
+# Created by `wrangler r2 bucket create bandroom-marketplace-files` -- bucket_name must match
+# exactly what you named it.
+r2_buckets = [
+  { binding = "MARKETPLACE_FILES", bucket_name = "bandroom-marketplace-files" }
+]

@@ -1,0 +1,25 @@
+# Secrets -- never commit these. Real live credentials as of 2026-08-07:
+# admin_token.local.txt, google_client_secret.local.txt
+*.local.txt
+*secret*
+*token*
+!docs/**
+!**/*Token*.cs
+!**/*Secret*.cs
+
+# .NET build output
+bin/
+obj/
+**/bin/
+**/obj/
+
+# WebView2 runtime cache/profile data
+WebView2Data/
+
+# User-owned data that shouldn't be versioned (mirrors ConfigStore.UserDataRoot conventions)
+crash.log
+*.user
+
+# Python venv (scripts/ tooling)
+.venv/
+__pycache__/

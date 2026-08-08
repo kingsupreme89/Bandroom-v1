@@ -1,0 +1,1988 @@
+@font-face {
+  font-family: "Outfit";
+  src: url("fonts/Outfit-Regular.ttf") format("truetype");
+  font-weight: 400;
+}
+@font-face {
+  font-family: "Outfit";
+  src: url("fonts/Outfit-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+}
+@font-face {
+  font-family: "Outfit";
+  src: url("fonts/Outfit-Bold.ttf") format("truetype");
+  font-weight: 700;
+}
+
+:root {
+  --accent: #22d3ee;
+  --accent-2: #22d3ee;
+  --team-secondary: #22d3ee;
+  --window-bg: #161719;
+
+  --text-primary: #e7ecf1;
+  --text-muted: #7d8791;
+  --text-muted-2: #8b95a1;
+  --glass-fill: rgba(255, 255, 255, 0.06);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-blur: 26px;
+  --header-h: 56px;
+  --rail-w: 88px;
+  --side-w: 240px;
+  --radius-panel: 24px;
+  --radius-card: 14px;
+}
+
+* { box-sizing: border-box; }
+/* Browsers do NOT inherit font-family into form controls by default (button/select/input/
+   textarea use the OS's system font regardless of anything set on body) -- that's why every nav
+   pill, dropdown, and text input was quietly rendering in a different font than the rest of the
+   app (and the "Bandroom" wordmark) even though body already declares Outfit. */
+button, select, input, textarea { font-family: inherit; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body {
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  color: var(--text-primary);
+  background: var(--window-bg);
+}
+
+/* Full-bleed team stadium background -- this IS the "island" surface everything floats on */
+#backdrop {
+  position: fixed;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--window-bg);
+  transition: background-image 0.6s ease;
+  z-index: 0;
+}
+/* VS split screen -- replaces #backdrop once GAMETIME locks in a matchup. Two halves, each
+   the picked team's own stadium image (same TeamBackgrounds\ lookup as the single backdrop)
+   with a big centered logo and a pulsing underglow in that team's color, split by a center
+   emblem -- structurally the same as a game's own team-select screen, restyled in Bandroom's
+   glass/neon language instead of copying it. */
+#backdrop-vs {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+#backdrop-vs[hidden] { display: none; }
+.backdrop-vs-half {
+  /* Absolutely positioned + clip-path instead of flex 50/50 -- lets the two halves overlap
+     the full screen and meet along a diagonal seam instead of a straight vertical line,
+     per explicit user ask. */
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background-size: cover;
+  background-color: var(--window-bg);
+  transition: background-image 0.6s ease;
+  /* --half-color is set inline per team on confirm; falls back to the app accent. */
+  --half-color: var(--accent);
+}
+#backdrop-vs-away {
+  background-position: right center;
+  clip-path: polygon(0 0, 56% 0, 44% 100%, 0 100%);
+  /* Each half's box is still the full screen (for its background-image to size/position
+     correctly), but its VISIBLE (clipped) region is only ever roughly the left or right side --
+     centering content with align-items:center would put both teams' logos on top of each
+     other at dead screen-center. Push content toward this half's own side instead. */
+  align-items: flex-start;
+  padding-left: 9vw;
+}
+#backdrop-vs-home {
+  background-position: left center;
+  clip-path: polygon(56% 0, 100% 0, 100% 100%, 44% 100%);
+  align-items: flex-end;
+  padding-right: 9vw;
+}
+/* The diagonal seam itself: a thin band along the same cut, split top/bottom into each team's
+   own color (set via --away-color/--home-color in applyVsBackdrop) so it visibly divides the
+   two schools' colors, with a pulsing glow. */
+#backdrop-vs-seam {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  /* Centered exactly on the two halves' own clip-path cut line (56% top / 44% bottom, see
+     #backdrop-vs-away/#backdrop-vs-home above) -- this band used to sit ~2% off to the right of
+     that line at every point, so the glowing "LED" strip didn't actually line up with where the
+     two team backgrounds meet. A wider band (1.6% vs the old 1.2%) also reads more clearly as a
+     deliberate lit strip rather than a hairline. */
+  clip-path: polygon(56.8% 0, 55.2% 0, 43.2% 100%, 44.8% 100%);
+  background: linear-gradient(to bottom,
+    var(--away-color, var(--accent)) 0%, var(--away-color, var(--accent)) 50%,
+    var(--home-color, var(--accent)) 50%, var(--home-color, var(--accent)) 100%);
+  filter: drop-shadow(0 0 10px var(--away-color, var(--accent))) drop-shadow(0 0 10px var(--home-color, var(--accent)));
+  animation: vs-seam-pulse 1.6s ease-in-out infinite;
+}
+@keyframes vs-seam-pulse {
+  /* Pulses actual glow size/intensity, not just opacity -- the old opacity-only pulse (0.6->1)
+     read as barely-there against a bright stadium photo background. Brightness + a second,
+     wider drop-shadow layer at peak make each team's color genuinely stand out and visibly
+     "breathe" the way an LED strip should. */
+  0%, 100% {
+    opacity: 0.75;
+    filter: brightness(1) drop-shadow(0 0 8px var(--away-color, var(--accent))) drop-shadow(0 0 8px var(--home-color, var(--accent)));
+  }
+  50% {
+    opacity: 1;
+    filter: brightness(1.35)
+      drop-shadow(0 0 16px var(--away-color, var(--accent))) drop-shadow(0 0 26px var(--away-color, var(--accent)))
+      drop-shadow(0 0 16px var(--home-color, var(--accent))) drop-shadow(0 0 26px var(--home-color, var(--accent)));
+  }
+}
+.backdrop-vs-half::before {
+  /* Dark scrim so the logo/label read clearly over whatever stadium photo (or none) is behind. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 100% at 50% 40%, rgba(6, 7, 8, 0.35) 0%, rgba(6, 7, 8, 0.7) 100%);
+}
+.backdrop-vs-label {
+  position: relative;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--half-color);
+  margin-bottom: 18px;
+}
+.backdrop-vs-logo {
+  position: relative;
+  width: min(30vh, 220px);
+  height: min(30vh, 220px);
+  object-fit: contain;
+  filter: drop-shadow(0 0 28px var(--half-color));
+}
+.backdrop-vs-logo:not([src]) { display: none; }
+.backdrop-vs-name {
+  position: relative;
+  margin-top: 18px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+/* .backdrop-vs-underglow (the old full-width bottom bar) is retired -- now that each half is
+   absolutely positioned + clip-path'd instead of a 50%-width flex item, a left:0;right:0 bar
+   would span the entire screen for BOTH halves and stack incorrectly. #backdrop-vs-seam above
+   replaces its job of showing each team's color. */
+.backdrop-vs-underglow { display: none; }
+@keyframes vs-underglow-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+#backdrop-vs-emblem {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 11, 13, 0.75);
+  border: 2px solid var(--glass-border);
+  box-shadow: 0 0 24px 4px rgba(34, 211, 238, 0.35);
+  animation: vs-emblem-pulse 2.4s ease-in-out infinite;
+}
+/* Neutral here, not team-colored -- this "B" sits between BOTH teams on the VS split, so it
+   shouldn't wear either one's color specifically. */
+#backdrop-vs-emblem .brand-mark { font-size: 26px; background: var(--accent); animation: none; }
+@keyframes vs-emblem-pulse {
+  0%, 100% { box-shadow: 0 0 18px 2px rgba(34, 211, 238, 0.3); }
+  50% { box-shadow: 0 0 30px 6px rgba(34, 211, 238, 0.55); }
+}
+
+#scrim {
+  position: fixed;
+  inset: 0;
+  /* Team background still shows through -- just a bit darker than before so the neon panel
+     borders read clearly against it. */
+  background: radial-gradient(120% 100% at 50% 0%, rgba(10, 11, 13, 0.24) 0%, rgba(10, 11, 13, 0.44) 60%, rgba(6, 7, 8, 0.62) 100%);
+  z-index: 1;
+}
+
+#app {
+  position: relative;
+  z-index: 2;
+  height: calc(100vh - 26px);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Glass panel base -- real backdrop-filter blur, this is the whole point of the pivot */
+.glass {
+  background: var(--glass-fill);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  animation: neon-pulse 3.2s ease-in-out infinite;
+}
+@keyframes neon-pulse {
+  0%, 100% {
+    border-color: color-mix(in srgb, var(--team-secondary) 45%, var(--glass-border));
+    box-shadow: 0 0 10px -2px color-mix(in srgb, var(--team-secondary) 35%, transparent);
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--team-secondary) 85%, var(--glass-border));
+    box-shadow: 0 0 22px 1px color-mix(in srgb, var(--team-secondary) 60%, transparent);
+  }
+}
+
+#header-bar {
+  height: var(--header-h);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 16px;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+.header-left { display: flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; }
+.brand-mark {
+  width: 32px; height: 32px; border-radius: 9px;
+  /* Fill follows the user's active team color (--team-secondary, already set app-wide by
+     setActiveTeam) instead of a fixed teal, as a gradient with a glossy sheen for depth --
+     with a pulsing/breathing outline that stays the app's own brand teal (--accent) so the
+     logo still reads as "Bandroom" at a glance no matter which team's colors it's wearing.
+     Explicit ask: make this the loudest, most eye-catching thing in the header -- it's the
+     brand mark. */
+  background: linear-gradient(135deg, var(--team-secondary, var(--accent)) 0%, color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, #000) 100%);
+  /* The "B" itself is outlined, not solid-filled -- reads as a lit LED tube sitting inside the
+     team-colored badge rather than flat dark text sitting on top of it. Fill stays transparent
+     so the badge's own gradient shows straight through the letterform. */
+  color: transparent;
+  -webkit-text-stroke: 1.2px rgba(255, 255, 255, 0.92);
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.55), 0 0 1px rgba(6, 34, 42, 0.4);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 19px; font-weight: 800;
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  flex: none;
+  position: relative;
+  overflow: hidden;
+  border: 2px solid var(--accent);
+  animation: brand-mark-pulse 2s ease-in-out infinite;
+}
+.brand-mark::before {
+  /* Glossy top-left sheen, same trick used on team tiles. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.08) 32%, rgba(255, 255, 255, 0) 58%);
+  pointer-events: none;
+}
+@keyframes brand-mark-pulse {
+  0%, 100%  { box-shadow: 0 0 4px 0 var(--accent), 0 2px 5px rgba(0, 0, 0, 0.4); transform: scale(1); }
+  50%       { box-shadow: 0 0 16px 4px var(--accent), 0 2px 5px rgba(0, 0, 0, 0.4); transform: scale(1.07); }
+}
+.brand-name {
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: 0.2px;
+  background: linear-gradient(120deg, #ffffff 0%, var(--accent) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.35));
+}
+.brand-dot { color: var(--accent); }
+.app-version {
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.3px;
+  flex: none;
+}
+.header-center {
+  flex: 1;
+  text-align: center;
+  color: var(--text-muted-2);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#team-name { color: var(--text-primary); font-weight: 600; }
+.header-sep { margin: 0 8px; color: var(--text-muted); }
+.header-right { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+
+/* Subtle "band members online" indicator -- just a dot, count lives in the tooltip so it
+   doesn't compete with the toolbar's other controls. Glows in --team-secondary, the same color
+   driving the island/.glass outline pulse (see neon-pulse below), instead of a fixed green, so
+   it reads as part of the same team-colored glow language as the rest of the app. (Also fixes
+   a dead reference -- ticker-dot-pulse was never actually defined, so the dot never pulsed at
+   all; renamed to presence-dot-pulse with a real keyframe.) */
+.presence-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--team-secondary, var(--accent));
+  flex: none;
+  animation: presence-dot-pulse 1.8s ease-in-out infinite;
+}
+@keyframes presence-dot-pulse {
+  0%, 100% { box-shadow: 0 0 4px 0 color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, transparent); }
+  50%      { box-shadow: 0 0 9px 2px color-mix(in srgb, var(--team-secondary, var(--accent)) 85%, transparent); }
+}
+
+/* Persistent bottom ticker, ESPN-style -- fixed team-colored "B" logo tile on the far left,
+   text scrolling in continuously from the right. Fixed to the viewport so it survives
+   regardless of scroll position/panel in view; deliberately thin so it doesn't compete with
+   real content. */
+/* Shared song-preview bar (item 2) -- one instance, reused by every preview surface, docked just
+   above the persistent bottom ticker. */
+#preview-bar {
+  position: fixed;
+  left: 50%; bottom: 54px;
+  transform: translateX(-50%);
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: rgba(6, 7, 8, 0.75);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  max-width: min(560px, 90vw);
+}
+#preview-bar[hidden] { display: none; }
+.preview-bar-btn {
+  flex: none;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.preview-bar-btn:hover { filter: brightness(1.1); }
+.preview-bar-name {
+  flex: 0 1 140px;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#preview-waveform {
+  flex: 1 1 auto;
+  width: 260px; height: 40px;
+  cursor: pointer;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.preview-bar-time {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-muted-2);
+  min-width: 34px;
+  text-align: right;
+}
+
+#bandroom-ticker {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  display: flex;
+  align-items: center;
+  height: 44px;
+  background: rgba(0, 0, 0, 0.35);
+  border-top: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  z-index: 50;
+  overflow: hidden;
+}
+.ticker-logo {
+  width: 32px; height: 32px; border-radius: 8px;
+  font-size: 17px;
+  margin: 0 14px;
+  flex: none;
+}
+.ticker-track {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  position: relative;
+}
+.ticker-scroll {
+  display: inline-block;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  padding-left: 100%;
+  animation: ticker-scroll-left 32s linear infinite;
+}
+@keyframes ticker-scroll-left {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-100%); }
+}
+
+/* "The Bandroom" marketplace + team album -- reuses #team-picker's glass/grid look exactly
+   (same team-swatch tiles, same dock-magnify) so it reads as part of the same app, not a
+   bolted-on feature. */
+#bandroom-overlay, #bandroom-album-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+/* Same bug/fix as #team-picker-overlay above: the ID selector's `display: flex` beats the
+   browser's default `[hidden] { display: none }` on specificity, so without this override
+   these overlays showed up immediately on load/ignored the hidden attribute entirely --
+   reproduced live as a black screen with the album's static placeholder content showing
+   through, since JS's real openTeamAlbum() flow never actually ran to populate anything. */
+#bandroom-overlay[hidden], #bandroom-album-overlay[hidden] {
+  display: none;
+}
+#bandroom-picker, #bandroom-album {
+  width: min(720px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  border-radius: 16px;
+}
+#bandroom-team-grid { overflow-y: auto; }
+
+/* My Downloads -- same overlay shell as #bandroom-overlay/#bandroom-album-overlay above, and
+   the exact same [hidden]-override fix required for the same reason: the ID selector's
+   `display: flex` otherwise beats the browser's default `[hidden] { display: none }` on
+   specificity, so the panel would technically un-hide but never actually render as a positioned,
+   backdropped modal -- it'd just sit inert in normal document flow, invisible/unusable. */
+#my-downloads-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#my-downloads-overlay[hidden] { display: none; }
+#my-downloads {
+  width: min(720px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  border-radius: 16px;
+}
+#my-downloads-grid { overflow-y: auto; }
+
+/* Discord Chat -- unlike the other marketplace overlays this docks to the right edge with no
+   dark backdrop, since the point is to keep it open while still watching a game underneath it
+   rather than as a full-screen modal. */
+#discord-chat-overlay {
+  position: fixed; top: 64px; right: 12px; bottom: 12px; z-index: 55;
+  display: flex; width: min(320px, 90vw);
+}
+#discord-chat-overlay[hidden] { display: none; }
+#discord-chat-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 12px;
+  border-radius: 16px;
+}
+#discord-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+.discord-message-row { display: flex; gap: 8px; align-items: flex-start; }
+.discord-avatar {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  object-fit: cover;
+}
+.discord-avatar-fallback {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent, #5865f2); color: #fff; font-size: 12px; font-weight: 700;
+}
+.discord-message-body { min-width: 0; flex: 1; }
+.discord-message-meta { display: flex; gap: 6px; align-items: baseline; }
+.discord-message-author { font-size: 12.5px; font-weight: 700; color: var(--text-secondary); }
+.discord-message-time { font-size: 10.5px; color: var(--text-muted-2); }
+.discord-message-text {
+  font-size: 12.5px; line-height: 1.4; color: var(--text-primary);
+  word-break: break-word; white-space: pre-wrap;
+}
+
+.pill-active { background: rgba(255, 255, 255, 0.14); color: var(--text-primary); }
+
+.bandroom-instructions {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted-2);
+  margin: 8px 0 12px;
+  flex: 0 0 auto;
+}
+.bandroom-hub-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 4px 0 8px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* Newest/Most Viewed/Most Downloaded/Most Liked dropdown next to the "Uploads" hub label --
+   normal-case + normal-weight since the label itself is uppercase/bold and the dropdown's own
+   option text shouldn't inherit that. */
+.bandroom-hub-sort {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+  background: var(--bg-elevated, #222);
+  border: 1px solid var(--border, #444);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+/* Mac Finder-style horizontal shelf, not a wrapping grid -- scrolls sideways so it never
+   competes with the team-search grid below it for vertical space. */
+.bandroom-recent-grid {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 0 0 auto;
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+}
+.bandroom-recent-empty {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  padding: 10px 2px 14px;
+  flex: 0 0 auto;
+}
+.bandroom-item-tile {
+  flex: 0 0 auto;
+  width: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  text-align: center;
+}
+.bandroom-item-thumb {
+  width: 88px; height: 88px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px;
+  overflow: hidden;
+  color: var(--text-muted-2);
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.bandroom-item-tile:hover .bandroom-item-thumb { transform: scale(1.06); filter: brightness(1.15); }
+.bandroom-item-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.bandroom-item-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.bandroom-item-school {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.bandroom-album-title { display: flex; align-items: center; gap: 10px; }
+.bandroom-album-icon { width: 28px; height: 28px; border-radius: 8px; flex: none; }
+
+.bandroom-album-tabs { display: flex; gap: 8px; margin: 10px 0 12px; flex: 0 0 auto; }
+.bandroom-album-tab {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 12px; font-weight: 600;
+  cursor: pointer;
+}
+.bandroom-album-tab.active { background: var(--team-secondary, var(--accent)); color: #06222a; border-color: transparent; }
+
+.bandroom-album-grid { overflow-y: auto; min-height: 0; }
+/* Sound Bank: 6 columns, as many rows as there are real uploads (+1 for the Upload tile). */
+.bandroom-songs-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+/* Trophy Room: 5 columns, scrolls vertically once rows exceed the panel's height. */
+.bandroom-images-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+/* Real item tiles inside either album grid -- same look/hover as the horizontal hub shelf's
+   .bandroom-item-tile, just stretched to fill its grid cell instead of a fixed 88px. */
+.bandroom-album-grid .bandroom-item-tile { width: auto; }
+.bandroom-album-grid .bandroom-item-thumb { width: 100%; height: auto; aspect-ratio: 1; }
+.bandroom-empty-state {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 28px 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.bandroom-slot {
+  aspect-ratio: 1;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 4px;
+}
+.bandroom-slot:hover { background: rgba(255, 255, 255, 0.07); }
+.bandroom-slot-plus { font-size: 20px; font-weight: 300; line-height: 1; }
+.bandroom-slot-label { font-size: 9.5px; line-height: 1.2; }
+/* A filled Trophy Room tile (once real uploads exist) gets a pulsing outline in the team's
+   own color, same technique as .situation-row's outline pulse -- --tile-color is set per-tile
+   in renderTrophyRoomGrid. */
+.bandroom-image-slot {
+  border-color: color-mix(in srgb, var(--tile-color, var(--glass-border)) 35%, var(--glass-border));
+  animation: bandroom-slot-outline-pulse 2.6s ease-in-out infinite;
+}
+/* Own keyframe (not situation-row-outline-pulse) because each Trophy Room tile is a DIFFERENT
+   team than whichever one is currently active app-wide -- it must pulse in ITS OWN --tile-color,
+   not the shared --team-secondary the situations panel uses. */
+@keyframes bandroom-slot-outline-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tile-color, var(--accent)) 30%, transparent); }
+  50%      { box-shadow: 0 0 9px 1px color-mix(in srgb, var(--tile-color, var(--accent)) 45%, transparent); }
+}
+
+/* Hover action row on an in-album item tile (like/report/set-background/delete -- items 3/5/6/17).
+   Absolutely positioned over the thumb, hidden until hover/focus so it never crowds the tile's
+   normal name/school text. */
+.bandroom-item-tile { position: relative; }
+/* Bounded to the thumb's own box (top/left/right/BOTTOM, not just top/left/right) with
+   overflow:hidden -- a tile can carry up to 6 action buttons at once (like, download,
+   report, delete-your-own, admin-edit, admin-delete). The old flex-wrap layout had no
+   bottom bound, so once a tile had enough buttons to wrap past one row, the extra rows
+   spilled out of the thumb and overlapped the tile's own name/school text (and could bleed
+   into neighboring tiles) -- the "garbled stacked badges" bug. A fixed 4-column icon grid
+   keeps every combination at 2 rows max, and overflow:hidden guarantees nothing outside the
+   thumb bounds is ever drawn (or clickable, since hidden overflow is also un-hit-testable). */
+.bandroom-item-actions {
+  position: absolute;
+  top: 4px; left: 4px; right: 4px; bottom: 4px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: min-content;
+  align-content: start;
+  gap: 3px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 2;
+}
+.bandroom-item-tile:hover .bandroom-item-actions,
+.bandroom-item-tile:focus-within .bandroom-item-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.bandroom-item-action {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 2px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(10, 14, 18, 0.72);
+  color: var(--text-primary);
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bandroom-item-action:hover { background: rgba(20, 26, 32, 0.9); }
+.bandroom-item-action:disabled { opacity: 0.5; cursor: default; }
+.bandroom-item-action-danger { border-color: color-mix(in srgb, var(--danger, #e5484d) 55%, rgba(255,255,255,0.25)); }
+.bandroom-item-action-danger:hover { background: color-mix(in srgb, var(--danger, #e5484d) 35%, rgba(10,14,18,0.9)); }
+/* Non-interactive "Shared" state on a My Downloads tile (item 21) -- looks like the other
+   action pills but isn't a button, so no hover/cursor affordance. */
+.bandroom-item-action-static { cursor: default; opacity: 0.75; }
+.bandroom-item-action-static:hover { background: none; }
+/* Admin-only marketplace override controls (owner's dev build only, see WebBridge.cs's
+   IsAdminMode) -- gold accent so they're never mistaken for the regular per-owner delete. */
+.bandroom-item-action-admin { border-color: color-mix(in srgb, gold 60%, rgba(255,255,255,0.25)); color: gold; }
+.bandroom-item-action-admin:hover { background: color-mix(in srgb, gold 25%, rgba(10,14,18,0.9)); }
+
+/* End-user local-song-import entry point (item 21) -- sits above the My Downloads grid. */
+.bandroom-import-song-btn {
+  margin: 0 0 12px;
+  width: 100%;
+}
+
+/* In-album search + bulk-download toolbar (items 7/21). */
+.bandroom-album-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex: 0 0 auto;
+}
+.bandroom-album-toolbar .team-picker-search { flex: 1 1 auto; margin: 0; }
+.bandroom-album-toolbar .btn-ghost { flex: 0 0 auto; white-space: nowrap; }
+
+/* Per-team leaderboard (item 19). */
+.bandroom-leaderboard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+  flex: 0 0 auto;
+}
+.bandroom-leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.bandroom-leaderboard-row:hover { background: rgba(255, 255, 255, 0.05); }
+.bandroom-leaderboard-rank { width: 24px; color: var(--text-muted); font-weight: 700; }
+.bandroom-leaderboard-school { flex: 1 1 auto; color: var(--text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bandroom-leaderboard-count { color: var(--text-muted); font-size: 11.5px; }
+
+/* First-run "point at The Bandroom" tooltip (item 16). */
+.onboarding-spotlight {
+  animation: onboarding-spotlight-pulse 1.4s ease-in-out infinite;
+  position: relative;
+  z-index: 30;
+}
+@keyframes onboarding-spotlight-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--team-secondary, var(--accent)) 25%, transparent); }
+}
+.onboarding-tooltip {
+  position: fixed;
+  z-index: 31;
+  max-width: 260px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(10, 14, 18, 0.92);
+  backdrop-filter: blur(8px);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted-2);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pill .watch-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex: none; }
+.pill-off .watch-dot { background: #666; }
+.pill-waiting { color: #febc2e; border-color: rgba(254, 188, 46, 0.4); }
+.pill-waiting .watch-dot { background: #febc2e; }
+.pill-watching { color: #3ddc84; border-color: rgba(61, 220, 132, 0.4); }
+.pill-watching .watch-dot { background: #3ddc84; }
+
+/* Start Watching stays disabled until Set Matchup has actually locked in both teams --
+   ToggleWatching already refused server-side ("no-matchup"), this just makes that visible up
+   front instead of letting the user press it and get an alert. */
+#btn-watch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+}
+#btn-watch:disabled:active { filter: grayscale(0.4); box-shadow: none; transform: none; }
+
+/* Marketplace island tabs -- identical pill shape/size to Start Watching so the whole header
+   row lines up on one baseline (used to run 8px/13.5px vs the base pill's 7px/13px, which made
+   these 2-3px taller and visibly out of line with the rest of the toolbar -- fixed by just
+   inheriting .pill's sizing instead of overriding it). */
+.marketplace-tabs { display: flex; align-items: center; gap: 6px; }
+.marketplace-tabs .pill { font-weight: 600; }
+.pill-marketplace { color: var(--text-secondary); }
+.pill-marketplace:hover { background: rgba(255, 255, 255, 0.08); }
+
+/* "The Bandroom" cloud marketplace placeholder tab -- persistent rainbow-pulsing outline so it
+   reads as "coming soon" rather than a normal disabled button. */
+.pill-rainbow {
+  border-color: transparent;
+  background-image:
+    linear-gradient(rgba(20, 20, 24, 0.9), rgba(20, 20, 24, 0.9)),
+    conic-gradient(from var(--rainbow-angle, 0deg), #ff5555, #ffd166, #3ddc84, #22d3ee, #a78bfa, #ff5555);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  border: 1.5px solid transparent;
+  animation: pill-rainbow-spin 4s linear infinite, pill-rainbow-pulse 2.2s ease-in-out infinite;
+}
+@keyframes pill-rainbow-spin {
+  to { --rainbow-angle: 360deg; }
+}
+@keyframes pill-rainbow-pulse {
+  0%, 100% { filter: saturate(0.9) brightness(0.95); }
+  50%      { filter: saturate(1.3) brightness(1.15); }
+}
+@property --rainbow-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* Universal "lights up when clicked" feedback -- every button in the app gets a bright accent
+   flash + slight press-down on :active, so clicking anything reads as a real physical press
+   instead of feeling inert. Individual button styles (.btn-ghost, .btn-update, .situation-btn,
+   etc.) layer their own look on top; this is just the shared press feedback. */
+button:active, .btn-ghost:active, .icon-btn:active, .situation-btn:active, .matchup-btn:active {
+  filter: brightness(1.4);
+  box-shadow: 0 0 0 2px var(--team-secondary, var(--accent)),
+    0 0 12px 1px color-mix(in srgb, var(--team-secondary, var(--accent)) 60%, transparent);
+  transform: translateY(1px);
+}
+
+.btn-ghost {
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.08s ease, box-shadow 0.08s ease, transform 0.08s ease;
+}
+.btn-block { width: 100%; margin-top: 8px; }
+.icon-btn {
+  width: 32px; height: 32px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted-2);
+  cursor: pointer;
+  flex: none;
+}
+
+.header-team-badge {
+  width: 28px; height: 28px;
+  font-size: 11px;
+  flex: none;
+  cursor: pointer;
+}
+
+.btn-update {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(61, 220, 132, 0.6);
+  background: rgba(61, 220, 132, 0.10);
+  color: #3ddc84;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  white-space: nowrap;
+  animation: update-pulse 2s ease-in-out infinite;
+}
+/* Default/no-update-available state -- always visible (so the control is discoverable and
+   clickable at any time), just visually quiet instead of hidden entirely. */
+.btn-update.dim {
+  border-color: var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  animation: none;
+  box-shadow: none;
+}
+.btn-update.downgraded {
+  border-color: rgba(239, 68, 68, 0.7);
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  animation: update-pulse-red 1.4s ease-in-out infinite;
+}
+@keyframes update-pulse {
+  0%, 100% { box-shadow: 0 0 6px 0 rgba(61, 220, 132, 0.3); border-color: rgba(61, 220, 132, 0.5); }
+  50%       { box-shadow: 0 0 18px 2px rgba(61, 220, 132, 0.65); border-color: rgba(61, 220, 132, 0.9); }
+}
+@keyframes update-pulse-red {
+  0%, 100% { box-shadow: 0 0 6px 0 rgba(239, 68, 68, 0.35); border-color: rgba(239, 68, 68, 0.6); }
+  50%       { box-shadow: 0 0 18px 2px rgba(239, 68, 68, 0.75); border-color: rgba(239, 68, 68, 1); }
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+}
+.wc-btn {
+  width: 38px; height: 38px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted-2);
+  font-size: 17px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.wc-btn:hover { background: rgba(255,255,255,0.10); color: var(--text-primary); }
+.wc-close:hover { background: rgba(232, 70, 70, 0.75); color: #fff; }
+
+/* Drag cursor on the header center so users know they can grab it */
+#drag-handle { cursor: grab; user-select: none; }
+#drag-handle:active { cursor: grabbing; }
+
+/* Danger variant for destructive profile actions */
+.btn-danger { color: rgba(232, 100, 100, 0.8); }
+.btn-danger:hover { color: #e86464; border-color: rgba(232, 100, 100, 0.5); background: rgba(232, 100, 100, 0.08); }
+
+/* Header right — tighter gap and shrink watch label text at narrower widths */
+.header-right { gap: 6px; }
+@media (max-width: 1100px) {
+  #watch-label { display: none; }
+  #btn-watch { padding: 7px 10px; }
+  .app-version { display: none; }
+}
+
+#body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  padding: 16px;
+  gap: 16px;
+}
+
+.rail {
+  flex: 0 0 var(--rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0;
+  border-radius: var(--radius-panel);
+}
+.rail-item {
+  width: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 4px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.rail-icon { font-size: 20px; line-height: 1; }
+.rail-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.rail-item.active, .rail-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--glass-border);
+  color: var(--text-primary);
+}
+
+.side-panel {
+  flex: 0 0 var(--side-w);
+  min-width: 0;
+  border-radius: var(--radius-panel);
+  padding: 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.panel-section { min-width: 0; }
+.panel-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  /* No inner scroll box here on purpose -- the side panel itself scrolls (.side-panel has
+     overflow-y: auto), so a second nested scroll area just clipped the last row mid-tile. */
+}
+.team-grid, .matchup-grid, .team-picker-grid {
+  /* Lets the dock-style hover magnify (below) actually draw over neighboring tiles instead
+     of getting clipped at the grid's own edge. */
+  overflow: visible;
+}
+.team-swatch {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  /* Raised "physical button" look matching the source logo sheets (chunky beveled metal/plastic
+     tiles) -- outer drop shadow for lift off the panel, inset highlight along the top-left edge
+     and inset shadow along the bottom-right edge to fake a bevel, plus a soft glossy sheen via
+     the ::before layer below. */
+  box-shadow:
+    0 3px 6px rgba(0, 0, 0, 0.35),
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    inset 1px 1px 0 rgba(255, 255, 255, 0.22),
+    inset -2px -3px 5px rgba(0, 0, 0, 0.35);
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.08s ease;
+  z-index: 1;
+  /* Monogram placeholder until real team logos are wired in (see WebBridge.Initials --
+     swap for an <img> using a TeamLogos\ lookup once logo files exist). */
+}
+.team-swatch::before {
+  /* Glossy highlight sweeping across the top third -- the "3D button" sheen. */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.08) 28%, rgba(255, 255, 255, 0) 55%);
+  pointer-events: none;
+  z-index: 2;
+}
+.team-swatch:active {
+  transform: translateY(1px) scale(0.98);
+  /* Lights up in the team's own color on press (--tile-color, set per-tile in fillTeamSwatch)
+     instead of the generic accent-cyan every other button uses -- explicit user ask. */
+  box-shadow:
+    0 0 0 2px var(--tile-color, var(--accent)),
+    0 0 16px 3px var(--tile-color, var(--accent)),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    inset 1px 1px 3px rgba(0, 0, 0, 0.4),
+    inset -1px -1px 0 rgba(255, 255, 255, 0.08);
+}
+.team-logo-img {
+  /* Full-bleed tile fill, not a floating monogram -- these logo source images already
+     come as their own square tile (solid/gradient background baked in), so no per-team
+     transparency prep is needed. Just stretch to cover the swatch and let border-radius
+     clip the corners via the parent's overflow:hidden. */
+  width: 100%; height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  position: relative;
+  z-index: 1;
+}
+.team-swatch.active { border-color: var(--text-primary); }
+/* The actual dock-style scale-up (with neighbor falloff) is driven by inline transform/z-index
+   from enableDockMagnify() in app.js -- see .team-swatch's transition above for the easing,
+   and .team-grid's overflow:visible above so the scaled tile isn't clipped by the grid edge. */
+.team-swatch:hover { filter: brightness(1.15); }
+.team-swatch.configured { position: relative; }
+.team-swatch.configured::after {
+  content: "";
+  position: absolute;
+  bottom: 3px; right: 3px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #3ddc84;
+  box-shadow: 0 0 4px rgba(61, 220, 132, 0.7);
+}
+
+.profile-status {
+  font-size: 12px;
+  margin-bottom: 8px;
+  min-height: 18px;
+}
+.profile-saved   { color: #3ddc84; }
+.profile-unsaved { color: var(--text-muted); }
+
+.profile-actions { display: flex; flex-direction: column; gap: 6px; }
+.profile-io { display: flex; gap: 6px; }
+.profile-io .btn-ghost { flex: 1; }
+
+.category-list {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.category-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+.category-row:hover { background: rgba(255, 255, 255, 0.07); }
+.category-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.category-text { min-width: 0; overflow: hidden; display: flex; align-items: baseline; gap: 6px; }
+.category-name {
+  font-size: 12px; font-weight: 600;
+  white-space: nowrap;
+}
+.category-count { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+
+/* Center column: the "island" is the header/side panels floating over this -- the column
+   itself carries no card/hero, just lets the full-bleed backdrop show through. */
+#center-column {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: var(--radius-panel);
+  padding: 4px;
+}
+#category-bar {
+  border-radius: var(--radius-panel);
+  padding: 14px 18px;
+}
+
+#matchup-side-bar {
+  border-radius: var(--radius-panel);
+  padding: 10px 18px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#matchup-side-bar[hidden] { display: none; }
+.matchup-side-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+.matchup-side-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.matchup-side-btn:hover { color: var(--text-primary); }
+.matchup-side-btn.active {
+  border-color: rgba(34, 211, 238, 0.7);
+  background: rgba(34, 211, 238, 0.14);
+  color: var(--text-primary);
+}
+
+#situations-panel {
+  margin-top: 10px;
+  border-radius: var(--radius-panel);
+  padding: 14px 18px;
+  max-height: calc(100vh - 260px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.situations-header {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; font-weight: 700;
+  margin-bottom: 10px;
+  flex: 0 0 auto;
+}
+.situations-list {
+  /* "Island" tabs: tiles that wrap into rows and settle toward the bottom of the panel,
+     instead of one song-per-line list -- explicit user ask. */
+  display: flex;
+  flex-flow: row wrap;
+  align-content: flex-end;
+  align-items: flex-start;
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.situation-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  flex: 1 1 220px;
+  max-width: 300px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--team-secondary, var(--glass-border)) 22%, var(--glass-border));
+  background: rgba(255, 255, 255, 0.03);
+  min-width: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+/* Decluttered 2026-08-07: every card used to pulse its outline glow constantly and
+   simultaneously (situation-row-outline-pulse, infinite) -- fine for one card, a wall of 46
+   all breathing at once read as noisy/cluttered (explicit user feedback). Now static/quiet at
+   rest, glow only appears on hover as a deliberate "you're looking at this one" cue instead of
+   an ambient always-on animation nobody asked to watch. */
+.situation-row:hover {
+  border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 45%, var(--glass-border));
+  box-shadow: 0 0 9px 1px color-mix(in srgb, var(--team-secondary, var(--accent)) 35%, transparent);
+}
+.situation-text { flex: 1 1 auto; min-width: 0; }
+.situation-name {
+  display: flex; align-items: center;
+  font-size: 12.5px; font-weight: 600;
+  min-width: 0;
+}
+.situation-name-text {
+  flex: 1 1 auto; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.situation-file { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.situation-file-pa { opacity: 0.7; }
+.situation-btn-pa { border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 40%, var(--glass-border)); color: var(--team-secondary, var(--accent)); }
+.situation-row.situation-unconfirmed { opacity: 0.6; filter: grayscale(0.5); }
+.situation-row.situation-unconfirmed:hover { opacity: 0.85; }
+.situation-actions { width: 100%; }
+.situation-led {
+  width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 8px; flex: none;
+}
+.situation-led-off { background: var(--text-muted); opacity: 0.5; }
+.situation-led-green { background: #3ddc84; box-shadow: 0 0 6px rgba(61, 220, 132, 0.8); animation: situation-led-pulse-green 1.8s ease-in-out infinite; }
+.situation-led-amber { background: #facc15; box-shadow: 0 0 6px rgba(250, 204, 21, 0.8); animation: situation-led-pulse-amber 1.8s ease-in-out infinite; }
+@keyframes situation-led-pulse-green {
+  0%, 100% { box-shadow: 0 0 4px 0 rgba(61, 220, 132, 0.5); }
+  50%       { box-shadow: 0 0 10px 3px rgba(61, 220, 132, 0.9); }
+}
+@keyframes situation-led-pulse-amber {
+  0%, 100% { box-shadow: 0 0 4px 0 rgba(250, 204, 21, 0.5); }
+  50%       { box-shadow: 0 0 10px 3px rgba(250, 204, 21, 0.9); }
+}
+.situation-badge {
+  display: inline-block;
+  flex: none;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;
+  padding: 1px 6px; margin-left: 6px;
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.15);
+  color: #facc15;
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  vertical-align: middle;
+}
+/* Bug 3: "Coming Soon" pill for the ~26/33 triggers wired/assignable but not yet in
+   WebBridge.ConfirmedTriggers -- same amber family as the existing unconfirmed LED so it reads
+   as one visual language, just a clearer, less jargon-y label than "not yet confirmed". Kept as
+   its own class (not a rename of .situation-badge) so it's trivial to restyle/relabel later
+   without touching the base badge shared by anything else that might reuse it. */
+.situation-badge-coming-soon { background: rgba(250, 204, 21, 0.18); }
+.situation-actions { display: flex; flex-wrap: wrap; gap: 5px; flex: 0 0 auto; }
+.situation-btn {
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 10.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.situation-btn:hover { background: rgba(255, 255, 255, 0.1); }
+
+.slider { width: 100%; accent-color: var(--team-secondary, var(--accent)); }
+.slider-value { font-size: 12px; color: var(--text-muted-2); margin-top: 4px; }
+
+.reverb-tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.reverb-tile {
+  padding: 10px 6px;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted-2);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reverb-tile.active { background: rgba(255, 255, 255, 0.12); color: var(--text-primary); border-color: var(--text-primary); }
+
+#team-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+  opacity: 1;
+  transition: opacity 0.18s ease;
+}
+/* The ID selector above beats the browser's default `[hidden] { display: none }` (attribute
+   selector loses to ID on specificity), so toggling the `hidden` attribute from JS did nothing
+   visually -- this rule needs to win instead, which is why closing the picker silently failed. */
+#team-picker-overlay[hidden] {
+  display: none;
+}
+#team-picker {
+  width: min(900px, 90vw);
+  height: min(720px, 85vh);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.team-picker-header {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 16px; font-weight: 700;
+  margin-bottom: 14px;
+  flex: 0 0 auto;
+}
+.team-picker-search {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-size: 13px;
+  margin-bottom: 14px;
+  outline: none;
+}
+.team-picker-search::placeholder { color: var(--text-muted); }
+.team-picker-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 10px;
+  align-content: start;
+  /* Without this, grid's default align-items:stretch fights .team-swatch's aspect-ratio:1 --
+     the tile's width stays pinned to its 1fr column track but the height stretches to fill
+     the row, producing tall skinny bars instead of squares. align-content:start alone (above)
+     only stops leftover space between ROWS from spreading out; it doesn't stop an individual
+     item from being stretched to fill its own row. This is the real bug behind the
+     long-standing "squashed team picker tiles" report -- the earlier WebView2-cache theory
+     was a red herring. */
+  align-items: start;
+}
+.team-picker-grid .team-swatch { font-size: 14px; }
+
+.matchup-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(34, 211, 238, 0.5);
+  background: rgba(34, 211, 238, 0.08);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.matchup-btn:hover { background: rgba(34, 211, 238, 0.16); border-color: rgba(34, 211, 238, 0.8); }
+
+#matchup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#matchup-overlay[hidden] { display: none; }
+#matchup-dialog {
+  width: min(760px, 92vw);
+  height: min(620px, 85vh);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.matchup-header {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 16px; font-weight: 700;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
+}
+.matchup-instructions {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted-2);
+  margin: 0 0 14px;
+  flex: 0 0 auto;
+}
+.matchup-columns {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.matchup-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.matchup-column-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.matchup-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Embedded directly in the Adjust panel ("Volume island") -- a fixed-height scroll box, not a
+   popup, so the changelog is actually seen instead of living behind a button nobody clicks. */
+.changelog-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.changelog-entry {
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.03);
+}
+.changelog-entry-header {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-bottom: 6px;
+}
+.changelog-version { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+.changelog-date { font-size: 10.5px; color: var(--text-muted); }
+.changelog-prerelease {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #f0b429;
+  border: 1px solid rgba(240, 180, 41, 0.5);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+.changelog-notes { margin: 0; padding-left: 16px; }
+.changelog-notes li { font-size: 11.5px; color: var(--text-muted-2); line-height: 1.55; }
+.changelog-empty { font-size: 12px; color: var(--text-muted); text-align: center; margin-top: 12px; }
+.changelog-full-link {
+  display: block;
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #22d3ee;
+  text-decoration: none;
+  padding: 8px 0 2px;
+}
+.changelog-full-link:hover { text-decoration: underline; }
+
+#save-profile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#save-profile-overlay[hidden] { display: none; }
+#save-profile-dialog {
+  width: min(440px, 90vw);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+}
+
+/* Same overlay shell as #save-profile-overlay -- and the same [hidden]-override fix already
+   applied to #team-picker-overlay/#bandroom-overlay/#bandroom-album-overlay this session (the
+   ID selector's display:flex otherwise beats [hidden]'s display:none on specificity). */
+#bandroom-upload-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#bandroom-upload-overlay[hidden] { display: none; }
+#bandroom-upload-dialog {
+  width: min(440px, 90vw);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+}
+#btn-bandroom-upload-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Profile / Google sign-in -- same overlay shell as #logo-crop-overlay/#bandroom-upload-overlay. */
+#profile-overlay {
+  position: fixed; inset: 0; z-index: 65;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#profile-overlay[hidden] { display: none; }
+#profile-dialog {
+  width: min(400px, 90vw);
+  max-height: 85vh;
+  overflow-y: auto;
+  border-radius: var(--radius-panel);
+  padding: 22px;
+}
+#profile-avatar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+#profile-avatar {
+  width: 48px; height: 48px; border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.06);
+}
+#btn-profile-avatar-upload { font-size: 15px; padding: 6px; border-radius: 50%; width: 30px; height: 30px; }
+#profile-identity { flex: 1 1 auto; min-width: 0; }
+#profile-name { font-weight: 700; font-size: 14px; color: var(--text-primary); }
+#profile-email { font-size: 12px; color: var(--text-muted-2); }
+#profile-member-since { font-size: 11px; color: var(--text-muted-2); margin-top: 2px; }
+#btn-google-signin:disabled { opacity: 0.5; cursor: not-allowed; }
+
+#profile-favorite-header, #profile-rival-header, #profile-bio-header, #profile-level-header,
+#profile-record-header, #profile-by-team-header, #profile-uploads-header {
+  margin-top: 18px;
+  display: flex; align-items: center; gap: 8px;
+}
+#profile-level-num {
+  font-size: 12px; font-weight: 700;
+  color: #06222a;
+  background: var(--team-secondary, var(--accent));
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+#profile-bio-input { width: 100%; box-sizing: border-box; }
+#profile-achievements { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.achievement-badge {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  color: var(--text-muted-2);
+  background: rgba(255, 255, 255, 0.03);
+  opacity: 0.5;
+}
+.achievement-badge.unlocked {
+  color: #06222a;
+  background: var(--team-secondary, var(--accent));
+  border-color: transparent;
+  opacity: 1;
+  font-weight: 600;
+}
+#profile-most-triggered { font-size: 12px; color: var(--text-muted-2); margin-top: 8px; }
+#profile-top-uploader-badge {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--team-secondary, var(--accent));
+}
+#profile-record-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+#profile-record-text { font-size: 16px; font-weight: 700; min-width: 48px; }
+#profile-by-team-list, #profile-my-uploads-list { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.profile-by-team-row {
+  display: flex; justify-content: space-between;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.profile-by-team-row-empty { font-size: 12px; color: var(--text-muted-2); padding: 4px 2px; }
+#profile-toasts-toggle-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 18px;
+  font-size: 13px;
+  color: var(--text-muted-2);
+  cursor: pointer;
+}
+#profile-io-actions { margin-top: 16px; flex-wrap: wrap; }
+
+/* Custom team logo crop tool -- same overlay shell/[hidden] pattern as #bandroom-upload-overlay
+   above (same reason: ID selector's display:flex needs an explicit [hidden] override). */
+#logo-crop-overlay {
+  position: fixed; inset: 0; z-index: 65;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#logo-crop-overlay[hidden] { display: none; }
+#logo-crop-dialog {
+  width: min(460px, 90vw);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+}
+#logo-crop-viewport {
+  width: 260px; height: 260px;
+  margin: 4px auto 14px;
+  border-radius: 16px;
+  overflow: hidden;
+  position: relative;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  cursor: grab;
+}
+#logo-crop-viewport:active { cursor: grabbing; }
+#logo-crop-canvas {
+  width: 100%; height: 100%;
+  display: block;
+  touch-action: none;
+}
+#logo-crop-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 24px;
+  font-size: 12.5px;
+  color: var(--text-muted-2);
+  pointer-events: none;
+}
+#logo-crop-controls {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px;
+}
+#logo-crop-controls .btn-ghost { flex: 0 0 auto; }
+#logo-crop-zoom { flex: 1 1 auto; }
+#logo-crop-zoom:disabled { opacity: 0.4; }
+#btn-logo-crop-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Batch logo import (item 20) -- Skip only makes sense mid-batch, and the team-select row's
+   hidden state is the single source of truth for "are we in a batch" (see app.js), so key the
+   button's visibility off the same flag instead of a second one. */
+#btn-logo-crop-skip { display: none; }
+#batch-logo-team-row:not([hidden]) ~ .save-profile-actions #btn-logo-crop-skip { display: inline-block; }
+
+/* Team BACKGROUND crop tool -- same shell as #logo-crop-overlay, wider viewport (16:9) instead
+   of a square since this crops a full-screen backdrop, not a badge. */
+#bg-crop-overlay {
+  position: fixed; inset: 0; z-index: 65;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#bg-crop-overlay[hidden] { display: none; }
+#bg-crop-dialog {
+  width: min(560px, 92vw);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+}
+#bg-crop-viewport {
+  width: min(480px, 84vw); height: calc(min(480px, 84vw) * 9 / 16);
+  margin: 4px auto 14px;
+  border-radius: 16px;
+  overflow: hidden;
+  position: relative;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  cursor: grab;
+}
+#bg-crop-viewport:active { cursor: grabbing; }
+#bg-crop-canvas {
+  width: 100%; height: 100%;
+  display: block;
+  touch-action: none;
+}
+#bg-crop-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center;
+  padding: 0 24px;
+  font-size: 12.5px;
+  color: var(--text-muted-2);
+  pointer-events: none;
+}
+#bg-crop-controls {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px;
+}
+#bg-crop-controls .btn-ghost { flex: 0 0 auto; }
+#bg-crop-zoom { flex: 1 1 auto; }
+#bg-crop-zoom:disabled { opacity: 0.4; }
+#btn-bg-crop-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Second edit icon (background) sitting next to the existing logo-edit pencil on a team swatch --
+   same look, different symbol/position so both are reachable without a menu. */
+.team-swatch-edit-bg {
+  position: absolute; top: 4px; left: 4px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.team-swatch:hover .team-swatch-edit-bg { opacity: 1; transform: scale(1); }
+.team-swatch-edit-bg:hover { background: rgba(0, 0, 0, 0.8); }
+#batch-logo-team-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+#batch-logo-team-row select { flex: 1 1 auto; }
+
+/* Small edit-pencil affordance on team tiles in the main Teams panel -- lets a user jump
+   straight into the crop tool for that specific team without a separate settings screen. Only
+   rendered there (see renderTeamGridInto's showEditLogo param), not in the onboarding/matchup/
+   marketplace team grids, which are quick-pick contexts where this would just be noise. */
+.team-swatch-edit-logo {
+  position: absolute;
+  bottom: 4px; right: 4px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  transform: scale(0.85);
+}
+.team-swatch:hover .team-swatch-edit-logo { opacity: 1; transform: scale(1); }
+.team-swatch-edit-logo:hover { background: rgba(0, 0, 0, 0.8); }
+.save-profile-header {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.save-profile-instructions {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted-2);
+  margin: 0 0 14px;
+}
+.save-profile-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+}
+.save-profile-input:focus { border-color: var(--team-secondary, var(--glass-border)); }
+#profile-favorite-header, #profile-stats-header { margin-top: 18px; }
+#profile-favorite-team, #profile-rival-team {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 4px;
+  color-scheme: dark;
+}
+/* WebView2/Chromium renders a <select>'s OPEN dropdown list with native OS chrome by default --
+   that's the plain white "MS-DOS" popup, completely ignoring the dark glass theme applied to the
+   closed control itself. color-scheme:dark above gets the browser's own popup chrome (scrollbar,
+   default background) into dark mode; explicitly styling <option> here (Chromium, unlike some
+   other engines, does honor background-color/color on individual options) finishes the job. */
+#profile-favorite-team option, #profile-rival-team option {
+  background: #12181d;
+  color: var(--text-primary);
+}
+#profile-favorite-team option:checked, #profile-favorite-team option:hover,
+#profile-rival-team option:checked, #profile-rival-team option:hover {
+  background: var(--team-secondary, var(--accent));
+  color: #06222a;
+}
+#profile-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.profile-stat {
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 10px 14px;
+}
+.profile-stat span {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--team-secondary, var(--accent));
+}
+.profile-stat label { font-size: 12px; color: var(--text-muted-2); }
+.save-profile-subtext {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-height: 16px;
+  margin-top: 8px;
+}
+.save-profile-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+.btn-primary {
+  padding: 7px 16px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--team-secondary, #22d3ee);
+  color: #0b0d0f;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#update-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.6);
+}
+#update-overlay[hidden] { display: none; }
+#update-dialog {
+  width: min(420px, 90vw);
+  border-radius: var(--radius-panel);
+  padding: 24px;
+  text-align: center;
+}
+.update-header { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+.update-progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.update-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22d3ee, #3ddc84);
+  transition: width 0.25s ease;
+}
+.update-sub { font-size: 12.5px; color: var(--text-muted-2); margin: 12px 0 0; }
+.update-actions { margin-top: 18px; }
+
+.gametime-btn {
+  padding: 10px 28px;
+  border-radius: 10px;
+  border: 2px solid #ffcc33;
+  background: linear-gradient(135deg, #ff6a00, #ffcc33);
+  color: #1a0f00;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  animation: gametime-flash 1s ease-in-out infinite;
+}
+.gametime-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+  animation: none;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--glass-border);
+  color: var(--text-muted);
+}
+@keyframes gametime-flash {
+  0%, 100% { box-shadow: 0 0 8px 1px rgba(255, 204, 51, 0.4); transform: scale(1); }
+  50% { box-shadow: 0 0 22px 6px rgba(255, 204, 51, 0.85); transform: scale(1.035); }
+}
+
+.matchup-btn.locked {
+  border-color: rgba(61, 220, 132, 0.6);
+  background: rgba(61, 220, 132, 0.10);
+  color: #3ddc84;
+  cursor: default;
+}
+.matchup-btn.locked:hover { background: rgba(61, 220, 132, 0.10); border-color: rgba(61, 220, 132, 0.6); }
+
+#onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.7);
+}
+#onboarding-overlay[hidden] { display: none; }
+#onboarding {
+  width: min(900px, 90vw);
+  height: min(680px, 85vh);
+  border-radius: var(--radius-panel);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.onboarding-header {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 20px; font-weight: 700;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
+}
+.onboarding-sub {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 16px 0;
+  flex: 0 0 auto;
+}
+
+@keyframes panel-flash {
+  0% { box-shadow: 0 0 0 0 transparent; border-color: var(--glass-border); }
+  30% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--team-secondary, var(--accent)) 50%, transparent); border-color: var(--team-secondary, var(--accent)); }
+  100% { box-shadow: 0 0 0 0 transparent; border-color: var(--glass-border); }
+}
+.panel-flash { animation: panel-flash 0.9s ease-out; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translate(-50%, 12px);
+  background: rgba(20, 22, 24, 0.92);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0;
+  z-index: 30;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+.toast-visible { opacity: 1; transform: translate(-50%, 0); }

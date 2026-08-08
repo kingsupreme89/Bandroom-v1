@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build *)",
+      "PowerShell(winget --version)",
+      "PowerShell(winget search vnc viewer)",
+      "PowerShell(winget search \"vnc\")",
+      "PowerShell(winget install --id RealVNC.VNCViewer -e --accept-package-agreements --accept-source-agreements)",
+      "PowerShell(winget install --id TigerVNC.TigerVNC -e --accept-package-agreements --accept-source-agreements)",
+      "PowerShell(Start-Process \"C:\\\\Program Files\\\\TigerVNC\\\\vncviewer.exe\" -ArgumentList \"10.20.45.24\")",
+      "PowerShell(Test-NetConnection -ComputerName localhost -Port 8765 -InformationLevel Quiet -WarningAction SilentlyContinue)",
+      "Bash(powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\\\\Bandroom\\\\serve_dashboard_watchdog.ps1\")",
+      "Bash(powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& 'C:\\\\Bandroom\\\\serve_dashboard_watchdog.ps1'\")",
+      "Bash(mkdir -p \"C:/Bandroom/.claude/skills/deep-audit\")",
+      "PowerShell(Get-Process Bandroom -ErrorAction SilentlyContinue)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(npx wrangler *)",
+      "Bash(gh --version)",
+      "Bash(gh auth *)",
+      "Bash(git init *)",
+      "Bash(git remote *)",
+      "Bash(git fetch *)",
+      "Bash(git ls-remote *)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(git check-ignore *)",
+      "Bash(git add *)"
+    ]
+  }
+}

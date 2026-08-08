@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Bandroom</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="backdrop"></div>
+  <!-- VS split backdrop -- shown instead of #backdrop once GAMETIME is pressed, replicating the
+       structure of CFB 27's own team-select screen: two symmetric halves, each team's stadium
+       image + big centered logo + a pulsing underglow in that team's color, split by a center
+       emblem. Purely visual (no controls live here) -- the glass panels on top still carry the
+       actual UI, same pulsing-LED theme as the rest of the app. -->
+  <div id="backdrop-vs" hidden>
+    <div id="backdrop-vs-away" class="backdrop-vs-half">
+      <span class="backdrop-vs-label">Away</span>
+      <img class="backdrop-vs-logo" id="backdrop-vs-away-logo" alt="" />
+      <span class="backdrop-vs-name" id="backdrop-vs-away-name"></span>
+    </div>
+    <div id="backdrop-vs-seam"></div>
+    <div id="backdrop-vs-emblem"><span class="brand-mark">B</span></div>
+    <div id="backdrop-vs-home" class="backdrop-vs-half">
+      <span class="backdrop-vs-label">Home</span>
+      <img class="backdrop-vs-logo" id="backdrop-vs-home-logo" alt="" />
+      <span class="backdrop-vs-name" id="backdrop-vs-home-name"></span>
+    </div>
+  </div>
+  <div id="scrim"></div>
+
+  <div id="app">
+    <!-- Header bar -- actual dragging happens via #drag-handle (header-center) below, not this
+         element; a duplicate id="drag-region" attribute used to sit here too but was invalid
+         HTML (dead weight -- browsers only honor the first id on an element) and unreferenced
+         anywhere in app.js/style.css, so it's removed rather than fixed into something real. -->
+    <div id="header-bar" class="glass">
+      <div class="header-left">
+        <span class="brand-mark">B</span>
+        <span class="brand-name">Bandroom</span>
+        <span id="app-version" class="app-version"></span>
+      </div>
+      <div class="header-center" id="drag-handle">
+        <span id="team-name">General</span>
+        <span class="header-sep">·</span>
+        <button id="btn-matchup" class="matchup-btn" title="Pick who's home and away for this game">Set Matchup</button>
+      </div>
+      <div class="header-right">
+        <button id="btn-watch" class="pill pill-off" title="Toggle watching">
+          <span class="watch-dot"></span>
+          <span id="watch-label">Start Watching</span>
+        </button>
+        <!-- Marketplace island tabs -- "The Bandroom" opens the full team-browser; Sound Bank
+             / Trophy Room jump straight into the ACTIVE team's album on that specific tab,
+             skipping the team-picker step since you're usually already working on one team. -->
+        <div class="marketplace-tabs">
+          <button id="btn-bandroom-cloud" class="pill pill-rainbow" title="Browse The Bandroom">The Bandroom</button>
+          <button id="btn-sound-bank" class="pill pill-marketplace" title="This team's Sound Bank">Sound Bank</button>
+          <button id="btn-trophy-room" class="pill pill-marketplace" title="This team's Trophy Room">Trophy Room</button>
+          <button id="btn-my-downloads" class="pill pill-marketplace" title="Songs and images you've downloaded">My Downloads</button>
+          <button id="btn-discord-chat" class="pill pill-marketplace" title="Live Discord chat feed">Discord</button>
+        </div>
+        <!-- Favorite-team badge -- shows the currently active team at a glance, click opens
+             the full team picker. Sits right next to the update button on purpose. -->
+        <div id="header-team-badge" class="team-swatch header-team-badge" title="Switch which team's sound profile you're editing (use Set Matchup to pick home/away)"></div>
+        <!-- Subtle presence indicator -- just a small flashing dot, count shown on hover via
+             title rather than a persistent number, so it stays out of the way in the toolbar.
+             The big ESPN-style bottom ticker is for upload activity, not this. -->
+        <span id="presence-dot" class="presence-dot" title="Connecting…"></span>
+        <button id="btn-jump-favorite-team" class="icon-btn" title="Jump to favorite team" hidden>⭐</button>
+        <button id="btn-profile" class="icon-btn" title="Profile">👤</button>
+        <button id="btn-update" class="btn-update dim" title="You're on the latest version">Up to date</button>
+        <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
+        <div class="window-controls">
+          <button id="btn-minimize" class="wc-btn wc-min" title="Minimize">&#8211;</button>
+          <button id="btn-maximize" class="wc-btn wc-max" title="Maximize">&#9633;</button>
+          <button id="btn-close"    class="wc-btn wc-close" title="Close">&#10005;</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="body">
+      <!-- Left icon rail -->
+      <div class="rail" id="rail-left">
+        <button class="rail-item active" data-action="focus-teams"><span class="rail-icon">&#9978;</span><span class="rail-label">Teams</span></button>
+        <button class="rail-item" data-action="save-profile"><span class="rail-icon">&#128190;</span><span class="rail-label">Save</span></button>
+        <button class="rail-item" data-action="help"><span class="rail-icon">?</span><span class="rail-label">Help</span></button>
+      </div>
+
+      <!-- Left panel: team grid + profiles -->
+      <div class="side-panel glass" id="left-panel">
+        <div class="panel-section">
+          <div class="panel-title">Team</div>
+          <div class="team-grid" id="team-grid"><!-- populated by app.js --></div>
+        </div>
+        <div class="panel-section" id="profiles-section">
+          <div class="panel-title">Profiles</div>
+          <div id="profile-status" class="profile-status"></div>
+          <div class="profile-actions">
+            <button class="btn-ghost" id="btn-copy-all" title="Apply current team's tracks to every team">Apply to All Teams</button>
+            <div class="profile-io">
+              <button class="btn-ghost" id="btn-export-profile">Export</button>
+              <button class="btn-ghost" id="btn-import-profile">Import</button>
+              <button class="btn-ghost btn-danger" id="btn-delete-profile" title="Clear this team's saved profile">Delete</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Center: team background showing through, with a horizontal categories strip on top -->
+      <div id="center-column">
+        <!-- Only shown once a matchup is set (see #btn-matchup). Assigning songs below always
+             edits ONE team's profile at a time (whichever is state.activeTeam) -- this bar makes
+             it obvious which side that is right now and gives a one-click way to flip to the
+             other, instead of having to hunt for the small header badge or the full team grid. -->
+        <div id="matchup-side-bar" class="glass" hidden>
+          <span class="matchup-side-label">Assigning songs for:</span>
+          <button class="matchup-side-btn" id="btn-side-away" data-side="away"></button>
+          <button class="matchup-side-btn" id="btn-side-home" data-side="home"></button>
+        </div>
+        <div id="category-bar" class="glass">
+          <div class="category-list" id="category-list"><!-- populated by app.js --></div>
+        </div>
+        <div id="situations-panel" class="glass" hidden>
+          <div class="situations-header">
+            <span id="situations-title">Situations</span>
+            <button id="btn-close-situations" class="icon-btn">&times;</button>
+          </div>
+          <div class="situations-list" id="situations-list"><!-- populated by app.js --></div>
+        </div>
+      </div>
+
+      <!-- Right panel: Adjust -->
+      <div class="side-panel glass" id="adjust-panel">
+        <div class="panel-section">
+          <div class="panel-title">Volume</div>
+          <input type="range" id="slider-volume" min="0" max="100" value="72" class="slider" />
+          <div class="slider-value"><span id="volume-value">72</span>%</div>
+        </div>
+        <!-- Only meaningful once a matchup is set (see #btn-matchup) -- home/away events fire
+             through these instead of the master Volume slider above. -->
+        <div class="panel-section" id="matchup-volumes">
+          <div class="panel-title">Away Volume</div>
+          <input type="range" id="slider-away-volume" min="0" max="100" value="100" class="slider" />
+          <div class="slider-value"><span id="away-volume-value">100</span>%</div>
+          <div class="panel-title" style="margin-top: 10px;">Home Volume</div>
+          <input type="range" id="slider-home-volume" min="0" max="100" value="100" class="slider" />
+          <div class="slider-value"><span id="home-volume-value">100</span>%</div>
+        </div>
+        <!-- PA Announcer volume: independent of Master/Home/Away since PA clips play alongside
+             (not instead of) the main song for a situation. See AudioPlayer.PaVolume. -->
+        <div class="panel-section">
+          <div class="panel-title">PA Announcer Volume</div>
+          <input type="range" id="slider-pa-volume" min="0" max="100" value="100" class="slider" />
+          <div class="slider-value"><span id="pa-volume-value">100</span>%</div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-title">Fire Sensitivity (Delay)</div>
+          <input type="range" id="slider-sensitivity" min="0" max="30" value="10" step="1" class="slider" />
+          <div class="slider-value"><span id="sensitivity-value">10</span>s until fade-out &mdash; no fade-in</div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-title">Reverb</div>
+          <div class="reverb-tiles" id="reverb-tiles">
+            <button class="reverb-tile" data-reverb="off">Off</button>
+            <button class="reverb-tile" data-reverb="stadium">Stadium</button>
+            <button class="reverb-tile" data-reverb="dome">Dome</button>
+            <button class="reverb-tile" data-reverb="nightgame">Night Game</button>
+          </div>
+        </div>
+        <!-- Real changelog (see ChangelogService.cs / WebBridge.GetChangelog), embedded directly
+             in the panel instead of behind a button so it's actually seen. -->
+        <div class="panel-section" id="changelog-section">
+          <div class="panel-title">What's New</div>
+          <div class="changelog-list" id="changelog-list"><!-- populated by app.js --></div>
+        </div>
+        <div class="panel-section adjust-actions">
+          <button id="btn-help" class="btn-ghost btn-block" title="How to use Bandroom">? Help</button>
+        </div>
+        <button id="btn-reset" class="btn-ghost btn-block">Reset Team Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full team picker -- Teams rail button opens this instead of just pointing at the small
+       sidebar grid, since browsing all ~148 teams needs more room and search. -->
+  <div id="team-picker-overlay" hidden>
+    <div id="team-picker" class="glass">
+      <div class="team-picker-header">
+        <span>Choose a Team</span>
+        <button id="btn-close-picker" class="icon-btn">&times;</button>
+      </div>
+      <input type="text" id="team-picker-search" placeholder="Search teams..." class="team-picker-search" />
+      <div class="team-picker-grid" id="team-picker-grid"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- "The Bandroom" cloud marketplace -- same team icons/logos as everywhere else in the app
+       (fillTeamSwatch), same dock-magnify hover. Picking a team opens its "album" below. -->
+  <!-- The Bandroom -- main marketplace hub. Search/select a team to jump to its own album
+       (same as always), OR browse "Newest Uploads" right here, Mac Finder-icon-view style,
+       across every team at once -- clicking any tile jumps straight into that team's album on
+       the right tab. No fake/placeholder content anywhere: if nothing's been uploaded yet, the
+       hub says so plainly instead of showing empty grid slots. -->
+  <div id="bandroom-overlay" hidden>
+    <div id="bandroom-picker" class="glass">
+      <div class="team-picker-header">
+        <span>The Bandroom</span>
+        <button id="btn-close-bandroom" class="icon-btn">&times;</button>
+      </div>
+      <p class="bandroom-instructions">
+        Search for a team below to open its Sound Bank / Trophy Room, or click anything in
+        Newest Uploads to jump straight to it. Every team has its own Sound Bank (songs) and
+        Trophy Room (background images) -- open one and hit <strong>+ Upload</strong> to
+        contribute.
+      </p>
+      <div class="bandroom-hub-section-label">
+        Uploads
+        <select id="bandroom-hub-sort" class="bandroom-hub-sort">
+          <option value="newest">Newest</option>
+          <option value="views">Most Viewed</option>
+          <option value="downloads">Most Downloaded</option>
+          <option value="likes">Most Liked</option>
+        </select>
+      </div>
+      <div class="bandroom-recent-grid" id="bandroom-recent-grid"><!-- populated by app.js --></div>
+      <div class="bandroom-hub-section-label">Top Contributing Teams</div>
+      <div class="bandroom-leaderboard" id="bandroom-leaderboard"><!-- populated by app.js --></div>
+      <div class="bandroom-hub-section-label">Find a Team</div>
+      <input type="text" id="bandroom-search" placeholder="Search teams..." class="team-picker-search" />
+      <div class="team-picker-grid" id="bandroom-team-grid"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- A team's album -- Sound Bank (songs) / Trophy Room (images). Only real uploads render as
+       tiles; an empty team shows a clear "nothing here yet" message instead of a wall of empty
+       placeholder slots. -->
+  <div id="bandroom-album-overlay" hidden>
+    <div id="bandroom-album" class="glass">
+      <div class="team-picker-header">
+        <div class="bandroom-album-title">
+          <span class="team-swatch bandroom-album-icon" id="bandroom-album-icon"></span>
+          <span id="bandroom-album-name">Team</span>
+        </div>
+        <button id="btn-close-bandroom-album" class="icon-btn">&times;</button>
+      </div>
+      <div class="bandroom-album-tabs">
+        <button class="bandroom-album-tab active" id="tab-sound-bank">Sound Bank</button>
+        <button class="bandroom-album-tab" id="tab-trophy-room">Trophy Room</button>
+      </div>
+      <p class="bandroom-instructions" id="bandroom-album-instructions"></p>
+      <div class="bandroom-album-toolbar">
+        <input type="text" id="bandroom-album-search" placeholder="Search this album..." class="team-picker-search" />
+        <button id="btn-bandroom-album-download-all" class="btn-ghost" title="Download every item in this album">Download All</button>
+      </div>
+      <div class="bandroom-album-grid bandroom-songs-grid" id="bandroom-songs-grid"><!-- populated by app.js --></div>
+      <div class="bandroom-album-grid bandroom-images-grid" id="bandroom-images-grid" hidden><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- Profile -- Google sign-in scaffolded ahead of a real OAuth Client ID being configured
+       (see GoogleAuthService.cs). Shows "not signed in" state and a disabled-with-explanation
+       sign-in button until that's set up; the plumbing (session persistence, worker verification)
+       is real and ready, not a mockup. -->
+  <div id="profile-overlay" hidden>
+    <div id="profile-dialog" class="glass">
+      <!-- Avatar -- local custom upload (works signed-out) shown if set, else the Google picture
+           if signed in, else the team badge fallback. Separate from the Google avatar so
+           signed-out users still get a personalized picture. -->
+      <input type="file" id="profile-avatar-file-input" accept="image/*" hidden />
+      <div id="profile-avatar-row">
+        <img id="profile-avatar" alt="" hidden />
+        <button id="btn-profile-avatar-upload" class="icon-btn" title="Change avatar">📷</button>
+        <div id="profile-identity">
+          <div id="profile-name"></div>
+          <div id="profile-email"></div>
+          <div id="profile-member-since"></div>
+        </div>
+      </div>
+
+      <div id="profile-signed-out">
+        <p class="save-profile-instructions">
+          Sign in with Google to keep your uploads and settings tied to your account across
+          devices. Optional -- everything in Bandroom still works fully signed out.
+        </p>
+        <button id="btn-google-signin" class="btn-primary">Sign in with Google</button>
+      </div>
+      <div id="profile-signed-in" hidden>
+        <button id="btn-google-signout" class="btn-ghost">Sign Out</button>
+      </div>
+
+      <!-- Universal profile -- favorite team + lifetime stats. Distinct from the per-team "Save
+           Profile" feature (song-to-situation assignments for one team); this is one record per
+           install, works fully signed-out, and mirrors to the cloud when signed in with Google
+           so it can follow the account across devices (see ConfigStore.UserProfile). -->
+      <div class="save-profile-header" id="profile-favorite-header">Favorite Team</div>
+      <select id="profile-favorite-team" class="team-picker-search"></select>
+
+      <div class="save-profile-header" id="profile-rival-header">Rival Team</div>
+      <select id="profile-rival-team" class="team-picker-search"></select>
+
+      <div class="save-profile-header" id="profile-bio-header">Bio</div>
+      <input type="text" id="profile-bio-input" class="save-profile-input" maxlength="140" placeholder="A short tagline about you..." />
+
+      <div class="save-profile-header" id="profile-level-header">Level <span id="profile-level-num">1</span></div>
+      <div id="profile-achievements"><!-- populated by app.js --></div>
+
+      <div class="save-profile-header" id="profile-stats-header">Stats</div>
+      <div id="profile-stats-grid">
+        <div class="profile-stat"><span id="profile-stat-games">0</span><label>Games Watched</label></div>
+        <div class="profile-stat"><span id="profile-stat-songs">0</span><label>Songs Triggered</label></div>
+        <div class="profile-stat"><span id="profile-stat-uploads">0</span><label>Uploads</label></div>
+        <div class="profile-stat"><span id="profile-stat-downloads">0</span><label>Downloads</label></div>
+        <div class="profile-stat"><span id="profile-stat-streak">0</span><label>Day Streak</label></div>
+        <div class="profile-stat"><span id="profile-stat-likes">0</span><label>Likes Received</label></div>
+      </div>
+      <div id="profile-most-triggered"></div>
+      <div id="profile-top-uploader-badge" hidden>🏆 Top Uploader for <span></span></div>
+
+      <div class="save-profile-header" id="profile-record-header">Favorite Team Record</div>
+      <div id="profile-record-row">
+        <span id="profile-record-text">0-0</span>
+        <button id="btn-record-win" class="btn-ghost">Log Win</button>
+        <button id="btn-record-loss" class="btn-ghost">Log Loss</button>
+      </div>
+
+      <div class="save-profile-header" id="profile-by-team-header">Games Watched by Team</div>
+      <div id="profile-by-team-list"><!-- populated by app.js, top 5 --></div>
+
+      <div class="save-profile-header" id="profile-uploads-header">My Uploads</div>
+      <div id="profile-my-uploads-list"><!-- populated by app.js from local upload tracking --></div>
+
+      <label id="profile-toasts-toggle-row">
+        <input type="checkbox" id="profile-toasts-toggle" checked />
+        Show toast notifications
+      </label>
+
+      <div class="save-profile-actions" id="profile-io-actions">
+        <button id="btn-export-user-profile" class="btn-ghost">Export Profile</button>
+        <button id="btn-import-user-profile" class="btn-ghost">Import Profile</button>
+        <button id="btn-reset-user-profile-stats" class="btn-ghost">Reset Stats</button>
+      </div>
+
+      <div class="save-profile-actions">
+        <button id="btn-close-profile" class="btn-ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom team logo crop tool -- upload any image, drag to reposition and use the slider to
+       zoom, and whatever's inside the square window is exactly what gets saved as that team's
+       logo everywhere in the app (team tiles, marketplace song tiles, etc). Fixed square output
+       is what keeps every logo uniform regardless of the source image's own shape/aspect ratio. -->
+  <input type="file" id="logo-crop-file-input" accept="image/*" hidden />
+  <!-- Creator-only batch logo import (item 20, opened via Ctrl+Alt+Shift+L, see app.js) --
+       webkitdirectory lets the OS folder picker hand back every image in one folder at once,
+       which openBatchLogoImportTool() then feeds through the SAME crop tool below one at a
+       time. Not reachable from any visible button/menu on purpose. -->
+  <input type="file" id="batch-logo-folder-input" accept="image/*" webkitdirectory multiple hidden />
+  <div id="logo-crop-overlay" hidden>
+    <div id="logo-crop-dialog" class="glass">
+      <div class="save-profile-header" id="logo-crop-header">Set Team Logo</div>
+      <p class="save-profile-instructions">
+        Drag the image to reposition it, use the slider to zoom. Whatever shows inside the
+        square becomes the logo -- keep the important part centered.
+      </p>
+      <!-- Only shown mid-batch-import -- lets the operator correct a bad filename->team guess
+           before hitting Save Logo for this image. -->
+      <div id="batch-logo-team-row" hidden>
+        <label for="batch-logo-team-select">Team:</label>
+        <select id="batch-logo-team-select"></select>
+      </div>
+      <div id="logo-crop-viewport">
+        <canvas id="logo-crop-canvas" width="400" height="400"></canvas>
+        <div id="logo-crop-empty">Choose an image to get started</div>
+      </div>
+      <div id="logo-crop-controls">
+        <button id="btn-logo-crop-choose" class="btn-ghost">Choose Image...</button>
+        <input type="range" id="logo-crop-zoom" min="100" max="900" value="100" disabled />
+      </div>
+      <div class="save-profile-actions">
+        <button id="btn-logo-crop-cancel" class="btn-ghost">Cancel</button>
+        <!-- Batch-only: skip this image without saving a logo for it. Hidden outside batch mode
+             via CSS (see style.css) since #batch-logo-team-row's hidden state is the visibility
+             signal for "are we in a batch". -->
+        <button id="btn-logo-crop-skip" class="btn-ghost">Skip</button>
+        <button id="btn-logo-crop-confirm" class="btn-primary" disabled>Save Logo</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom team BACKGROUND crop tool -- same drag/zoom/canvas pattern as the logo crop tool
+       above, but with a fixed 16:9 output (matches the full-screen cover backdrop's aspect ratio,
+       see #backdrop-vs-away/#backdrop-vs-home in style.css) instead of a square. This is the only
+       in-app way to upload a CUSTOM background from the user's own files -- "Set as Background"
+       elsewhere in the app only covers downloading a Trophy Room image from the marketplace. -->
+  <input type="file" id="bg-crop-file-input" accept="image/*" hidden />
+  <div id="bg-crop-overlay" hidden>
+    <div id="bg-crop-dialog" class="glass">
+      <div class="save-profile-header" id="bg-crop-header">Set Team Background</div>
+      <p class="save-profile-instructions">
+        Drag the image to reposition it, use the slider to zoom. Whatever shows inside the
+        widescreen window becomes the backdrop behind that team's screens.
+      </p>
+      <div id="bg-crop-viewport">
+        <canvas id="bg-crop-canvas" width="960" height="540"></canvas>
+        <div id="bg-crop-empty">Choose an image to get started</div>
+      </div>
+      <div id="bg-crop-controls">
+        <button id="btn-bg-crop-choose" class="btn-ghost">Choose Image...</button>
+        <input type="range" id="bg-crop-zoom" min="100" max="900" value="100" disabled />
+      </div>
+      <div class="save-profile-actions">
+        <button id="btn-bg-crop-cancel" class="btn-ghost">Cancel</button>
+        <button id="btn-bg-crop-confirm" class="btn-primary" disabled>Save Background</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- My Downloads -- everything the user has pulled down locally from the marketplace, songs
+       and images together, newest first, with clear "[School] — [Name]" identifiers so a saved
+       item is still recognizable outside of whichever team's album it came from. -->
+  <div id="my-downloads-overlay" hidden>
+    <div id="my-downloads" class="glass">
+      <div class="team-picker-header">
+        <span>My Downloads</span>
+        <button id="btn-close-my-downloads" class="icon-btn">&times;</button>
+      </div>
+      <p class="bandroom-instructions">
+        Songs you download here are added straight to your Sound Bank library (Assign Track will
+        list them right away). Images are saved for later -- open one from a team's Trophy Room
+        if you want to set it as that team's background.
+      </p>
+      <!-- End-user "import my own song" pipeline (item 21) -- picks a local file, names it,
+           trims/normalizes it through the same tool a marketplace track uses, and it lands
+           right here alongside real downloads. -->
+      <button id="btn-import-local-song" class="btn-ghost bandroom-import-song-btn">+ Import Your Own Song</button>
+      <div class="bandroom-album-grid" id="my-downloads-grid"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- Discord Chat -- a docked (not full-screen-modal) panel so it can sit open on the side while
+       still watching a game, unlike the other marketplace overlays which cover the whole window.
+       Read-only relay of one Discord channel via the usercount worker's /discord/messages
+       endpoint (see that worker for the bot-token/channel-id setup this needs on the owner's
+       side); polling starts when opened and stops when closed, see pollDiscordChat in app.js. -->
+  <div id="discord-chat-overlay" hidden>
+    <div id="discord-chat-panel" class="glass">
+      <div class="team-picker-header">
+        <span>Discord Chat</span>
+        <button id="btn-close-discord-chat" class="icon-btn">&times;</button>
+      </div>
+      <div id="discord-chat-messages"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- Matchup picker / GAMETIME -- pick who's home and away for this game so the app can
+       auto-load BOTH teams' own saved profiles and play the right side's song when OCR detects
+       who actually scored/forced a turnover, instead of always assuming "the active team". -->
+  <div id="matchup-overlay" hidden>
+    <div id="matchup-dialog" class="glass">
+      <div class="matchup-header">
+        <span>Start a Game</span>
+        <button id="btn-close-matchup" class="icon-btn">&times;</button>
+      </div>
+      <p class="matchup-instructions">
+        Do this while you're still on CFB 27's own team-select screen: pick the same two teams
+        below, then hit GAMETIME right before kickoff. Each team's own saved profile loads
+        automatically, so the right song plays for whichever side actually scores or forces a
+        turnover. You can still switch between them below to tweak songs during the game --
+        GAMETIME only locks in <em>who's home and away</em>, not which one you're editing.
+        Press <strong>Stop Watching</strong> at the top when the game ends to unlock and start a
+        new one.
+      </p>
+      <div class="matchup-columns">
+        <div class="matchup-column">
+          <div class="matchup-column-title">Away</div>
+          <input type="text" id="matchup-away-search" placeholder="Search teams..." class="team-picker-search" />
+          <div class="team-picker-grid matchup-grid" id="matchup-away-grid"></div>
+        </div>
+        <div class="matchup-column">
+          <div class="matchup-column-title">Home</div>
+          <input type="text" id="matchup-home-search" placeholder="Search teams..." class="team-picker-search" />
+          <div class="team-picker-grid matchup-grid" id="matchup-home-grid"></div>
+        </div>
+      </div>
+      <div class="save-profile-subtext" id="matchup-subtext"></div>
+      <div class="save-profile-actions">
+        <button id="btn-matchup-cancel" class="btn-ghost">Cancel</button>
+        <button id="btn-matchup-confirm" class="gametime-btn" disabled>GAMETIME</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save Profile dialog -- replaces the native window.prompt() (which showed a generic
+       "appassets says" browser dialog with no context) with one that explains what's about
+       to happen before the user commits to it. -->
+  <div id="save-profile-overlay" hidden>
+    <div id="save-profile-dialog" class="glass">
+      <div class="save-profile-header">Save Profile</div>
+      <p class="save-profile-instructions">
+        This saves every song currently assigned to situations for the active team. Keep the
+        name as-is to overwrite that team's existing save, or type a different name to keep
+        this setup as a separate, extra profile you can reload later.
+      </p>
+      <input type="text" id="save-profile-name" class="save-profile-input" />
+      <div class="save-profile-subtext" id="save-profile-subtext"></div>
+      <div class="save-profile-actions">
+        <button id="btn-save-profile-cancel" class="btn-ghost">Cancel</button>
+        <button id="btn-save-profile-confirm" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Marketplace upload -- school is implicit (the album's own team, never re-typed), so this
+       only asks for the item's name per the upload spec. Reuses .save-profile-* dialog styling
+       verbatim so it doesn't look like a bolted-on feature. -->
+  <input type="file" id="bandroom-upload-file-input" hidden />
+  <div id="bandroom-upload-overlay" hidden>
+    <div id="bandroom-upload-dialog" class="glass">
+      <div class="save-profile-header" id="bandroom-upload-header">Upload</div>
+      <p class="save-profile-instructions" id="bandroom-upload-instructions"></p>
+      <input type="text" id="bandroom-upload-name" class="save-profile-input" placeholder="Name..." />
+      <div class="save-profile-subtext" id="bandroom-upload-subtext"></div>
+      <div class="save-profile-actions">
+        <button id="btn-bandroom-upload-cancel" class="btn-ghost">Cancel</button>
+        <button id="btn-bandroom-upload-confirm" class="btn-primary">Upload</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- First-run onboarding -- shown once (gated by ConfigStore.IsFirstRun) to pick a
+       favorite team before the app is used normally, like the game's own team-select. -->
+  <div id="onboarding-overlay" hidden>
+    <div id="onboarding" class="glass">
+      <div class="onboarding-header">
+        <span class="brand-mark">B</span>
+        <span class="brand-name">Welcome to Bandroom</span>
+      </div>
+      <p class="onboarding-sub">Bandroom plays your sounds automatically while you watch CFB 27 --
+        pick your team to get started. You can change this anytime from the Teams panel.</p>
+      <input type="text" id="onboarding-search" placeholder="Search teams..." class="team-picker-search" />
+      <div class="team-picker-grid" id="onboarding-grid"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- Update progress -- the app used to silently download then instantly relaunch itself the
+       moment a download finished, with zero on-screen feedback while it happened. This shows a
+       progress bar while downloading, then asks before restarting instead of doing it out from
+       under the user. -->
+  <div id="update-overlay" hidden>
+    <div id="update-dialog" class="glass">
+      <div class="update-header" id="update-header">Downloading update&hellip;</div>
+      <div class="update-progress-track">
+        <div class="update-progress-fill" id="update-progress-fill" style="width:0%"></div>
+      </div>
+      <p class="update-sub" id="update-sub">Hang tight, this only takes a moment.</p>
+      <div class="update-actions" id="update-actions" hidden>
+        <button id="btn-update-restart" class="btn-primary">Restart Now</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Persistent bottom ticker, ESPN-style: a fixed logo tile on the far left (same
+       team-colored brand-mark as the header), scrolling upload activity ("<song/image name> —
+       <school name>") behind/into it. NOT the online-count -- that's the small presence-dot in
+       the header toolbar now. Shows a placeholder line until real uploads exist (Sound
+       Bank/Trophy Room backend isn't built yet). -->
+  <div id="bandroom-ticker">
+    <span class="brand-mark ticker-logo">B</span>
+    <div class="ticker-track">
+      <span id="ticker-text" class="ticker-scroll">No uploads yet — be the first to add a song or background in The Bandroom!</span>
+    </div>
+  </div>
+
+  <!-- Shared song-preview bar -- ONE instance reused by every preview surface in the app
+       (marketplace tile preview, My Downloads preview) instead of a per-surface player. Shows a
+       clickable/draggable waveform for scrubbing, Play/Pause, and a Stop that resets to 0:00.
+       See previewSong()/renderPreviewWaveform() in app.js. -->
+  <div id="preview-bar" hidden>
+    <button id="btn-preview-playpause" class="preview-bar-btn" title="Play/Pause">▶</button>
+    <button id="btn-preview-stop" class="preview-bar-btn" title="Stop">⏹</button>
+    <div id="preview-name" class="preview-bar-name"></div>
+    <canvas id="preview-waveform" width="480" height="40"></canvas>
+    <span id="preview-time" class="preview-bar-time">0:00</span>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

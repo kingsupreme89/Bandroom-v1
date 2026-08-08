@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bandroom Progress Tracker</title>
+<style>
+  :root {
+    --bg: #0f0f13;
+    --card: #1a1a24;
+    --accent: #6366f1;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+    --text: #e4e4e7;
+    --muted: #71717a;
+    --border: #27272a;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 24px; min-height: 100vh; }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  h1 span { color: var(--accent); }
+  .subtitle { color: var(--muted); font-size: 0.8rem; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .column { background: var(--card); border-radius: 12px; padding: 16px; border: 1px solid var(--border); }
+  .column h2 { font-size: 1rem; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .task { padding: 8px 10px; margin-bottom: 6px; border-radius: 8px; background: rgba(255,255,255,0.03); font-size: 0.85rem; display: flex; align-items: flex-start; gap: 8px; }
+  .task .icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+  .task .text { flex: 1; }
+  .task .note { color: var(--muted); font-size: 0.75rem; margin-top: 2px; }
+  .done .text { opacity: 0.6; }
+  .status-bar { background: var(--card); border-radius: 12px; padding: 12px 16px; border: 1px solid var(--border); margin-bottom: 16px; font-size: 0.8rem; color: var(--muted); }
+  .status-bar strong { color: var(--text); }
+  .thinking { background: var(--card); border-radius: 12px; padding: 12px 16px; border: 1px solid var(--border); margin-bottom: 16px; }
+  .thinking .tag { font-size: 0.7rem; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .thinking .msg { font-size: 0.85rem; font-style: italic; color: var(--text); }
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+  .stat { background: var(--card); border-radius: 10px; padding: 12px; border: 1px solid var(--border); text-align: center; }
+  .stat .num { font-size: 1.5rem; font-weight: 700; }
+  .stat .label { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+  .log { background: var(--card); border-radius: 12px; padding: 12px 16px; border: 1px solid var(--border); font-size: 0.78rem; max-height: 150px; overflow-y: auto; }
+  .log .entry { padding: 2px 0; color: var(--muted); }
+  .log .entry .time { color: var(--accent); }
+  .auditor { background: var(--card); border-radius: 12px; padding: 12px 16px; border: 1px solid var(--border); margin-bottom: 16px; }
+  .auditor h2 { font-size: 0.9rem; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .auditor-entry { padding: 8px 10px; margin-bottom: 6px; border-radius: 8px; background: rgba(255,255,255,0.03); font-size: 0.82rem; border-left: 3px solid var(--border); }
+  .auditor-entry.mismatch { border-left-color: var(--red); }
+  .auditor-entry.verified { border-left-color: var(--green); }
+  .auditor-entry.fixed { border-left-color: var(--accent); }
+  .auditor-entry .atime { color: var(--accent); font-weight: 600; margin-right: 6px; }
+  #refresh { font-size: 0.7rem; color: var(--muted); float: right; }
+  .blink { animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+</style>
+</head>
+<body>
+<h1>🔵 <span>Bandroom</span> Progress Tracker</h1>
+<div class="subtitle">This page watches the to-do list and updates itself — you don't have to do anything, just look</div>
+
+<div class="summary" id="summary"></div>
+
+<div class="auditor" id="auditorPanel" style="display:none">
+  <h2>🕵️ Double-Checked Stuff (things I verified were actually true, not just claimed)</h2>
+  <div id="auditorEntries"></div>
+</div>
+
+<div class="grid" id="columns"></div>
+
+<div class="thinking" id="thinking" style="display:none">
+  <div class="tag">💭 What's happening right now</div>
+  <div class="msg" id="thoughtText"></div>
+</div>
+
+<div class="status-bar" id="status"></div>
+
+<div class="log" id="log"><div class="entry"><span class="time">--:--</span> Just opened up — reading the to-do list now…</div></div>
+<div id="refresh">this page checks for updates every 5 seconds, all by itself · doesn't use the internet or cost anything · just reads files on this computer</div>
+
+<script>
+const TASK_FILE = 'TASK_BOARD.md';
+
+function parseBoard(text) {
+  const data = { columns: {}, summary: {}, thought: '', log: [], status: {}, auditorFindings: [] };
+  let currentSection = null;
+
+  const lines = text.split('\n');
+  for (const line of lines) {
+    // Section headers
+    if (line.startsWith('## ')) {
+      currentSection = line.replace('## ', '').trim();
+      if (currentSection.includes('Status')) currentSection = 'thought';
+      else if (currentSection.includes('State')) currentSection = 'state';
+      else if (currentSection.includes('Auditor Findings')) currentSection = 'auditor';
+      else if (!data.columns[currentSection]) data.columns[currentSection] = [];
+      continue;
+    }
+
+    // Auditor findings: "- [HH:MM] <emoji/word> <text>"
+    if (currentSection === 'auditor' && line.trim().startsWith('- [')) {
+      const m = line.trim().match(/^- \[(\d{2}:\d{2})\]\s*(.+)$/);
+      if (m) data.auditorFindings.push({ time: m[1], text: m[2] });
+      continue;
+    }
+
+    // Thinking
+    if (currentSection === 'thought' && line.startsWith('💭')) {
+      data.thought = line.replace('💭', '').trim();
+      continue;
+    }
+
+    // Shared state
+    if (currentSection === 'state' && line.startsWith('- **')) {
+      const m = line.match(/\*\*([^*]+)\*\*:\s*(.+)/);
+      if (m) data.status[m[1].trim()] = m[2].trim();
+      continue;
+    }
+
+    // Task rows
+    if (currentSection && data.columns[currentSection] && line.startsWith('| ') && !line.startsWith('| #') && !line.match(/^\|[\s-]+\|/)) {
+      const cells = line.split('|').filter(c => c.trim());
+      if (cells.length >= 3) {
+        const taskNum = cells[0].trim();
+        const taskName = cells[1].trim();
+        const status = cells[2].trim();
+        const notes = cells[3] ? cells[3].trim() : '';
+        if (taskNum && taskNum.match(/^\d+$/)) {
+          data.columns[currentSection].push({ num: taskNum, name: taskName, status, notes });
+        }
+      }
+    }
+
+    // Log lines
+    if (currentSection === 'state' && line.startsWith('- **')) {
+      data.log.push(line);
+    }
+  }
+  return data;
+}
+
+function statusIcon(status) {
+  if (status.includes('DONE') || status.includes('✅')) return '🟢';
+  if (status.includes('PROGRESS') || status.includes('🔴')) return '🔴';
+  return '⬜';
+}
+
+function statusClass(status) {
+  if (status.includes('DONE') || status.includes('✅')) return 'done';
+  if (status.includes('PROGRESS') || status.includes('🔴')) return 'progress';
+  return 'todo';
+}
+
+async function refresh() {
+  try {
+    const resp = await fetch(TASK_FILE, { cache: 'no-cache' });
+    if (!resp.ok) throw new Error('File not found');
+    const text = await resp.text();
+    const data = parseBoard(text);
+
+    // Summary stats
+    let total = 0, done = 0, inProgress = 0;
+    const summaryHtml = [];
+    for (const [col, tasks] of Object.entries(data.columns)) {
+      tasks.forEach(t => {
+        total++;
+        if (t.status.includes('DONE') || t.status.includes('✅')) done++;
+        if (t.status.includes('PROGRESS') || t.status.includes('🔴')) inProgress++;
+      });
+    }
+    document.getElementById('summary').innerHTML = `
+      <div class="stat"><div class="num" style="color:var(--accent)">${total}</div><div class="label">Total Jobs</div></div>
+      <div class="stat"><div class="num" style="color:var(--green)">${done}</div><div class="label">All Done ✅</div></div>
+      <div class="stat"><div class="num" style="color:var(--yellow)">${inProgress}</div><div class="label">Working On It 🔴</div></div>
+      <div class="stat"><div class="num" style="color:var(--muted)">${total - done - inProgress}</div><div class="label">Haven't Started</div></div>
+    `;
+
+    // Auditor findings
+    if (data.auditorFindings.length) {
+      document.getElementById('auditorPanel').style.display = 'block';
+      const entriesHtml = data.auditorFindings.slice().reverse().map(f => {
+        let cls = '';
+        if (f.text.includes('MISMATCH') || f.text.includes('⚠️')) cls = 'mismatch';
+        else if (f.text.includes('VERIFIED') || f.text.includes('✅')) cls = 'verified';
+        else if (f.text.includes('FIXED')) cls = 'fixed';
+        return `<div class="auditor-entry ${cls}"><span class="atime">${f.time}</span>${f.text}</div>`;
+      }).join('');
+      document.getElementById('auditorEntries').innerHTML = entriesHtml;
+    }
+
+    // Columns
+    let colsHtml = '';
+    for (const [col, tasks] of Object.entries(data.columns)) {
+      colsHtml += `<div class="column"><h2>${col}</h2>`;
+      tasks.forEach(t => {
+        const cls = statusClass(t.status);
+        const ico = statusIcon(t.status);
+        colsHtml += `<div class="task ${cls}"><span class="icon">${ico}</span><div class="text">${t.name}<div class="note">${t.notes}</div></div></div>`;
+      });
+      colsHtml += '</div>';
+    }
+    document.getElementById('columns').innerHTML = colsHtml;
+
+    // Thought
+    if (data.thought) {
+      document.getElementById('thinking').style.display = 'block';
+      document.getElementById('thoughtText').textContent = data.thought;
+    }
+
+    // Status bar
+    const statusItems = Object.entries(data.status).map(([k,v]) => `<strong>${k}:</strong> ${v}`).join(' &nbsp;·&nbsp; ');
+    document.getElementById('status').innerHTML = statusItems;
+
+    // Log
+    const now = new Date().toLocaleTimeString('en-US', { hour12: false });
+    document.getElementById('log').innerHTML = `<div class="entry"><span class="time">${now}</span> Checked again — ${done} out of ${total} jobs are done</div>`;
+
+    document.getElementById('refresh').textContent = `this page checks for updates every 5 seconds, all by itself · doesn't use the internet or cost anything · just reads files on this computer · last checked: ${now}`;
+  } catch (e) {
+    document.getElementById('log').innerHTML = `<div class="entry" style="color:var(--red)">⚠️ Something's wrong — can't find the to-do list file (${e.message})</div>`;
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

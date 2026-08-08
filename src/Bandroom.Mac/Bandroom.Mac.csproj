@@ -1,0 +1,60 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RootNamespace>Bandroom.Mac</RootNamespace>
+    <AssemblyName>Bandroom.Mac</AssemblyName>
+    <DefaultItemExcludes>$(DefaultItemExcludes);..\*.cs</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.19" />
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Bandroom.Core\Bandroom.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Shared source files from the Windows root (no WinForms/Win32 deps) -->
+  <ItemGroup>
+    <Compile Include="..\..\ConfigStore.cs" />
+    <Compile Include="..\..\TriggerEntry.cs" />
+    <Compile Include="..\..\TeamColors.cs" />
+    <Compile Include="..\..\TeamLogo.cs" />
+    <Compile Include="..\..\CategoryMap.cs" />
+    <Compile Include="..\..\ScorebugPreset.cs" />
+    <!-- ReverbProvider.cs intentionally NOT included: despite living at the Windows root, it
+         depends on NAudio (ISampleProvider, WaveFormat), which is Windows only and isn't
+         referenced by this project. It briefly broke the Mac build (2026 08 07) when added
+         here under the "no WinForms/Win32 deps" assumption, which doesn't hold for NAudio
+         specifically. Reverb for Mac needs its own AVFoundation based implementation later,
+         not a reuse of this file. -->
+    <Compile Include="..\..\ConfigProfileManager.cs" />
+    <Compile Include="..\..\MarketplaceDownloadService.cs" />
+    <Compile Include="..\..\ProfileSyncService.cs" />
+    <Compile Include="..\..\GoogleAuthService.cs" />
+    <Compile Include="..\..\UserCountService.cs" />
+    <Compile Include="..\..\VersionGuard.cs" />
+    <Compile Include="..\..\VolumeProfilePreset.cs" />
+    <!-- CrashLog.cs excluded: uses System.Windows.Forms (Windows-only). Mac stub in PlatformStubs.Mac.cs. -->
+    <Compile Include="..\..\ChangelogService.cs" />
+    <Compile Include="..\..\EventHistoryFeed.cs" />
+  </ItemGroup>
+
+  <!-- Copy wwwroot + assets to output -->
+  <ItemGroup>
+    <Content Include="..\..\wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Content Include="..\..\Assets\**\*" CopyToOutputDirectory="PreserveNewest" Link="Assets\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Content Include="..\..\TeamLogos\**\*" CopyToOutputDirectory="PreserveNewest" Link="TeamLogos\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Content Include="..\..\TeamBackgrounds\**\*" Exclude="..\..\TeamBackgrounds_original_fullres\**\*" CopyToOutputDirectory="PreserveNewest" Link="TeamBackgrounds\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Content Include="..\..\Fonts\**\*" CopyToOutputDirectory="PreserveNewest" Link="Fonts\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>
