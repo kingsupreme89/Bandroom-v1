@@ -1505,8 +1505,8 @@ function openBandroomMarketplace() {
         });
       }
     }
-    renderBandroomHub();
-    renderLeaderboard();
+    renderPopularSongsShelf();
+    renderTopTeamBackgroundsShelf();
     search.focus();
   }, "openBandroomMarketplace");
 }
@@ -1775,60 +1775,117 @@ function buildMyDownloadTile(item) {
   return tile;
 }
 
-/// Per-team upload leaderboard (item 19) -- combines song + image counts per school from the
-/// worker's /leaderboard endpoint and shows the top few. Best-effort: any failure just leaves
-/// the section empty rather than breaking the rest of the hub.
-async function renderLeaderboard() {
-  const el = document.getElementById("bandroom-leaderboard");
+// ---- Popular Songs + Top Team Background shelves (Session 9 task queue item 1) --------
+// Replaces the old static "Uploads" grid + "Top Contributing Teams" leaderboard with two
+// horizontal shelves: a rotating "Popular Songs" carousel ranked by downloads+likes, and a
+// "Top Team Background Uploads" shelf seeded from the existing local TeamBackgrounds pack.
+
+// One rotation timer shared by both shelves (keyed by element id) so re-opening the hub or
+// switching sort doesn't stack up duplicate intervals.
+const _shelfRotationTimers = {};
+
+function startShelfRotation(elId) {
+  stopShelfRotation(elId);
+  const el = document.getElementById(elId);
   if (!el) return;
-  el.innerHTML = `<div class="bandroom-recent-empty">Loading...</div>`;
-  try {
-    const [songsRes, imagesRes] = await Promise.all([
-      fetch(`${MARKETPLACE_URL}/leaderboard?type=song`).then((r) => (r.ok ? r.json() : { schools: [] })),
-      fetch(`${MARKETPLACE_URL}/leaderboard?type=image`).then((r) => (r.ok ? r.json() : { schools: [] })),
-    ]);
-    if (document.getElementById("bandroom-overlay").hidden) return;
+  _shelfRotationTimers[elId] = setInterval(() => {
+    if (document.getElementById("bandroom-overlay")?.hidden) { stopShelfRotation(elId); return; }
+    if (el.matches(":hover")) return; // pause while the user is browsing the shelf
+    const tileWidth = el.firstElementChild?.getBoundingClientRect().width ?? 200;
+    const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 4;
+    el.scrollTo({ left: atEnd ? 0 : el.scrollLeft + tileWidth + 16, behavior: "smooth" });
+  }, 4000);
+}
 
-    const combined = new Map();
-    for (const { school, count } of [...(songsRes.schools ?? []), ...(imagesRes.schools ?? [])]) {
-      combined.set(school, (combined.get(school) ?? 0) + count);
-    }
-    const top = [...combined.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
-
-    el.innerHTML = "";
-    if (top.length === 0) {
-      el.innerHTML = `<div class="bandroom-recent-empty">No uploads yet -- be the first team on the board!</div>`;
-      return;
-    }
-    top.forEach(([school, count], i) => {
-      const row = document.createElement("div");
-      row.className = "bandroom-leaderboard-row";
-      row.innerHTML = `<span class="bandroom-leaderboard-rank">#${i + 1}</span>
-        <span class="bandroom-leaderboard-school">${school}</span>
-        <span class="bandroom-leaderboard-count">${count} upload${count === 1 ? "" : "s"}</span>`;
-      row.addEventListener("click", () => openTeamAlbum(school));
-      el.appendChild(row);
-    });
-  } catch (err) {
-    console.error("renderLeaderboard failed", err);
-    el.innerHTML = `<div class="bandroom-recent-empty">Couldn't load the leaderboard right now.</div>`;
+function stopShelfRotation(elId) {
+  if (_shelfRotationTimers[elId]) {
+    clearInterval(_shelfRotationTimers[elId]);
+    delete _shelfRotationTimers[elId];
   }
 }
 
-async function renderBandroomHub() {
-  const grid = document.getElementById("bandroom-recent-grid");
-  grid.innerHTML = `<div class="bandroom-recent-empty">Loading...</div>`;
-  const items = await fetchRecentUploads(20, _hubSort);
-  // The overlay may have been closed (or a different one reopened) while this fetch was in
-  // flight -- bail instead of writing into a grid the user can no longer see, or worse, into a
-  // hub that's since been torn down.
-  if (document.getElementById("bandroom-overlay").hidden) return;
-  grid.innerHTML = "";
-  if (items.length === 0) {
-    grid.innerHTML = `<div class="bandroom-recent-empty">Nothing uploaded yet -- open any team's Sound Bank and be the first!</div>`;
+/// Popular Songs carousel -- ranked by downloads+likes combined (falls back to whatever single
+/// sort the hub's dropdown has selected when that's not the default "newest"/combined view).
+async function renderPopularSongsShelf() {
+  const el = document.getElementById("bandroom-popular-shelf");
+  if (!el) return;
+  el.innerHTML = `<div class="bandroom-recent-empty">Loading...</div>`;
+  try {
+    const songs = await fetchUploadList("song", null, null);
+    if (document.getElementById("bandroom-overlay").hidden) return;
+    let ranked = songs;
+    if (_hubSort === "views" || _hubSort === "downloads" || _hubSort === "likes") {
+      ranked = [...songs].sort((a, b) => (b[_hubSort] ?? 0) - (a[_hubSort] ?? 0));
+    } else {
+      // Default ranking: downloads + likes combined, per the owner's "ranked by downloads+likes"
+      // spec, ties broken newest-first.
+      ranked = [...songs].sort((a, b) => {
+        const scoreDiff = ((b.downloads ?? 0) + (b.likes ?? 0)) - ((a.downloads ?? 0) + (a.likes ?? 0));
+        return scoreDiff !== 0 ? scoreDiff : (a.uploadedAt < b.uploadedAt ? 1 : -1);
+      });
+    }
+    ranked = ranked.slice(0, 20);
+    el.innerHTML = "";
+    if (ranked.length === 0) {
+      el.innerHTML = `<div class="bandroom-recent-empty">No songs uploaded yet -- open any team's Sound Bank and be the first!</div>`;
+      return;
+    }
+    for (const item of ranked) el.appendChild(buildItemTile(item, /*inHub*/ true));
+    startShelfRotation("bandroom-popular-shelf");
+  } catch (err) {
+    console.error("renderPopularSongsShelf failed", err);
+    el.innerHTML = `<div class="bandroom-recent-empty">Couldn't load popular songs right now.</div>`;
+  }
+}
+
+/// Top Team Background Uploads shelf -- seeded from the existing local TeamBackgrounds pack
+/// (bridge.GetTeamBackgroundUrl, same source used everywhere else backgrounds are shown) rather
+/// than a live marketplace image feed, per the owner's "seeded from the existing pack for now"
+/// scoping. Clicking a tile jumps into that team's Sound Bank, same as every other hub tile.
+async function renderTopTeamBackgroundsShelf() {
+  const el = document.getElementById("bandroom-backgrounds-shelf");
+  if (!el) return;
+  el.innerHTML = `<div class="bandroom-recent-empty">Loading...</div>`;
+  if (!bridge || !Array.isArray(state.teams)) {
+    el.innerHTML = `<div class="bandroom-recent-empty">Team backgrounds aren't available right now.</div>`;
     return;
   }
-  for (const item of items) grid.appendChild(buildItemTile(item, /*inHub*/ true));
+  try {
+    const results = await Promise.all(
+      state.teams.map(async (team) => {
+        const url = await bridge.GetTeamBackgroundUrl(team.name).catch(() => null);
+        return url ? { team, url } : null;
+      })
+    );
+    if (document.getElementById("bandroom-overlay").hidden) return;
+    const withBackgrounds = results.filter(Boolean).slice(0, 20);
+    el.innerHTML = "";
+    if (withBackgrounds.length === 0) {
+      el.innerHTML = `<div class="bandroom-recent-empty">No team backgrounds available yet.</div>`;
+      return;
+    }
+    for (const { team, url } of withBackgrounds) {
+      const tile = document.createElement("div");
+      tile.className = "bandroom-item-tile";
+      tile.title = `${team.name} background`;
+      tile.innerHTML = `
+        <div class="bandroom-item-thumb"><img src="${sanitizeHTML(url)}" alt="${sanitizeHTML(team.name)}" loading="lazy"></div>
+        <div class="bandroom-item-name">${sanitizeHTML(team.name)}</div>
+        <div class="bandroom-item-school">Team Background</div>`;
+      tile.addEventListener("click", () => openTeamAlbum(team.name));
+      el.appendChild(tile);
+    }
+    startShelfRotation("bandroom-backgrounds-shelf");
+  } catch (err) {
+    console.error("renderTopTeamBackgroundsShelf failed", err);
+    el.innerHTML = `<div class="bandroom-recent-empty">Couldn't load team backgrounds right now.</div>`;
+  }
+}
+
+// Kept as the shared refresh entry point other call sites (edit/delete handlers, sort-change
+// listener) already use -- now refreshes both shelves instead of the old single grid.
+async function renderBandroomHub() {
+  await Promise.all([renderPopularSongsShelf(), renderTopTeamBackgroundsShelf()]);
 }
 
 // Song tiles use the uploading team's logo instead of a generic note icon, so every song tile

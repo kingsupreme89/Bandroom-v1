@@ -316,7 +316,7 @@
           one and hit <strong>+ Upload</strong> to contribute.
         </p>
         <div class="bandroom-hub-section-label">
-          Uploads
+          Popular Songs
           <select id="bandroom-hub-sort" class="bandroom-hub-sort">
             <option value="newest">Newest</option>
             <option value="views">Most Viewed</option>
@@ -324,9 +324,16 @@
             <option value="likes">Most Liked</option>
           </select>
         </div>
-        <div class="bandroom-recent-grid" id="bandroom-recent-grid"><!-- populated by app.js --></div>
-        <div class="bandroom-hub-section-label">Top Contributing Teams</div>
-        <div class="bandroom-leaderboard" id="bandroom-leaderboard"><!-- populated by app.js --></div>
+        <!-- Rotating carousel of the top songs ranked by downloads+likes -- auto-advances every
+             few seconds, pauses on hover/interaction (see startShelfRotation in app.js). Reuses
+             buildItemTile the same as every other item grid in the app. -->
+        <div class="bandroom-shelf" id="bandroom-popular-shelf"><!-- populated by app.js --></div>
+
+        <div class="bandroom-hub-section-label">Top Team Background Uploads</div>
+        <!-- Seeded from the existing local TeamBackgrounds pack for now (not yet a live
+             marketplace image feed) -- one tile per team that has a background set, via
+             bridge.GetTeamBackgroundUrl, same source Set Matchup/team select already use. -->
+        <div class="bandroom-shelf" id="bandroom-backgrounds-shelf"><!-- populated by app.js --></div>
       </div>
     </div>
   </div>

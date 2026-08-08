@@ -1598,15 +1598,20 @@ input, select, textarea, [contenteditable] {
   border-radius: 4px;
   padding: 2px 6px;
 }
-/* Mac Finder-style horizontal shelf */
-.bandroom-recent-grid {
+/* Mac Finder-style horizontal shelf -- also used by the Popular Songs carousel and Top Team
+   Background Uploads shelf (.bandroom-shelf), which auto-rotate via startShelfRotation() in
+   app.js, so both need smooth native scrolling for that to look like a carousel instead of a
+   jump-cut. */
+.bandroom-recent-grid,
+.bandroom-shelf {
   display: flex;
   gap: 12px;
   overflow-x: auto;
   overflow-y: hidden;
   flex: 0 0 auto;
   padding-bottom: 10px;
-  margin-bottom: 4px;
+  margin-bottom: 20px;
+  scroll-behavior: smooth;
 }
 .bandroom-recent-empty {
   font-size: 12.5px;
