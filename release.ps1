@@ -69,6 +69,19 @@ if ($LASTEXITCODE -ne 0) { Write-Host "Squirrel pack failed." -ForegroundColor R
 
 Remove-Item $PublishDir -Recurse -Force
 
+# Squirrel writes RELEASES with a UTF-8 BOM, which corrupts the first entry's SHA1 hash when
+# Squirrel.Windows' own GithubSource client parses it -- CheckForUpdate() then silently finds
+# zero valid entries and reports "already on latest" instead of erroring or finding the update.
+# Bit us on v1.0.50 (uploaded with the BOM, existing installs couldn't see the new release at
+# all until the asset was stripped and re-uploaded). Strip it here so every future release ships
+# clean.
+$ReleasesFile = Join-Path $ReleaseDir "RELEASES"
+$releasesBytes = [System.IO.File]::ReadAllBytes($ReleasesFile)
+$bom = [System.Text.Encoding]::UTF8.GetPreamble()
+if ($releasesBytes.Length -ge $bom.Length -and (Compare-Object $releasesBytes[0..($bom.Length-1)] $bom -SyncWindow 0) -eq $null) {
+    [System.IO.File]::WriteAllBytes($ReleasesFile, $releasesBytes[$bom.Length..($releasesBytes.Length-1)])
+}
+
 Write-Host "  Squirrel packages:" -ForegroundColor Green
 Get-ChildItem $ReleaseDir -File | ForEach-Object {
     Write-Host "    $($_.Name)  ($([math]::Round($_.Length/1MB,1)) MB)"
