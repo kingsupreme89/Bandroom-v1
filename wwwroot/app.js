@@ -433,11 +433,44 @@ async function selectTeam(name) {
   await refreshCategories();
 }
 
+/// Picks the most legible ink color for text sitting on a `bg` swatch, preferring the team's
+/// OTHER color (primary on secondary, or vice versa) over plain black/white when it actually
+/// reads well -- so a pill reads as "team colors" rather than a generic dark-on-light chip.
+/// Falls back to black/white by relative luminance when the other team color doesn't contrast
+/// enough (e.g. two similarly-dark or similarly-light team colors).
+function pickContrastInk(bg, altColor) {
+  const luminance = (hex) => {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
+    if (!m) return null;
+    const [r, g, b] = [m[1], m[2], m[3]].map((h) => {
+      const c = parseInt(h, 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const bgLum = luminance(bg);
+  if (bgLum == null) return "#06222a";
+  const contrastRatio = (l1, l2) => (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  const altLum = luminance(altColor);
+  if (altLum != null) {
+    const altRatio = contrastRatio(bgLum, altLum);
+    if (altRatio >= 3.5) return altColor; // legible enough to read as "the other team color"
+  }
+  const blackRatio = contrastRatio(bgLum, 0);
+  const whiteRatio = contrastRatio(bgLum, 1);
+  return whiteRatio > blackRatio ? "#ffffff" : "#06222a";
+}
+
 function setActiveTeam(name, fromInit = false) {
   document.getElementById("team-name").textContent = name;
   applyBackground(name);
   const team = state.teams.find((t) => t.name === name);
-  document.documentElement.style.setProperty("--team-secondary", team?.secondary ?? "#22d3ee");
+  const secondary = team?.secondary ?? "#22d3ee";
+  const primary = team?.primary ?? "#0f766e";
+  document.documentElement.style.setProperty("--team-secondary", secondary);
+  document.documentElement.style.setProperty("--team-primary", primary);
+  document.documentElement.style.setProperty("--team-secondary-ink", pickContrastInk(secondary, primary));
+  document.documentElement.style.setProperty("--team-primary-ink", pickContrastInk(primary, secondary));
   updateProfileStatus();
   updateHeaderTeamBadge(team);
   updateMatchupSideBar();
@@ -2119,7 +2152,11 @@ function initDefaultSongPackPrompt() {
   document.getElementById("btn-songpack-skip").addEventListener("click", () => { promptOverlay.hidden = true; });
   document.getElementById("btn-songpack-download").addEventListener("click", () => {
     promptOverlay.hidden = true;
-    bridge?.DownloadDefaultSongPack();
+    // Temporary: the pack is too large for the in-app R2 download pipeline to be wired up yet
+    // (see DefaultSongPackService.cs), so this opens the pack's Google Drive link in the
+    // system browser instead. Switch back to bridge?.DownloadDefaultSongPack() once pack.zip
+    // is actually uploaded to the bandroom-default-songs R2 bucket.
+    bridge?.OpenExternalUrl("https://drive.google.com/file/d/1kZKcqfOSfMv9k2sppduTE9hWpaVrPerN/view");
   });
 
   window.addEventListener("bandroom:songpackdownloading", () => {

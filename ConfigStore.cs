@@ -686,7 +686,7 @@ internal static class ConfigStore
             new() { Trigger = "down:1st", Event = "1st Down", AudioFile = "" },
             new() { Trigger = "down:2nd", Event = "2nd Down", AudioFile = "" },
             new() { Trigger = "down:3rd", Event = "3rd Down", AudioFile = "" },
-            new() { Trigger = "down:4th", Event = "4th Down", AudioFile = @"C:\Games\Mod Folder\CFB Mods\MMC_Editor_v1.1.0.2\dies irie 0.wav" },
+            new() { Trigger = "down:4th", Event = "4th Down", AudioFile = "" },
             new() { Trigger = "flag:on", Event = "Penalty Flag", AudioFile = "" },
         };
 

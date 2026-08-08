@@ -521,6 +521,9 @@ public sealed class WebMainForm : Form
 
     public void OpenHelpFromWeb() => new ShortcutsForm(this).ShowDialog(this);
 
+    public void OpenExternalUrlFromWeb(string url) =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+
     /// <summary>All 33 situations, or just the ones in `category` (matches CategoryMap.Resolve,
     /// same "Downs"/"Scoring"/etc bucketing the category chips use) when category is non-null.
     /// null/"All" -> every situation, for the "All" chip.</summary>

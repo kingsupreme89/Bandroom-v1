@@ -45,7 +45,7 @@ if (Test-Path $PublishDir) { Remove-Item $PublishDir -Recurse -Force }
 
 Write-Host "  Building..." -ForegroundColor Yellow
 dotnet publish $ProjectFile -c Release -r win-x64 --self-contained false -o $PublishDir `
-    /p:AssemblyVersion=$version /p:FileVersion=$version
+    /p:AssemblyVersion=$version /p:FileVersion=$version /p:BundleDefaultSongs=false
 if ($LASTEXITCODE -ne 0) { Write-Host "Build failed." -ForegroundColor Red; exit 1 }
 
 Remove-Item (Join-Path $PublishDir "*.pdb") -Force -ErrorAction SilentlyContinue

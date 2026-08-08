@@ -774,6 +774,7 @@ public sealed class WebBridge
     public void RestartForUpdate() => _host.RestartForUpdateFromWeb();
     public void ResetTeamProfile() => _host.ResetTeamProfileFromWeb();
     public void OpenHelp() => _host.OpenHelpFromWeb();
+    public void OpenExternalUrl(string url) => _host.OpenExternalUrlFromWeb(url);
     public void TriggerEffectsTest() => _host.TriggerEffectsTestFromWeb();
     public string FireTestEvent(string side, string eventKey) => _host.FireTestEventFromWeb(side, eventKey);
     public void UnlockMatchup() => _host.UnlockMatchupFromWeb();

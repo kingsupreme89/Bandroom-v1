@@ -1540,7 +1540,7 @@ input, select, textarea, [contenteditable] {
   font-size: 12px; font-weight: 600;
   cursor: pointer;
 }
-.bandroom-album-tab.active { background: var(--team-secondary, var(--accent)); color: #06222a; border-color: transparent; }
+.bandroom-album-tab.active { background: var(--team-secondary, var(--accent)); color: var(--team-secondary-ink, #06222a); border-color: transparent; }
 
 .bandroom-album-grid { overflow-y: auto; min-height: 0; }
 /* SOUND BANK & TROPHY ROOM & MY DOWNLOADS — Nexus Mods-style 4-column card grid */
@@ -1771,7 +1771,7 @@ input, select, textarea, [contenteditable] {
 .bandroom-leaderboard-count { font-size: 11px; color: var(--text-muted); }
 
 /* Teams */
-#team-grid, #team-picker-grid, #bandroom-team-grid {
+#team-grid, #team-picker-grid, #bandroom-team-grid, .team-picker-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
@@ -2062,6 +2062,19 @@ input, select, textarea, [contenteditable] {
 .btn-ghost:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); }
 .btn-block { display: block; width: 100%; text-align: center; }
 .btn-danger { color: #ff6b6b !important; }
+.btn-primary {
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent);
+  color: #06222a;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-primary:hover { filter: brightness(1.1); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-danger:hover { background: rgba(255, 107, 107, 0.12) !important; }
 
 .btn-update {
@@ -2248,6 +2261,122 @@ input, select, textarea, [contenteditable] {
   cursor: default;
 }
 .matchup-btn.locked:hover { background: rgba(61, 220, 132, 0.10); border-color: rgba(61, 220, 132, 0.6); }
+
+/* Matchup / Save Profile / Upload dialogs -- these three overlays were shipped with markup but
+   no CSS at all, so unhiding them just dropped an unstyled <div> into normal document flow
+   (invisible, no positioning/z-index/background). Styled to match #team-picker-overlay /
+   .profile-dialog's existing fixed-centered-overlay pattern. */
+#matchup-overlay, #save-profile-overlay, #bandroom-upload-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+#matchup-overlay[hidden], #save-profile-overlay[hidden], #bandroom-upload-overlay[hidden] { display: none; }
+
+#matchup-dialog {
+  width: min(720px, 92vw);
+  max-height: 85vh;
+  padding: 24px;
+  border-radius: var(--radius-panel);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+.matchup-header {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 16px; font-weight: 700;
+}
+.matchup-instructions {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.matchup-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.matchup-column-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+/* List, not a grid of giant logo tiles -- overrides the 4-col .team-picker-grid it also carries. */
+.matchup-grid {
+  display: flex !important;
+  flex-direction: column;
+  grid-template-columns: none !important;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.matchup-grid .team-swatch {
+  width: 100%;
+  aspect-ratio: unset;
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.matchup-grid .team-swatch img.team-logo-img {
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+.gametime-btn {
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent);
+  color: #06222a;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.gametime-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.gametime-btn:not(:disabled):hover { filter: brightness(1.1); }
+
+#save-profile-dialog, #bandroom-upload-dialog {
+  width: min(420px, 90vw);
+  padding: 24px;
+  border-radius: var(--radius-panel);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.save-profile-header {
+  font-size: 16px; font-weight: 700;
+}
+.save-profile-instructions {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.save-profile-input {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+.save-profile-input:focus { border-color: var(--accent); }
+.save-profile-subtext {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-height: 14px;
+}
+.save-profile-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
 
 #onboarding-overlay {
   position: fixed;
