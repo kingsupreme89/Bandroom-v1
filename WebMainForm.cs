@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 using Bandroom.Core;
 using Microsoft.Web.WebView2.Core;
@@ -691,6 +692,41 @@ public sealed class WebMainForm : Form
         return dlg.ShowDialog(this) == DialogResult.OK ? dlg.FileName : null;
     }
 
+    public string? BrowseForSongPackZipFromWeb()
+    {
+        using var dlg = new OpenFileDialog { Filter = "Zip Archive|*.zip", Title = "Locate Downloaded Song Pack" };
+        return dlg.ShowDialog(this) == DialogResult.OK ? dlg.FileName : null;
+    }
+
+    /// <summary>Extracts a pack zip the user already downloaded from the Drive link into
+    /// ConfigStore.DownloadedDefaultSongsFolder -- the local counterpart to
+    /// DownloadDefaultSongPackFromWeb's R2 path below, minus the HTTP download half. Reuses the
+    /// same bandroom:songpack* events so app.js's existing progress UI just works for both.</summary>
+    public void ImportDefaultSongPackZipFromWeb(string zipPath)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:songpackimporting'))"));
+
+                bool ok = await DefaultSongPackService.ExtractExistingZipAsync(zipPath,
+                    frac => RunOnUi(() => _ = _webView.ExecuteScriptAsync(
+                        $"window.dispatchEvent(new CustomEvent('bandroom:songpackimportprogress', {{ detail: {{ fraction: {frac.ToString(System.Globalization.CultureInfo.InvariantCulture)} }} }}))")),
+                    _lifetimeCts.Token);
+
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync(
+                    ok ? "window.dispatchEvent(new CustomEvent('bandroom:songpackready'))"
+                       : "window.dispatchEvent(new CustomEvent('bandroom:songpackimportfailed'))"));
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Default song pack import failed", ex);
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:songpackimportfailed'))"));
+            }
+        });
+    }
+
     /// <summary>Trim button on the island -- same TrimmerForm flow OpenAssignTrack's RequestTrim
     /// branch used, just callable directly against whatever's currently assigned instead of
     /// needing the native picker dialog open first.</summary>
@@ -1373,11 +1409,20 @@ public sealed class WebMainForm : Form
         if (ofd.ShowDialog(this) != DialogResult.OK)
             return System.Text.Json.JsonSerializer.Serialize(new { success = false, cancelled = true });
 
+        // Filename-based auto-indexing (IntakeEngine): suggest a clean title/team/trigger from
+        // the raw filename so the naming dialog starts prefilled instead of the user typing a
+        // clean name in from scratch. Purely a suggestion -- never auto-assigns anything; the
+        // user still has to accept/edit it and, later, actually assign the track to a trigger.
+        var suggestion = IntakeEngine.Process(Path.GetFileName(ofd.FileName));
+        var label = suggestion.Team != "Unknown" || suggestion.TriggerSource != "fallback"
+            ? $"Enter a name for this track: (suggested: {suggestion.Team} / {suggestion.PrimaryTrigger})"
+            : "Enter a name for this track:";
+
         // ShowTrackNaming (Task: add PA as a content type + crowd-noise checkbox) also collects
         // the Song/PA type choice and, if checked, bakes " w/ Crowd" into the name here -- name
         // already carries the suffix by the time anything downstream (TrimmerForm's disk write,
         // the local-tracks manifest, a later marketplace share) ever sees it.
-        var naming = PromptDialog.ShowTrackNaming(this, "Name Your Track", "Enter a name for this track:");
+        var naming = PromptDialog.ShowTrackNaming(this, "Name Your Track", label, suggestion.CleanedTitle);
         if (naming == null)
             return System.Text.Json.JsonSerializer.Serialize(new { success = false, cancelled = true });
 
