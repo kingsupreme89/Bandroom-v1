@@ -109,7 +109,27 @@
               <button class="btn-ghost" id="btn-import-profile">Import</button>
               <button class="btn-ghost btn-danger" id="btn-delete-profile" title="Clear this team's saved profile">Delete</button>
             </div>
+            <!-- Marketplace profile sharing -- shares/loads the trigger->song ASSIGNMENT MAP
+                 (filenames only, never a local path), auto-applying whatever matches a file
+                 already in your own Songs library and reporting what didn't. See
+                 ShareCurrentProfileToMarketplace/ApplyMarketplaceProfile in WebBridge.cs. -->
+            <div class="profile-io">
+              <button class="pill pill-marketplace" id="btn-share-profile" title="Share this team's song assignments to the marketplace">Share Profile</button>
+              <button class="pill pill-marketplace" id="btn-load-profile">Load Profile from Others</button>
+            </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Load Profile from Others -- lists shared profiles for the active team, applies
+           whichever one is picked by matching filenames against the local Songs library. -->
+      <div id="load-profile-overlay" hidden>
+        <div id="load-profile-dialog" class="glass">
+          <div class="clipper-header">
+            <span class="clipper-title" id="load-profile-title">Load Profile from Others</span>
+            <button id="btn-close-load-profile" class="icon-btn">&times;</button>
+          </div>
+          <div id="load-profile-list" class="clipper-assign-list"></div>
         </div>
       </div>
 
@@ -575,17 +595,39 @@
        to happen before the user commits to it. -->
   <div id="save-profile-overlay" hidden>
     <div id="save-profile-dialog" class="glass">
-      <div class="save-profile-header">Save Profile</div>
-      <p class="save-profile-instructions">
-        This saves every song currently assigned to situations for the active team. Keep the
-        name as-is to overwrite that team's existing save, or type a different name to keep
-        this setup as a separate, extra profile you can reload later.
-      </p>
-      <input type="text" id="save-profile-name" class="save-profile-input" />
-      <div class="save-profile-subtext" id="save-profile-subtext"></div>
-      <div class="save-profile-actions">
-        <button id="btn-save-profile-cancel" class="btn-ghost">Cancel</button>
-        <button id="btn-save-profile-confirm" class="btn-primary">Save</button>
+      <div id="save-profile-ask">
+        <div class="save-profile-header">Save Profile</div>
+        <p class="save-profile-instructions">
+          This saves every song currently assigned to situations for the active team. Keep the
+          name as-is to overwrite that team's existing save, or type a different name to keep
+          this setup as a separate, extra profile you can reload later.
+        </p>
+        <input type="text" id="save-profile-name" class="save-profile-input" />
+        <div class="save-profile-subtext" id="save-profile-subtext"></div>
+        <div class="save-profile-actions">
+          <button id="btn-save-profile-cancel" class="btn-ghost">Cancel</button>
+          <button id="btn-save-profile-confirm" class="btn-primary">Save</button>
+        </div>
+      </div>
+      <!-- Post-save confirmation -- plain-language next steps instead of just a toast, so
+           someone new to the app knows what "saved" actually did and what to do with it.
+           "Upload to Marketplace" isn't a real feature yet at the whole-profile level (only
+           individual songs can be shared to the marketplace today, from Sound Bank/My
+           Downloads) -- this points there honestly instead of a fake button. "Share with a
+           Friend" is real: it's the existing Export flow, just surfaced here too. -->
+      <div id="save-profile-done" hidden>
+        <div class="save-profile-header">✅ Saved!</div>
+        <p class="save-profile-instructions" id="save-profile-done-text"></p>
+        <p class="save-profile-instructions">
+          <strong>Share with a friend:</strong> Export saves this to a file you can send them --
+          they use Import (left sidebar, under Profiles) to load it on their own copy of Bandroom.
+          <br><strong>Share a song publicly:</strong> that happens per-song, not per-profile --
+          open that team's Sound Bank and hit Share on any song you uploaded yourself.
+        </p>
+        <div class="save-profile-actions">
+          <button id="btn-save-profile-done-close" class="btn-ghost">Close</button>
+          <button id="btn-save-profile-done-export" class="btn-primary">Export &amp; Share with a Friend</button>
+        </div>
       </div>
     </div>
   </div>

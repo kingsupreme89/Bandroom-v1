@@ -100,10 +100,13 @@ function sanitizeSegment(s) {
 
 // Valid marketplace/upload content types -- "song" (Sound Bank), "image" (Trophy Room
 // background), "pa" (stadium PA-announcer clips, added alongside song for parity -- same
-// validation/sanitization path, just a different bucket in R2/KV). Centralized here so every
-// type-check below (upload/list/leaderboard/like/report/view/download/item) stays in sync
-// instead of six-plus copies of the same three-way string comparison drifting apart.
-const VALID_TYPES = new Set(["song", "image", "pa"]);
+// validation/sanitization path, just a different bucket in R2/KV), "profile" (a whole team's
+// trigger-assignment JSON, same upload/list/download plumbing as everything else -- just JSON
+// instead of audio/image bytes, so an uploader shares their whole assignment set, not one
+// song at a time). Centralized here so every type-check below (upload/list/leaderboard/like/
+// report/view/download/item) stays in sync instead of copies of the same string-set drifting
+// apart.
+const VALID_TYPES = new Set(["song", "image", "pa", "profile"]);
 function isValidType(type) {
   return VALID_TYPES.has(type);
 }
@@ -276,7 +279,7 @@ export default {
 
       const type = form.get("type");
       if (!isValidType(type)) {
-        return new Response('type must be "song", "image", or "pa"', { status: 400, headers: cors() });
+        return new Response('type must be "song", "image", "pa", or "profile"', { status: 400, headers: cors() });
       }
       const name = sanitizeSegment(form.get("name"));
       const school = sanitizeSegment(form.get("school"));
@@ -310,7 +313,7 @@ export default {
     if (url.pathname === "/list" && request.method === "GET") {
       const type = url.searchParams.get("type");
       if (!isValidType(type)) {
-        return new Response('type must be "song", "image", or "pa"', { status: 400, headers: cors() });
+        return new Response('type must be "song", "image", "pa", or "profile"', { status: 400, headers: cors() });
       }
       const schoolFilter = url.searchParams.get("school");
       const sort = url.searchParams.get("sort") ?? "newest";
@@ -359,7 +362,7 @@ export default {
     if (url.pathname === "/leaderboard" && request.method === "GET") {
       const type = url.searchParams.get("type");
       if (!isValidType(type)) {
-        return new Response('type must be "song", "image", or "pa"', { status: 400, headers: cors() });
+        return new Response('type must be "song", "image", "pa", or "profile"', { status: 400, headers: cors() });
       }
 
       let ids;

@@ -2333,12 +2333,22 @@ input, select, textarea, [contenteditable] {
    no CSS at all, so unhiding them just dropped an unstyled <div> into normal document flow
    (invisible, no positioning/z-index/background). Styled to match #team-picker-overlay /
    .profile-dialog's existing fixed-centered-overlay pattern. */
-#matchup-overlay, #save-profile-overlay, #bandroom-upload-overlay {
+#matchup-overlay, #save-profile-overlay, #bandroom-upload-overlay, #load-profile-overlay {
   position: fixed; inset: 0; z-index: 60;
   display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.6);
 }
-#matchup-overlay[hidden], #save-profile-overlay[hidden], #bandroom-upload-overlay[hidden] { display: none; }
+#matchup-overlay[hidden], #save-profile-overlay[hidden], #bandroom-upload-overlay[hidden], #load-profile-overlay[hidden] { display: none; }
+#load-profile-dialog {
+  width: min(440px, 90vw);
+  max-height: 70vh;
+  padding: 20px;
+  border-radius: var(--radius-panel);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#load-profile-list { max-height: 50vh; }
 
 #matchup-dialog {
   width: min(720px, 92vw);

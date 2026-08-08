@@ -199,6 +199,118 @@ public sealed class WebBridge
         }
     }
 
+    // ---- Profile sharing ("Load Profile from Others") -----------------------------------------
+    // Shares/loads a whole team's trigger->song assignment MAP, not audio bytes -- the uploaded
+    // JSON only ever contains trigger/event/filename, never a full local path (those are
+    // machine-specific and meaningless on someone else's PC). Applying a downloaded profile
+    // works by filename match against the applier's OWN Songs library (same portability model
+    // Export/Import already use) -- entries with no local match are reported back and left
+    // Unassigned rather than silently guessed at. This is real, working auto-assign-by-filename
+    // for the common "everyone's using the same default pack + similarly-named uploads" case,
+    // not a fake button -- but it can't summon audio files that don't exist on this machine.
+    public async Task<string> ShareCurrentProfileToMarketplace()
+    {
+        var team = Theme.ActiveTeam.Name;
+        var entries = _host.GetEvents(null)
+            .Where(e => !string.IsNullOrWhiteSpace(e.AudioFile))
+            .Select(e => new { trigger = e.Trigger, eventName = e.Event, fileName = Path.GetFileName(e.AudioFile) })
+            .ToList();
+        if (entries.Count == 0)
+            return JsonSerializer.Serialize(new { success = false, error = "No songs are assigned yet -- assign at least one before sharing this team's profile." });
+
+        try
+        {
+            var json = JsonSerializer.Serialize(new { team, assignments = entries });
+            using var form = new System.Net.Http.MultipartFormDataContent();
+            form.Add(new System.Net.Http.StringContent("profile"), "type");
+            form.Add(new System.Net.Http.StringContent($"{team} profile ({entries.Count} songs)"), "name");
+            form.Add(new System.Net.Http.StringContent(team), "school");
+            var fileContent = new System.Net.Http.ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(json));
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            form.Add(fileContent, "file", $"{team}-profile.json");
+
+            using var response = await ShareHttp.PostAsync(
+                "https://bandroom-marketplace.bandroom.workers.dev/upload", form);
+            if (!response.IsSuccessStatusCode)
+                return JsonSerializer.Serialize(new { success = false, error = "Upload failed -- check your connection and try again." });
+
+            return JsonSerializer.Serialize(new { success = true, count = entries.Count });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write($"ShareCurrentProfileToMarketplace failed for \"{team}\"", ex);
+            return JsonSerializer.Serialize(new { success = false, error = "Upload failed -- check your connection and try again." });
+        }
+    }
+
+    /// <summary>Lists profiles other people have shared for a given school -- backs the
+    /// "Load Profile from Others" pill.</summary>
+    public async Task<string> GetMarketplaceProfiles(string school)
+    {
+        try
+        {
+            using var response = await ShareHttp.GetAsync(
+                $"https://bandroom-marketplace.bandroom.workers.dev/list?type=profile&school={Uri.EscapeDataString(school)}&sort=newest");
+            if (!response.IsSuccessStatusCode) return "{\"items\":[]}";
+            return await response.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write($"GetMarketplaceProfiles failed for \"{school}\"", ex);
+            return "{\"items\":[]}";
+        }
+    }
+
+    /// <summary>Downloads a shared profile and applies whatever it can match by filename against
+    /// this machine's own Songs library (see class-level comment above). Returns
+    /// {success, applied, total, unmatched:[eventName,...]} so the UI can tell the user exactly
+    /// what got auto-assigned and what still needs a manual upload.</summary>
+    public async Task<string> ApplyMarketplaceProfile(string fileUrl)
+    {
+        try
+        {
+            using var response = await ShareHttp.GetAsync(fileUrl);
+            if (!response.IsSuccessStatusCode)
+                return JsonSerializer.Serialize(new { success = false, error = "Couldn't download that profile -- try again." });
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            var assignments = doc.RootElement.GetProperty("assignments");
+
+            var library = new List<string>();
+            if (Directory.Exists(ConfigStore.SongsFolder))
+                library.AddRange(Directory.GetFiles(ConfigStore.SongsFolder, "*", SearchOption.AllDirectories));
+            var byFileName = library
+                .GroupBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            int applied = 0, total = 0;
+            var unmatched = new List<string>();
+            foreach (var a in assignments.EnumerateArray())
+            {
+                total++;
+                var trigger = a.GetProperty("trigger").GetString() ?? "";
+                var eventName = a.GetProperty("eventName").GetString() ?? trigger;
+                var fileName = a.GetProperty("fileName").GetString() ?? "";
+                if (byFileName.TryGetValue(fileName, out var localPath))
+                {
+                    _host.AssignTrackFileFromWeb(trigger, isPa: false, localPath);
+                    applied++;
+                }
+                else
+                {
+                    unmatched.Add(eventName);
+                }
+            }
+
+            return JsonSerializer.Serialize(new { success = true, applied, total, unmatched });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("ApplyMarketplaceProfile failed", ex);
+            return JsonSerializer.Serialize(new { success = false, error = "Couldn't apply that profile -- try again." });
+        }
+    }
+
     // ---- Admin marketplace override (owner-only, never shipped to end users) -----------------
     // Unlike google_client_secret.local.txt, this file is deliberately NOT added as a
     // <Content Include> in BandAudioHook.csproj and never copied into the build output. It's

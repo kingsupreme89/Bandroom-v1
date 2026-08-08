@@ -863,6 +863,12 @@ function wireControls() {
   document.getElementById("btn-export-profile").addEventListener("click", () => bridge?.ExportProfile());
   document.getElementById("btn-import-profile").addEventListener("click", () => bridge?.ImportProfile());
   document.getElementById("btn-delete-profile").addEventListener("click", () => bridge?.DeleteCurrentProfile());
+  document.getElementById("btn-share-profile").addEventListener("click", shareCurrentProfile);
+  document.getElementById("btn-load-profile").addEventListener("click", openLoadProfileDialog);
+  document.getElementById("btn-close-load-profile").addEventListener("click", closeLoadProfileDialog);
+  document.getElementById("load-profile-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "load-profile-overlay") closeLoadProfileDialog();
+  });
 
   // Drag the borderless window by pulling on the header center region -- but not when the
   // mousedown started on a real control inside it (e.g. "Set Matchup"), since native drag
@@ -3428,18 +3434,102 @@ function updateSaveProfileSubtext() {
 
 function closeSaveProfileDialog() {
   document.getElementById("save-profile-overlay").hidden = true;
+  document.getElementById("save-profile-ask").hidden = false;
+  document.getElementById("save-profile-done").hidden = true;
 }
 
 async function confirmSaveProfile() {
   const name = document.getElementById("save-profile-name").value.trim();
   if (!name) return;
-  closeSaveProfileDialog();
   const saved = await bridge?.SaveProfileAs(name);
   if (bridge) state.savedProfiles = JSON.parse(await bridge.GetSavedProfiles());
   renderTeamGrid();
   await updateProfileStatus();
   const t = await bridge?.GetProfileSavedAt(saved ?? name);
   showToast(`Saved "${saved ?? name}"${t ? ` at ${t}` : ""}`);
+
+  document.getElementById("save-profile-ask").hidden = true;
+  document.getElementById("save-profile-done-text").textContent =
+    `"${saved ?? name}" is saved${t ? ` (${t})` : ""} -- every song currently assigned to this team's situations is locked in and will reload automatically next time you pick ${state.activeTeam}.`;
+  document.getElementById("save-profile-done").hidden = false;
+}
+
+// ---- Load Profile from Others -----------------------------------------------------------
+// Shares/loads a trigger->song ASSIGNMENT MAP (filenames only), not audio bytes -- applying a
+// downloaded profile matches filenames against the applier's OWN Songs library and reports
+// what it could/couldn't auto-assign. See ShareCurrentProfileToMarketplace/
+// GetMarketplaceProfiles/ApplyMarketplaceProfile in WebBridge.cs for the real portability
+// constraint this works within (paths aren't portable across machines, filenames sort of are).
+async function shareCurrentProfile() {
+  const btn = document.getElementById("btn-share-profile");
+  btn.disabled = true;
+  btn.textContent = "Sharing...";
+  try {
+    const raw = await bridge?.ShareCurrentProfileToMarketplace();
+    const result = raw ? JSON.parse(raw) : null;
+    showToast(result?.success
+      ? `Shared ${state.activeTeam}'s profile (${result.count} songs) to the marketplace!`
+      : (result?.error || "Couldn't share that profile -- try again."));
+  } catch (err) {
+    console.error("shareCurrentProfile failed", err);
+    showToast("Couldn't share that profile -- try again.");
+  }
+  btn.disabled = false;
+  btn.textContent = "Share Profile";
+}
+
+async function openLoadProfileDialog() {
+  document.getElementById("load-profile-title").textContent = `Load Profile from Others -- for ${state.activeTeam}`;
+  const list = document.getElementById("load-profile-list");
+  list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">Loading...</div>`;
+  document.getElementById("load-profile-overlay").hidden = false;
+
+  let items = [];
+  try {
+    const raw = await bridge?.GetMarketplaceProfiles(state.activeTeam);
+    items = raw ? (JSON.parse(raw).items || []) : [];
+  } catch (err) {
+    console.error("GetMarketplaceProfiles failed", err);
+  }
+
+  list.innerHTML = "";
+  if (!items.length) {
+    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No one's shared a profile for ${state.activeTeam} yet -- be the first with Share Profile.</div>`;
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "clipper-assign-row";
+    row.textContent = `${item.name} -- ${new Date(item.uploadedAt).toLocaleDateString()}`;
+    row.addEventListener("click", () => applyMarketplaceProfile(item.url, item.name));
+    list.appendChild(row);
+  }
+}
+
+function closeLoadProfileDialog() {
+  document.getElementById("load-profile-overlay").hidden = true;
+}
+
+async function applyMarketplaceProfile(url, name) {
+  closeLoadProfileDialog();
+  showToast(`Applying "${name}"...`);
+  try {
+    const raw = await bridge?.ApplyMarketplaceProfile(url);
+    const result = raw ? JSON.parse(raw) : null;
+    if (!result?.success) {
+      showToast(result?.error || "Couldn't apply that profile -- try again.");
+      return;
+    }
+    await refreshCategories();
+    if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
+    const missed = result.total - result.applied;
+    showToast(missed > 0
+      ? `Applied ${result.applied} of ${result.total} songs -- ${missed} need a manual upload (filenames didn't match anything in your Songs library).`
+      : `Applied all ${result.applied} songs from "${name}"!`);
+  } catch (err) {
+    console.error("applyMarketplaceProfile failed", err);
+    showToast("Couldn't apply that profile -- try again.");
+  }
 }
 
 function runRailAction(action) {
@@ -4248,7 +4338,7 @@ document.addEventListener("keydown", (e) => {
       "team-picker-overlay", "bandroom-overlay", "bandroom-album-overlay",
       "matchup-overlay", "profile-overlay", "profile-dashboard-overlay",
       "hotkey-panel", "discord-chat-overlay", "my-downloads-overlay",
-      "situations-panel"
+      "load-profile-overlay", "situations-panel"
     ];
     for (const id of overlays) {
       const el = document.getElementById(id);
@@ -4588,9 +4678,6 @@ function toggleDiscordChat() {
 }
 function openMatchupPicker() {
   document.getElementById("btn-matchup")?.click();
-}
-function openSaveProfileDialog() {
-  document.querySelector(".rail-item[data-action='save-profile']")?.click();
 }
 
 // Show on first launch after this update
