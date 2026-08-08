@@ -765,6 +765,15 @@ public sealed class WebMainForm : Form
         return dlg.ShowDialog(this) == DialogResult.OK ? dlg.FileName : null;
     }
 
+    /// <summary>Native folder picker -- backs WebBridge.RelocateDefaultSongsFolder (task queue
+    /// item 7b, Session 10). Same "no web equivalent can hand back a real filesystem path"
+    /// reasoning as BrowseForAudioFileFromWeb above, folder flavor.</summary>
+    public string? BrowseForFolderFromWeb(string description)
+    {
+        using var dlg = new FolderBrowserDialog { Description = description, UseDescriptionForTitle = true };
+        return dlg.ShowDialog(this) == DialogResult.OK ? dlg.SelectedPath : null;
+    }
+
     public string? BrowseForSongPackZipFromWeb()
     {
         using var dlg = new OpenFileDialog { Filter = "Zip Archive|*.zip", Title = "Locate Downloaded Song Pack" };

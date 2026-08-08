@@ -931,6 +931,31 @@ public sealed class WebBridge
     public string? BrowseForSongPackZip() => _host.BrowseForSongPackZipFromWeb();
 
     public void ImportDefaultSongPackZip(string zipPath) => _host.ImportDefaultSongPackZipFromWeb(zipPath);
+
+    /// <summary>Current on-disk location of the default song pack (task queue item 7a, Session
+    /// 10) -- shown in-app so it's actually clear where these files land, instead of that only
+    /// being documented in code comments nobody but a developer ever reads.</summary>
+    public string GetDefaultSongsFolderPath() => ConfigStore.DownloadedDefaultSongsFolder;
+
+    /// <summary>Task queue item 7b (Session 10): lets the user move the default song pack to a
+    /// different drive/folder (e.g. off a small C: drive) instead of it being permanently stuck
+    /// under AppData. Native FolderBrowserDialog (same reasoning as every other filesystem picker
+    /// in this class -- a web &lt;input type=file&gt; can't hand back a real directory path), then
+    /// ConfigStore.SetDefaultSongsFolderOverride does the actual move + persists the new location
+    /// so GetDefaultPackTeams/ImportDefaultPackForTeam keep finding songs correctly afterward.
+    /// Returns JSON {success, path, error} rather than a bare bool -- "cancelled the picker" and
+    /// "picked a folder but the move failed" need different toast copy on the JS side.</summary>
+    public string RelocateDefaultSongsFolder()
+    {
+        string? chosen = _host.BrowseForFolderFromWeb("Choose where to keep the default song pack");
+        if (chosen == null)
+            return JsonSerializer.Serialize(new { success = false, cancelled = true });
+
+        bool ok = ConfigStore.SetDefaultSongsFolderOverride(chosen);
+        return ok
+            ? JsonSerializer.Serialize(new { success = true, path = ConfigStore.DownloadedDefaultSongsFolder })
+            : JsonSerializer.Serialize(new { success = false, error = "That folder already has other files in it -- pick an empty folder, or the pack's current location, and try again." });
+    }
     public void RestartForUpdate() => _host.RestartForUpdateFromWeb();
     public void ResetTeamProfile() => _host.ResetTeamProfileFromWeb();
     public void OpenHelp() => _host.OpenHelpFromWeb();

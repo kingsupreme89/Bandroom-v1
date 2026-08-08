@@ -52,10 +52,104 @@ internal static class ConfigStore
     /// includes it (dev builds and any future full build still do -- see BundleDefaultSongs in
     /// BandAudioHook.csproj). Public releases from v1.0.48 on don't, so this is empty there.</summary>
     static readonly string BundledDefaultSongsFolder = Path.Combine(AppContext.BaseDirectory, "Songs", "Default");
-    /// <summary>Where DefaultSongPackService extracts the pack after the user opts into the
-    /// one-time download (see cloudflare-defaultsongs). Lives under UserDataRoot so, like
-    /// everything else there, Squirrel updates never touch or wipe it.</summary>
-    public static readonly string DownloadedDefaultSongsFolder = Path.Combine(UserDataRoot, "DefaultSongs");
+    /// <summary>Default location DefaultSongPackService extracts the pack into after the user
+    /// opts into the one-time download (see cloudflare-defaultsongs). Lives under UserDataRoot
+    /// so, like everything else there, Squirrel updates never touch or wipe it.</summary>
+    static readonly string DefaultDownloadedDefaultSongsFolder = Path.Combine(UserDataRoot, "DefaultSongs");
+
+    /// <summary>Where a user-relocated song pack folder path is persisted (task queue item 7b,
+    /// Session 10) -- a single line of plain text, same "tiny marker file under UserDataRoot"
+    /// pattern as ScorebugPresetPath/LeadInWhistleEnabledPath above, not JSON, since it's one
+    /// value.</summary>
+    static readonly string DefaultSongsFolderOverridePath = Path.Combine(UserDataRoot, "default_songs_folder_override.txt");
+
+    /// <summary>Where DefaultSongPackService extracts the pack, and where ImportDefaultPackForTeam/
+    /// GetDefaultPackTeams (via DefaultSongsFolder below) look for it -- a user-chosen relocation
+    /// (SetDefaultSongsFolderOverride) takes priority over the UserDataRoot default. Was a
+    /// `readonly` field; converted to a property so every one of its 16 existing call sites
+    /// (ConfigStore/DefaultSongPackService/WebMainForm) picks up a relocation automatically
+    /// without needing to change any of them -- don't revert this back to a field, that would
+    /// silently break the relocate feature for every reader that cached the old value.</summary>
+    public static string DownloadedDefaultSongsFolder =>
+        GetDefaultSongsFolderOverride() ?? DefaultDownloadedDefaultSongsFolder;
+
+    /// <summary>Returns the user's chosen relocation folder, or null if the pack is still at the
+    /// default UserDataRoot location. Cached in memory after first read since this is checked on
+    /// every DownloadedDefaultSongsFolder access (including inside tight loops like
+    /// ImportDefaultPackForTeam's file scan) -- re-reading a text file off disk that often would
+    /// be wasteful for a value that only ever changes via SetDefaultSongsFolderOverride, which
+    /// updates the cache itself.</summary>
+    static string? _defaultSongsFolderOverrideCache;
+    static bool _defaultSongsFolderOverrideLoaded;
+    static string? GetDefaultSongsFolderOverride()
+    {
+        if (!_defaultSongsFolderOverrideLoaded)
+        {
+            _defaultSongsFolderOverrideLoaded = true;
+            try
+            {
+                _defaultSongsFolderOverrideCache = File.Exists(DefaultSongsFolderOverridePath)
+                    ? File.ReadAllText(DefaultSongsFolderOverridePath).Trim()
+                    : null;
+                if (string.IsNullOrWhiteSpace(_defaultSongsFolderOverrideCache)) _defaultSongsFolderOverrideCache = null;
+            }
+            catch { _defaultSongsFolderOverrideCache = null; } // corrupt/unreadable marker shouldn't crash startup
+        }
+        return _defaultSongsFolderOverrideCache;
+    }
+
+    /// <summary>Relocates the default song pack to <paramref name="newFolder"/> -- moves whatever
+    /// already exists at the current DownloadedDefaultSongsFolder location (if anything) into the
+    /// new one, then persists the override so every future read of DownloadedDefaultSongsFolder
+    /// (and therefore DefaultSongsFolder/GetDefaultPackTeams/ImportDefaultPackForTeam) resolves to
+    /// the new location. Passing null/empty resets to the default UserDataRoot location. Returns
+    /// false (and leaves everything untouched) if the move itself fails, e.g. destination on a
+    /// different drive with a permissions issue, or newFolder is an existing non-empty directory
+    /// that isn't already the pack (moving INTO an unrelated populated folder would silently mix
+    /// the pack's index.json/team folders with whatever was already there).</summary>
+    public static bool SetDefaultSongsFolderOverride(string? newFolder)
+    {
+        string oldFolder = DownloadedDefaultSongsFolder; // resolve BEFORE changing the cache below
+
+        if (string.IsNullOrWhiteSpace(newFolder))
+        {
+            try { if (File.Exists(DefaultSongsFolderOverridePath)) File.Delete(DefaultSongsFolderOverridePath); }
+            catch { return false; }
+            _defaultSongsFolderOverrideCache = null;
+            _defaultSongsFolderOverrideLoaded = true;
+            return true;
+        }
+
+        newFolder = Path.GetFullPath(newFolder);
+        if (string.Equals(Path.GetFullPath(oldFolder), newFolder, StringComparison.OrdinalIgnoreCase))
+            return true; // no-op, already there
+
+        try
+        {
+            if (Directory.Exists(newFolder) && Directory.EnumerateFileSystemEntries(newFolder).Any())
+                return false; // refuse to move into an already-populated unrelated folder
+            Directory.CreateDirectory(Path.GetDirectoryName(newFolder) ?? newFolder);
+            if (Directory.Exists(oldFolder) && Directory.EnumerateFileSystemEntries(oldFolder).Any())
+            {
+                if (Directory.Exists(newFolder)) Directory.Delete(newFolder); // empty, checked above
+                Directory.Move(oldFolder, newFolder);
+            }
+            else
+            {
+                Directory.CreateDirectory(newFolder); // nothing to move yet -- just point future imports here
+            }
+
+            Directory.CreateDirectory(UserDataRoot);
+            File.WriteAllText(DefaultSongsFolderOverridePath, newFolder);
+            _defaultSongsFolderOverrideCache = newFolder;
+            _defaultSongsFolderOverrideLoaded = true;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     /// <summary>Path to the default song pack, whichever source actually has it on this
     /// machine. Songs\Default\{Conference}\{Team}\{EventKey}.mp3. Prefers the bundled copy

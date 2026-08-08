@@ -2925,11 +2925,21 @@ function initDefaultSongPackPrompt() {
   window.addEventListener("bandroom:songpackimportprogress", (e) => {
     progressFill.style.width = `${Math.max(0, Math.min(100, e.detail.fraction * 100))}%`;
   });
-  window.addEventListener("bandroom:songpackready", () => {
+  window.addEventListener("bandroom:songpackready", async () => {
     progressTitle.textContent = "Song pack ready";
     progressFill.style.width = "100%";
-    progressSub.textContent = "Every team can now auto-fill with default songs.";
-    setTimeout(() => { progressOverlay.hidden = true; }, 1800);
+    // Task queue item 7a (Session 10): be explicit about WHERE the files landed and WHAT
+    // auto-fill actually does -- "every team can now auto-fill" was true but didn't say the pack
+    // only fills events you haven't already assigned yourself (see ConfigStore.
+    // ImportDefaultPackForTeam's "never overwrites existing assignments" doc comment), which the
+    // owner specifically wants to be unambiguous rather than left to a silent success toast.
+    let folderLine = "";
+    try {
+      const path = bridge ? await bridge.GetDefaultSongsFolderPath() : null;
+      if (path) folderLine = ` Files live at: ${path}.`;
+    } catch (err) { console.error("GetDefaultSongsFolderPath failed", err); }
+    progressSub.textContent = `Every team can now auto-fill any situation you haven't already assigned a song to yourself -- it never overwrites your own picks.${folderLine}`;
+    setTimeout(() => { progressOverlay.hidden = true; }, 3200);
     refreshCategories?.();
   });
   window.addEventListener("bandroom:songpackfailed", () => {
@@ -4580,7 +4590,32 @@ const COMMANDS = [
   { icon: "⚙️", label: "Settings", hint: "preferences", action: () => document.getElementById("btn-settings")?.click() },
   { icon: "ℹ️", label: "Help", hint: "guide", action: () => bridge?.ShowHelp() },
   { icon: "🔄", label: "Reset Team Profile", hint: "reset", action: () => resetTeamProfile() },
+  { icon: "📁", label: "Move Default Song Pack Folder", hint: "relocate", action: () => relocateDefaultSongsFolder() },
+  { icon: "🎵", label: "Download / Import Default Song Pack", hint: "song pack", action: () => { document.getElementById("songpack-prompt-overlay").hidden = false; } },
 ];
+
+/// Task queue item 7b (Session 10) -- lets the user move the default song pack (2,241 files,
+/// ~2.8GB, see initDefaultSongPackPrompt above) to a different drive/folder instead of it being
+/// stuck under AppData forever. Reachable from the command palette (Ctrl+K) rather than a new
+/// always-visible button, since this is a rare one-off action, not a frequent one -- same
+/// treatment "Reset Team Profile" above already gets.
+async function relocateDefaultSongsFolder() {
+  if (!bridge) return;
+  let result;
+  try {
+    result = JSON.parse(await bridge.RelocateDefaultSongsFolder());
+  } catch (err) {
+    console.error("RelocateDefaultSongsFolder failed", err);
+    showToast("Couldn't move the song pack folder -- try again.");
+    return;
+  }
+  if (result.cancelled) return; // user backed out of the folder picker, not an error
+  if (result.success) {
+    showToast(`Default song pack now lives at: ${result.path}`);
+  } else {
+    showToast(result.error ?? "Couldn't move the song pack folder -- try again.");
+  }
+}
 
 let _cmdActiveIndex = 0;
 function openCommandPalette() {
