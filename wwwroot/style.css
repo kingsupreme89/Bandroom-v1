@@ -344,7 +344,11 @@ input, select, textarea, [contenteditable] {
 /* ================================================================
    RUBBER-BAND SCROLL EFFECT
    ================================================================ */
-.situations-list, .bandroom-album-grid, .changelog-list,
+/* NOTE: .situations-list is deliberately excluded here. It sits above the clipper/preview
+   island inside the same #center-column scroll container -- overscroll-behavior: contain
+   stops wheel scroll chaining at this list's own boundary, which made it impossible to keep
+   scrolling past it down to the clipper island on the assign pages. */
+.bandroom-album-grid, .changelog-list,
 #team-picker-grid, #bandroom-team-grid, #my-downloads-grid,
 #discord-chat-messages, .bandroom-recent-grid, #bandroom-picker, #bandroom-album {
   overscroll-behavior: contain;
