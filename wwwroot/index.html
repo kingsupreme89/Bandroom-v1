@@ -134,6 +134,52 @@
           </div>
           <div class="situations-list" id="situations-list"><!-- populated by app.js --></div>
         </div>
+
+        <!-- Clip Preview island -- static on every tab (Offense/Defense/Situations), same width
+             as the grid above it. Not a new player: this is the existing shared preview bar
+             (previewSong()/renderWaveformScrubber() in app.js, used by Sound Bank/Trophy
+             Room/My Downloads tile previews) relocated out of its old fixed-position bottom
+             strip and restyled to live here permanently instead of popping up over the content.
+             Actual trimming still happens in the native TrimmerForm (WaveformRenderer.cs) --
+             this is a preview/scrub surface, not a second trim implementation. -->
+        <div id="clipper-island" class="glass">
+          <div class="clipper-header">
+            <span class="clipper-title" id="clipper-title-text">Clip Preview</span>
+            <button id="btn-clipper-close-assign" class="icon-btn" hidden title="Close">&times;</button>
+          </div>
+          <div class="clipper-empty-state" id="clipper-empty">Click any song in Sound Bank, Trophy Room, or My Downloads to preview it here.</div>
+          <div id="preview-bar" hidden>
+            <button id="btn-preview-playpause" class="preview-bar-btn" title="Play/Pause">▶</button>
+            <button id="btn-preview-stop" class="preview-bar-btn" title="Stop">⏹</button>
+            <div id="preview-name" class="preview-bar-name"></div>
+            <canvas id="preview-waveform" width="900" height="64"></canvas>
+            <span id="preview-time" class="preview-bar-time">0:00</span>
+          </div>
+
+          <!-- Assign mode -- replaces the native AssignTrackForm popup. Opened by the "Assign /
+               Edit" button on any Offense/Defense/Situations event card (see wireSituationCard
+               in app.js); browse/trim still hand off to native dialogs (OpenFileDialog,
+               TrimmerForm) since those need real filesystem access / waveform-cut tooling this
+               web view doesn't have. -->
+          <div id="clipper-assign" hidden>
+            <div class="clipper-assign-meta">
+              <span id="clipper-assign-event"></span>
+              <span id="clipper-assign-current"></span>
+            </div>
+            <div class="clipper-assign-toolbar">
+              <button id="btn-clipper-assign-play" class="preview-bar-btn" title="Play selected">▶</button>
+              <button id="btn-clipper-assign-stop" class="preview-bar-btn" title="Stop">⏹</button>
+              <input type="text" id="clipper-assign-search" class="team-picker-search" placeholder="Search songs..." />
+            </div>
+            <div id="clipper-assign-list" class="clipper-assign-list"></div>
+            <div class="clipper-assign-actions">
+              <button id="btn-clipper-assign-select" class="btn-primary" disabled>Assign Selected</button>
+              <button id="btn-clipper-assign-browse" class="btn-ghost">Browse for file...</button>
+              <button id="btn-clipper-assign-trim" class="btn-ghost">Trim...</button>
+              <button id="btn-clipper-assign-clear" class="btn-ghost btn-danger">Clear Assignment</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Right panel: Adjust -->
@@ -618,18 +664,6 @@
     <div class="ticker-track">
       <span id="ticker-text" class="ticker-scroll">No uploads yet — be the first to add a song or background in The Bandroom!</span>
     </div>
-  </div>
-
-  <!-- Shared song-preview bar -- ONE instance reused by every preview surface in the app
-       (marketplace tile preview, My Downloads preview) instead of a per-surface player. Shows a
-       clickable/draggable waveform for scrubbing, Play/Pause, and a Stop that resets to 0:00.
-       See previewSong()/renderPreviewWaveform() in app.js. -->
-  <div id="preview-bar" hidden>
-    <button id="btn-preview-playpause" class="preview-bar-btn" title="Play/Pause">▶</button>
-    <button id="btn-preview-stop" class="preview-bar-btn" title="Stop">⏹</button>
-    <div id="preview-name" class="preview-bar-name"></div>
-    <canvas id="preview-waveform" width="480" height="40"></canvas>
-    <span id="preview-time" class="preview-bar-time">0:00</span>
   </div>
 
   <!-- Test hook: fire any EventKey for home/away directly through FireEventForSide, bypassing

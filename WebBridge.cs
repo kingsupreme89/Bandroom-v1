@@ -809,6 +809,15 @@ public sealed class WebBridge
     public void AssignPaEvent(string trigger) => _host.OpenAssignPaTrackFromWeb(trigger);
     public void PreviewEvent(string trigger) => _host.PreviewEventFromWeb(trigger);
     public void StopPreview() => _host.StopPreviewFromWeb();
+
+    // Clipping-island assign flow -- replaces the native AssignTrackForm popup for the main-song
+    // assign path (see initClipperIsland in app.js). Trim still opens the real TrimmerForm.
+    public string GetTrackLibrary() => _host.GetTrackLibraryFromWeb();
+    public void PreviewLocalFile(string path) => _host.PreviewLocalFileFromWeb(path);
+    public void AssignTrackFile(string trigger, bool isPa, string path) => _host.AssignTrackFileFromWeb(trigger, isPa, path);
+    public void ClearTrackAssignment(string trigger, bool isPa) => _host.ClearTrackAssignmentFromWeb(trigger, isPa);
+    public string? BrowseForAudioFile() => _host.BrowseForAudioFileFromWeb();
+    public void OpenTrimmer(string trigger, bool isPa) => _host.OpenTrimmerFromWeb(trigger, isPa);
     public int GetEventVolume(string trigger) => _host.GetEventVolumeFromWeb(trigger);
     public void SetEventVolume(string trigger, int percent) => _host.SetEventVolumeFromWeb(trigger, percent);
 

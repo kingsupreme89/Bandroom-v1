@@ -639,6 +639,81 @@ public sealed class WebMainForm : Form
         SaveCurrentTeamProfile();
     }
 
+    /// <summary>Web equivalent of AssignTrackForm's library list -- same source (everything
+    /// under ConfigStore.SongsFolder), just JSON instead of a ListBox. Backs the clipping
+    /// island's inline song picker (see initClipperIsland in app.js), which replaces the native
+    /// AssignTrackForm popup for the main-song assign flow -- Trim still opens the real
+    /// TrimmerForm (see OpenTrimmerFromWeb) since that's real waveform-cut/normalize work, not
+    /// something worth re-implementing in JS.</summary>
+    public string GetTrackLibraryFromWeb()
+    {
+        var library = new List<string>();
+        if (Directory.Exists(ConfigStore.SongsFolder))
+            library.AddRange(Directory.GetFiles(ConfigStore.SongsFolder, "*", SearchOption.AllDirectories)
+                .Where(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())));
+
+        var items = library.Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(Path.GetFileNameWithoutExtension, StringComparer.OrdinalIgnoreCase)
+            .Select(p => new { name = Path.GetFileNameWithoutExtension(p), path = p });
+        return System.Text.Json.JsonSerializer.Serialize(items);
+    }
+
+    /// <summary>Preview an arbitrary local library file from the clipping island's song list --
+    /// distinct from PreviewEventFromWeb (which previews whatever's already assigned to a
+    /// trigger). Routes through the same native AudioPlayer as everything else local, not a JS
+    /// &lt;audio&gt; element -- local filesystem paths aren't reliably fetchable from the WebView2
+    /// content process, same reason PreviewEventFromWeb doesn't either.</summary>
+    public void PreviewLocalFileFromWeb(string path)
+    {
+        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            AudioPlayer.Play(path, AudioPlayer.MasterVolume, interruptPrevious: true, isPreview: true);
+    }
+
+    public void AssignTrackFileFromWeb(string trigger, bool isPa, string path)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        if (isPa) entry.PaAudioFile = path; else entry.AudioFile = path;
+        ConfigStore.Save(_config);
+        SaveCurrentTeamProfile();
+        PushCategories();
+    }
+
+    public void ClearTrackAssignmentFromWeb(string trigger, bool isPa) => AssignTrackFileFromWeb(trigger, isPa, "");
+
+    /// <summary>Native OpenFileDialog for "Browse for file..." on the island -- there's no web
+    /// equivalent that can hand back a real filesystem path (a web &lt;input type=file&gt; only
+    /// exposes a Blob, not a path AudioPlayer can play from), so this stays a native call same as
+    /// AssignTrackForm's own Browse button did.</summary>
+    public string? BrowseForAudioFileFromWeb()
+    {
+        using var dlg = new OpenFileDialog { Filter = "Audio Files|*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac|All Files|*.*", Title = "Choose Audio File" };
+        return dlg.ShowDialog(this) == DialogResult.OK ? dlg.FileName : null;
+    }
+
+    /// <summary>Trim button on the island -- same TrimmerForm flow OpenAssignTrack's RequestTrim
+    /// branch used, just callable directly against whatever's currently assigned instead of
+    /// needing the native picker dialog open first.</summary>
+    public void OpenTrimmerFromWeb(string trigger, bool isPa)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        string currentPath = isPa ? entry.PaAudioFile : entry.AudioFile;
+        if (string.IsNullOrWhiteSpace(currentPath) || !File.Exists(currentPath))
+        {
+            MessageBox.Show(this, "Choose a song for this situation first, then you can trim it.", "Bandroom");
+            return;
+        }
+        using var trimmer = new TrimmerForm(this, currentPath);
+        if (trimmer.ShowDialog(this) == DialogResult.OK && trimmer.SavedFilePath != null)
+        {
+            if (isPa) entry.PaAudioFile = trimmer.SavedFilePath; else entry.AudioFile = trimmer.SavedFilePath;
+            ConfigStore.Save(_config);
+            SaveCurrentTeamProfile();
+            PushCategories();
+        }
+    }
+
     public void SetVolumeFromWeb(int percent) => AudioPlayer.MasterVolume = percent / 100f;
 
     /// <summary>Matchup-mode independent side volumes -- lets the home and away team's cues be

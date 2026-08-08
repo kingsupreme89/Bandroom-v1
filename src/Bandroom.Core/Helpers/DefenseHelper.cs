@@ -33,6 +33,23 @@ public sealed class DefenseHelper : IRuleEvaluator
             };
         }
 
+        // Plain 3rd-down stop -- the ordinary case (incomplete pass, short gain that doesn't
+        // convert, no loss of yards, no turnover) had NO evaluator at all: BigEventHelper only
+        // fires "Defense: Third Down" for the rare same-snap turnover (NewPossession, already
+        // excluded by the guard above), and the branch above only covers a stuffed-for-a-loss
+        // 3rd down. So the single most common "held them on 3rd, forced 4th down" scenario never
+        // fired any cue, despite every team's default song pack already having a
+        // "Defense: Third Down" song mapped for exactly this.
+        if (state.Current.Down == 3)
+        {
+            return new TriggerEvent
+            {
+                EventKey = "Defense: Third Down",
+                Volume = state.Current.BigGame ? 100 : 80,
+                IsEarnedBigEvent = state.Current.BigGame
+            };
+        }
+
         if (state.Current.Down == 2 && state.Delta.LostYards)
         {
             return new TriggerEvent

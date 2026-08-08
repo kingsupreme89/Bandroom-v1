@@ -368,16 +368,8 @@ async function openSituations(category) {
           <button class="situation-volume-close" title="Close">&times;</button>
         </div>
       </span>`;
-    row.querySelector('[data-act="assign"]').addEventListener("click", async () => {
-      await bridge?.AssignEvent(ev.trigger);
-      await refreshCategories();
-      openSituations(category); // re-render with updated assignment
-    });
-    row.querySelector('[data-act="assign-pa"]').addEventListener("click", async () => {
-      await bridge?.AssignPaEvent(ev.trigger);
-      await refreshCategories();
-      openSituations(category); // re-render with updated assignment
-    });
+    row.querySelector('[data-act="assign"]').addEventListener("click", () => openClipperAssign(ev.trigger, ev.eventName, false, ev.fileName));
+    row.querySelector('[data-act="assign-pa"]').addEventListener("click", () => openClipperAssign(ev.trigger, ev.eventName, true, ev.paFileName));
     row.querySelector('[data-act="preview"]').addEventListener("click", () => bridge?.PreviewEvent(ev.trigger));
     row.querySelector('[data-act="stop"]').addEventListener("click", () => bridge?.StopPreview());
     wireSituationVolumePopover(row, ev.trigger);
@@ -1020,6 +1012,8 @@ function wireControls() {
   document.getElementById("btn-update-restart").addEventListener("click", () => bridge?.RestartForUpdate());
 
   initDefaultSongPackPrompt();
+  wirePreviewBar();
+  initClipperAssign();
 
   document.getElementById("header-team-badge").addEventListener("click", openTeamPicker);
   // Files dropped anywhere on the window get copied into Songs\ (normalized name) by the
@@ -2004,6 +1998,10 @@ function previewSong(item) {
 function showPreviewBar(item) {
   const bar = document.getElementById("preview-bar");
   if (!bar) return;
+  const assignPanel = document.getElementById("clipper-assign");
+  if (assignPanel && !assignPanel.hidden) closeClipperAssign();
+  const empty = document.getElementById("clipper-empty");
+  if (empty) empty.hidden = true;
   document.getElementById("preview-name").textContent = item.name || "Preview";
   document.getElementById("btn-preview-playpause").textContent = "⏸"; // pause glyph, we just started playing
   _previewWaveformPeaks = null; // clear the old track's waveform until the new one decodes
@@ -2132,6 +2130,121 @@ function wirePreviewBar() {
   window.addEventListener("mousemove", (e) => { if (dragging) seekFromEvent(e); });
   window.addEventListener("mouseup", () => { dragging = false; });
   canvas.addEventListener("click", seekFromEvent);
+}
+
+// ---- Clipping island: assign mode -------------------------------------------------------
+// Replaces the native AssignTrackForm popup for the main "Assign / Edit" / "Assign PA" flow --
+// the whole point of moving this here (owner request) is not having a separate window steal
+// focus mid-game. Browse/Trim still hand off to native dialogs (OpenFileDialog, TrimmerForm)
+// since those need real filesystem access / waveform-cut tooling a web view doesn't have.
+let _clipperAssignTrigger = null;
+let _clipperAssignIsPa = false;
+let _clipperAssignLibrary = null; // cached [{name, path}], same list for every trigger
+let _clipperAssignSelectedPath = null;
+
+async function openClipperAssign(trigger, eventName, isPa, currentFileName) {
+  _clipperAssignTrigger = trigger;
+  _clipperAssignIsPa = isPa;
+  _clipperAssignSelectedPath = null;
+
+  stopPreview();
+  document.getElementById("clipper-empty").hidden = true;
+  document.getElementById("preview-bar").hidden = true;
+  document.getElementById("clipper-title-text").textContent = isPa ? "Assign PA Announcer Clip" : "Assign Track";
+  document.getElementById("btn-clipper-close-assign").hidden = false;
+  document.getElementById("clipper-assign-event").textContent = `for ${friendlyEventName(eventName)}`;
+  document.getElementById("clipper-assign-current").textContent = currentFileName ? `Current: ${currentFileName}` : "Current: (none assigned)";
+  document.getElementById("clipper-assign-search").value = "";
+  document.getElementById("btn-clipper-assign-select").disabled = true;
+  document.getElementById("clipper-assign").hidden = false;
+
+  if (!_clipperAssignLibrary) {
+    try {
+      _clipperAssignLibrary = bridge ? JSON.parse(await bridge.GetTrackLibrary()) : [];
+    } catch (err) {
+      console.error("GetTrackLibrary failed", err);
+      _clipperAssignLibrary = [];
+    }
+  }
+  renderClipperAssignList("");
+}
+
+function closeClipperAssign() {
+  bridge?.StopPreview();
+  document.getElementById("clipper-assign").hidden = true;
+  document.getElementById("btn-clipper-close-assign").hidden = true;
+  document.getElementById("clipper-title-text").textContent = "Clip Preview";
+  document.getElementById("clipper-empty").hidden = !!_previewAudio;
+  document.getElementById("preview-bar").hidden = !_previewAudio;
+  _clipperAssignTrigger = null;
+}
+
+function renderClipperAssignList(filter) {
+  const list = document.getElementById("clipper-assign-list");
+  list.innerHTML = "";
+  const q = filter.toLowerCase().trim();
+  const items = (_clipperAssignLibrary || []).filter((it) => !q || it.name.toLowerCase().includes(q));
+  if (!items.length) {
+    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No songs found${q ? " for that search" : " in the Songs library"}.</div>`;
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "clipper-assign-row";
+    row.textContent = item.name;
+    row.title = item.path;
+    row.addEventListener("click", () => {
+      list.querySelectorAll(".clipper-assign-row.selected").forEach((r) => r.classList.remove("selected"));
+      row.classList.add("selected");
+      _clipperAssignSelectedPath = item.path;
+      document.getElementById("btn-clipper-assign-select").disabled = false;
+    });
+    list.appendChild(row);
+  }
+}
+
+function initClipperAssign() {
+  document.getElementById("btn-clipper-close-assign").addEventListener("click", closeClipperAssign);
+  document.getElementById("clipper-assign-search").addEventListener("input", (e) => renderClipperAssignList(e.target.value));
+
+  document.getElementById("btn-clipper-assign-play").addEventListener("click", () => {
+    if (_clipperAssignSelectedPath) bridge?.PreviewLocalFile(_clipperAssignSelectedPath);
+  });
+  document.getElementById("btn-clipper-assign-stop").addEventListener("click", () => bridge?.StopPreview());
+
+  document.getElementById("btn-clipper-assign-select").addEventListener("click", async () => {
+    if (!_clipperAssignTrigger || !_clipperAssignSelectedPath) return;
+    await bridge?.AssignTrackFile(_clipperAssignTrigger, _clipperAssignIsPa, _clipperAssignSelectedPath);
+    await refreshCategories();
+    if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
+    closeClipperAssign();
+  });
+
+  document.getElementById("btn-clipper-assign-browse").addEventListener("click", async () => {
+    if (!_clipperAssignTrigger) return;
+    const path = await bridge?.BrowseForAudioFile();
+    if (!path) return;
+    await bridge?.AssignTrackFile(_clipperAssignTrigger, _clipperAssignIsPa, path);
+    await refreshCategories();
+    if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
+    closeClipperAssign();
+  });
+
+  document.getElementById("btn-clipper-assign-trim").addEventListener("click", async () => {
+    if (!_clipperAssignTrigger) return;
+    await bridge?.OpenTrimmer(_clipperAssignTrigger, _clipperAssignIsPa);
+    await refreshCategories();
+    if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
+    closeClipperAssign();
+  });
+
+  document.getElementById("btn-clipper-assign-clear").addEventListener("click", async () => {
+    if (!_clipperAssignTrigger) return;
+    await bridge?.ClearTrackAssignment(_clipperAssignTrigger, _clipperAssignIsPa);
+    await refreshCategories();
+    if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
+    closeClipperAssign();
+  });
 }
 
 // Optional one-time default song pack download (see DefaultSongPackService.cs). Pulled out of

@@ -79,7 +79,7 @@ button:focus-visible, .team-swatch:focus-visible, .rail-item:focus-visible,
   }
   .ticker-track { color: var(--text-primary); }
   .ticker-logo { background: rgba(0,0,0,0.06); }
-  #preview-bar { background: rgba(240,242,245,0.85); }
+  #clipper-island { background: rgba(240,242,245,0.85); }
   .marketplace-card { background: rgba(0,0,0,0.02); }
   .category-row { background: rgba(0,0,0,0.03); }
   .category-row:hover { background: rgba(0,0,0,0.07); }
@@ -288,7 +288,7 @@ button:focus-visible, .team-swatch:focus-visible, .rail-item:focus-visible,
 }
 
 /* Central panels get neon pulse but default blur */
-#category-bar, #matchup-side-bar, #situations-panel {
+#category-bar, #matchup-side-bar, #situations-panel, #clipper-island {
   animation: neon-pulse 3.2s ease-in-out infinite;
 }
 
@@ -1269,40 +1269,95 @@ input, select, textarea, [contenteditable] {
   50%      { box-shadow: 0 0 9px 2px color-mix(in srgb, var(--team-secondary, var(--accent)) 85%, transparent); }
 }
 
-/* Shared song-preview bar */
+/* Clip Preview island -- static panel in the empty strip below the situations grid, same width
+   as the grid above it. Houses the shared song-preview bar (moved out of its old fixed-position
+   floating strip, see index.html) so it's always present instead of popping up over content. */
+#clipper-island {
+  margin-top: 10px;
+  border-radius: var(--radius-panel);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 96px;
+  justify-content: center;
+}
+.clipper-header { display: flex; align-items: center; justify-content: space-between; }
+
+/* Assign mode -- inline replacement for the native AssignTrackForm popup */
+#clipper-assign[hidden] { display: none; }
+#clipper-assign { display: flex; flex-direction: column; gap: 10px; }
+.clipper-assign-meta { display: flex; align-items: baseline; gap: 10px; }
+#clipper-assign-event { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+#clipper-assign-current { font-size: 12px; color: var(--text-muted); }
+.clipper-assign-toolbar { display: flex; align-items: center; gap: 10px; }
+.clipper-assign-toolbar .team-picker-search { flex: 1 1 auto; margin-bottom: 0; }
+.clipper-assign-list {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 6px;
+}
+.clipper-assign-row {
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--text-muted-2);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.clipper-assign-row:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-primary); }
+.clipper-assign-row.selected {
+  background: color-mix(in srgb, var(--team-secondary, var(--accent)) 25%, transparent);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.clipper-assign-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.clipper-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.clipper-empty-state {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 10px 0;
+}
+
 #preview-bar {
-  position: fixed;
-  left: 50%; bottom: 54px;
-  transform: translateX(-50%);
-  z-index: 55;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  background: rgba(6, 7, 8, 0.75);
-  border: 1px solid var(--glass-border);
-  border-radius: 14px;
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  max-width: min(560px, 90vw);
+  gap: 16px;
+  width: 100%;
 }
 #preview-bar[hidden] { display: none; }
 .preview-bar-btn {
   flex: none;
-  width: 30px; height: 30px;
+  width: 40px; height: 40px;
   border-radius: 50%;
   border: none;
-  background: var(--accent);
-  color: #fff;
-  font-size: 13px;
+  background: var(--team-secondary, var(--accent));
+  color: var(--team-secondary-ink, #06222a);
+  font-size: 15px;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 14px 1px color-mix(in srgb, var(--team-secondary, var(--accent)) 45%, transparent);
+  transition: filter 0.15s ease, transform 0.1s ease;
 }
-.preview-bar-btn:hover { filter: brightness(1.1); }
+.preview-bar-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
 .preview-bar-name {
-  flex: 0 1 140px;
+  flex: 0 1 200px;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -1310,16 +1365,16 @@ input, select, textarea, [contenteditable] {
 }
 #preview-waveform {
   flex: 1 1 auto;
-  width: 260px; height: 40px;
+  width: 100%; height: 64px;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
 }
 .preview-bar-time {
   flex: none;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-muted-2);
-  min-width: 34px;
+  min-width: 38px;
   text-align: right;
 }
 
@@ -1876,9 +1931,18 @@ input, select, textarea, [contenteditable] {
 #center-column {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   border-radius: var(--radius-panel);
   padding: 4px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
+#category-bar, #matchup-side-bar { flex: 0 0 auto; }
+/* Clip Preview island stays its natural size; the situations panel below flexes to fill
+   whatever's left, so adding/removing panels here never has to be balanced against a magic
+   pixel offset for the others to keep scrolling correctly. */
+#clipper-island { flex: 0 0 auto; }
 #category-bar {
   border-radius: var(--radius-panel);
   padding: 14px 18px;
@@ -1920,7 +1984,7 @@ input, select, textarea, [contenteditable] {
   margin-top: 10px;
   border-radius: var(--radius-panel);
   padding: 14px 18px;
-  max-height: calc(100vh - 260px);
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
