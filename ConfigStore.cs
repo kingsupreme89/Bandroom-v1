@@ -745,6 +745,11 @@ internal static class ConfigStore
         "Offense: Earned First Down",
         "Offense: Second Down",
         "Offense: Third Down",
+        // Added 2026-08-08 alongside OffenseDownHelper now emitting this (STATE_MACHINE_ANALYSIS.md
+        // Discrepancy #10) -- same simplification bucket as Second/Third Down above: fires at
+        // runtime, reachable via LegacyDownEventAlias's new down:4th mapping (see WebMainForm.cs),
+        // just no separate UI card.
+        "Offense: Fourth Down",
         "Offense: Drive Starter",
         "Defense: Drive Starter",
     };

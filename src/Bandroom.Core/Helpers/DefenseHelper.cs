@@ -15,6 +15,14 @@ public sealed class DefenseHelper : IRuleEvaluator
         if (state.Current.Down == state.Previous.Down)
             return null;
 
+        // A 3rd-down loss that ALSO flips possession (e.g. a sack-fumble the defense recovers)
+        // is a turnover/stop, not just a loss -- BigEventHelper already covers that as
+        // "Defense: Third Down". Without this guard both fired together: two different real
+        // cues stacked on one snap, each cutting the other off via interruptPrevious.
+        // STATE_MACHINE_ANALYSIS.md Discrepancy #4.
+        if (state.Delta.NewPossession)
+            return null;
+
         if (state.Current.Down == 3 && state.Delta.LostYards)
         {
             return new TriggerEvent

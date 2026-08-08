@@ -352,7 +352,7 @@ async function openSituations(category) {
     row.className = "situation-row" + (ev.confirmed ? "" : " situation-unconfirmed");
     row.innerHTML = `
       <span class="situation-text">
-        <div class="situation-name"><span class="situation-led ${ledClass}"></span><span class="situation-name-text">${friendlyEventName(ev.eventName)}</span>${ev.confirmed ? "" : ' <span class="situation-badge situation-badge-coming-soon" title="Wired and assignable, but not yet confirmed firing in a live game -- could work, just hasn\'t been verified">Coming Soon</span>'}</div>
+        <div class="situation-name"><span class="situation-led ${ledClass}"></span><span class="situation-name-text">${friendlyEventName(ev.eventName)}</span></div>
         <div class="situation-file">${ev.fileName ? ev.fileName : "Unassigned"}</div>
         <div class="situation-file situation-file-pa">PA: ${ev.paFileName ? ev.paFileName : "none"}</div>
       </span>

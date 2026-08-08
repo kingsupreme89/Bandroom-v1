@@ -366,15 +366,16 @@ public sealed class WebMainForm : Form
     /// permanent-true (OnDownChanged, the only thing that ever fired them, now always bails).
     /// These three map 1:1 onto the engine's offense-side equivalent (same "my team is driving"
     /// meaning), so a canonical miss falls back to the matching legacy trigger rather than losing
-    /// an already-assigned file. "4th Down" has no clean engine equivalent (no "Offense: Fourth
-    /// Down" event exists -- going for it on 4th is only modeled from the defense's reactive
-    /// side) so it's deliberately NOT aliased here; that one needs a product decision, not a
-    /// guess.</summary>
+    /// an already-assigned file. "4th Down" now has an engine equivalent too (OffenseDownHelper
+    /// added "Offense: Fourth Down" 2026-08-08, STATE_MACHINE_ANALYSIS.md Discrepancy #10) --
+    /// aliased here the same way, so an already-assigned legacy down:4th file (e.g. the shipped
+    /// default "dies irie 0.wav") is reachable again instead of staying permanently silent.</summary>
     static readonly Dictionary<string, string> LegacyDownEventAlias = new()
     {
         ["Offense: Earned First Down"] = "down:1st",
         ["Offense: Second Down"] = "down:2nd",
         ["Offense: Third Down"] = "down:3rd",
+        ["Offense: Fourth Down"] = "down:4th",
     };
 
     /// <summary>Returns what actually happened so callers that need visible feedback (the test

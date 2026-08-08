@@ -17,6 +17,11 @@ public sealed class OffenseDownHelper : IRuleEvaluator
             {
                 2 => "Offense: Second Down",
                 3 => "Offense: Third Down",
+                // Added 2026-08-08 (STATE_MACHINE_ANALYSIS.md Discrepancy #10): no evaluator
+                // produced this at all, so any user who'd assigned a song to the legacy down:4th
+                // trigger went silent once the engine took over -- going for it on 4th produced
+                // no offensive audio cue.
+                4 => "Offense: Fourth Down",
                 _ => string.Empty
             };
 

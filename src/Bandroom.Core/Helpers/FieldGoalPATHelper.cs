@@ -24,8 +24,19 @@ public sealed class FieldGoalPATHelper : IRuleEvaluator
             };
         }
 
-        // 2-point conversion: exactly 2 points added (detected via IsPAT + score delta)
-        if (scoreDiff == 2)
+        // A safety ALSO nets a total-score delta of +2 (defense scores against the possessing
+        // team), and used to be indistinguishable from a real 2-point conversion here since this
+        // only checked the combined total, not which side actually gained the points --
+        // SafetyHelper would correctly fire "Defense: Safety" at the same time this incorrectly
+        // fired "Offense: 2-Point Conversion Made" for a play that never happened.
+        // STATE_MACHINE_ANALYSIS.md Discrepancy #5: a real 2-point conversion is the POSSESSING
+        // side's own score going up by 2; a safety is the OTHER side's score going up by 2.
+        int homeDelta = state.Current.HomeScore - state.Previous.HomeScore;
+        int awayDelta = state.Current.AwayScore - state.Previous.AwayScore;
+        bool possessingSideGained2 = state.Previous.PossessionAway ? awayDelta == 2 : homeDelta == 2;
+
+        // 2-point conversion: exactly 2 points added, and it's the offense's own score that moved
+        if (scoreDiff == 2 && possessingSideGained2)
         {
             return new TriggerEvent
             {

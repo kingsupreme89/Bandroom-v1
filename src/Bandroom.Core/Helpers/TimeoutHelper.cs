@@ -11,6 +11,13 @@ public sealed class TimeoutHelper : IRuleEvaluator
         if (state.Current.AwayTimeoutsRemaining < 0 || state.Current.AwayTimeoutsRemaining > 6)
             return null;
 
+        // Edge-trigger on an actual decrement -- this evaluator only checked current state with
+        // no previous-state comparison (unlike every other evaluator here), so it fired on EVERY
+        // tick the level condition held: ~4x/second, masked down to once per FireCooldown (20s)
+        // rather than once per real timeout. STATE_MACHINE_ANALYSIS.md Discrepancy #1.
+        if (state.Current.AwayTimeoutsRemaining >= state.Previous.AwayTimeoutsRemaining)
+            return null;
+
         int remaining = state.Current.AwayTimeoutsRemaining;
 
         return new TriggerEvent

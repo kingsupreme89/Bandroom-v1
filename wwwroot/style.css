@@ -1,17 +1,7 @@
 @font-face {
   font-family: "Outfit";
-  src: url("fonts/Outfit-Regular.ttf") format("truetype");
-  font-weight: 400;
-}
-@font-face {
-  font-family: "Outfit";
-  src: url("fonts/Outfit-SemiBold.ttf") format("truetype");
-  font-weight: 600;
-}
-@font-face {
-  font-family: "Outfit";
-  src: url("fonts/Outfit-Bold.ttf") format("truetype");
-  font-weight: 700;
+  src: url("fonts/Outfit-Variable.ttf") format("truetype-variations");
+  font-weight: 100 900;
 }
 
 :root {
@@ -1553,8 +1543,8 @@ input, select, textarea, [contenteditable] {
 .bandroom-album-tab.active { background: var(--team-secondary, var(--accent)); color: #06222a; border-color: transparent; }
 
 .bandroom-album-grid { overflow-y: auto; min-height: 0; }
-/* SOUND BANK & TROPHY ROOM — Nexus Mods-style 4-column card grid */
-.bandroom-songs-grid, .bandroom-images-grid {
+/* SOUND BANK & TROPHY ROOM & MY DOWNLOADS — Nexus Mods-style 4-column card grid */
+.bandroom-songs-grid, .bandroom-images-grid, #my-downloads-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 14px;
@@ -1942,11 +1932,10 @@ input, select, textarea, [contenteditable] {
   flex: 0 0 auto;
 }
 .situations-list {
-  display: flex;
-  flex-flow: row wrap;
-  align-content: flex-end;
-  align-items: flex-start;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  align-content: start;
+  gap: 10px;
   overflow-y: auto;
   min-height: 0;
 }
@@ -1955,12 +1944,10 @@ input, select, textarea, [contenteditable] {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-  flex: 1 1 220px;
-  max-width: 300px;
   padding: 9px 11px;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--team-secondary, var(--glass-border)) 22%, var(--glass-border));
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(16, 18, 24, 0.92);
   min-width: 0;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -1996,6 +1983,7 @@ input, select, textarea, [contenteditable] {
   border: 1px solid color-mix(in srgb, var(--team-secondary, var(--accent)) 40%, var(--glass-border));
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
+.situation-volume-popover[hidden] { display: none; }
 .situation-volume-slider { width: 110px; }
 .situation-volume-value { font-size: 11px; color: var(--text-muted); min-width: 32px; }
 .situation-volume-close {
@@ -2122,6 +2110,8 @@ input, select, textarea, [contenteditable] {
   display: inline-flex; align-items: center; justify-content: center;
 }
 .icon-btn:hover { background: rgba(255, 255, 255, 0.06); color: var(--text-primary); }
+
+.header-team-badge { width: 30px; height: 30px; flex: none; }
 
 .slider {
   width: 100%;

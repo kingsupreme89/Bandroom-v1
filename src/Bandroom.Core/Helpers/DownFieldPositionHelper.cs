@@ -1,8 +1,12 @@
 namespace Bandroom.Core.Helpers;
 
-/// <summary>Covers all the field-position and yardage-gain variants for 2nd/3rd/4th down
-/// on both offense and defense sides. Works with the existing OffenseDownHelper and
-/// DefenseHelper to fill the gaps.</summary>
+/// <summary>Covers the Midfield field-position variants for 2nd down on both offense and
+/// defense sides. Loss-of-yards variants ("Second/Third/Fourth Down (Loss)") were REMOVED
+/// 2026-08-08 (STATE_MACHINE_ANALYSIS.md Discrepancy #3) -- they exactly duplicated
+/// DefenseHelper's own Loss variants (same EventKey, different Volume), so both evaluators
+/// fired for the same tick and the second AudioPlayer.Play(interruptPrevious: true) call cut
+/// off the first mid-clip, producing an audible start-stop-restart glitch on every loss-of-yards
+/// 2nd/3rd/4th down. DefenseHelper remains the single source for those.</summary>
 public sealed class DownFieldPositionHelper : IRuleEvaluator
 {
     public TriggerEvent? Evaluate(GameState state)
@@ -11,8 +15,11 @@ public sealed class DownFieldPositionHelper : IRuleEvaluator
             return null;
 
         int down = state.Current.Down;
-        bool lostYards = state.Delta.LostYards;
-        bool atMidfield = state.Current.YardLine <= 50;
+        // Discrepancy #2: YardLine OCR was never built (always 0), so "<= 50" was always true --
+        // this fired "(Midfield)" on literally every 2nd down, duplicating the plain event. Gated
+        // behind YardLine > 0 so it stays dormant (matching FirstDownHelper's own Midfield guard)
+        // until real yard-line OCR exists, instead of firing on bogus data.
+        bool atMidfield = state.Current.YardLine > 0 && state.Current.YardLine <= 50;
 
         // --- Defense side variants ---
         // Defense = user's team does NOT have possession
@@ -20,14 +27,7 @@ public sealed class DownFieldPositionHelper : IRuleEvaluator
 
         if (defenseSide)
         {
-            return down switch
-            {
-                2 when lostYards => Make("Defense: Second Down (Loss)", 85, true),
-                2 when atMidfield => Make("Defense: Second Down (Midfield)", 75, false),
-                3 when lostYards => Make("Defense: Third Down (Loss)", 85, true),
-                4 when lostYards => Make("Defense: Fourth Down (Loss)", 85, true),
-                _ => null
-            };
+            return down == 2 && atMidfield ? Make("Defense: Second Down (Midfield)", 75, false) : null;
         }
 
         // --- Offense side variants ---

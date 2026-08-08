@@ -679,7 +679,11 @@ internal sealed class GameWatcher
         var match = DistancePattern.Match(text);
         string? distanceRaw = match.Success ? match.Groups[1].Value : null;
         if (distanceRaw == _lastDistanceRaw) return;
-        _lastDistanceRaw = distanceRaw;
+        // Sticky, same pattern as _lastKnownDown/_lastKnownAwayScore/etc: a blank OCR read
+        // (pause menu, replay overlay) must not zero out YardsToGo for RouteEngineTick -- that
+        // was creating a stale-vs-fresh mismatch on resume (STATE_MACHINE_ANALYSIS.md
+        // Discrepancy #7) where TflHelper and friends could see a spurious YardsToGo jump.
+        if (distanceRaw != null) _lastDistanceRaw = distanceRaw;
         if (distanceRaw == null) return;
 
         if (int.TryParse(distanceRaw, out int distance) && distance < 0)
