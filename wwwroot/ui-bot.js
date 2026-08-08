@@ -493,12 +493,18 @@
 
   window.__uiBotReport = REPORT;
 
-  // Auto-run on DOM ready
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => {
-      setTimeout(window.__runUIBot, 1500); // Wait for dynamic content to render
-    });
-  } else {
-    setTimeout(window.__runUIBot, 1500);
+  // Auto-run on DOM ready, but ONLY when the URL includes ?debug or #debug --
+  // this is a dev diagnostic; shipping it to production was gated 2026-08-08
+  // (TASK_BOARD.md "ui-bot shipped to production" bug) so it never pops a
+  // user-visible "N critical" toast for real users.
+  var isDebug = location.search.indexOf('debug') !== -1 || location.hash.indexOf('debug') !== -1;
+  if (isDebug) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => {
+        setTimeout(window.__runUIBot, 1500);
+      });
+    } else {
+      setTimeout(window.__runUIBot, 1500);
+    }
   }
 })();

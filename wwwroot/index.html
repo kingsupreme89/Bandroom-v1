@@ -291,33 +291,41 @@
        across every team at once -- clicking any tile jumps straight into that team's album on
        the right tab. No fake/placeholder content anywhere: if nothing's been uploaded yet, the
        hub says so plainly instead of showing empty grid slots. -->
+  <!-- Spotify-style layout: fixed left "Your Library" team sidebar (search + scrollable icon
+       list) alongside a scrolling main pane of horizontal shelves (Uploads, Top Contributing
+       Teams) -- explicit reference was Spotify desktop's sidebar+shelves+bottom-player shape;
+       the bottom player is #clipper-island/#preview-bar, already global, so no change needed
+       there. -->
   <div id="bandroom-overlay" hidden>
     <div id="bandroom-picker" class="glass">
       <div class="team-picker-header">
         <span>The Bandroom</span>
         <button id="btn-close-bandroom" class="icon-btn">&times;</button>
       </div>
-      <p class="bandroom-instructions">
-        Search for a team below to open its Sound Bank / Trophy Room, or click anything in
-        Newest Uploads to jump straight to it. Every team has its own Sound Bank (songs) and
-        Trophy Room (background images) -- open one and hit <strong>+ Upload</strong> to
-        contribute.
-      </p>
-      <div class="bandroom-hub-section-label">
-        Uploads
-        <select id="bandroom-hub-sort" class="bandroom-hub-sort">
-          <option value="newest">Newest</option>
-          <option value="views">Most Viewed</option>
-          <option value="downloads">Most Downloaded</option>
-          <option value="likes">Most Liked</option>
-        </select>
+      <div class="bandroom-sidebar">
+        <div class="bandroom-hub-section-label">Your Library</div>
+        <input type="text" id="bandroom-search" placeholder="Search teams..." class="team-picker-search" />
+        <div class="team-picker-grid" id="bandroom-team-grid"><!-- populated by app.js --></div>
       </div>
-      <div class="bandroom-recent-grid" id="bandroom-recent-grid"><!-- populated by app.js --></div>
-      <div class="bandroom-hub-section-label">Top Contributing Teams</div>
-      <div class="bandroom-leaderboard" id="bandroom-leaderboard"><!-- populated by app.js --></div>
-      <div class="bandroom-hub-section-label">Find a Team</div>
-      <input type="text" id="bandroom-search" placeholder="Search teams..." class="team-picker-search" />
-      <div class="team-picker-grid" id="bandroom-team-grid"><!-- populated by app.js --></div>
+      <div class="bandroom-main">
+        <p class="bandroom-instructions">
+          Search for a team to open its Sound Bank / Trophy Room, or click anything below to
+          jump straight to it. Every team has its own Sound Bank (songs) and Trophy Room
+          (background images) -- open one and hit <strong>+ Upload</strong> to contribute.
+        </p>
+        <div class="bandroom-hub-section-label">
+          Uploads
+          <select id="bandroom-hub-sort" class="bandroom-hub-sort">
+            <option value="newest">Newest</option>
+            <option value="views">Most Viewed</option>
+            <option value="downloads">Most Downloaded</option>
+            <option value="likes">Most Liked</option>
+          </select>
+        </div>
+        <div class="bandroom-recent-grid" id="bandroom-recent-grid"><!-- populated by app.js --></div>
+        <div class="bandroom-hub-section-label">Top Contributing Teams</div>
+        <div class="bandroom-leaderboard" id="bandroom-leaderboard"><!-- populated by app.js --></div>
+      </div>
     </div>
   </div>
 

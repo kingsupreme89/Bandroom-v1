@@ -538,7 +538,18 @@ function setActiveTeam(name, fromInit = false) {
   applyBackground(name);
   const team = state.teams.find((t) => t.name === name);
   const secondary = team?.secondary ?? "#22d3ee";
-  const primary = team?.primary ?? "#0f766e";
+  // A handful of teams (Appalachian State, Army, ...) have literal black as their primary --
+  // fine as a jersey color, unreadable as a glow/accent color. Fall back to secondary for those
+  // so every current and future --team-primary consumer (glows, accent fills) is covered from
+  // this one spot instead of needing a black-check at every call site.
+  const isNearBlack = (hex) => {
+    const h = (hex || "").replace("#", "");
+    if (h.length !== 6) return false;
+    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return r < 20 && g < 20 && b < 20;
+  };
+  const rawPrimary = team?.primary ?? "#0f766e";
+  const primary = isNearBlack(rawPrimary) ? secondary : rawPrimary;
   document.documentElement.style.setProperty("--team-secondary", secondary);
   document.documentElement.style.setProperty("--team-primary", primary);
   document.documentElement.style.setProperty("--team-secondary-ink", pickContrastInk(secondary, primary));

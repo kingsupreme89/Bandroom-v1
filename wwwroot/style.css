@@ -327,16 +327,18 @@ button:focus-visible, .team-swatch:focus-visible, .rail-item:focus-visible,
 }
 
 /* ================================================================
-   CROSSHAIR CURSOR STYLES (gamer UI)
+   CURSOR STYLES -- plain OS pointer/text, not the crosshair reticle this
+   used to render as (explicit ask: standard mac-style arrow that swaps to
+   a pointer over clickable elements, no custom reticle).
    ================================================================ */
 button, .rail-item, .team-swatch, .category-row, .situation-row,
 .marketplace-card, .bandroom-item-tile, .bandroom-slot, .pill,
 .marketplace-sort-tab, .marketplace-filter-chip, .reverb-tile,
 .matchup-side-btn, .wc-btn {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='1.5' fill='%2322d3ee'/%3E%3Cline x1='8' y1='0' x2='8' y2='6' stroke='%2322d3ee' stroke-width='0.8'/%3E%3Cline x1='8' y1='10' x2='8' y2='16' stroke='%2322d3ee' stroke-width='0.8'/%3E%3Cline x1='0' y1='8' x2='6' y2='8' stroke='%2322d3ee' stroke-width='0.8'/%3E%3Cline x1='10' y1='8' x2='16' y2='8' stroke='%2322d3ee' stroke-width='0.8'/%3E%3C/svg%3E") 8 8, pointer;
+  cursor: pointer;
 }
 input, select, textarea, [contenteditable] {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cline x1='8' y1='2' x2='8' y2='14' stroke='%2322d3ee' stroke-width='1.2'/%3E%3C/svg%3E") 8 8, text;
+  cursor: text;
 }
 
 /* ================================================================
@@ -1428,17 +1430,55 @@ input, select, textarea, [contenteditable] {
 #bandroom-overlay[hidden], #bandroom-album-overlay[hidden] {
   display: none;
 }
-#bandroom-picker, #bandroom-album {
-  width: min(720px, 92vw);
-  max-height: 80vh;
+#bandroom-album {
+  width: min(1100px, 95vw);
+  height: 85vh;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: 20px;
   border-radius: 16px;
 }
 #bandroom-team-grid { overflow-y: auto; }
 
-/* My Downloads */
+/* The Bandroom hub -- Spotify-style sidebar (Your Library) + scrolling main pane, full-window
+   scale to match the reference (Spotify desktop), not a small centered card like the other
+   dialogs. */
+#bandroom-picker {
+  width: min(1400px, 96vw);
+  height: 88vh;
+  max-height: 88vh;
+  padding: 20px;
+  border-radius: 16px;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "header header" "sidebar main";
+  gap: 4px 24px;
+  overflow: hidden;
+}
+#bandroom-picker .team-picker-header { grid-area: header; }
+#bandroom-picker .bandroom-sidebar {
+  grid-area: sidebar;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--glass-border);
+  padding-right: 20px;
+}
+#bandroom-picker .bandroom-main {
+  grid-area: main;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+#bandroom-picker .bandroom-sidebar #bandroom-team-grid {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+/* My Downloads -- widened to match the hub/album scale instead of the small update-style
+   dialogs; still a single flat list (Spotify's "Liked Songs" shape), no sidebar needed. */
 #my-downloads-overlay {
   position: fixed; inset: 0; z-index: 60;
   display: flex; align-items: center; justify-content: center;
@@ -1446,11 +1486,12 @@ input, select, textarea, [contenteditable] {
 }
 #my-downloads-overlay[hidden] { display: none; }
 #my-downloads {
-  width: min(720px, 92vw);
-  max-height: 80vh;
+  width: min(1100px, 95vw);
+  height: 85vh;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: 20px;
   border-radius: 16px;
 }
 #my-downloads-grid { overflow-y: auto; }
