@@ -906,6 +906,7 @@ public sealed class WebBridge
 
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
     public void OpenSettings() => _host.OpenSettingsFromWeb();
+    public void ShowHelp() => _host.OpenHelpFromWeb();
     public void ShowUpdate() => _host.ShowUpdateDialogFromWeb();
 
     /// <summary>True once a default song pack (bundled with an older full installer, or
