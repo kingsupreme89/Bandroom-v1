@@ -78,7 +78,27 @@ public sealed class ScorebugPreset
         AwayTimeoutFxX = 0.15, AwayTimeoutFxY = 0.895, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
     };
 
-    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebug, KamsCbsScorebugV3 };
+    /// <summary>Third scorebug layout, calibrated 2026-08-08 from two 1920x1080 screenshots the
+    /// owner sent (Texas @ Oklahoma kickoff; Purdue @ Indiana 1st &amp; 10) -- one an actual PS5
+    /// Remote Play-style capture, one a PC capture with an on-screen hardware monitor overlay in
+    /// the corner (unrelated to the scorebug itself, just confirms this is the same in-game UI at
+    /// the same screen-space position regardless of capture path). IMPORTANT: these coordinates
+    /// are eyeballed from the screenshots, not pixel-measured against the actual source images --
+    /// same caveat as AwayTimeoutFx*/AwayUnderlineFx* above ("estimated crop... needs live
+    /// tuning"). Treat this preset as a starting point to refine against a live game, not a
+    /// finished calibration. Possession here uses the underline-brightness method (same reasoning
+    /// as V3): this scorebug style shows a bright underline beneath the team currently on offense
+    /// rather than a team-colored fill box.</summary>
+    public static readonly ScorebugPreset ConsoleScorebugV1 = new()
+    {
+        Name = "Console/Remote Play v1",
+        BandFxY = 0.855, BandFxH = 0.10,
+        AwayUnderlineFxX = 0.20, AwayUnderlineFxY = 0.965, AwayUnderlineFxW = 0.09, AwayUnderlineFxH = 0.015,
+        HomeUnderlineFxX = 0.565, HomeUnderlineFxY = 0.965, HomeUnderlineFxW = 0.09, HomeUnderlineFxH = 0.015,
+        AwayTimeoutFxX = 0.20, AwayTimeoutFxY = 0.905, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
+    };
+
+    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebug, KamsCbsScorebugV3, ConsoleScorebugV1 };
 
     public static ScorebugPreset GetByName(string? name) =>
         AllPresets.Find(p => p.Name.Equals(name, System.StringComparison.OrdinalIgnoreCase)) ?? KamsCbsScorebug;
