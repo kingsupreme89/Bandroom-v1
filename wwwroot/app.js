@@ -2148,6 +2148,50 @@ function buildItemTile(item, inHub) {
     school.className = "bandroom-item-school";
     school.textContent = item.school;
     tile.append(thumb, name, school);
+
+    // Per-item Play/Stop/Download transport on hub song tiles (Popular Songs shelf) -- reuses
+    // the exact .bandroom-item-actions hover-overlay pattern the album view (!inHub branch,
+    // below) already uses on these same .bandroom-item-tile elements, and the same
+    // previewSong/stopPreview/downloadMarketplaceItem calls the rest of the marketplace UI uses
+    // for remote items (NOT bridge.PreviewLocalFile/AddLibraryFileToDownloads -- those are for
+    // the clipper's LOCAL filesystem library, item.url here is a remote marketplace URL).
+    // Background shelf tiles (image type, built separately in renderTopTeamBackgroundsShelf)
+    // intentionally don't get this row -- there's nothing to play/download there yet.
+    if (item.type === "song") {
+      const actions = document.createElement("div");
+      actions.className = "bandroom-item-actions";
+
+      const playBtn = document.createElement("button");
+      playBtn.className = "bandroom-item-action";
+      playBtn.title = "Play";
+      playBtn.textContent = "▶";
+      playBtn.addEventListener("click", (e) => { e.stopPropagation(); previewSong(item); });
+      actions.appendChild(playBtn);
+
+      const stopBtn = document.createElement("button");
+      stopBtn.className = "bandroom-item-action";
+      stopBtn.title = "Stop";
+      stopBtn.textContent = "⏹";
+      stopBtn.addEventListener("click", (e) => { e.stopPropagation(); stopPreview(); });
+      actions.appendChild(stopBtn);
+
+      const dlBtn = document.createElement("button");
+      dlBtn.className = "bandroom-item-action";
+      dlBtn.title = "Download to My Downloads";
+      dlBtn.textContent = "⬇";
+      dlBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        dlBtn.disabled = true;
+        dlBtn.textContent = "...";
+        const ok = bridge ? await downloadMarketplaceItem(item) : false;
+        showToast(ok ? `Downloaded "${item.name}"!` : "Couldn't download that.");
+        dlBtn.disabled = false;
+        dlBtn.textContent = "⬇";
+      });
+      actions.appendChild(dlBtn);
+
+      tile.appendChild(actions);
+    }
   } else {
     const body = document.createElement("div");
     body.className = "marketplace-card-body";
