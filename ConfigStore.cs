@@ -43,10 +43,31 @@ internal static class ConfigStore
     static readonly string FirstRunFlagPath = Path.Combine(UserDataRoot, ".firstrun_done");
     static readonly string ScorebugPresetPath = Path.Combine(UserDataRoot, "scorebug_preset.txt");
 
-    /// <summary>Path to the bundled default song pack (ships with the app installer).
-    /// Songs\Default\{Conference}\{Team}\{EventKey}.mp3</summary>
-    public static readonly string DefaultSongsFolder = Path.Combine(AppContext.BaseDirectory, "Songs", "Default");
-    static readonly string DefaultSongsIndexPath = Path.Combine(DefaultSongsFolder, "index.json");
+    /// <summary>Where the installer would have bundled the default song pack, if this build
+    /// includes it (dev builds and any future full build still do -- see BundleDefaultSongs in
+    /// BandAudioHook.csproj). Public releases from v1.0.48 on don't, so this is empty there.</summary>
+    static readonly string BundledDefaultSongsFolder = Path.Combine(AppContext.BaseDirectory, "Songs", "Default");
+    /// <summary>Where DefaultSongPackService extracts the pack after the user opts into the
+    /// one-time download (see cloudflare-defaultsongs). Lives under UserDataRoot so, like
+    /// everything else there, Squirrel updates never touch or wipe it.</summary>
+    public static readonly string DownloadedDefaultSongsFolder = Path.Combine(UserDataRoot, "DefaultSongs");
+
+    /// <summary>Path to the default song pack, whichever source actually has it on this
+    /// machine. Songs\Default\{Conference}\{Team}\{EventKey}.mp3. Prefers the bundled copy
+    /// (older/full installs) over the downloaded one so a machine with both never double-counts
+    /// or picks the wrong copy.</summary>
+    public static string DefaultSongsFolder =>
+        Directory.Exists(BundledDefaultSongsFolder) && Directory.EnumerateFileSystemEntries(BundledDefaultSongsFolder).Any()
+            ? BundledDefaultSongsFolder
+            : DownloadedDefaultSongsFolder;
+
+    /// <summary>True once a default song pack (bundled or downloaded) is actually present --
+    /// the signal the UI uses to decide whether to offer the one-time download prompt at all.</summary>
+    public static bool HasDefaultSongPack =>
+        (Directory.Exists(BundledDefaultSongsFolder) && Directory.EnumerateFileSystemEntries(BundledDefaultSongsFolder).Any())
+        || (Directory.Exists(DownloadedDefaultSongsFolder) && Directory.EnumerateFileSystemEntries(DownloadedDefaultSongsFolder).Any());
+
+    static string DefaultSongsIndexPath => Path.Combine(DefaultSongsFolder, "index.json");
 
     public static string LoadScorebugPresetName() =>
         File.Exists(ScorebugPresetPath) ? File.ReadAllText(ScorebugPresetPath).Trim() : ScorebugPreset.KamsCbsScorebug.Name;
@@ -681,15 +702,39 @@ internal static class ConfigStore
     /// had no row in any profile, never appeared in the assignment UI, and could never have audio
     /// assigned -- regardless of how correct OCR/engine detection was. Update this list whenever a
     /// new evaluator/EventKey is added on the engine side, or its songs go silently unassignable.</summary>
-    public static readonly string[] AllEngineEventKeys =
+    /// <summary>Event keys that used to have their own assignable card but were retired because
+    /// they duplicated the legacy `down:1st`/`2nd`/`3rd` cards (which already have real,
+    /// working song assignments via LegacyDownEventAlias) or added clutter without a distinct
+    /// sound (Drive Starter) -- explicit owner request 2026-08-07: "some of these are the same
+    /// and we don't need... make this simplified for people." Kept as a real EventKey string
+    /// constant (not deleted from the engine) since FirstDownHelper/OffenseDownHelper/
+    /// DriveStarterHelper still emit these at runtime -- removing the UI card doesn't touch
+    /// firing, it only stops EnsureAllEvents from re-creating an empty duplicate slot for it.</summary>
+    /// <summary>Also pruned like RetiredEventKeys, but for a different reason: these can never
+    /// actually fire yet, not just "not confirmed" -- YardLine is hardcoded to 0 everywhere
+    /// (never OCR'd), so any "<= 50 = midfield" check would either never pass or always pass.
+    /// Showing a permanently-dead card is worse than not showing one at all -- explicit owner
+    /// request 2026-08-08 to keep simplifying the list. Re-add to AllEngineEventKeys once real
+    /// YardLine data exists.</summary>
+    static readonly HashSet<string> BlockedEventKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Offense: Earned First Down (Midfield)",
+        "Offense: Second Down (Midfield)",
+        "Defense: Second Down (Midfield)",
+    };
+
+    static readonly HashSet<string> RetiredEventKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "Offense: Earned First Down",
-        "Offense: Earned First Down (Big Gain)",
-        "Offense: Earned First Down (Midfield)",
         "Offense: Second Down",
-        "Offense: Second Down (Midfield)",
         "Offense: Third Down",
         "Offense: Drive Starter",
+        "Defense: Drive Starter",
+    };
+
+    public static readonly string[] AllEngineEventKeys =
+    {
+        "Offense: Earned First Down (Big Gain)",
         "Offense: PAT Made",
         "Offense: 2-Point Conversion Made",
         "Offense: Field Goal Made",
@@ -700,10 +745,8 @@ internal static class ConfigStore
         "Defense: Fourth Down",
         "Defense: Third Down (Loss)",
         "Defense: Second Down",
-        "Defense: Second Down (Midfield)",
-        "Defense: Second Down (Loss)",
-        "Defense: Fourth Down (Loss)",
-        "Defense: Drive Starter",
+        "Defense: Second Down (Loss)", // Implemented 2026-08-07 (DefenseHelper.cs)
+        "Defense: Fourth Down (Loss)", // Implemented 2026-08-07 (BigEventHelper.cs)
         "Defense: Field Goal Missed by Opponent",
         "Defense: Turnover Forced",
         "Defense: Iced Game by Turnover",
@@ -724,6 +767,7 @@ internal static class ConfigStore
         "Other: Kickoff on Kick (Kicking)",
         "Penalty: Offense",
         "Penalty: Defense",
+        "Defense: No Punt Return",
     };
 
     /// <summary>Appends a slot for any engine EventKey missing from `entries`, so every event the
@@ -731,6 +775,10 @@ internal static class ConfigStore
     /// saved song assignments are never disturbed. Called from every load/build path.</summary>
     public static List<TriggerEntry> EnsureAllEvents(List<TriggerEntry> entries)
     {
+        // Prune already-persisted rows for retired duplicate events -- only when nothing was
+        // ever assigned to them, so no existing user song assignment is ever silently dropped.
+        entries.RemoveAll(e => (RetiredEventKeys.Contains(e.Event) || BlockedEventKeys.Contains(e.Event)) && string.IsNullOrWhiteSpace(e.AudioFile));
+
         var existing = new HashSet<string>(entries.Select(e => e.Event), StringComparer.OrdinalIgnoreCase);
         foreach (var key in AllEngineEventKeys)
         {

@@ -32,7 +32,6 @@ public partial class MainWindow : Window
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly MacWebBridge _bridge;
     private bool _watching;
-    private static SupremeStadiumSoundSelector.Theme.ActiveThemeType MacTheme => SupremeStadiumSoundSelector.Theme.ActiveTeam;
     private bool _windowFound;
     private TeamColor? _homeTeam, _awayTeam;
     private List<TriggerEntry>? _homeConfig, _awayConfig;
@@ -90,7 +89,7 @@ public partial class MainWindow : Window
                 };
                 System.Diagnostics.Process.Start(psi);
 
-                LoadingText.Text = $"Bandroom\nhttp://localhost:18765\n16 evaluators · {ConfigStore.AllEngineEventKeys.Length} events";
+                LoadingText.Text = $"Bandroom\nhttp://localhost:18765\n17 evaluators · {ConfigStore.AllEngineEventKeys.Length} events";
             }
             else
             {
@@ -208,6 +207,7 @@ public partial class MainWindow : Window
         new Bandroom.Core.Helpers.OffenseDownHelper(),
         new Bandroom.Core.Helpers.PenaltyHelper(),
         new Bandroom.Core.Helpers.SafetyHelper(),
+        new Bandroom.Core.Helpers.NoPuntReturnHelper(),
         new Bandroom.Core.Helpers.TflHelper(),
         new Bandroom.Core.Helpers.TimeoutHelper(),
         new Bandroom.Core.Helpers.TouchdownHelper(),

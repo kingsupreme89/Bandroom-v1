@@ -42,6 +42,14 @@ internal static class AudioPlayer
     public static readonly TimeSpan FireCooldown = TimeSpan.FromSeconds(20);
     static readonly Dictionary<string, DateTime> _lastFireByPath = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Clears the cooldown for one clip so a manual re-trigger (test hook, "fire again"
+    /// button) isn't silently swallowed by the same 20s dedup meant for live-game OCR flicker.
+    /// Preview/real engine fires still go through the normal cooldown untouched.</summary>
+    public static void ClearCooldown(string path)
+    {
+        lock (Lock) _lastFireByPath.Remove(path);
+    }
+
     static bool _warmedUp;
 
     /// <summary>Opens a throwaway WaveOutEvent against a few ms of silence and immediately

@@ -163,6 +163,7 @@ internal sealed class MacGameWatcher
             new DriveStarterHelper(), new FieldGoalMissedHelper(), new FieldGoalPATHelper(),
             new FirstDownHelper(), new GameStateEventHelper(), new KickoffHelper(),
             new OffenseDownHelper(), new PenaltyHelper(), new SafetyHelper(),
+            new NoPuntReturnHelper(),
             new TflHelper(), new TimeoutHelper(), new TouchdownHelper(), new TurnoverHelper(),
         });
     }

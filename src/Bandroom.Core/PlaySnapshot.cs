@@ -18,4 +18,5 @@ public sealed class PlaySnapshot
     public bool IsPenaltyOnDefense { get; init; }
     public bool IsTouchdown { get; init; }
     public bool IsTurnover { get; init; }
+    public bool IsNoPuntReturn { get; init; }
 }

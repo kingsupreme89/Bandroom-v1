@@ -43,12 +43,19 @@
         <span id="team-name">General</span>
         <span class="header-sep">·</span>
         <button id="btn-matchup" class="matchup-btn" title="Pick who's home and away for this game">Set Matchup</button>
+        <button id="btn-unlock-matchup" class="icon-btn" title="Unlock matchup without stopping watching" hidden>&#128275;</button>
       </div>
       <div class="header-right">
-        <button id="btn-watch" class="pill pill-off" title="Toggle watching">
+        <!-- Status-only, not clickable -- GAMETIME now starts watching automatically (see
+             WebMainForm.ConfirmGametimeFromWeb), so there's no manual "start" action left to
+             offer here. Was a clickable toggle before; kept as a button-shaped element made it
+             too easy to accidentally press again mid-game and silently stop watching. Explicit
+             stop is now the separate "Stop Watching" button below instead. -->
+        <div id="watch-status" class="pill pill-off" title="Watching status">
           <span class="watch-dot"></span>
-          <span id="watch-label">Start Watching</span>
-        </button>
+          <span id="watch-label">Not watching</span>
+        </div>
+        <button id="btn-stop-watching" class="btn-ghost" title="End this game and unlock the matchup" hidden>Stop Watching</button>
         <!-- Marketplace island tabs -- "The Bandroom" opens the full team-browser; Sound Bank
              / Trophy Room jump straight into the ACTIVE team's album on that specific tab,
              skipping the team-picker step since you're usually already working on one team. -->
@@ -263,6 +270,9 @@
        is real and ready, not a mockup. -->
   <div id="profile-overlay" hidden>
     <div id="profile-dialog" class="glass">
+      <!-- Profile close button in header, matching every other overlay in the app.
+           Previously missing -- user had to scroll to the bottom to find "Close". -->
+      <button id="btn-close-profile-top" class="icon-btn" title="Close" style="position:absolute;top:12px;right:12px;">&times;</button>
       <!-- Avatar -- local custom upload (works signed-out) shown if set, else the Google picture
            if signed in, else the team badge fallback. Separate from the Google avatar so
            signed-out users still get a personalized picture. -->
@@ -560,6 +570,35 @@
     </div>
   </div>
 
+  <!-- Optional one-time default song pack download (2,241 files, ~2.8GB) -- pulled out of the
+       installer as of v1.0.48 to stay under GitHub Releases' 2GB asset cap, so it's now a
+       separate opt-in download instead of bundled. Same glass-dialog + progress-bar shape as
+       the update overlay above, on purpose, so it reads as the same kind of "app thing
+       happening" rather than a new UI pattern. -->
+  <div id="songpack-prompt-overlay" hidden>
+    <div class="update-dialog glass">
+      <div class="update-header">Download the default song pack?</div>
+      <p class="update-sub" id="songpack-prompt-sub">
+        2,241 songs across every team (about 2.8&nbsp;GB), so teams auto-fill with real cues
+        instead of staying silent. One-time download -- entirely optional, and you can add it
+        later from Settings if you skip it now.
+      </p>
+      <div class="update-actions">
+        <button id="btn-songpack-skip" class="btn-ghost">Not Now</button>
+        <button id="btn-songpack-download" class="btn-primary">Download (2.8 GB)</button>
+      </div>
+    </div>
+  </div>
+  <div id="songpack-progress-overlay" hidden>
+    <div id="songpack-progress-dialog" class="glass">
+      <div class="update-header" id="songpack-progress-header">Downloading song pack&hellip;</div>
+      <div class="update-progress-track">
+        <div class="update-progress-fill" id="songpack-progress-fill" style="width:0%"></div>
+      </div>
+      <p class="update-sub" id="songpack-progress-sub">Hang tight -- this is a big one-time download.</p>
+    </div>
+  </div>
+
   <!-- Persistent bottom ticker, ESPN-style: a fixed logo tile on the far left (same
        team-colored brand-mark as the header), scrolling upload activity ("<song/image name> —
        <school name>") behind/into it. NOT the online-count -- that's the small presence-dot in
@@ -584,6 +623,161 @@
     <span id="preview-time" class="preview-bar-time">0:00</span>
   </div>
 
+  <!-- Test hook: fire any EventKey for home/away directly through FireEventForSide, bypassing
+       OCR/live game feed. Owner-only debug tool, not part of the normal user flow. -->
+  <div id="test-hook-panel" class="glass" hidden>
+    <div class="test-hook-header">
+      <span>Event Test Hook</span>
+      <button id="btn-close-test-hook" class="icon-btn">&times;</button>
+    </div>
+    <div class="test-hook-body">
+      <label>Side
+        <select id="test-hook-side">
+          <option value="home">Home</option>
+          <option value="away">Away</option>
+        </select>
+      </label>
+      <label>Event
+        <select id="test-hook-event"></select>
+      </label>
+      <div class="test-hook-actions">
+        <button id="btn-test-hook-fire" class="btn-primary">Fire Event</button>
+        <button id="btn-test-hook-stop" class="btn-ghost">Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- What's New popup -->
+  <div id="whats-new-overlay" hidden>
+    <div id="whats-new-modal" class="glass">
+      <div class="whats-new-header">
+        <span>What's New in Bandroom</span>
+        <button id="btn-close-whats-new" class="icon-btn">&times;</button>
+      </div>
+      <div class="whats-new-changelog" id="whats-new-changelog"><!-- populated by JS --></div>
+      <div class="save-profile-actions">
+        <button id="btn-whats-new-gotit" class="btn-primary">Got it!</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       NEW ELEMENTS: HUD overlay, kill-feed, command palette, context menu,
+       streamer mode, offline indicator, tip widget, soundboard, status
+       indicator, hotkey panel, profile dashboard, resume session bar
+       ================================================================ -->
+
+  <!-- Streamer mode indicator -->
+  <div id="streamer-mode-indicator" hidden>
+    <span class="streamer-dot"></span> STREAMER MODE
+  </div>
+
+  <!-- Offline mode indicator -->
+  <div id="offline-indicator" hidden>⚠ Offline — some features may be unavailable</div>
+
+  <!-- Live HUD Overlay (score, quarter, down & distance) -->
+  <div id="hud-overlay" hidden>
+    <span class="hud-score-away" id="hud-away-score">0</span>
+    <span class="hud-vs">vs</span>
+    <span class="hud-score-home" id="hud-home-score">0</span>
+    <span class="hud-sep"></span>
+    <span class="hud-quarter" id="hud-quarter">1ST</span>
+    <span class="hud-sep"></span>
+    <span class="hud-down-distance" id="hud-down-distance">1st & 10</span>
+  </div>
+
+  <!-- Kill-feed event log -->
+  <div id="kill-feed"><!-- populated by app.js --></div>
+
+  <!-- Soundboard favorites bar -->
+  <div id="soundboard-bar" hidden>
+    <button class="soundboard-btn" data-key="1" title="Favorite 1">1</button>
+    <button class="soundboard-btn" data-key="2" title="Favorite 2">2</button>
+    <button class="soundboard-btn" data-key="3" title="Favorite 3">3</button>
+    <button class="soundboard-btn" data-key="4" title="Favorite 4">4</button>
+    <button class="soundboard-btn" data-key="5" title="Favorite 5">5</button>
+    <button class="soundboard-btn" data-key="6" title="Favorite 6">6</button>
+    <button class="soundboard-btn" data-key="7" title="Favorite 7">7</button>
+    <button class="soundboard-btn" data-key="8" title="Favorite 8">8</button>
+  </div>
+
+  <!-- FPS/Ping status indicator -->
+  <div id="status-indicator" hidden>
+    <span class="status-fps" id="status-fps">60 FPS</span>
+    <span>|</span>
+    <span class="status-ping" id="status-ping">5ms</span>
+  </div>
+
+  <!-- Tips system floating widget -->
+  <div id="tip-widget" hidden>
+    <div class="tip-clipboard-icon">📋</div>
+    <div class="tip-title">Did you know?</div>
+    <div class="tip-text" id="tip-text"></div>
+    <div class="tip-actions">
+      <button class="tip-action-btn" id="tip-never-show">Never show</button>
+      <button class="tip-action-btn" id="tip-next">Next tip →</button>
+    </div>
+  </div>
+
+  <!-- Command palette (Ctrl+K) -->
+  <div id="command-palette-overlay" hidden>
+    <div id="command-palette" class="glass">
+      <input type="text" id="cmd-input" placeholder="Type a command... (Ctrl+K to open)" autofocus />
+      <div id="cmd-results"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- Right-click context menu -->
+  <div id="context-menu" hidden>
+    <!-- populated by app.js -->
+  </div>
+
+  <!-- Global hotkey panel -->
+  <div id="hotkey-panel" hidden>
+    <div class="team-picker-header">
+      <span>Keyboard Shortcuts</span>
+      <button id="btn-close-hotkey-panel" class="icon-btn">&times;</button>
+    </div>
+    <div id="hotkey-list"><!-- populated by app.js --></div>
+  </div>
+
+  <!-- Profile Dashboard (replacing modal) -->
+  <div id="profile-dashboard-overlay" hidden>
+    <div id="profile-dashboard" class="glass">
+      <div class="team-picker-header">
+        <span>Profile</span>
+        <button id="btn-close-profile-dashboard" class="icon-btn">&times;</button>
+      </div>
+      <div class="profile-dashboard-header">
+        <img id="profile-dashboard-avatar" class="profile-avatar-lg" alt="" src="" />
+        <div>
+          <div class="profile-name-lg" id="profile-dashboard-name">User</div>
+          <div class="profile-handle" id="profile-dashboard-handle">@user</div>
+          <button class="follow-btn" id="profile-dashboard-follow-btn" hidden>Follow</button>
+        </div>
+      </div>
+      <div class="profile-stats">
+        <div class="profile-stat"><div class="profile-stat-value" id="pd-stat-games">0</div><div class="profile-stat-label">Games</div></div>
+        <div class="profile-stat"><div class="profile-stat-value" id="pd-stat-songs">0</div><div class="profile-stat-label">Songs</div></div>
+        <div class="profile-stat"><div class="profile-stat-value" id="pd-stat-uploads">0</div><div class="profile-stat-label">Uploads</div></div>
+        <div class="profile-stat"><div class="profile-stat-value" id="pd-stat-downloads">0</div><div class="profile-stat-label">Downloads</div></div>
+        <div class="profile-stat"><div class="profile-stat-value" id="pd-stat-followers">0</div><div class="profile-stat-label">Followers</div></div>
+      </div>
+      <div class="panel-title">Activity</div>
+      <div class="profile-activity-feed" id="profile-activity-feed">
+        <div class="bandroom-recent-empty">No recent activity</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resume last session bar -->
+  <div id="resume-session-bar" hidden>
+    <span>Resume your last session?</span>
+    <button class="resume-btn" id="btn-resume-yes">Resume</button>
+    <button class="btn-ghost" id="btn-resume-no">Start Fresh</button>
+  </div>
+
   <script src="app.js"></script>
+  <script src="ui-bot.js"></script>
 </body>
 </html>

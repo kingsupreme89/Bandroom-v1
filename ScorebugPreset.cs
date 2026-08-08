@@ -29,15 +29,56 @@ public sealed class ScorebugPreset
     public double AwayTimeoutFxW { get; init; }
     public double AwayTimeoutFxH { get; init; }
 
+    /// <summary>Tight crop directly under each team's name for possession sampling by brightness
+    /// comparison (GameWatcher.SamplePossessionByUnderline), NOT color matching -- correction
+    /// 2026-08-07: the possession signal on this scorebug revision is a thin underline beneath
+    /// whichever team currently has the ball (brighter/lit) vs the other team's (dim), not a
+    /// team-colored fill box the way PossessionFx*/SamplePossession assumed. Zero (both W/H) on
+    /// older presets means "not calibrated for this preset" -- GameWatcher falls back to the
+    /// legacy PossessionFx* color method in that case. Estimated crop from live screenshots
+    /// (Auburn @ Georgia Tech, CBS skin) -- not pixel-measured, needs live tuning.</summary>
+    public double AwayUnderlineFxX { get; init; }
+    public double AwayUnderlineFxY { get; init; }
+    public double AwayUnderlineFxW { get; init; }
+    public double AwayUnderlineFxH { get; init; }
+    public double HomeUnderlineFxX { get; init; }
+    public double HomeUnderlineFxY { get; init; }
+    public double HomeUnderlineFxW { get; init; }
+    public double HomeUnderlineFxH { get; init; }
+
     public static readonly ScorebugPreset KamsCbsScorebug = new()
     {
         Name = "Kam's CBS Scorebug",
         BandFxY = 0.83, BandFxH = 0.14,
-        PossessionFxX = 0.65, PossessionFxY = 0.85, PossessionFxW = 0.14, PossessionFxH = 0.09,
+        // RECALIBRATED 2026-08-08 from a live "3rd & 12" screenshot: the old PossessionFx* box
+        // (0.65/0.85/0.14/0.09) landed somewhere in the yardline/down-distance text area, not
+        // reliably on team-colored fill -- and this is the DEFAULT preset (no persisted override
+        // picks V3's underline method instead), so this box was silently deciding possession for
+        // every game using default settings. The rightmost down-and-distance box (e.g. "3rd & 12")
+        // is filled solid with whichever team is currently on offense's color -- far more reliable
+        // than the underline dashes (both teams here are orange-heavy, near-identical hue) or the
+        // old crop's location. Targets the right ~10% of the band, inset from the rounded corners.
+        PossessionFxX = 0.89, PossessionFxY = 0.848, PossessionFxW = 0.095, PossessionFxH = 0.104,
         AwayTimeoutFxX = 0.15, AwayTimeoutFxY = 0.895, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
     };
 
-    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebug };
+    /// <summary>A revised scorebug layout ("v3") the owner identified from a fresh batch of live
+    /// screenshots 2026-08-07 -- kept as its own preset rather than overwriting KamsCbsScorebug,
+    /// per this file's whole point (swap presets, don't hand-edit coordinates every time the game
+    /// updates its HUD). Possession here is read via the underline-brightness method, not color
+    /// matching -- see AwayUnderlineFx*/HomeUnderlineFx* above for why. away=Auburn (left block),
+    /// home=Georgia Tech (right block) in the calibrating screenshots, matching this app's
+    /// existing "home = the user's own team" convention.</summary>
+    public static readonly ScorebugPreset KamsCbsScorebugV3 = new()
+    {
+        Name = "Kam's CBSv3",
+        BandFxY = 0.83, BandFxH = 0.14,
+        AwayUnderlineFxX = 0.145, AwayUnderlineFxY = 0.975, AwayUnderlineFxW = 0.075, AwayUnderlineFxH = 0.012,
+        HomeUnderlineFxX = 0.395, HomeUnderlineFxY = 0.975, HomeUnderlineFxW = 0.11, HomeUnderlineFxH = 0.012,
+        AwayTimeoutFxX = 0.15, AwayTimeoutFxY = 0.895, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
+    };
+
+    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebug, KamsCbsScorebugV3 };
 
     public static ScorebugPreset GetByName(string? name) =>
         AllPresets.Find(p => p.Name.Equals(name, System.StringComparison.OrdinalIgnoreCase)) ?? KamsCbsScorebug;

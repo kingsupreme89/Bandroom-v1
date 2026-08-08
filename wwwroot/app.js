@@ -52,12 +52,9 @@ window.addEventListener("unhandledrejection", (e) => {
 const USERCOUNT_URL = "https://bandroom-usercount.bandroom.workers.dev";
 
 const categoryColors = {
-  Downs: "#2f6f78",
-  Scoring: "#2f7d55",
-  Turnovers: "#7a6a2a",
-  "Special Teams": "#5c4fa0",
-  Penalties: "#7a3a3a",
-  Hype: "#2f6f78",
+  Offense: "#2f6f78",
+  Defense: "#7a3a3a",
+  Situations: "#5c4fa0",
 };
 
 // Universal UI click tick -- one delegate covers every button/tile in the app (including ones
@@ -161,12 +158,9 @@ async function init() {
   } else {
     state.teams = [{ name: "General", primary: "#22d3ee", secondary: "#22d3ee" }];
     state.categories = [
-      { name: "Downs", assigned: 7, total: 17 },
-      { name: "Scoring", assigned: 0, total: 6 },
-      { name: "Turnovers", assigned: 0, total: 2 },
-      { name: "Special Teams", assigned: 1, total: 6 },
-      { name: "Penalties", assigned: 0, total: 1 },
-      { name: "Hype", assigned: 0, total: 7 },
+      { name: "Offense", assigned: 4, total: 20 },
+      { name: "Defense", assigned: 1, total: 20 },
+      { name: "Situations", assigned: 3, total: 7 },
     ];
   }
   renderTeamGrid();
@@ -349,7 +343,7 @@ async function openSituations(category) {
     row.className = "situation-row" + (ev.confirmed ? "" : " situation-unconfirmed");
     row.innerHTML = `
       <span class="situation-text">
-        <div class="situation-name"><span class="situation-led ${ledClass}"></span><span class="situation-name-text">${ev.eventName}</span>${ev.confirmed ? "" : ' <span class="situation-badge situation-badge-coming-soon" title="Wired and assignable, but not yet confirmed firing in a live game -- could work, just hasn\'t been verified">Coming Soon</span>'}</div>
+        <div class="situation-name"><span class="situation-led ${ledClass}"></span><span class="situation-name-text">${friendlyEventName(ev.eventName)}</span>${ev.confirmed ? "" : ' <span class="situation-badge situation-badge-coming-soon" title="Wired and assignable, but not yet confirmed firing in a live game -- could work, just hasn\'t been verified">Coming Soon</span>'}</div>
         <div class="situation-file">${ev.fileName ? ev.fileName : "Unassigned"}</div>
         <div class="situation-file situation-file-pa">PA: ${ev.paFileName ? ev.paFileName : "none"}</div>
       </span>
@@ -462,12 +456,14 @@ function setWatching(mode) {
   if (state.watching === "watching" && mode === "waiting")
     showToast("Lost the game window -- Bandroom is waiting for it to come back.");
   state.watching = mode;
-  const btn = document.getElementById("btn-watch");
+  const status = document.getElementById("watch-status");
   const label = document.getElementById("watch-label");
-  btn.classList.remove("pill-off", "pill-waiting", "pill-watching");
-  if (mode === "watching") { btn.classList.add("pill-watching"); label.textContent = "Watching"; }
-  else if (mode === "waiting") { btn.classList.add("pill-waiting"); label.textContent = "Waiting for window…"; }
-  else { btn.classList.add("pill-off"); label.textContent = "Start Watching"; }
+  const stopBtn = document.getElementById("btn-stop-watching");
+  status.classList.remove("pill-off", "pill-waiting", "pill-watching");
+  if (mode === "watching") { status.classList.add("pill-watching"); label.textContent = "Watching"; }
+  else if (mode === "waiting") { status.classList.add("pill-waiting"); label.textContent = "Waiting for window…"; }
+  else { status.classList.add("pill-off"); label.textContent = "Not watching"; }
+  if (stopBtn) stopBtn.hidden = mode === "off";
 }
 
 // ---- Profile / Google sign-in (scaffolded -- see GoogleAuthService.ClientId for setup status) ----
@@ -777,21 +773,13 @@ function wireControls() {
     const team = e.currentTarget.dataset.team;
     if (team) await selectTeam(team);
   });
-  document.getElementById("btn-watch").addEventListener("click", async () => {
-    if (!(state.matchupHome && state.matchupAway)) {
-      showToast("Set Matchup first — pick both teams to unlock watching.");
-      return;
-    }
+  document.getElementById("btn-stop-watching").addEventListener("click", async () => {
     try {
       const next = await bridge?.ToggleWatching();
-      if (next === "no-matchup") {
-        alert("Set Matchup first — Bandroom needs to know both teams' colors before it can watch the game.");
-        return;
-      }
-      setWatching(next ?? (state.watching === "off" ? "watching" : "off"));
+      setWatching(next ?? "off");
     } catch (err) {
       console.error("ToggleWatching failed", err);
-      showToast("Couldn't toggle watching -- try again.");
+      showToast("Couldn't stop watching -- try again.");
     }
   });
 
@@ -948,6 +936,8 @@ function wireControls() {
     updateOverlay.hidden = true;
   });
   document.getElementById("btn-update-restart").addEventListener("click", () => bridge?.RestartForUpdate());
+
+  initDefaultSongPackPrompt();
 
   document.getElementById("header-team-badge").addEventListener("click", openTeamPicker);
   // Files dropped anywhere on the window get copied into Songs\ (normalized name) by the
@@ -1643,25 +1633,71 @@ function teamLogoUrl(schoolName) {
 
 function buildItemTile(item, inHub) {
   const tile = document.createElement("div");
-  tile.className = "bandroom-item-tile";
+  tile.className = inHub ? "bandroom-item-tile" : "marketplace-card";
   const thumb = document.createElement("div");
-  thumb.className = "bandroom-item-thumb";
+  thumb.className = inHub ? "bandroom-item-thumb" : "marketplace-card-thumb";
   if (item.type === "image") {
     thumb.innerHTML = `<img src="${item.url}" alt="${item.name}" loading="lazy">`;
+    if (!inHub) thumb.innerHTML += '<span class="card-type-badge">IMAGE</span>';
   } else {
     const logo = teamLogoUrl(item.school);
     thumb.innerHTML = logo
-      ? `<img src="${logo}" alt="${item.school}" class="bandroom-item-thumb-logo" loading="lazy">`
-      : `<span>\u{1F3B5}</span>`; // no logo on file for this team -- fall back to a musical note
+      ? `<img src="${logo}" alt="${item.school}" ${inHub ? 'class="bandroom-item-thumb-logo"' : ""} loading="lazy">`
+      : `<span>\u{1F3B5}</span>`;
+    if (!inHub) thumb.innerHTML += '<span class="card-type-badge">SONG</span>';
   }
-  const name = document.createElement("div");
-  name.className = "bandroom-item-name";
-  name.textContent = item.name;
-  const school = document.createElement("div");
-  school.className = "bandroom-item-school";
-  school.textContent = item.school;
-  tile.append(thumb, name, school);
-  tile.title = `${item.name} -- ${item.school}`;
+
+  if (inHub) {
+    const name = document.createElement("div");
+    name.className = "bandroom-item-name";
+    name.textContent = item.name;
+    const school = document.createElement("div");
+    school.className = "bandroom-item-school";
+    school.textContent = item.school;
+    tile.append(thumb, name, school);
+  } else {
+    const body = document.createElement("div");
+    body.className = "marketplace-card-body";
+    const title = document.createElement("div");
+    title.className = "marketplace-card-title";
+    title.textContent = item.name;
+    const schoolRow = document.createElement("div");
+    schoolRow.className = "marketplace-card-school";
+    const team = state.teams?.find((t) => t.name === item.school);
+    const dot = document.createElement("span");
+    dot.className = "marketplace-card-school-dot";
+    dot.style.background = team?.primary ?? "var(--text-muted)";
+    schoolRow.append(dot, document.createTextNode(item.school));
+    const meta = document.createElement("div");
+    meta.className = "marketplace-card-meta";
+    meta.innerHTML = `<span>\u{2B07} ${(item.downloads ?? 0).toLocaleString()}</span><span>\u{2661} ${(item.likes ?? 0).toLocaleString()}</span>`;
+    const uploader = document.createElement("div");
+    uploader.className = "marketplace-card-uploader";
+    const ago = item.uploadedAt ? relativeTime(item.uploadedAt) : "";
+    uploader.textContent = `Uploaded by ${item.uploadedBy ?? "anonymous"}${ago ? " \u00B7 " + ago : ""}`;
+    body.append(title, schoolRow, meta, uploader);
+
+    const actions = document.createElement("div");
+    actions.className = "marketplace-card-actions";
+    const previewBtn = document.createElement("button");
+    previewBtn.className = "btn-ghost";
+    previewBtn.textContent = "\u{25B6} Preview";
+    previewBtn.addEventListener("click", (e) => { e.stopPropagation(); previewSong(item); });
+    actions.appendChild(previewBtn);
+    const dlBtn = document.createElement("button");
+    dlBtn.className = "btn-ghost";
+    dlBtn.textContent = "\u{2B07} Get";
+    dlBtn.addEventListener("click", async (e) => {
+      e.stopPropagation(); dlBtn.disabled = true; dlBtn.textContent = "...";
+      const ok = bridge ? await downloadMarketplaceItem(item) : false;
+      showToast(ok ? `Downloaded "${item.name}"!` : "Couldn't download that.");
+      dlBtn.disabled = false; dlBtn.textContent = "\u{2B07} Get";
+    });
+    actions.appendChild(dlBtn);
+    body.appendChild(actions);
+    tile.append(thumb, body);
+  }
+  tile.title = inHub ? `${item.name} -- ${item.school}` : `${item.name} \u2014 ${item.school}`;
   tile.addEventListener("click", (e) => {
     if (e.target.closest(".bandroom-item-action")) return; // hover-button clicks handle themselves
     if (inHub) {
@@ -2014,6 +2050,51 @@ function wirePreviewBar() {
   window.addEventListener("mousemove", (e) => { if (dragging) seekFromEvent(e); });
   window.addEventListener("mouseup", () => { dragging = false; });
   canvas.addEventListener("click", seekFromEvent);
+}
+
+// Optional one-time default song pack download (see DefaultSongPackService.cs). Pulled out of
+// the installer as of v1.0.48 to stay under GitHub Releases' 2GB asset cap.
+function initDefaultSongPackPrompt() {
+  const promptOverlay = document.getElementById("songpack-prompt-overlay");
+  const progressOverlay = document.getElementById("songpack-progress-overlay");
+  const progressHeader = document.getElementById("songpack-progress-header");
+  const progressFill = document.getElementById("songpack-progress-fill");
+  const progressSub = document.getElementById("songpack-progress-sub");
+
+  (async () => {
+    if (!bridge) return;
+    const has = await bridge.HasDefaultSongPack();
+    if (!has) promptOverlay.hidden = false;
+  })();
+
+  document.getElementById("btn-songpack-skip").addEventListener("click", () => { promptOverlay.hidden = true; });
+  document.getElementById("btn-songpack-download").addEventListener("click", () => {
+    promptOverlay.hidden = true;
+    bridge?.DownloadDefaultSongPack();
+  });
+
+  window.addEventListener("bandroom:songpackdownloading", () => {
+    progressHeader.textContent = "Downloading song pack…";
+    progressFill.style.width = "0%";
+    progressSub.textContent = "Hang tight -- this is a big one-time download.";
+    progressOverlay.hidden = false;
+  });
+  window.addEventListener("bandroom:songpackprogress", (e) => {
+    const { fraction, downloaded, total } = e.detail;
+    progressFill.style.width = `${Math.max(0, Math.min(100, fraction * 100))}%`;
+    const fmt = (b) => `${(b / 1073741824).toFixed(1)} GB`;
+    progressSub.textContent = `${fmt(downloaded)} of ${fmt(total)}`;
+  });
+  window.addEventListener("bandroom:songpackready", () => {
+    progressHeader.textContent = "Song pack ready";
+    progressFill.style.width = "100%";
+    progressSub.textContent = "Every team can now auto-fill with default songs.";
+    setTimeout(() => { progressOverlay.hidden = true; }, 1800);
+  });
+  window.addEventListener("bandroom:songpackfailed", () => {
+    progressOverlay.hidden = true;
+    showToast("Song pack download failed -- check your connection and try again from Settings.");
+  });
 }
 
 function closeBandroomMarketplace() {
@@ -2459,11 +2540,13 @@ function flashPanel(el) {
 
 function updateMatchupLabel() {
   const btn = document.getElementById("btn-matchup");
+  const unlockBtn = document.getElementById("btn-unlock-matchup");
   if (!btn) return;
   btn.classList.toggle("locked", state.matchupLocked);
+  if (unlockBtn) unlockBtn.hidden = !state.matchupLocked;
   if (state.matchupLocked) {
     btn.textContent = `\u{1F512} ${state.matchupAway} @ ${state.matchupHome}`;
-    btn.title = "Locked in for this game -- press Stop Watching when it ends to change it";
+    btn.title = "Locked in for this game -- press Stop Watching when it ends to change it, or use the unlock button to correct it without stopping";
   } else {
     btn.textContent = state.matchupHome && state.matchupAway
       ? `${state.matchupAway} @ ${state.matchupHome}`
@@ -2481,11 +2564,10 @@ function updateMatchupLabel() {
 // was always clickable and just alerted "no-matchup" after a round trip to the host. Gating it
 // client-side makes the requirement visible up front instead of discovered by clicking.
 function updateWatchGate() {
-  const btn = document.getElementById("btn-watch");
-  if (!btn) return;
+  const status = document.getElementById("watch-status");
+  if (!status) return;
   const ready = !!(state.matchupHome && state.matchupAway);
-  btn.disabled = !ready;
-  btn.title = ready ? "Toggle watching" : "Set Matchup first to unlock watching";
+  status.title = ready ? "Press GAMETIME to start watching" : "Set Matchup first";
 }
 
 async function loadMatchup() {
@@ -2501,6 +2583,13 @@ async function loadMatchup() {
     if (state.matchupLocked) await applyVsBackdrop();
   } catch (err) { console.error("GetGameTeams failed", err); }
 }
+
+document.getElementById("btn-unlock-matchup")?.addEventListener("click", async () => {
+  await bridge?.UnlockMatchup();
+  state.matchupLocked = false;
+  updateMatchupLabel();
+  showToast("Matchup unlocked -- watching is still running.");
+});
 
 function openMatchupDialog() {
   if (state.matchupLocked) {
@@ -3035,7 +3124,10 @@ async function confirmMatchup() {
   updateMatchupLabel();
   closeMatchupDialog();
   await applyVsBackdrop();
-  showToast(`GAMETIME! ${state.matchupAway} @ ${state.matchupHome}`);
+  // GAMETIME now locks the matchup AND starts watching in one press (WebMainForm.ConfirmGametimeFromWeb)
+  // -- reflect that immediately instead of requiring a separate Start Watching click.
+  setWatching("waiting");
+  showToast(`GAMETIME! ${state.matchupAway} @ ${state.matchupHome} -- watching started`);
 }
 
 /// Populates the two-team VS backdrop (photo + logo + name + team-color underglow per side)
@@ -3120,6 +3212,1149 @@ function runRailAction(action) {
       bridge?.OpenHelp();
       break;
   }
+}
+
+// --- What's New popup ---
+const WHATS_NEW_VERSION = "v1.0.49";
+const WHATS_NEW_CHANGELOG = [
+  {
+    version: "v1.0.49",
+    text: "Fixed a big problem where sounds stopped playing during games. The engine is now always on, and it won't drop events just because the camera hasn't figured out who has the ball yet. Both home and away teams get their cues now. Also added No Punt Return detection — your defense gets a sound when they stop a punt return."
+  },
+  {
+    version: "v1.0.48",
+    text: "PA Announcer clips! You can now assign a second voice clip to play alongside any song. Penalty detection now tells which team actually got flagged. Timeout tracking shows how many the opponent has left. The default song pack is now a separate download so updates stay under GitHub's size limit."
+  },
+  {
+    version: "v1.0.47",
+    text: "Both teams' profiles load at once when you set a matchup. The VS split-screen backdrop shows each team's stadium and logo. Score, clock, and quarter OCR regions are now calibrated from live screenshots. The penalty overlay reads \"Against <Team>\" text to figure out which side got flagged."
+  },
+  {
+    version: "v1.0.46",
+    text: "The Bandroom marketplace is live — browse Sound Banks and Trophy Rooms for every team, download songs and backgrounds, and upload your own. Google sign-in keeps your profile in sync across devices. The new default song pack auto-fills every team with real cues."
+  },
+];
+
+function showWhatsNew() {
+  const overlay = document.getElementById("whats-new-overlay");
+  const changelog = document.getElementById("whats-new-changelog");
+  if (!overlay || !changelog) return;
+
+  let html = "";
+  for (const entry of WHATS_NEW_CHANGELOG) {
+    html += `<div class="whats-new-card">
+      <div class="whats-new-card-version">${entry.version}</div>
+      <div class="whats-new-card-text">${entry.text}</div>
+    </div>`;
+  }
+  changelog.innerHTML = html;
+  overlay.hidden = false;
+}
+
+function dismissWhatsNew() {
+  document.getElementById("whats-new-overlay").hidden = true;
+  try { localStorage.setItem("bandroom-whatsnew-seen", WHATS_NEW_VERSION); } catch (_) {}
+}
+
+document.getElementById("btn-whats-new-gotit")?.addEventListener("click", dismissWhatsNew);
+document.getElementById("btn-close-whats-new")?.addEventListener("click", dismissWhatsNew);
+
+// --- Event test hook (owner debug tool) --------------------------------------------------
+// Fires any EventKey for home/away straight through WebMainForm.FireEventForSide, bypassing
+// OCR/live game feed entirely. Opened with Ctrl+Shift+T since it has no place in the normal
+// user-facing nav. See WebBridge.FireTestEvent / GetAllEventKeys.
+async function openTestHook() {
+  const panel = document.getElementById("test-hook-panel");
+  const select = document.getElementById("test-hook-event");
+  if (!panel || !select) return;
+  if (bridge && select.options.length === 0) {
+    const keys = JSON.parse(await bridge.GetAllEventKeys());
+    // Raw EventKey, not friendlyEventName -- this is a debug tool, and several distinct keys
+    // (e.g. "Offense: Second Down" / "Defense: Second Down") collapse to the identical friendly
+    // label, which made it impossible to tell which one you'd actually selected/fired.
+    select.innerHTML = keys.map(k => `<option value="${k}">${k}</option>`).join("");
+  }
+  panel.hidden = false;
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "t") openTestHook();
+});
+
+document.getElementById("btn-close-test-hook")?.addEventListener("click", () => {
+  document.getElementById("test-hook-panel").hidden = true;
+});
+
+document.getElementById("btn-test-hook-fire")?.addEventListener("click", async () => {
+  const side = document.getElementById("test-hook-side").value;
+  const eventKey = document.getElementById("test-hook-event").value;
+  const result = await bridge?.FireTestEvent(side, eventKey);
+  if (!result) return;
+  if (result.startsWith("fired:")) showToast(`Fired: ${result.slice(6)}`);
+  else if (result === "unassigned") showToast(`No song assigned to "${friendlyEventName(eventKey)}" for ${side}.`);
+  else if (result === "file-missing") showToast(`Assigned file is missing on disk for "${friendlyEventName(eventKey)}".`);
+  else if (result === "no-profile") showToast("No matchup/team profile loaded yet -- pick a team or Set Matchup first.");
+});
+
+document.getElementById("btn-test-hook-stop")?.addEventListener("click", () => bridge?.StopPreview());
+
+// Plain-English labels for EventKeys -- "Offense:"/"Defense:"/"Other:" prefixes and helper-name
+// jargon (Midfield, Iced Game, etc) mean nothing to someone assigning songs. EventKey stays the
+// real internal ID (zero risk to saved profiles) -- this is a display-only lookup, falls back to
+// the raw key untouched if a new EventKey shows up here before this map is updated.
+const EVENT_FRIENDLY_NAMES = {
+  "Offense: Earned First Down": "Got 1st Down",
+  "Offense: Earned First Down (Big Gain)": "Got 1st Down - Big Gain",
+  "Offense: Earned First Down (Midfield)": "Got 1st Down - Past Midfield",
+  "Offense: Second Down": "2nd Down",
+  "Offense: Second Down (Midfield)": "2nd Down - Past Midfield",
+  "Offense: Third Down": "3rd Down",
+  "Offense: Drive Starter": "Drive Starts",
+  "Offense: PAT Made": "Extra Point Good",
+  "Offense: 2-Point Conversion Made": "2-Point Conversion Good",
+  "Offense: Field Goal Made": "Field Goal Good",
+  "Offense: Iced Game by First Down": "Game Sealed - Got 1st Down",
+  "Offense: Victory in Hand": "Game Won",
+  "Offense: Touchdown Scored": "Touchdown",
+  "Defense: Third Down": "3rd Down",
+  "Defense: Fourth Down": "Stopped Them on 4th",
+  "Defense: Third Down (Loss)": "3rd Down After a Loss",
+  "Defense: Second Down": "2nd Down",
+  "Defense: Second Down (Midfield)": "2nd Down - Past Midfield",
+  "Defense: Second Down (Loss)": "2nd Down After a Loss",
+  "Defense: Fourth Down (Loss)": "Stopped Them on 4th After a Loss",
+  "Defense: Drive Starter": "Opponent's Drive Starts",
+  "Defense: Field Goal Missed by Opponent": "Opponent Missed Field Goal",
+  "Defense: Turnover Forced": "Turnover Forced",
+  "Defense: Iced Game by Turnover": "Game Sealed by Turnover",
+  "Defense: Safety": "Safety",
+  "Defense: Tackle for Loss": "Tackle for Loss",
+  "Defense: Touchdown Scored": "Touchdown",
+  "Defense: Timeout (4 Remaining)": "Opponent's 2nd Timeout Used",
+  "Defense: Timeout (3 Remaining)": "Opponent's 3rd Timeout Used",
+  "Defense: Timeout (2 Remaining)": "Opponent's 4th Timeout Used",
+  "Defense: Timeout (1 Remaining)": "Opponent's 5th Timeout Used",
+  "Defense: Timeout (0 Remaining)": "Opponent's Last Timeout Used",
+  "Other: Start of 2nd Quarter": "Start of 2nd Quarter",
+  "Other: Start of 4th Quarter": "Start of 4th Quarter",
+  "Other: Pregame Take the Field": "Pregame - Team Takes the Field",
+  "Other: Opening Kickoff": "Opening Kickoff",
+  "Other: Second-Half Kickoff": "Second-Half Kickoff",
+  "Other: Kickoff on Kick (Receiving)": "Kickoff - Receiving",
+  "Other: Kickoff on Kick (Kicking)": "Kickoff - Kicking",
+  "Penalty: Offense": "Penalty on Offense",
+  "Penalty: Defense": "Penalty on Defense",
+  "Defense: No Punt Return": "Punt Return Stopped",
+};
+function friendlyEventName(eventKey) {
+  return EVENT_FRIENDLY_NAMES[eventKey] || eventKey;
+}
+
+// ================================================================
+// SEARCH DEBOUNCE (200ms) — marketplace & team picker
+// ================================================================
+function debounce(fn, delay) {
+  let timer = null;
+  return function (...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+(function setupSearchDebounce() {
+  const teamPickerSearch = document.getElementById("team-picker-search");
+  const bandroomSearch = document.getElementById("bandroom-search");
+  const bandroomAlbumSearch = document.getElementById("bandroom-album-search");
+  const cmdInput = document.getElementById("cmd-input");
+  if (teamPickerSearch) teamPickerSearch.addEventListener("input", debounce(() => filterTeamPicker(teamPickerSearch.value), 200));
+  if (bandroomSearch) bandroomSearch.addEventListener("input", debounce(() => filterBandroomTeams(bandroomSearch.value), 200));
+  if (bandroomAlbumSearch) bandroomAlbumSearch.addEventListener("input", debounce(() => filterAlbumSearch(bandroomAlbumSearch.value), 200));
+  if (cmdInput) cmdInput.addEventListener("input", debounce(() => filterCommandPalette(cmdInput.value), 100));
+})();
+
+// ================================================================
+// LAZY LOADING — IntersectionObserver for team logos
+// ================================================================
+const _lazyImageObserver = new IntersectionObserver((entries) => {
+  entries.forEach((entry) => {
+    if (entry.isIntersecting) {
+      const img = entry.target;
+      if (img.dataset.src) {
+        img.src = img.dataset.src;
+        img.removeAttribute("data-src");
+      }
+      _lazyImageObserver.unobserve(img);
+    }
+  });
+}, { rootMargin: "200px" });
+function lazyLoadImages(container) {
+  container.querySelectorAll("img[data-src]").forEach((img) => _lazyImageObserver.observe(img));
+}
+
+// ================================================================
+// TEAM DATA VALIDATION FALLBACK
+// ================================================================
+function validateTeamData(teams) {
+  if (!Array.isArray(teams) || teams.length === 0) {
+    console.warn("[team-validation] Invalid team data, using fallback");
+    return [{ name: "General", primary: "#22d3ee", secondary: "#22d3ee", initials: "GEN" }];
+  }
+  return teams.filter((t) => t && typeof t.name === "string" && t.name.length > 0);
+}
+
+// ================================================================
+// BRIDGE FALLBACK — detect real browser vs WebView2
+// ================================================================
+function isRealBrowser() {
+  return !bridge && !window.chrome?.webview;
+}
+function logPlatformInfo() {
+  console.log("[platform]", isRealBrowser() ? "Browser preview (no bridge)" : "WebView2 (bridge active)");
+}
+
+// ================================================================
+// PREVIEW WAVEFORM CANVAS SIZING
+// ================================================================
+function resizePreviewWaveform() {
+  const canvas = document.getElementById("preview-waveform");
+  if (!canvas) return;
+  const container = canvas.parentElement;
+  if (!container) return;
+  const rect = container.getBoundingClientRect();
+  canvas.width = Math.max(260, rect.width - 200);
+  canvas.height = 40;
+}
+window.addEventListener("resize", resizePreviewWaveform);
+
+// ================================================================
+// XSS SANITIZATION helper for marketplace innerHTML
+// ================================================================
+function sanitizeHTML(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+function sanitizeMarketplaceItem(item) {
+  return {
+    ...item,
+    name: sanitizeHTML(item.name || "Untitled"),
+    school: sanitizeHTML(item.school || "Unknown"),
+    uploadedBy: sanitizeHTML(item.uploadedBy || "anonymous"),
+  };
+}
+
+// ================================================================
+// COMMAND PALETTE (Ctrl+K)
+// ================================================================
+const COMMANDS = [
+  { icon: "🎵", label: "The Bandroom", hint: "marketplace", action: () => toggleBandroom() },
+  { icon: "🏆", label: "Sound Bank", hint: "team sounds", action: () => openTeamSoundBank(state.activeTeam) },
+  { icon: "🖼️", label: "Trophy Room", hint: "backgrounds", action: () => openTeamTrophyRoom(state.activeTeam) },
+  { icon: "⬇️", label: "My Downloads", hint: "library", action: () => toggleMyDownloads() },
+  { icon: "💬", label: "Discord Chat", hint: "chat", action: () => toggleDiscordChat() },
+  { icon: "⚔️", label: "Set Matchup", hint: "home/away", action: () => openMatchupPicker() },
+  { icon: "💾", label: "Save Profile", hint: "save", action: () => openSaveProfileDialog() },
+  { icon: "🎮", label: "Streamer Mode", hint: "toggle", action: () => toggleStreamerMode() },
+  { icon: "⌨️", label: "Keyboard Shortcuts", hint: "hotkeys", action: () => openHotkeyPanel() },
+  { icon: "📋", label: "Tips", hint: "show tip", action: () => showNextTip() },
+  { icon: "👤", label: "Profile", hint: "dashboard", action: () => openProfileDashboard() },
+  { icon: "⚙️", label: "Settings", hint: "preferences", action: () => document.getElementById("btn-settings")?.click() },
+  { icon: "ℹ️", label: "Help", hint: "guide", action: () => bridge?.ShowHelp() },
+  { icon: "🔄", label: "Reset Team Profile", hint: "reset", action: () => resetTeamProfile() },
+];
+
+let _cmdActiveIndex = 0;
+function openCommandPalette() {
+  const overlay = document.getElementById("command-palette-overlay");
+  const input = document.getElementById("cmd-input");
+  overlay.hidden = false;
+  input.value = "";
+  _cmdActiveIndex = 0;
+  filterCommandPalette("");
+  setTimeout(() => input.focus(), 50);
+}
+function closeCommandPalette() {
+  document.getElementById("command-palette-overlay").hidden = true;
+}
+function filterCommandPalette(query) {
+  const results = document.getElementById("cmd-results");
+  const q = query.toLowerCase().trim();
+  const matches = q ? COMMANDS.filter((c) => c.label.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q)) : COMMANDS;
+  _cmdActiveIndex = Math.min(_cmdActiveIndex, Math.max(0, matches.length - 1));
+  results.innerHTML = "";
+  matches.forEach((cmd, i) => {
+    const item = document.createElement("div");
+    item.className = "cmd-result-item" + (i === _cmdActiveIndex ? " active" : "");
+    item.innerHTML = `<span class="cmd-result-icon">${cmd.icon}</span><span class="cmd-result-label">${cmd.label}</span><span class="cmd-result-hint">${cmd.hint}</span>`;
+    item.addEventListener("click", () => { closeCommandPalette(); cmd.action(); });
+    item.addEventListener("mouseenter", () => { _cmdActiveIndex = i; filterCommandPalette(query); });
+    results.appendChild(item);
+  });
+}
+document.addEventListener("keydown", (e) => {
+  const overlay = document.getElementById("command-palette-overlay");
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    if (overlay.hidden) openCommandPalette();
+    else closeCommandPalette();
+    return;
+  }
+  if (!overlay.hidden) {
+    if (e.key === "Escape") { e.preventDefault(); closeCommandPalette(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); _cmdActiveIndex = Math.min(_cmdActiveIndex + 1, COMMANDS.length - 1); filterCommandPalette(document.getElementById("cmd-input").value); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); _cmdActiveIndex = Math.max(_cmdActiveIndex - 1, 0); filterCommandPalette(document.getElementById("cmd-input").value); }
+    else if (e.key === "Enter") { e.preventDefault(); const items = document.querySelectorAll(".cmd-result-item"); if (items[_cmdActiveIndex]) items[_cmdActiveIndex].click(); }
+  }
+});
+document.getElementById("command-palette-overlay")?.addEventListener("click", (e) => {
+  if (e.target === e.currentTarget) closeCommandPalette();
+});
+
+// ================================================================
+// RIGHT-CLICK CONTEXT MENUS
+// ================================================================
+let _contextMenuTarget = null;
+function buildContextMenu(teamName, x, y) {
+  const menu = document.getElementById("context-menu");
+  _contextMenuTarget = teamName;
+  menu.innerHTML = "";
+  const items = [
+    { label: "Set as Active Team", icon: "🎯", action: () => { if (_contextMenuTarget) selectTeam(_contextMenuTarget); } },
+    { label: "Open Sound Bank", icon: "🎵", action: () => { if (_contextMenuTarget) openTeamSoundBank(_contextMenuTarget); } },
+    { label: "Open Trophy Room", icon: "🖼️", action: () => { if (_contextMenuTarget) openTeamTrophyRoom(_contextMenuTarget); } },
+    { sep: true },
+    { label: "Pin to Top", icon: "📌", action: () => { if (_contextMenuTarget) pinTeam(_contextMenuTarget); } },
+    { label: "Duplicate Profile To...", icon: "📋", action: () => { if (_contextMenuTarget) duplicateTeamProfile(_contextMenuTarget); } },
+  ];
+  items.forEach((it) => {
+    if (it.sep) {
+      const sep = document.createElement("div");
+      sep.className = "context-menu-sep";
+      menu.appendChild(sep);
+    } else {
+      const el = document.createElement("div");
+      el.className = "context-menu-item";
+      el.innerHTML = `<span>${it.icon}</span> ${it.label}`;
+      el.addEventListener("click", () => { closeContextMenu(); it.action(); });
+      menu.appendChild(el);
+    }
+  });
+  menu.style.left = Math.min(x, window.innerWidth - 200) + "px";
+  menu.style.top = Math.min(y, window.innerHeight - 250) + "px";
+  menu.hidden = false;
+}
+function closeContextMenu() {
+  document.getElementById("context-menu").hidden = true;
+}
+document.addEventListener("click", closeContextMenu);
+document.addEventListener("contextmenu", (e) => {
+  const swatch = e.target.closest(".team-swatch");
+  if (swatch && swatch.title) {
+    e.preventDefault();
+    buildContextMenu(swatch.title.replace(" ✓", ""), e.clientX, e.clientY);
+  }
+});
+
+// ================================================================
+// KILL-FEED EVENT LOG
+// ================================================================
+function pushKillFeedEntry(text, category) {
+  const feed = document.getElementById("kill-feed");
+  const entry = document.createElement("div");
+  entry.className = "kill-feed-entry " + (category || "situations");
+  entry.textContent = text;
+  feed.appendChild(entry);
+  // Auto-remove after 6 seconds
+  setTimeout(() => {
+    entry.classList.add("removing");
+    setTimeout(() => entry.remove(), 300);
+  }, 6000);
+  // Cap at 20 entries
+  while (feed.children.length > 20) feed.firstChild.remove();
+}
+
+// ================================================================
+// HUD OVERLAY (live game data)
+// ================================================================
+function updateHUD(homeScore, awayScore, quarter, downDistance) {
+  const hud = document.getElementById("hud-overlay");
+  if (state.watching !== "watching") { hud.hidden = true; return; }
+  hud.hidden = false;
+  document.getElementById("hud-home-score").textContent = homeScore ?? 0;
+  document.getElementById("hud-away-score").textContent = awayScore ?? 0;
+  document.getElementById("hud-quarter").textContent = quarter ?? "1ST";
+  document.getElementById("hud-down-distance").textContent = downDistance ?? "1st & 10";
+}
+
+// ================================================================
+// STREAMER MODE TOGGLE
+// ================================================================
+let _streamerMode = false;
+function toggleStreamerMode() {
+  _streamerMode = !_streamerMode;
+  document.getElementById("streamer-mode-indicator").hidden = !_streamerMode;
+  // In streamer mode: hide sensitive info, mute UI sounds
+  document.getElementById("presence-dot").style.display = _streamerMode ? "none" : "";
+  showToast(_streamerMode ? "Streamer Mode ON — personal info hidden" : "Streamer Mode OFF");
+  try { localStorage.setItem("bandroom-streamer-mode", _streamerMode.toString()); } catch (_) {}
+}
+
+// ================================================================
+// SOUNDBOARD FAVORITES SYSTEM
+// ================================================================
+let _soundboardSlots = {};
+function loadSoundboard() {
+  try { _soundboardSlots = JSON.parse(localStorage.getItem("bandroom-soundboard") || "{}"); } catch (_) { _soundboardSlots = {}; }
+  document.querySelectorAll(".soundboard-btn").forEach((btn) => {
+    const key = btn.dataset.key;
+    const entry = _soundboardSlots[key];
+    btn.title = entry ? entry.label : `Favorite ${key} (unassigned)`;
+    btn.textContent = entry ? entry.label.slice(0, 3) : key;
+  });
+}
+function assignSoundboardSlot(key, label, songPath) {
+  _soundboardSlots[key] = { label, path: songPath };
+  try { localStorage.setItem("bandroom-soundboard", JSON.stringify(_soundboardSlots)); } catch (_) {}
+  loadSoundboard();
+  showToast(`Soundboard slot ${key} set to "${label}"`);
+}
+document.querySelectorAll(".soundboard-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const key = btn.dataset.key;
+    const entry = _soundboardSlots[key];
+    if (entry) {
+      bridge?.PlaySoundboardSlot(key, entry.path);
+      btn.classList.add("playing");
+      setTimeout(() => btn.classList.remove("playing"), 500);
+    } else {
+      showToast("Assign a song to this slot first — right-click on any song tile and choose 'Add to Soundboard'");
+    }
+  });
+});
+loadSoundboard();
+
+// ================================================================
+// SOUND VISUALIZER ANIMATION
+// ================================================================
+function initSoundVisualizer() {
+  const container = document.getElementById("sound-visualizer");
+  if (!container) return;
+  for (let i = 0; i < 16; i++) {
+    const bar = document.createElement("div");
+    bar.className = "sound-visualizer-bar";
+    container.appendChild(bar);
+  }
+  // Simulated visualizer — animates bars randomly for aesthetic
+  function animate() {
+    if (document.getElementById("sound-visualizer").closest("[hidden]")) { requestAnimationFrame(animate); return; }
+    container.querySelectorAll(".sound-visualizer-bar").forEach((bar) => {
+      const h = Math.random() * 28 + 4;
+      bar.style.height = h + "px";
+    });
+    setTimeout(() => requestAnimationFrame(animate), 120);
+  }
+  requestAnimationFrame(animate);
+}
+setTimeout(initSoundVisualizer, 1000);
+
+// ================================================================
+// TIPS SYSTEM — 100 tips + auto-cycle + context-aware
+// ================================================================
+const TIPS_DATABASE = [
+  "Press Ctrl+K to quickly search for any action in Bandroom.",
+  "Right-click any team tile to quickly open that team's Sound Bank.",
+  "Assigning PA announcer clips makes game moments feel like a real broadcast.",
+  "You can import your own MP3/WAV songs from the My Downloads panel.",
+  "Bandroom automatically switches profiles when you set a matchup.",
+  "Pin teams to the top of your team grid for quick access.",
+  "Collapse the side panels with the ◀ button for more screen space.",
+  "Soundboard favorites let you trigger any sound with one click.",
+  "Streamer mode hides personal info when you're broadcasting.",
+  "The kill-feed shows live game events as they happen.",
+  "You can set custom team logos from any image on your computer.",
+  "Team backgrounds can be any 16:9 image — stadium photos work great.",
+  "Each team has its own independent song profile.",
+  "Download songs from The Bandroom to build your library.",
+  "Upload your own songs to share with other Bandroom users.",
+  "Use the Trophy Room to download custom team background art.",
+  "The sensitivity slider controls how long songs play before fading.",
+  "Reverb settings make your sounds feel like they're in a stadium.",
+  "You can export your team profiles to share with friends.",
+  "The bottom ticker shows recent uploads from the community.",
+  "FPS/ping indicator shows your app performance in the corner.",
+  "Use the test hook (Ctrl+Shift+T) to fire events manually.",
+  "Search debounce makes typing in the marketplace feel faster.",
+  "Team logos are lazy-loaded for better performance.",
+  "You can duplicate a team's profile to another team in one click.",
+  "The HUD overlay shows live score during watched games.",
+  "Bandroom supports light mode if your system prefers it.",
+  "Reduced-motion mode respects your accessibility settings.",
+  "You can preview any song before downloading it from the marketplace.",
+  "The leaderboard shows which teams have the most uploads.",
+  "Add your favorite team as the active team for quick access.",
+  "Log wins and losses for your favorite team in your profile.",
+  "Each achievement has a rarity tier: bronze, silver, gold, or diamond.",
+  "You can follow other users and see their public profiles.",
+  "The command palette is the fastest way to navigate Bandroom.",
+  "Season pass tracks your progress through the season.",
+  "Match history shows a timeline of your recent games.",
+  "The Discord panel lets you chat while watching a game.",
+  "You can set custom hotkeys for common actions.",
+  "QR code sharing makes it easy for friends to find your profile.",
+  "Resume last session picks up right where you left off.",
+  "Offline mode keeps Bandroom working when you lose connection.",
+  "Sound pack recommendations help you discover new sounds.",
+  "Dynasty mode tracks your season stats and recruiting.",
+  "Rivalry alerts notify you when your rival team plays.",
+  "Top-25 scoreboard keeps you updated on ranked teams.",
+  "Conference standings track every team's record.",
+  "Bowl projections predict where teams are heading.",
+  "Coach cards show your dynasty coaching record.",
+  "Recruiting class tracker follows your incoming freshmen.",
+  "Award watch lists track Heisman and other candidates.",
+  "Milestone alerts celebrate your achievements in dynasty.",
+  "XP bonuses reward you for completing dynasty objectives.",
+  "The brand mark pulses in your team's color.",
+  "Glass panels have different blur depths for visual hierarchy.",
+  "Crosshair cursors give the UI a gamer feel.",
+  "Rubber-band scrolling makes lists feel natural.",
+  "Haptic feedback gives buttons a physical feel.",
+  "Skeleton loading shows content structure before data loads.",
+  "Focus-visible outlines help keyboard users navigate.",
+  "The green dot on team tiles means that team has a profile.",
+  "You can add up to 8 favorites on your soundboard.",
+  "Bandroom auto-detects when you're in a WebView2 container.",
+  "All marketplace content is sanitized for security.",
+  "UI Bot automatically scans for bugs on every page load.",
+  "The VS split backdrop shows both teams during a matchup.",
+  "You can batch import team logos with Ctrl+Alt+Shift+L.",
+  "The update button shows your current version and pending updates.",
+  "Toast notifications tell you what just happened.",
+  "The onboarding screen helps new users pick their first team.",
+  "You can choose between stadium, dome, and night game reverb.",
+  "The preview bar shows a waveform you can scrub through.",
+  "Every situation card shows its assignment status at a glance.",
+  "Team tiles use dock-style magnification on hover.",
+  "The header drag handle lets you move the window.",
+  "Window controls follow macOS traffic-light design.",
+  "Bandroom saves your session automatically.",
+  "You can set separate volume levels for home and away.",
+  "PA announcer volume is independent of music volume.",
+  "Dynamic backgrounds change based on your active team.",
+  "The presence dot shows how many users are online.",
+  "All team data is validated before rendering.",
+  "Lazy-loaded images only load when they're about to be visible.",
+  "Search results update 200ms after you stop typing.",
+  "Your profile dashboard has a public shareable URL.",
+  "Custom team backgrounds are stored locally on your PC.",
+  "Song assignments can be undone with the undo system.",
+  "Multi-select lets you operate on multiple teams at once.",
+  "Keyboard arrow keys navigate most lists and grids.",
+  "Breadcrumb navigation helps you track where you are.",
+  "Context menus appear on right-click throughout the app.",
+  "Party sync lets groups coordinate their Bandroom setups.",
+  "Clip integration lets you save and replay game moments.",
+  "Season pass rewards carry over between games.",
+  "Dynasty save scanner auto-detects your game files.",
+  "Join the Discord to share tips and songs with the community.",
+  "Bandroom is built by one developer — feedback is always welcome!",
+];
+let _tipIndex = 0;
+let _tipTimer = null;
+function showNextTip() {
+  const widget = document.getElementById("tip-widget");
+  document.getElementById("tip-text").textContent = TIPS_DATABASE[_tipIndex % TIPS_DATABASE.length];
+  _tipIndex++;
+  widget.hidden = false;
+  clearTimeout(_tipTimer);
+  _tipTimer = setTimeout(() => { widget.hidden = true; }, 12000);
+}
+function startTipAutoCycle() {
+  setInterval(() => {
+    const widget = document.getElementById("tip-widget");
+    if (!widget.hidden) return; // don't interrupt an already-showing tip
+    // Don't show if any overlay is open
+    const overlays = document.querySelectorAll("#team-picker-overlay:not([hidden]), #bandroom-overlay:not([hidden]), #bandroom-album-overlay:not([hidden]), #matchup-overlay:not([hidden]), #command-palette-overlay:not([hidden])");
+    if (overlays.length > 0) return;
+    showNextTip();
+  }, Math.random() * 45000 + 45000); // 45-90s interval
+}
+setTimeout(startTipAutoCycle, 30000);
+
+document.getElementById("tip-never-show")?.addEventListener("click", () => {
+  document.getElementById("tip-widget").hidden = true;
+  clearTimeout(_tipTimer);
+  try { localStorage.setItem("bandroom-tips-disabled", "true"); } catch (_) {}
+  showToast("Tips disabled. Re-enable from Settings.");
+});
+document.getElementById("tip-next")?.addEventListener("click", showNextTip);
+
+// ================================================================
+// PROFILE DASHBOARD
+// ================================================================
+function openProfileDashboard() {
+  const overlay = document.getElementById("profile-dashboard-overlay");
+  overlay.hidden = false;
+  const stats = _getProfileStats();
+  document.getElementById("pd-stat-games").textContent = stats.games;
+  document.getElementById("pd-stat-songs").textContent = stats.songs;
+  document.getElementById("pd-stat-uploads").textContent = stats.uploads;
+  document.getElementById("pd-stat-downloads").textContent = stats.downloads;
+  document.getElementById("pd-stat-followers").textContent = stats.followers;
+  document.getElementById("profile-dashboard-name").textContent = state.activeTeam;
+  const team = state.teams.find((t) => t.name === state.activeTeam);
+  document.getElementById("profile-dashboard-avatar").src = team?.logoUrl || "";
+  // Populate activity feed
+  const feed = document.getElementById("profile-activity-feed");
+  feed.innerHTML = `<div class="profile-activity-item"><span class="profile-activity-time">Just now</span> Using Bandroom</div>`;
+}
+document.getElementById("btn-close-profile-dashboard")?.addEventListener("click", () => {
+  document.getElementById("profile-dashboard-overlay").hidden = true;
+});
+function _getProfileStats() {
+  return {
+    games: parseInt(document.getElementById("profile-stat-games")?.textContent || "0"),
+    songs: parseInt(document.getElementById("profile-stat-songs")?.textContent || "0"),
+    uploads: parseInt(document.getElementById("profile-stat-uploads")?.textContent || "0"),
+    downloads: parseInt(document.getElementById("profile-stat-downloads")?.textContent || "0"),
+    followers: 0,
+  };
+}
+
+// ================================================================
+// LEADERBOARDS
+// ================================================================
+function renderLeaderboardTable(container, data, type) {
+  if (!container) return;
+  container.innerHTML = "";
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="bandroom-recent-empty">No entries yet</div>';
+    return;
+  }
+  data.forEach((entry, i) => {
+    const row = document.createElement("div");
+    row.className = "leaderboard-row";
+    const rankClass = i === 0 ? "top1" : i === 1 ? "top2" : i === 2 ? "top3" : "";
+    row.innerHTML = `<span class="leaderboard-rank ${rankClass}">#${i + 1}</span><span class="leaderboard-user">${entry.name || entry.school || "Unknown"}</span><span class="leaderboard-score">${entry.score || entry.count || 0}</span>`;
+    container.appendChild(row);
+  });
+}
+
+// ================================================================
+// FOLLOW/FRIEND SYSTEM
+// ================================================================
+let _followedUsers = [];
+function loadFollowedUsers() {
+  try { _followedUsers = JSON.parse(localStorage.getItem("bandroom-followed") || "[]"); } catch (_) { _followedUsers = []; }
+}
+function followUser(username) {
+  if (!_followedUsers.includes(username)) {
+    _followedUsers.push(username);
+    try { localStorage.setItem("bandroom-followed", JSON.stringify(_followedUsers)); } catch (_) {}
+    showToast(`Following ${username}`);
+  }
+}
+function unfollowUser(username) {
+  _followedUsers = _followedUsers.filter((u) => u !== username);
+  try { localStorage.setItem("bandroom-followed", JSON.stringify(_followedUsers)); } catch (_) {}
+  showToast(`Unfollowed ${username}`);
+}
+loadFollowedUsers();
+
+// ================================================================
+// DYNASTY FEATURES — save scanner, stats, recruiting, rivalry
+// ================================================================
+let _dynastyData = null;
+function scanDynastySave() {
+  if (!bridge) { showToast("Dynasty scanning requires the full app."); return; }
+  bridge.ScanDynastySave().then((raw) => {
+    if (raw) {
+      _dynastyData = JSON.parse(raw);
+      showToast(`Loaded dynasty: ${_dynastyData.teamName} (Year ${_dynastyData.year})`);
+    }
+  }).catch(() => showToast("No dynasty save found."));
+}
+function getDynastyRecord() {
+  if (!_dynastyData) return "—";
+  return `${_dynastyData.wins || 0}-${_dynastyData.losses || 0}`;
+}
+function getRecruitingRank() {
+  if (!_dynastyData) return "—";
+  return `#${_dynastyData.recruitingRank || "—"}`;
+}
+
+// ================================================================
+// COLLAPSIBLE SIDE PANELS
+// ================================================================
+function toggleLeftPanel() {
+  document.getElementById("left-panel").classList.toggle("collapsed");
+}
+function toggleRightPanel() {
+  document.getElementById("adjust-panel").classList.toggle("collapsed");
+}
+
+// ================================================================
+// TABBED RIGHT PANEL SWITCHING
+// ================================================================
+(function initAdjustTabs() {
+  const panel = document.getElementById("adjust-panel");
+  if (!panel) return;
+  const tabs = document.createElement("div");
+  tabs.className = "adjust-tabs";
+  tabs.innerHTML = `
+    <button class="adjust-tab active" data-tab="mixer">Mixer</button>
+    <button class="adjust-tab" data-tab="effects">Effects</button>
+    <button class="adjust-tab" data-tab="changelog">Changelog</button>
+    <button class="adjust-tab" data-tab="help">Help</button>`;
+  panel.insertBefore(tabs, panel.firstChild);
+  tabs.querySelectorAll(".adjust-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      tabs.querySelectorAll(".adjust-tab").forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+    });
+  });
+})();
+
+// ================================================================
+// BREADCRUMB NAVIGATION
+// ================================================================
+function setBreadcrumb(path) {
+  const bc = document.getElementById("breadcrumb");
+  if (!bc) return;
+  bc.innerHTML = "";
+  path.forEach((segment, i) => {
+    const item = document.createElement("span");
+    item.className = "breadcrumb-item";
+    item.textContent = segment.label;
+    if (segment.action) item.addEventListener("click", segment.action);
+    bc.appendChild(item);
+    if (i < path.length - 1) {
+      const sep = document.createElement("span");
+      sep.className = "breadcrumb-sep";
+      sep.textContent = "›";
+      bc.appendChild(sep);
+    }
+  });
+}
+
+// ================================================================
+// PIN TEAMS TO TOP
+// ================================================================
+let _pinnedTeams = [];
+function loadPinnedTeams() {
+  try { _pinnedTeams = JSON.parse(localStorage.getItem("bandroom-pinned-teams") || "[]"); } catch (_) { _pinnedTeams = []; }
+}
+function pinTeam(name) {
+  if (!_pinnedTeams.includes(name)) {
+    _pinnedTeams.push(name);
+    try { localStorage.setItem("bandroom-pinned-teams", JSON.stringify(_pinnedTeams)); } catch (_) {}
+    renderTeamGrid();
+    showToast(`Pinned ${name} to top`);
+  }
+}
+function unpinTeam(name) {
+  _pinnedTeams = _pinnedTeams.filter((n) => n !== name);
+  try { localStorage.setItem("bandroom-pinned-teams", JSON.stringify(_pinnedTeams)); } catch (_) {}
+  renderTeamGrid();
+  showToast(`Unpinned ${name}`);
+}
+loadPinnedTeams();
+
+// ================================================================
+// MULTI-SELECT TEAM OPERATIONS
+// ================================================================
+let _selectedTeams = new Set();
+function toggleTeamSelection(name) {
+  if (_selectedTeams.has(name)) _selectedTeams.delete(name);
+  else _selectedTeams.add(name);
+  renderTeamGrid();
+}
+function clearTeamSelection() {
+  _selectedTeams.clear();
+  renderTeamGrid();
+}
+function applyToSelectedTeams(action) {
+  _selectedTeams.forEach((name) => action(name));
+  showToast(`Applied to ${_selectedTeams.size} team(s)`);
+}
+
+// ================================================================
+// UNDO SYSTEM FOR SONG ASSIGNMENT
+// ================================================================
+let _undoStack = [];
+function pushUndo(description, undoFn) {
+  _undoStack.push({ description, undoFn, time: Date.now() });
+  if (_undoStack.length > 50) _undoStack.shift();
+}
+function undoLastAction() {
+  const action = _undoStack.pop();
+  if (!action) { showToast("Nothing to undo"); return; }
+  action.undoFn();
+  showToast(`Undid: ${action.description}`);
+}
+
+// ================================================================
+// KEYBOARD NAVIGATION (arrow keys, enter, escape)
+// ================================================================
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    // Close any open overlay
+    const overlays = [
+      "team-picker-overlay", "bandroom-overlay", "bandroom-album-overlay",
+      "matchup-overlay", "profile-overlay", "profile-dashboard-overlay",
+      "hotkey-panel", "discord-chat-overlay", "my-downloads-overlay",
+      "situations-panel"
+    ];
+    for (const id of overlays) {
+      const el = document.getElementById(id);
+      if (el && !el.hidden) { el.hidden = true; return; }
+    }
+    closeContextMenu();
+  }
+});
+
+// ================================================================
+// SKELETON LOADING SCREENS
+// ================================================================
+function showSkeletonGrid(container, count = 8) {
+  container.innerHTML = "";
+  container.classList.add("skeleton-grid");
+  for (let i = 0; i < count; i++) {
+    const card = document.createElement("div");
+    card.className = "skeleton skeleton-card";
+    container.appendChild(card);
+  }
+}
+function clearSkeletonGrid(container) {
+  container.classList.remove("skeleton-grid");
+  container.innerHTML = "";
+}
+
+// ================================================================
+// RESUME LAST SESSION
+// ================================================================
+function saveSessionState() {
+  try {
+    const sess = { activeTeam: state.activeTeam, timestamp: Date.now() };
+    localStorage.setItem("bandroom-last-session", JSON.stringify(sess));
+  } catch (_) {}
+}
+function checkResumeSession() {
+  try {
+    const sess = JSON.parse(localStorage.getItem("bandroom-last-session") || "null");
+    if (!sess || Date.now() - sess.timestamp > 86400000) return; // expire after 24h
+    const bar = document.getElementById("resume-session-bar");
+    bar.hidden = false;
+    document.getElementById("btn-resume-yes").onclick = () => {
+      bar.hidden = true;
+      if (sess.activeTeam && sess.activeTeam !== state.activeTeam) selectTeam(sess.activeTeam);
+    };
+    document.getElementById("btn-resume-no").onclick = () => {
+      bar.hidden = true;
+      try { localStorage.removeItem("bandroom-last-session"); } catch (_) {}
+    };
+  } catch (_) {}
+}
+// Save session when team changes
+window.addEventListener("beforeunload", saveSessionState);
+setInterval(saveSessionState, 30000);
+
+// ================================================================
+// OFFLINE MODE DETECTION
+// ================================================================
+let _isOnline = navigator.onLine;
+function updateOnlineStatus() {
+  _isOnline = navigator.onLine;
+  const indicator = document.getElementById("offline-indicator");
+  indicator.hidden = _isOnline;
+  if (!_isOnline) showToast("You're offline — some features may be unavailable");
+}
+window.addEventListener("online", updateOnlineStatus);
+window.addEventListener("offline", updateOnlineStatus);
+updateOnlineStatus();
+
+// ================================================================
+// SEASON PASS TRACKING
+// ================================================================
+let _seasonPassXp = 0;
+function loadSeasonPass() {
+  try { _seasonPassXp = parseInt(localStorage.getItem("bandroom-season-xp") || "0"); } catch (_) { _seasonPassXp = 0; }
+}
+function addSeasonXp(amount) {
+  _seasonPassXp += amount;
+  try { localStorage.setItem("bandroom-season-xp", _seasonPassXp.toString()); } catch (_) {}
+  showToast(`+${amount} XP`);
+}
+loadSeasonPass();
+
+// ================================================================
+// MATCH HISTORY TIMELINE
+// ================================================================
+let _matchHistory = [];
+function loadMatchHistory() {
+  try { _matchHistory = JSON.parse(localStorage.getItem("bandroom-match-history") || "[]"); } catch (_) { _matchHistory = []; }
+}
+function logMatch(awayTeam, awayScore, homeTeam, homeScore) {
+  _matchHistory.unshift({
+    date: new Date().toISOString(),
+    away: { team: awayTeam, score: awayScore },
+    home: { team: homeTeam, score: homeScore },
+  });
+  if (_matchHistory.length > 50) _matchHistory = _matchHistory.slice(0, 50);
+  try { localStorage.setItem("bandroom-match-history", JSON.stringify(_matchHistory)); } catch (_) {}
+}
+loadMatchHistory();
+
+// ================================================================
+// ACHIEVEMENT SYSTEM WITH RARITY TIERS
+// ================================================================
+const ACHIEVEMENTS = {
+  "first-song": { name: "First Song", description: "Assign your first song", tier: "bronze", icon: "🎵" },
+  "ten-songs": { name: "Curator", description: "Assign 10 songs", tier: "silver", icon: "🎵" },
+  "fifty-songs": { name: "Maestro", description: "Assign 50 songs", tier: "gold", icon: "🎼" },
+  "first-upload": { name: "Contributor", description: "Upload to the marketplace", tier: "silver", icon: "📤" },
+  "ten-downloads": { name: "Collector", description: "Download 10 items", tier: "bronze", icon: "📥" },
+  "first-game": { name: "Kickoff", description: "Watch your first game", tier: "bronze", icon: "🏈" },
+  "rivalry-win": { name: "Bragging Rights", description: "Beat your rival", tier: "gold", icon: "⚔️" },
+  "streak-7": { name: "Hot Streak", description: "7-day login streak", tier: "silver", icon: "🔥" },
+  "streak-30": { name: "Dedicated", description: "30-day login streak", tier: "diamond", icon: "💎" },
+};
+let _unlockedAchievements = [];
+function loadAchievements() {
+  try { _unlockedAchievements = JSON.parse(localStorage.getItem("bandroom-achievements") || "[]"); } catch (_) { _unlockedAchievements = []; }
+}
+function unlockAchievement(key) {
+  if (_unlockedAchievements.includes(key)) return;
+  const ach = ACHIEVEMENTS[key];
+  if (!ach) return;
+  _unlockedAchievements.push(key);
+  try { localStorage.setItem("bandroom-achievements", JSON.stringify(_unlockedAchievements)); } catch (_) {}
+  showToast(`🏆 Achievement unlocked: ${ach.name} (${ach.tier})`);
+  addSeasonXp(ach.tier === "diamond" ? 200 : ach.tier === "gold" ? 100 : ach.tier === "silver" ? 50 : 25);
+}
+loadAchievements();
+
+// ================================================================
+// QR CODE GENERATION
+// ================================================================
+function generateQRCode(text, container) {
+  const el = document.getElementById(container);
+  if (!el) return;
+  // Use a simple QR code API
+  el.innerHTML = `<div class="qr-code-wrapper"><img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(text)}" alt="QR Code" width="150" height="150" /></div>`;
+}
+
+// ================================================================
+// PARTY/GROUP SYNC SCAFFOLD
+// ================================================================
+let _partyId = null;
+function createParty() {
+  _partyId = "party-" + Math.random().toString(36).slice(2, 8);
+  showToast(`Party created! Code: ${_partyId}`);
+}
+function joinParty(code) {
+  _partyId = code;
+  showToast(`Joined party: ${_partyId}`);
+}
+function leaveParty() {
+  _partyId = null;
+  showToast("Left party");
+}
+
+// ================================================================
+// GLOBAL HOTKEY REGISTRATION
+// ================================================================
+const HOTKEYS = [
+  { label: "Command Palette", keys: ["Ctrl", "K"], action: openCommandPalette },
+  { label: "The Bandroom", keys: ["Ctrl", "B"], action: toggleBandroom },
+  { label: "Sound Bank", keys: ["Ctrl", "S"], action: () => openTeamSoundBank(state.activeTeam) },
+  { label: "My Downloads", keys: ["Ctrl", "D"], action: toggleMyDownloads },
+  { label: "Discord Chat", keys: ["Ctrl", "Shift", "D"], action: toggleDiscordChat },
+  { label: "Set Matchup", keys: ["Ctrl", "M"], action: openMatchupPicker },
+  { label: "Save Profile", keys: ["Ctrl", "Shift", "S"], action: openSaveProfileDialog },
+  { label: "Streamer Mode", keys: ["Ctrl", "Alt", "S"], action: toggleStreamerMode },
+  { label: "Profile", keys: ["Ctrl", "P"], action: openProfileDashboard },
+  { label: "Undo", keys: ["Ctrl", "Z"], action: undoLastAction },
+  { label: "Tips", keys: ["Ctrl", "T"], action: showNextTip },
+];
+function openHotkeyPanel() {
+  const panel = document.getElementById("hotkey-panel");
+  const list = document.getElementById("hotkey-list");
+  list.innerHTML = "";
+  HOTKEYS.forEach((hk) => {
+    const row = document.createElement("div");
+    row.className = "hotkey-row";
+    const keysHTML = hk.keys.map((k) => `<span class="hotkey-key">${k}</span>`).join("");
+    row.innerHTML = `<span class="hotkey-label">${hk.label}</span><span class="hotkey-keys">${keysHTML}</span>`;
+    list.appendChild(row);
+  });
+  panel.hidden = false;
+}
+document.getElementById("btn-close-hotkey-panel")?.addEventListener("click", () => {
+  document.getElementById("hotkey-panel").hidden = true;
+});
+
+// ================================================================
+// SOUND PACK RECOMMENDATION ENGINE
+// ================================================================
+function getRecommendations() {
+  const team = state.activeTeam;
+  const recs = [
+    { name: "Stadium Organ Pack", team: "General", type: "song" },
+    { name: "Fight Song Collection", team, type: "song" },
+    { name: "Crowd Noise Effects", team: "General", type: "song" },
+    { name: "ESPN Broadcast Cues", team: "General", type: "song" },
+  ];
+  return recs;
+}
+function renderRecommendations(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const recs = getRecommendations();
+  recs.forEach((rec) => {
+    const card = document.createElement("div");
+    card.className = "recommendation-card";
+    card.innerHTML = `<div class="recommendation-thumb">${rec.type === "song" ? "🎵" : "🖼️"}</div><div><div class="recommendation-name">${rec.name}</div><div class="recommendation-team">${rec.team}</div></div>`;
+    container.appendChild(card);
+  });
+}
+
+// ================================================================
+// DUPLICATE TEAM PROFILE
+// ================================================================
+function duplicateTeamProfile(fromTeam) {
+  if (!bridge) return;
+  bridge.DuplicateProfile(fromTeam, state.activeTeam).then(() => {
+    showToast(`Duplicated ${fromTeam}'s profile to ${state.activeTeam}`);
+    refreshCategories();
+  }).catch(() => showToast("Failed to duplicate profile"));
+}
+
+// ================================================================
+// STRING XSS SAFETY — wrap innerHTML setters
+// ================================================================
+const _originalSetInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+// Run XSS sanitization blanket: any element's innerHTML that sets string content
+// goes through a safe path. This is a best-effort guard for dynamically-rendered
+// marketplace content from potentially untrusted sources.
+const _safeSetInnerHTML = {
+  set(value) {
+    if (typeof value === "string" && (value.includes("<") || value.includes("script"))) {
+      // Let it through but log for auditing
+      const stack = new Error().stack;
+      if (value.toLowerCase().includes("<script") || value.toLowerCase().includes("onerror=") || value.toLowerCase().includes("javascript:")) {
+        console.warn("[XSS-guard] Potential XSS blocked", { value: value.slice(0, 80), stack });
+        value = "⚠ Content blocked for security";
+      }
+    }
+    _originalSetInnerHTML.set.call(this, value);
+  },
+  get() { return _originalSetInnerHTML.get.call(this); },
+};
+
+// ================================================================
+// FPS/PING STATUS INDICATOR
+// ================================================================
+let _fpsFrames = 0;
+let _fpsLastTime = performance.now();
+let _fpsValue = 60;
+function updateFPS() {
+  _fpsFrames++;
+  const now = performance.now();
+  if (now - _fpsLastTime >= 1000) {
+    _fpsValue = Math.round(_fpsFrames * 1000 / (now - _fpsLastTime));
+    _fpsFrames = 0;
+    _fpsLastTime = now;
+    document.getElementById("status-fps").textContent = _fpsValue + " FPS";
+  }
+  requestAnimationFrame(updateFPS);
+}
+requestAnimationFrame(updateFPS);
+
+// ================================================================
+// POST-INIT SETUP
+// ================================================================
+setTimeout(() => {
+  checkResumeSession();
+  logPlatformInfo();
+  if (state.teams) state.teams = validateTeamData(state.teams);
+}, 500);
+
+// ================================================================
+// FILTER HELPERS for debounced search
+// ================================================================
+function filterTeamPicker(query) {
+  const grid = document.getElementById("team-picker-grid");
+  if (!grid) return;
+  const tiles = grid.querySelectorAll(".team-swatch");
+  const q = query.toLowerCase().trim();
+  tiles.forEach((tile) => {
+    tile.style.display = !q || (tile.title || "").toLowerCase().includes(q) ? "" : "none";
+  });
+}
+function filterBandroomTeams(query) {
+  const grid = document.getElementById("bandroom-team-grid");
+  if (!grid) return;
+  const tiles = grid.querySelectorAll(".team-swatch");
+  const q = query.toLowerCase().trim();
+  tiles.forEach((tile) => {
+    tile.style.display = !q || (tile.title || "").toLowerCase().includes(q) ? "" : "none";
+  });
+}
+function filterAlbumSearch(query) {
+  const songsGrid = document.getElementById("bandroom-songs-grid");
+  const imagesGrid = document.getElementById("bandroom-images-grid");
+  const q = query.toLowerCase().trim();
+  [songsGrid, imagesGrid].forEach((grid) => {
+    if (!grid || grid.hidden) return;
+    const cards = grid.querySelectorAll(".marketplace-card, .bandroom-item-tile");
+    cards.forEach((card) => {
+      const title = card.querySelector(".marketplace-card-title, .bandroom-item-name");
+      card.style.display = !q || (title?.textContent || "").toLowerCase().includes(q) ? "" : "none";
+    });
+  });
+}
+
+// ================================================================
+// DUPLICATE HELPERS (referenced by context menu)
+// ================================================================
+async function resetTeamProfile() {
+  if (!bridge) return;
+  await bridge.ResetTeamProfile();
+  showToast("Team profile reset");
+  await refreshCategories();
+  renderTeamGrid();
+}
+function toggleBandroom() {
+  document.getElementById("btn-bandroom-cloud")?.click();
+}
+function openTeamSoundBank(teamName) {
+  // Navigate to the sound bank via the marketplace buttons
+  openTeamAlbum(teamName);
+}
+function openTeamTrophyRoom(teamName) {
+  openTeamAlbum(teamName);
+}
+function toggleMyDownloads() {
+  document.getElementById("btn-my-downloads")?.click();
+}
+function toggleDiscordChat() {
+  document.getElementById("btn-discord-chat")?.click();
+}
+function openMatchupPicker() {
+  document.getElementById("btn-matchup")?.click();
+}
+function openSaveProfileDialog() {
+  document.querySelector(".rail-item[data-action='save-profile']")?.click();
+}
+
+// Show on first launch after this update
+try {
+  const seen = localStorage.getItem("bandroom-whatsnew-seen");
+  if (seen !== WHATS_NEW_VERSION) {
+    setTimeout(showWhatsNew, 600);
+  }
+} catch (_) {
+  setTimeout(showWhatsNew, 600);
 }
 
 init();

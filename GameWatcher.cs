@@ -122,6 +122,17 @@ internal sealed class GameWatcher
     static readonly HashSet<string> EventGatedRegions = new(StringComparer.OrdinalIgnoreCase) { "situation", "banner", "quarter" };
     bool _downChangedThisTick;
 
+    // The "down" WatchedRegion's raw OCR crop is the whole play-by-play ticker line, which goes
+    // blank constantly between plays (camera cuts, replays, no ticker text on screen) -- on those
+    // ticks region.Last resets to null so the SAME down value can re-trigger DownChanged later,
+    // which is correct for that purpose. But RouteEngineTick used to read region.Last directly to
+    // build the snapshot's Down field, so PlaySnapshot.Down flickered to 0 on every blank tick.
+    // PlayDelta.WasFirstDown requires current.Down==1 immediately after previous.Down>1 -- with a
+    // 0 landing between almost every real transition, that edge was essentially never observed,
+    // silently killing every "Offense: Earned First Down" detection. Track the last actually-read
+    // down value here, separately from the edge-triggering region.Last, and never null it out.
+    string? _lastKnownDown;
+
     readonly List<WatchedRegion> _regions = new()
     {
         // Spans the FULL WIDTH of the bottom score-bug band rather than one tight box, because
@@ -162,7 +173,7 @@ internal sealed class GameWatcher
         {
             Name = "situation",
             FxX = 0, FxY = 0.83, FxW = 1.0, FxH = 0.14,
-            Pattern = new Regex(@"\b(KICKOFF|PAT\s*GOOD|TOUCHDOWN|INTERCEPTED|FUMBLE|TURNOVER)\b", RegexOptions.IgnoreCase),
+            Pattern = new Regex(@"\b(KICKOFF|PAT\s*GOOD|TOUCHDOWN|INTERCEPTED|FUMBLE|TURNOVER|FAIR\s*CATCH|NO\s*RETURN)\b", RegexOptions.IgnoreCase),
         },
         // Quarter indicator -- reads the HUD's quarter number (sits between the score and the
         // game clock in the bottom scorebug, e.g. "1st | 5:11 | -- | KICKOFF") so we can
@@ -267,13 +278,28 @@ internal sealed class GameWatcher
                         await Task.Delay(1500, ct);
                         continue;
                     }
+                    Log?.Invoke("[watcher] game window found, hwnd acquired");
                 }
 
                 ocrEngine ??= OcrEngine.TryCreateFromUserProfileLanguages()
                     ?? throw new Exception("Could not create OCR engine.");
 
+                // Minimized windows report a valid-looking (often off-screen, e.g. Left=-32000)
+                // RECT with a positive but tiny/garbage size, and PrintWindow against a minimized
+                // window silently returns a blank/black bitmap instead of failing -- previously
+                // this meant the loop kept "succeeding" every tick forever while producing zero
+                // usable OCR text, with nothing in the log to explain why. Treat minimized the
+                // same as "window gone" so it's visible and retried instead of spinning silently.
+                if (Native.IsIconic(hwnd))
+                {
+                    Log?.Invoke("[watcher] game window is minimized -- pausing capture until restored");
+                    await Task.Delay(1000, ct);
+                    continue;
+                }
+
                 if (!Native.GetWindowRect(hwnd, out Native.RECT rect))
                 {
+                    Log?.Invoke("[watcher] GetWindowRect failed -- window handle went stale, will re-search");
                     hwnd = IntPtr.Zero;
                     WindowFoundChanged?.Invoke(false);
                     // Not on the tackle-detection critical path -- window handle just went stale
@@ -284,24 +310,55 @@ internal sealed class GameWatcher
 
                 int winW = rect.Right - rect.Left;
                 int winH = rect.Bottom - rect.Top;
+                if (winW <= 0 || winH <= 0)
+                {
+                    Log?.Invoke($"[watcher] window rect has non-positive size ({winW}x{winH}) -- skipping this tick");
+                    await Task.Delay(1000, ct);
+                    continue;
+                }
+
+                // PrintWindow (tried first) came back blank against this game -- EA's anti-cheat
+                // (EAAntiCheat.GameServiceLauncher.exe, confirmed running alongside CFB27) blocks
+                // direct window-content capture APIs as a standard anti-cheat measure, so
+                // PrintWindow "succeeds" but renders nothing. Graphics.CopyFromScreen (plain
+                // desktop pixel capture, not a window-content API) isn't blocked, so that's back
+                // to being the actual capture method. Its real limitation is that it reads
+                // whatever's visibly on top at those screen coordinates -- so it only produces
+                // useful OCR while the game window is genuinely the foreground window (nothing,
+                // including Bandroom itself, drawn on top of the capture region). Skip and log
+                // instead of silently reading garbage when that's not true, rather than trying to
+                // guess at wrong content the way the old title-substring bug did.
+                if (Native.GetForegroundWindow() != hwnd)
+                {
+                    Log?.Invoke("[watcher] game window isn't focused/foreground -- skipping capture this tick (bring the game to the front to resume detection)");
+                    await Task.Delay(500, ct);
+                    continue;
+                }
+
+                using var fullBmp = new Bitmap(winW, winH, PixelFormat.Format32bppArgb);
+                using (var fg = Graphics.FromImage(fullBmp))
+                {
+                    fg.CopyFromScreen(rect.Left, rect.Top, 0, 0, new Size(winW, winH));
+                }
 
                 foreach (var region in _regions)
                 {
                     if (!region.Calibrated) continue;
 
-                    int cropX = rect.Left + (int)(winW * region.FxX);
-                    int cropY = rect.Top + (int)(winH * region.FxY);
+                    int cropX = (int)(winW * region.FxX);
+                    int cropY = (int)(winH * region.FxY);
                     // Clamp to at least 1px -- a tiny/minimized game window (or a preset with a
                     // very small fractional height) can round FxW/FxH down to 0, and a 0x0
                     // Bitmap throws ArgumentException, which would otherwise trip the outer
                     // catch every single poll tick until the window is resized.
-                    int cropW = Math.Max(1, (int)(winW * region.FxW));
-                    int cropH = Math.Max(1, (int)(winH * region.FxH));
+                    int cropW = Math.Max(1, Math.Min((int)(winW * region.FxW), winW - cropX));
+                    int cropH = Math.Max(1, Math.Min((int)(winH * region.FxH), winH - cropY));
 
                     using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
                     using (var g = Graphics.FromImage(bmp))
                     {
-                        g.CopyFromScreen(cropX, cropY, 0, 0, new Size(cropW, cropH));
+                        g.DrawImage(fullBmp, new Rectangle(0, 0, cropW, cropH),
+                            new Rectangle(cropX, cropY, cropW, cropH), GraphicsUnit.Pixel);
                     }
 
                     string text = await OcrBitmapAsync(ocrEngine, bmp);
@@ -314,12 +371,23 @@ internal sealed class GameWatcher
 
                     if (region.Name == "down")
                     {
-                        SamplePossessionFromWindow(rect, winW, winH);
+                        // Skip possession color-sampling while a penalty flag is up -- the
+                        // rightmost box (which PossessionFx* now targets, see ScorebugPreset)
+                        // turns bright yellow for "FLAG" instead of showing a team color, and
+                        // Tennessee's own primary color (orange) sits close enough to yellow in
+                        // RGB space that ResolveTeamColor's 90-unit tolerance could misread a
+                        // penalty review as "Tennessee has the ball." One-tick-stale flag state is
+                        // fine here (this "down" region processes before "flag" is re-read the
+                        // same tick, but polls every 250ms).
+                        bool flagActive = _regions.FirstOrDefault(r => r.Name == "flag")?.Last != null;
+                        if (!flagActive) SamplePossessionFromWindow(fullBmp, winW, winH);
                         CheckForLossOfYards(text);
                     }
 
                     var match = region.Pattern.Match(text);
                     string? currentValue = match.Success ? NormalizeMatch(region.Name, match.Value) : null;
+
+                    if (region.Name == "down" && currentValue != null) _lastKnownDown = currentValue;
 
                     if (currentValue != null && currentValue != region.Last)
                     {
@@ -415,19 +483,20 @@ internal sealed class GameWatcher
     /// matching every screenshot seen calibrating this. Returns -1 if the preset's timeout box
     /// isn't calibrated (FxW/FxH still 0), so callers can tell "not sampled" from "sampled as
     /// zero remaining."</summary>
-    int SampleTimeoutSegments(Native.RECT rect, int winW, int winH)
+    int SampleTimeoutSegments(Bitmap fullBmp, int winW, int winH)
     {
         if (_activePreset.AwayTimeoutFxW <= 0 || _activePreset.AwayTimeoutFxH <= 0) return -1;
 
-        int cropX = rect.Left + (int)(winW * _activePreset.AwayTimeoutFxX);
-        int cropY = rect.Top + (int)(winH * _activePreset.AwayTimeoutFxY);
-        int cropW = Math.Max(3, (int)(winW * _activePreset.AwayTimeoutFxW));
-        int cropH = Math.Max(1, (int)(winH * _activePreset.AwayTimeoutFxH));
+        int cropX = (int)(winW * _activePreset.AwayTimeoutFxX);
+        int cropY = (int)(winH * _activePreset.AwayTimeoutFxY);
+        int cropW = Math.Max(3, Math.Min((int)(winW * _activePreset.AwayTimeoutFxW), winW - cropX));
+        int cropH = Math.Max(1, Math.Min((int)(winH * _activePreset.AwayTimeoutFxH), winH - cropY));
 
         using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
         {
-            g.CopyFromScreen(cropX, cropY, 0, 0, new Size(cropW, cropH));
+            g.DrawImage(fullBmp, new Rectangle(0, 0, cropW, cropH),
+                new Rectangle(cropX, cropY, cropW, cropH), GraphicsUnit.Pixel);
         }
 
         const int segments = 3;
@@ -451,21 +520,97 @@ internal sealed class GameWatcher
         return litCount;
     }
 
-    void SamplePossessionFromWindow(Native.RECT rect, int winW, int winH)
+    void SamplePossessionFromWindow(Bitmap fullBmp, int winW, int winH)
     {
-        _lastAwayTimeoutsRemaining = SampleTimeoutSegments(rect, winW, winH);
+        _lastAwayTimeoutsRemaining = SampleTimeoutSegments(fullBmp, winW, winH);
 
-        int cropX = rect.Left + (int)(winW * _activePreset.PossessionFxX);
-        int cropY = rect.Top + (int)(winH * _activePreset.PossessionFxY);
-        int cropW = Math.Max(1, (int)(winW * _activePreset.PossessionFxW));
-        int cropH = Math.Max(1, (int)(winH * _activePreset.PossessionFxH));
+        // Underline-brightness method takes priority when the active preset has it calibrated
+        // (see ScorebugPreset.AwayUnderlineFx*/HomeUnderlineFx*) -- correction 2026-08-07: the
+        // real possession signal is a thin lit/dim underline under the team name, not a
+        // team-colored fill box. Falls back to the old color-match method (SamplePossession)
+        // for presets that predate this, e.g. KamsCbsScorebug.
+        if (_activePreset.AwayUnderlineFxW > 0 && _activePreset.HomeUnderlineFxW > 0)
+        {
+            SamplePossessionByUnderline(fullBmp, winW, winH);
+            return;
+        }
+
+        int cropX = (int)(winW * _activePreset.PossessionFxX);
+        int cropY = (int)(winH * _activePreset.PossessionFxY);
+        int cropW = Math.Max(1, Math.Min((int)(winW * _activePreset.PossessionFxW), winW - cropX));
+        int cropH = Math.Max(1, Math.Min((int)(winH * _activePreset.PossessionFxH), winH - cropY));
 
         using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
         {
-            g.CopyFromScreen(cropX, cropY, 0, 0, new Size(cropW, cropH));
+            g.DrawImage(fullBmp, new Rectangle(0, 0, cropW, cropH),
+                new Rectangle(cropX, cropY, cropW, cropH), GraphicsUnit.Pixel);
         }
         SamplePossession(bmp);
+    }
+
+    /// <summary>Reads the average brightness of the crop directly under each team's name and
+    /// calls possession for whichever side is brighter (lit underline = has the ball), same
+    /// segment-luminance technique as SampleTimeoutSegments. Requires a clear winner -- if both
+    /// sides read within a small margin of each other (ambiguous frame, mid-transition, OCR
+    /// caught a half-rendered frame), this deliberately does nothing rather than guess, same
+    /// "don't fire on uncertain data" philosophy as the rest of GameWatcher.</summary>
+    void SamplePossessionByUnderline(Bitmap fullBmp, int winW, int winH)
+    {
+        double awayBrightness = SampleCropBrightness(fullBmp, winW, winH,
+            _activePreset.AwayUnderlineFxX, _activePreset.AwayUnderlineFxY,
+            _activePreset.AwayUnderlineFxW, _activePreset.AwayUnderlineFxH);
+        double homeBrightness = SampleCropBrightness(fullBmp, winW, winH,
+            _activePreset.HomeUnderlineFxX, _activePreset.HomeUnderlineFxY,
+            _activePreset.HomeUnderlineFxW, _activePreset.HomeUnderlineFxH);
+
+        const double minMargin = 15; // luminance points (0-255 scale) -- ignore too-close-to-call frames
+        string? side = (awayBrightness - homeBrightness) switch
+        {
+            > minMargin => "away",
+            < -minMargin => "home",
+            _ => null,
+        };
+        if (side == null) return;
+
+        if (side != _lastPossession)
+        {
+            _lastPossession = side;
+            if (DateTime.UtcNow < _possessionCooldownUntil)
+            {
+                Log?.Invoke($"[possession] suppressed re-fire of \"{side}\" (cooldown)");
+                return;
+            }
+            _possessionCooldownUntil = DateTime.UtcNow + Cooldown;
+            Log?.Invoke($"[possession] now: {side} (underline brightness away={awayBrightness:F0} home={homeBrightness:F0})");
+            PossessionChanged?.Invoke(side);
+        }
+    }
+
+    static double SampleCropBrightness(Bitmap fullBmp, int winW, int winH, double fxX, double fxY, double fxW, double fxH)
+    {
+        int cropX = (int)(winW * fxX);
+        int cropY = (int)(winH * fxY);
+        int cropW = Math.Max(1, Math.Min((int)(winW * fxW), winW - cropX));
+        int cropH = Math.Max(1, Math.Min((int)(winH * fxH), winH - cropY));
+
+        using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.DrawImage(fullBmp, new Rectangle(0, 0, cropW, cropH),
+                new Rectangle(cropX, cropY, cropW, cropH), GraphicsUnit.Pixel);
+        }
+
+        long luminanceSum = 0;
+        int n = 0;
+        for (int y = 0; y < cropH; y++)
+        for (int x = 0; x < cropW; x++)
+        {
+            var px = bmp.GetPixel(x, y);
+            luminanceSum += (px.R + px.G + px.B) / 3;
+            n++;
+        }
+        return n == 0 ? 0 : (double)luminanceSum / n;
     }
 
     void SamplePossession(Bitmap bmp)
@@ -542,6 +687,7 @@ internal sealed class GameWatcher
         {
             "intercepted" or "fumble" or "turnover" => "turnover",
             "field goal" => "fieldgoal",
+            "fair catch" or "no return" => "nopuntreturn",
             _ => collapsed.Replace(" ", "_"),
         };
     }
@@ -589,7 +735,6 @@ internal sealed class GameWatcher
     {
         if (_eventRouter == null) return;
 
-        var downRegion = _regions.FirstOrDefault(r => r.Name == "down");
         var situationRegion = _regions.FirstOrDefault(r => r.Name == "situation");
         var quarterRegion = _regions.FirstOrDefault(r => r.Name == "quarter");
         var awayScoreRegion = _regions.FirstOrDefault(r => r.Name == "awayscore");
@@ -597,7 +742,7 @@ internal sealed class GameWatcher
         var clockRegion = _regions.FirstOrDefault(r => r.Name == "clock");
         var penaltyAgainstRegion = _regions.FirstOrDefault(r => r.Name == "penaltyagainst");
 
-        int down = ParseOrdinal(downRegion?.Last);
+        int down = ParseOrdinal(_lastKnownDown);
         int quarter = ParseOrdinal(quarterRegion?.Last);
         string? situation = situationRegion?.Last;
 
@@ -616,7 +761,12 @@ internal sealed class GameWatcher
         // not (= defense). If team names haven't been set yet (HomeTeamName/AwayTeamName null,
         // e.g. matchup not confirmed) or the text doesn't match either name, both flags stay
         // false -- PenaltyHelper simply won't fire rather than guessing wrong.
-        bool possessionIsHomeNow = _lastPossession != "away";
+        // FIXED 2026-08-07: was `_lastPossession != "away"`, which reads null (possession not
+        // detected yet) as "home has it" instead of "unknown" -- silently misrouted penalty
+        // events during the pre-detection window right after a matchup is confirmed. Now null
+        // stays null so penalty routing waits for a real possession read, same guessing-avoidance
+        // rule already used for penalizedIsHome below.
+        bool? possessionIsHomeNow = _lastPossession == null ? null : _lastPossession != "away";
         bool? penalizedIsHome = null;
         string? penaltyText = penaltyAgainstRegion?.Last;
         if (penaltyText != null)
@@ -626,8 +776,8 @@ internal sealed class GameWatcher
             else if (!string.IsNullOrEmpty(AwayTeamName) && penaltyText.Contains(AwayTeamName, StringComparison.OrdinalIgnoreCase))
                 penalizedIsHome = false;
         }
-        bool isPenaltyOnOffense = penalizedIsHome.HasValue && penalizedIsHome.Value == possessionIsHomeNow;
-        bool isPenaltyOnDefense = penalizedIsHome.HasValue && penalizedIsHome.Value != possessionIsHomeNow;
+        bool isPenaltyOnOffense = penalizedIsHome.HasValue && possessionIsHomeNow.HasValue && penalizedIsHome.Value == possessionIsHomeNow.Value;
+        bool isPenaltyOnDefense = penalizedIsHome.HasValue && possessionIsHomeNow.HasValue && penalizedIsHome.Value != possessionIsHomeNow.Value;
 
         var snapshot = new PlaySnapshot
         {
@@ -639,6 +789,7 @@ internal sealed class GameWatcher
             IsPAT = situation == "pat_good",
             IsTouchdown = situation == "touchdown",
             IsTurnover = situation == "turnover",
+            IsNoPuntReturn = situation == "nopuntreturn",
             IsPenaltyOnOffense = isPenaltyOnOffense,
             IsPenaltyOnDefense = isPenaltyOnDefense,
             YardLine = 0,
@@ -682,6 +833,7 @@ internal sealed class GameWatcher
             new GameStateEventHelper(),
             new KickoffHelper(),
             new OffenseDownHelper(),
+            new NoPuntReturnHelper(),
             new PenaltyHelper(),
             new SafetyHelper(),
             new TflHelper(),
@@ -692,22 +844,19 @@ internal sealed class GameWatcher
         return new EventRouter(rules);
     }
 
+    // Matching by process name (not window-title text) is deliberate: other apps commonly have
+    // the game's name in their own title too (e.g. a mod manager's title bar shows
+    // "(College Football 27)" for the game it's managing), and a title-substring match would
+    // grab whichever window enumerates first -- silently OCR'ing the wrong window's screen
+    // region instead of ever finding the real game. "CollegeFB27" is the actual game's process
+    // name, confirmed live via Get-Process.
     static IntPtr FindGameWindow()
     {
-        IntPtr found = IntPtr.Zero;
-        Native.EnumWindows((hWnd, lParam) =>
+        foreach (var proc in System.Diagnostics.Process.GetProcessesByName("CollegeFB27"))
         {
-            int len = Native.GetWindowTextLength(hWnd);
-            if (len == 0 || !Native.IsWindowVisible(hWnd)) return true;
-            var sb = new System.Text.StringBuilder(len + 1);
-            Native.GetWindowText(hWnd, sb, sb.Capacity);
-            if (sb.ToString().Contains("College Football 27", StringComparison.OrdinalIgnoreCase))
-            {
-                found = hWnd;
-                return false;
-            }
-            return true;
-        }, IntPtr.Zero);
-        return found;
+            IntPtr hWnd = proc.MainWindowHandle;
+            if (hWnd != IntPtr.Zero && Native.IsWindowVisible(hWnd)) return hWnd;
+        }
+        return IntPtr.Zero;
     }
 }

@@ -15,7 +15,7 @@ namespace SupremeStadiumSoundSelector;
 public sealed class WebMainForm : Form
 {
     static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac" };
-    static readonly string[] CategoryOrder = { "Downs", "Scoring", "Turnovers", "Special Teams", "Penalties", "Hype" };
+    static readonly string[] CategoryOrder = { "Offense", "Defense", "Situations" };
 
     List<TriggerEntry> _config = new();
     readonly KeyboardHook _hook = new();
@@ -40,6 +40,7 @@ public sealed class WebMainForm : Form
     /// This matches the real workflow: you set the matchup once at kickoff, then Stop Watching
     /// is the one signal that means "this game is over, I might pick a different matchup next."</summary>
     bool _matchupLocked;
+    bool _useEngineForEvents;
 
     public WebMainForm()
     {
@@ -70,9 +71,11 @@ public sealed class WebMainForm : Form
         _watcher.TackleForLossDetected += OnTackleForLoss;
         _watcher.EventsDetected += OnEngineEventsDetected;
         _watcher.ResolveTeamColor = ResolveTeamColor;
-        // Engine is now primary — gate old legacy handlers to prevent double-firing.
+        // Engine is now always active — always run the rule engine evaluators.
         // PossessionChanged still fires (it updates _possession for the engine to use).
-        _useEngineForEvents = _homeConfig != null && _awayConfig != null;
+        // Was gated on _homeConfig/_awayConfig being non-null, which silently killed
+        // all events until "Set Matchup" was pressed. Fixed 2026-08-07.
+        _useEngineForEvents = true;
         _watcher.Log += OnLog;
         _watcher.ActivePreset = ScorebugPreset.GetByName(ConfigStore.LoadScorebugPresetName());
 
@@ -244,9 +247,16 @@ public sealed class WebMainForm : Form
     {
         SetGameTeamsFromWeb(homeName, awayName);
         _matchupLocked = true;
+        StartWatchingIfMatchupSet(); // GAMETIME locks the matchup AND starts watching in one press
         PlayGametimeSound();
         RecordGameWatched(homeName, awayName);
     }
+
+    /// <summary>Unlocks the matchup (so Set Matchup can pick different teams) WITHOUT stopping
+    /// the OCR watcher/input hook -- previously the only way to unlock was Stop Watching, which
+    /// also kills the live capture session entirely. Lets the owner correct a wrong matchup pick
+    /// mid-session without losing the watcher state.</summary>
+    public void UnlockMatchupFromWeb() => _matchupLocked = false;
 
     /// <summary>Bumps the universal profile's lifetime "games watched" counter, per-team
     /// breakdown, and daily streak -- see ConfigStore.UserProfile. Fire-and-forget cloud sync,
@@ -342,12 +352,32 @@ public sealed class WebMainForm : Form
         return (int)Math.Sqrt(dr * dr + dg * dg + db * db);
     }
 
-    void FireEventForSide(string side, string eventName)
+    /// <summary>Pre-engine profiles have real songs assigned under the old bare "1st/2nd/3rd
+    /// Down" (Trigger-keyed down:1st/2nd/3rd) slots -- dead since _useEngineForEvents went
+    /// permanent-true (OnDownChanged, the only thing that ever fired them, now always bails).
+    /// These three map 1:1 onto the engine's offense-side equivalent (same "my team is driving"
+    /// meaning), so a canonical miss falls back to the matching legacy trigger rather than losing
+    /// an already-assigned file. "4th Down" has no clean engine equivalent (no "Offense: Fourth
+    /// Down" event exists -- going for it on 4th is only modeled from the defense's reactive
+    /// side) so it's deliberately NOT aliased here; that one needs a product decision, not a
+    /// guess.</summary>
+    static readonly Dictionary<string, string> LegacyDownEventAlias = new()
+    {
+        ["Offense: Earned First Down"] = "down:1st",
+        ["Offense: Second Down"] = "down:2nd",
+        ["Offense: Third Down"] = "down:3rd",
+    };
+
+    /// <summary>Returns what actually happened so callers that need visible feedback (the test
+    /// hook) can tell "fired," "no song assigned," and "no matchup loaded" apart instead of all
+    /// three looking identically like silence. Real engine/legacy callers ignore the return.</summary>
+    string FireEventForSide(string side, string eventName, bool bypassCooldown = false)
     {
         var config = side == "home" ? _homeConfig : _awayConfig;
+        if (config == null) return "no-profile";
 
         // Try the team's own profile first, then fall back to the Generic profile
-        var entry = config?.FirstOrDefault(e => e.Event == eventName);
+        var entry = config.FirstOrDefault(e => e.Event == eventName);
         if (entry == null || string.IsNullOrWhiteSpace(entry.AudioFile))
         {
             // Fall back to Generic profile for shared default sounds
@@ -355,8 +385,20 @@ public sealed class WebMainForm : Form
             entry = generic?.FirstOrDefault(e => e.Event == eventName);
         }
 
-        if (entry != null && !string.IsNullOrWhiteSpace(entry.AudioFile))
-            FireEvent(entry, side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume);
+        if ((entry == null || string.IsNullOrWhiteSpace(entry.AudioFile))
+            && LegacyDownEventAlias.TryGetValue(eventName, out var legacyTrigger))
+        {
+            var legacyEntry = config.FirstOrDefault(e => e.Trigger.Equals(legacyTrigger, StringComparison.OrdinalIgnoreCase));
+            if (legacyEntry != null && !string.IsNullOrWhiteSpace(legacyEntry.AudioFile))
+                entry = legacyEntry;
+        }
+
+        if (entry == null || string.IsNullOrWhiteSpace(entry.AudioFile)) return "unassigned";
+
+        if (bypassCooldown) AudioPlayer.ClearCooldown(entry.AudioFile);
+        if (!File.Exists(entry.AudioFile)) return "file-missing";
+        FireEvent(entry, side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume);
+        return "fired:" + Path.GetFileName(entry.AudioFile);
     }
 
     void FireTriggerForSide(string side, string trigger)
@@ -404,18 +446,24 @@ public sealed class WebMainForm : Form
         }
         else
         {
-            // Refuse to start without a Matchup set -- _homeTeam/_awayTeam (and everything
-            // derived from them: ResolveTeamColor, _homeConfig/_awayConfig) stay null until
-            // SetGameTeamsFromWeb runs, which otherwise silently falls back to firing one
-            // team's cues for both sides. Explicit user ask: force Set Matchup first so the
-            // system actually knows both teams' colors before OCR starts.
-            if (_homeTeam is null || _awayTeam is null) return "no-matchup";
-
-            _hook.Start();
-            _watcher.Start();
-            _watching = true;
+            string? failure = StartWatchingIfMatchupSet();
+            if (failure != null) return failure;
         }
         return WatchStateString();
+    }
+
+    /// <summary>Shared by the manual Watch toggle and GAMETIME -- explicit owner request: GAMETIME
+    /// should lock the matchup AND start watching in one press instead of needing a second manual
+    /// "Start Watching" step afterward. Refuses to start without a matchup set for the same reason
+    /// ToggleWatchingFromWeb always did (OCR needs _homeTeam/_awayTeam resolved first).</summary>
+    string? StartWatchingIfMatchupSet()
+    {
+        if (_homeTeam is null || _awayTeam is null) return "no-matchup";
+        if (_watching) return null;
+        _hook.Start();
+        _watcher.Start();
+        _watching = true;
+        return null;
     }
 
     string WatchStateString() => !_watching ? "off" : _windowFound ? "watching" : "waiting";
@@ -502,6 +550,14 @@ public sealed class WebMainForm : Form
             ?? _config.FirstOrDefault();
         if (entry != null) FireEvent(entry);
     }
+
+    /// <summary>Test hook: fires a specific EventKey for a specific side through the exact same
+    /// FireEventForSide path the real engine uses, without needing a live game/OCR feed. Lets the
+    /// owner test event wiring, LegacyDownEventAlias fallback, and side-routing volume directly
+    /// from the debug panel.</summary>
+    public string FireTestEventFromWeb(string side, string eventKey) => FireEventForSide(side, eventKey, bypassCooldown: true);
+
+    public string GetAllEventKeysFromWeb() => System.Text.Json.JsonSerializer.Serialize(ConfigStore.AllEngineEventKeys);
 
     /// <summary>isPa selects which field on entry this dialog session edits: false = the main
     /// song (AudioFile, unchanged behavior), true = the PA Announcer clip (PaAudioFile, new).
@@ -919,7 +975,11 @@ public sealed class WebMainForm : Form
     {
         RunOnUi(() =>
         {
-            if (_homeConfig == null || _awayConfig == null || _possession == null) return;
+            // If matchup not set yet, fall back to the single-team config (legacy mode).
+            if (_homeConfig == null || _awayConfig == null) return;
+            // Default to "home" when possession hasn't been read yet (menus, replays, etc)
+            // instead of silently dropping every event — the engine already knows UserIsHome=true.
+            string side = _possession ?? "home";
 
             foreach (var evt in events)
             {
@@ -932,13 +992,20 @@ public sealed class WebMainForm : Form
                 // offense's own side instead -- moot until penalty-side OCR detection existed to
                 // ever populate it, but real now that it does.
                 bool routesLikeDefense = evt.EventKey.StartsWith("Defense:") || evt.EventKey == "Penalty: Offense";
-                string side = routesLikeDefense
-                    ? (_possession == "home" ? "away" : "home")
-                    : _possession;
+                string routedSide = routesLikeDefense
+                    ? (side == "home" ? "away" : "home")
+                    : side;
 
-                bool sideAllowed = HomeOnlyEventsForNow ? side == "home" : true;
+                bool sideAllowed = HomeOnlyEventsForNow ? routedSide == "home" : true;
                 if (sideAllowed)
-                    FireEventForSide(side, evt.EventKey);
+                {
+                    string result = FireEventForSide(routedSide, evt.EventKey);
+                    OnLog($"[engine] {evt.EventKey} -> {routedSide}: {result}");
+                }
+                else
+                {
+                    OnLog($"[engine] {evt.EventKey} -> {routedSide}: blocked (HomeOnlyEventsForNow)");
+                }
             }
         });
     }
@@ -946,9 +1013,9 @@ public sealed class WebMainForm : Form
     /// <summary>Temporary simplification, requested by the owner ahead of a major push: only the
     /// HOME team's events should fire for now. Away-side firing (via FireTriggerForSide/
     /// FireEventForSide below) is disabled, not deleted, so it's a one-line revert once away-side
-    /// support is wanted again. Tackle-for-Loss is deliberately exempt -- see OnTackleForLoss.</summary>
-    const bool HomeOnlyEventsForNow = true;
-    bool _useEngineForEvents;
+    /// support is wanted again. Tackle-for-Loss is deliberately exempt -- see OnTackleForLoss.
+    /// TURNED OFF 2026-08-07: was silently killing all events when possession read as "away".</summary>
+    const bool HomeOnlyEventsForNow = false;
 
     void OnDownChanged(string? down)
     {
@@ -1005,7 +1072,30 @@ public sealed class WebMainForm : Form
         });
     }
 
-    void OnLog(string message) { }
+    static readonly string OcrLogPath = Path.Combine(AppContext.BaseDirectory, "ocr_debug.log");
+    static readonly object OcrLogLock = new();
+
+    /// <summary>Was a no-op -- every OCR region read (down/situation/flag/possession/etc, see
+    /// GameWatcher's Log?.Invoke call sites) went nowhere, so there was no way to see what text
+    /// actually got read on a tick where a trigger silently failed to fire. Now appends to
+    /// ocr_debug.log next to the exe, capped to the last ~2000 lines so it can't grow unbounded
+    /// over a long game session.</summary>
+    void OnLog(string message)
+    {
+        lock (OcrLogLock)
+        {
+            try
+            {
+                File.AppendAllText(OcrLogPath, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
+                if (new FileInfo(OcrLogPath).Length > 2_000_000)
+                {
+                    var lines = File.ReadAllLines(OcrLogPath);
+                    File.WriteAllLines(OcrLogPath, lines.Skip(Math.Max(0, lines.Length - 2000)));
+                }
+            }
+            catch (Exception ex) { CrashLog.Write("OCR log write failed", ex); }
+        }
+    }
 
     void InitAutoUpdater()
     {
@@ -1102,6 +1192,34 @@ public sealed class WebMainForm : Form
     /// in app.js) -- the app no longer relaunches itself automatically the instant the download
     /// finishes.</summary>
     public void RestartForUpdateFromWeb() => RunOnUi(() => UpdateManager.RestartApp());
+
+    /// <summary>User opts into the one-time default song pack download (see
+    /// DefaultSongPackService). Same fire-and-forget-with-progress-events shape as
+    /// ShowUpdateDialogFromWeb above, just against a different download.</summary>
+    public void DownloadDefaultSongPackFromWeb()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:songpackdownloading'))"));
+
+                bool ok = await DefaultSongPackService.DownloadAndExtractAsync((frac, downloaded, total) =>
+                    RunOnUi(() => _ = _webView.ExecuteScriptAsync(
+                        $"window.dispatchEvent(new CustomEvent('bandroom:songpackprogress', {{ detail: {{ fraction: {frac.ToString(System.Globalization.CultureInfo.InvariantCulture)}, downloaded: {downloaded}, total: {total} }} }}))")),
+                    _lifetimeCts.Token);
+
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync(
+                    ok ? "window.dispatchEvent(new CustomEvent('bandroom:songpackready'))"
+                       : "window.dispatchEvent(new CustomEvent('bandroom:songpackfailed'))"));
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Default song pack download failed", ex);
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:songpackfailed'))"));
+            }
+        });
+    }
 
     void RunOnUi(Action action)
     {

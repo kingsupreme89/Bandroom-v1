@@ -1,5 +1,42 @@
 # Bandroom Task Board — Last Updated: 2026-08-07 (orchestrator pass)
 
+## Cline → Orchestrator
+- [20:5x] CONFIRMED ROOT CAUSE — "event trigger system hasn't fired on both pushes" (user report,
+  Auburn @ Georgia Tech matchup, Watching on, real songs assigned, nothing played):
+  `WebMainForm.cs:78` now sets `_useEngineForEvents = true` unconditionally in the constructor
+  (Cline's fix, comment says "Fixed 2026-08-07", intent was to stop events dying before Set
+  Matchup was pressed). But `OnDownChanged` (`WebMainForm.cs:962`) — the ONLY code path that ever
+  fires the `Trigger`-keyed `"1st Down"/"2nd Down"/"3rd Down"/"4th Down"` entries — opens with
+  `if (_useEngineForEvents) return;`. Since that flag is now permanently true, `OnDownChanged`
+  always bails immediately: these four entries can never fire again, full stop, regardless of OCR
+  correctness.
+  The engine's replacement evaluators do NOT emit those literal keys — `OffenseDownHelper.cs`
+  emits `"Offense: Second Down"` / `"Offense: Third Down"`, `BigEventHelper.cs`/`DefenseHelper.cs`
+  emit `"Defense: Third Down"` / `"Defense: Fourth Down"` (opponent-facing "they're in a tough
+  spot" cues, not "it is now Nth down for you"). There is no evaluator anywhere that emits a bare
+  `"1st Down"`/`"2nd Down"`/`"3rd Down"`/`"4th Down"` key — confirmed via full grep of
+  `src/Bandroom.Core/Helpers/*.cs`. So even a perfect fix to the routing gate would not bring
+  these back; the engine has no equivalent event to route.
+  Worse: `ConfigStore.BuildDefault()` (`ConfigStore.cs:669-672`) still manufactures these same 4
+  dead `Trigger`-keyed entries — including a pre-filled default 4th-down file
+  (`dies irie 0.wav`) — for every new/existing profile via `EnsureAllEvents`. So this isn't just
+  "user assigned to stale slots": the app itself ships dead UI slots with a real default sound
+  that can never play, for every team, out of the box.
+  This matches the Georgia Tech profile exactly (`UserData/Profiles/Georgia Tech.json`): real,
+  existing files assigned to `"1st Down"`/`"2nd Down"`/`"3rd Down"`/`"4th Down"`, all orphaned.
+  **Not yet fixed** — needs a decision, not a blind patch: either (a) remove/hide the 4 legacy
+  Down entries from BuildDefault + UI and have OffenseDownHelper/BigEventHelper/DefenseHelper
+  cover 1st down explicitly too (currently only 2nd/3rd are covered on offense, nothing fires on
+  a *fresh* 1st down at all — FirstDownHelper only fires on *earning* a first down via a play, a
+  different concept), migrating any already-assigned legacy files across; or (b) add a
+  compatibility alias in `FireEventForSide`/`ConfigStore` mapping the legacy keys to their nearest
+  canonical engine key so already-assigned user files keep working without a data migration.
+  Adjacent behavior checked and NOT affected by the same class of bug: `OnRegionChanged`'s
+  legacy `SideAwareEvents` fallback (touchdown/turnover/pat_good/kickoff) is also gated on
+  `_useEngineForEvents` and also permanently dead now, but the engine's `TouchdownHelper`/
+  `TurnoverHelper`/`FieldGoalPATHelper`/`KickoffHelper` emit the exact same EventKey strings
+  those mapped to, so no regression there — those events fire fine through the new path.
+
 ## Build Status (verified directly, not self-reported)
 ```
 Bandroom.Core.dll   → 0 errors, 0 warnings

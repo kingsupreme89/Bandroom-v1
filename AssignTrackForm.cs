@@ -15,6 +15,9 @@ internal sealed class AssignTrackForm : Form
     readonly string _dialogTitle;
     ListBox _lstTracks = null!;
     Label _lblCurrent = null!;
+    Label _lblPreviewing = null!;
+    GlassButton _btnPlay = null!;
+    GlassButton _btnStop = null!;
 
     public string? AssignedPath { get; private set; }
     public bool RequestTrim { get; private set; }
@@ -56,14 +59,49 @@ internal sealed class AssignTrackForm : Form
         _lblCurrent = new Label { Text = $"Current: {currentLabel}", Left = 16, Top = 62, AutoSize = true, Font = AppFonts.Get(8.5f), ForeColor = Theme.TextMuted };
         Controls.Add(_lblCurrent);
 
+        // --- Big preview area on top (owner request: "hard to understand how to select a song" --
+        // put the preview front and center instead of buried under a bare list) ---
+        var previewPanel = new Panel
+        {
+            Left = 16, Top = 86, Width = 392, Height = 70,
+            BackColor = Theme.InputFill, BorderStyle = BorderStyle.FixedSingle,
+        };
+        Controls.Add(previewPanel);
+
+        _lblPreviewing = new Label
+        {
+            Text = "Select a song below to preview it",
+            Left = 12, Top = 10, Width = 368, AutoSize = false, Height = 20,
+            Font = AppFonts.Get(9.5f, FontStyle.Bold), ForeColor = Theme.TextPrimary,
+        };
+        previewPanel.Controls.Add(_lblPreviewing);
+
+        var previewBtnFont = AppFonts.Get(9);
+        _btnPlay = new GlassButton { Text = "▶ Play", Left = 12, Top = 34, Width = 90, Height = 26, Font = previewBtnFont, Enabled = false };
+        _btnPlay.Click += (_, _) => PreviewSelected();
+        previewPanel.Controls.Add(_btnPlay);
+
+        _btnStop = new GlassButton { Text = "■ Stop", Left = 108, Top = 34, Width = 90, Height = 26, Font = previewBtnFont, Enabled = false };
+        _btnStop.Click += (_, _) => AudioPlayer.StopAll();
+        previewPanel.Controls.Add(_btnStop);
+
         _lstTracks = new ListBox
         {
-            Left = 16, Top = 90, Width = 392, Height = 240,
+            Left = 16, Top = 164, Width = 392, Height = 166,
             BackColor = Theme.InputFill, ForeColor = Theme.TextPrimary,
             BorderStyle = BorderStyle.FixedSingle,
         };
         foreach (var path in library) _lstTracks.Items.Add(new TrackItem(path));
         _lstTracks.DoubleClick += (_, _) => AssignFromList();
+        _lstTracks.SelectedIndexChanged += (_, _) =>
+        {
+            bool hasSelection = _lstTracks.SelectedItem is TrackItem;
+            _btnPlay.Enabled = hasSelection;
+            _btnStop.Enabled = hasSelection;
+            _lblPreviewing.Text = _lstTracks.SelectedItem is TrackItem item
+                ? $"Selected: {item}"
+                : "Select a song below to preview it";
+        };
         Controls.Add(_lstTracks);
 
         if (library.Count == 0)
@@ -94,8 +132,15 @@ internal sealed class AssignTrackForm : Form
         Controls.Add(btnClear);
 
         var btnCancel = new GlassButton { Text = "Cancel", Left = 332, Top = 378, Width = 76, Height = 28, Font = btnFont };
-        btnCancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
+        btnCancel.Click += (_, _) => { AudioPlayer.StopAll(); DialogResult = DialogResult.Cancel; Close(); };
         Controls.Add(btnCancel);
+
+        Height = 460 + 76; // grew for the new preview panel
+    }
+
+    void PreviewSelected()
+    {
+        if (_lstTracks.SelectedItem is TrackItem item) AudioPlayer.Play(item.Path);
     }
 
     void AssignFromList()

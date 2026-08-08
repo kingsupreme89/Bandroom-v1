@@ -1,0 +1,168 @@
+BANDROOM — FULL FEATURE LIST
+================================
+Badges: [LIVE] confirmed working  [TEST] built, not yet live-tested
+        [PART] partially built    [FIXED] bug fixed today
+
+PART 1 — CORE SYSTEMS (30)
+---------------------------------
+1.  Live Game Watcher (OCR) [LIVE]
+    Reads your screen in real time — down, distance, quarter, situation, score, clock,
+    penalties, big scoring banner. Zero manual input.
+
+2.  Smart Trigger Brain [LIVE]
+    16 rule-evaluators compare this play to the last one and decide instantly which of
+    the 46 events just happened.
+
+3.  46 Assignable Song Events [LIVE]
+    Every trigger slot across Downs/Scoring/Turnovers/Special Teams/Penalties/Hype is
+    wired up and assignable.
+
+4.  PA Announcer Layer — NEW [TEST]
+    A second sound plays alongside your main song, like a real stadium announcer under
+    the band hit. Own volume slider.
+
+5.  Penalty Detection + Side Routing [TEST]
+    Reads who a penalty was called against and fires the correct team's reaction.
+
+6.  Timeout Tracker [TEST]
+    Reads the scorebug's timeout dash marks via pixel-brightness sampling — there's no
+    text there to OCR.
+
+7.  Score & Clock Reading [TEST]
+    Live score + game clock unlock "iced game," 2-minute warning, and "victory in hand"
+    moments.
+
+8.  Score Banner Detection [TEST]
+    Catches the full-screen TOUCHDOWN / FIELD GOAL / SAFETY ribbon the instant it appears.
+
+9.  Tackle-for-Loss Detection [LIVE]
+    Reuses the down/distance read to catch negative-yardage plays automatically.
+
+10. Possession Color Sampling [LIVE]
+    Samples the down-ribbon's team color to know who has the ball, no OCR needed.
+
+11. Per-Team Song Profiles [LIVE]
+    Totally different song assignments for every team in the game.
+
+12. Universal Profile Override [LIVE]
+    Flip one switch to hear the same song set no matter which team you're playing as.
+
+13. Config Profile Manager [LIVE]
+    Save and switch between multiple complete setups, not just one.
+
+14. Cross-Device Profile Sync [LIVE]
+    Sign in with Google and your whole setup follows you to any machine.
+
+15. Song Marketplace [LIVE]
+    Browse and download song packs other users made. Backend just got upgraded to
+    unlimited writes.
+
+16. One-Click Default Song Pack [LIVE]
+    Auto-imports ~950 pre-matched songs across 62 teams so you're never starting empty.
+
+17. In-App Song Trimmer [LIVE]
+    Waveform editor to trim any clip down to exactly the hit you want, without leaving
+    the app.
+
+18. Audio Ducking Engine [PART]
+    Built duck/fade state machine for lowering game audio under a cue — fully coded,
+    not wired in yet by design choice.
+
+19. Reverb Effect [LIVE]
+    Optional reverb processing to make clips sound more "stadium."
+
+20. Volume Profile Presets [LIVE]
+    Save different master/home/away/PA volume balances and swap between them.
+
+21. Team Logos & Backgrounds [LIVE]
+    Full art library — logos and backdrop art for every team, auto-applied to match
+    your matchup.
+
+22. Custom Global Hotkeys [LIVE]
+    Trigger actions from anywhere on your PC, even while the game has focus.
+
+23. In-App Changelog Viewer [LIVE]
+    See what changed in the latest update without leaving the app.
+
+24. Crash Reporting [LIVE]
+    Captures crash details automatically so bugs are fixable instead of a mystery.
+
+25. Version Compatibility Guard [LIVE]
+    Checks saved profiles against the running version before loading them.
+
+26. Custom Glass-UI Theme [LIVE]
+    A whole custom glassmorphism look-and-feel, not stock WinForms.
+
+27. Mac Port [PART]
+    Engine + audio playback already run natively on Mac with identical detection logic.
+    UI bridge still in progress.
+
+28. Security Hardening [FIXED]
+    Found and closed a real secrets-leak risk today, before this code goes up to GitHub.
+
+29. Calmer Event-Card UI [LIVE]
+    Killed the nonstop pulsing glow across all 46 cards and tightened the whole layout.
+
+30. Orchestrator Dashboard [LIVE]
+    Live build/task status board so the dev team — human and AI — always knows what's
+    done and what's next.
+
+
+PART 2 — EVERY ASSIGNABLE TRIGGER (41 unique events / 46 UI slots)
+---------------------------------
+
+DOWNS (14)
+- Offense: Earned First Down
+- Offense: Earned First Down (Big Gain)
+- Offense: Earned First Down (Midfield)
+- Offense: Second Down
+- Offense: Second Down (Midfield)
+- Offense: Third Down
+- Defense: Second Down
+- Defense: Second Down (Loss)
+- Defense: Second Down (Midfield)
+- Defense: Third Down
+- Defense: Third Down (Loss)
+- Defense: Fourth Down
+- Defense: Fourth Down (Loss)
+- Defense: Tackle for Loss
+
+SCORING (7)
+- Offense: Touchdown Scored
+- Offense: Field Goal Made
+- Offense: PAT Made
+- Offense: 2-Point Conversion Made
+- Defense: Touchdown Scored
+- Defense: Field Goal Missed by Opponent
+- Defense: Safety
+
+TURNOVERS (2)
+- Defense: Turnover Forced
+- Defense: Iced Game by Turnover
+
+SPECIAL TEAMS (4)
+- Other: Opening Kickoff
+- Other: Second-Half Kickoff
+- Other: Kickoff on Kick (Kicking)
+- Other: Kickoff on Kick (Receiving)
+
+PENALTIES (2)
+- Penalty: Offense (fires for defense's side)
+- Penalty: Defense (fires for offense's side)
+
+HYPE (12)
+- Other: Pregame Take the Field
+- Other: Start of 2nd Quarter
+- Other: Start of 4th Quarter
+- Offense: Drive Starter
+- Defense: Drive Starter
+- Offense: Iced Game by First Down
+- Offense: Victory in Hand
+- Defense: Timeout (4 Remaining)
+- Defense: Timeout (3 Remaining)
+- Defense: Timeout (2 Remaining)
+- Defense: Timeout (1 Remaining)
+- Defense: Timeout (0 Remaining)
+
+================================
+Source: C:\Bandroom (TASK_BOARD.md, EVENT_KEY_MAP.md, session handoffs, direct code review)

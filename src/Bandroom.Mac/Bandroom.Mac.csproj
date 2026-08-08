@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -31,12 +31,6 @@
     <Compile Include="..\..\TeamLogo.cs" />
     <Compile Include="..\..\CategoryMap.cs" />
     <Compile Include="..\..\ScorebugPreset.cs" />
-    <!-- ReverbProvider.cs intentionally NOT included: despite living at the Windows root, it
-         depends on NAudio (ISampleProvider, WaveFormat), which is Windows only and isn't
-         referenced by this project. It briefly broke the Mac build (2026 08 07) when added
-         here under the "no WinForms/Win32 deps" assumption, which doesn't hold for NAudio
-         specifically. Reverb for Mac needs its own AVFoundation based implementation later,
-         not a reuse of this file. -->
     <Compile Include="..\..\ConfigProfileManager.cs" />
     <Compile Include="..\..\MarketplaceDownloadService.cs" />
     <Compile Include="..\..\ProfileSyncService.cs" />
@@ -44,9 +38,9 @@
     <Compile Include="..\..\UserCountService.cs" />
     <Compile Include="..\..\VersionGuard.cs" />
     <Compile Include="..\..\VolumeProfilePreset.cs" />
-    <!-- CrashLog.cs excluded: uses System.Windows.Forms (Windows-only). Mac stub in PlatformStubs.Mac.cs. -->
     <Compile Include="..\..\ChangelogService.cs" />
     <Compile Include="..\..\EventHistoryFeed.cs" />
+    <Compile Include="..\..\DefaultSongPackService.cs" />
   </ItemGroup>
 
   <!-- Copy wwwroot + assets to output -->
@@ -56,5 +50,9 @@
     <Content Include="..\..\TeamLogos\**\*" CopyToOutputDirectory="PreserveNewest" Link="TeamLogos\%(RecursiveDir)%(Filename)%(Extension)" />
     <Content Include="..\..\TeamBackgrounds\**\*" Exclude="..\..\TeamBackgrounds_original_fullres\**\*" CopyToOutputDirectory="PreserveNewest" Link="TeamBackgrounds\%(RecursiveDir)%(Filename)%(Extension)" />
     <Content Include="..\..\Fonts\**\*" CopyToOutputDirectory="PreserveNewest" Link="Fonts\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Content Include="..\..\Songs\Default\**\*" CopyToOutputDirectory="PreserveNewest" Link="Songs\Default\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Content Include="..\..\google_client_secret.local.txt" Condition="Exists('..\..\google_client_secret.local.txt')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 </Project>

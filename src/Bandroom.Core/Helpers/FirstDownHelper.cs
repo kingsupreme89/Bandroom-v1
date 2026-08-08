@@ -24,16 +24,20 @@ public sealed class FirstDownHelper : IRuleEvaluator
             };
         }
 
-        // Midfield: inside opponent territory (yard line <= 50)
-        if (state.Current.YardLine <= 50)
-        {
-            return new TriggerEvent
-            {
-                EventKey = "Offense: Earned First Down (Midfield)",
-                Volume = 85,
-                IsEarnedBigEvent = true
-            };
-        }
+        // Midfield: inside opponent territory (yard line <= 50). DISABLED 2026-08-07 --
+        // YardLine is hardcoded to 0 everywhere (OCR for it was never built, see TASK_BOARD.md),
+        // so "<= 50" was always true, meaning this branch fired on literally every first down
+        // and the base event below could never be reached. Re-enable once YardLine reads a real
+        // value; until then this must stay off rather than silently misfire on every down.
+        // if (state.Current.YardLine <= 50)
+        // {
+        //     return new TriggerEvent
+        //     {
+        //         EventKey = "Offense: Earned First Down (Midfield)",
+        //         Volume = 85,
+        //         IsEarnedBigEvent = true
+        //     };
+        // }
 
         // Base first down
         return new TriggerEvent

@@ -7,16 +7,8 @@ public sealed class OffenseDownHelper : IRuleEvaluator
         if (!state.UserHasPossession)
             return null;
 
-        // 1st down: only fire if it's a fresh EARNED first down (not opening snap)
-        if (state.Current.Down == 1 && state.Delta.WasFirstDown)
-        {
-            return new TriggerEvent
-            {
-                EventKey = "Offense: Earned First Down",
-                Volume = state.Current.BigGame ? 100 : 70,
-                IsEarnedBigEvent = false
-            };
-        }
+        // 1st down is handled by FirstDownHelper (with Big Gain / Midfield variants).
+        // This block was a duplicate of FirstDownHelper's base event — removed 2026-08-07.
 
         // 2nd/3rd down: fire when down changes
         if (state.Current.Down != state.Previous.Down)

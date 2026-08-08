@@ -764,10 +764,20 @@ public sealed class WebBridge
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
     public void OpenSettings() => _host.OpenSettingsFromWeb();
     public void ShowUpdate() => _host.ShowUpdateDialogFromWeb();
+
+    /// <summary>True once a default song pack (bundled with an older full installer, or
+    /// downloaded via DefaultSongPackService) is actually present on disk -- the app-side
+    /// signal for whether to show the one-time "download the song pack?" prompt at all.</summary>
+    public bool HasDefaultSongPack() => ConfigStore.HasDefaultSongPack;
+
+    public void DownloadDefaultSongPack() => _host.DownloadDefaultSongPackFromWeb();
     public void RestartForUpdate() => _host.RestartForUpdateFromWeb();
     public void ResetTeamProfile() => _host.ResetTeamProfileFromWeb();
     public void OpenHelp() => _host.OpenHelpFromWeb();
     public void TriggerEffectsTest() => _host.TriggerEffectsTestFromWeb();
+    public string FireTestEvent(string side, string eventKey) => _host.FireTestEventFromWeb(side, eventKey);
+    public void UnlockMatchup() => _host.UnlockMatchupFromWeb();
+    public string GetAllEventKeys() => _host.GetAllEventKeysFromWeb();
 
     // Triggers actually confirmed live in a real game, not just wired in code. Touchdown/
     // Turnover/Downs/PAT have been play-tested across sessions; Kickoff was just wired to the

@@ -30,10 +30,12 @@ internal static class CrashLog
 }
 
 /// <summary>Mac-compatible Theme stub — provides only the members referenced by MacWebBridge.
-/// Matches the real Theme.cs signature: ActiveTeam is a TeamColor, not a custom type.</summary>
+/// TeamColor.Accent is non-nullable (Primary ?? DefaultAccent), Primary is Color?.</summary>
 internal static class Theme
 {
     private static TeamColor _activeTeam = TeamColors.All[0];
+    private static readonly System.Drawing.Color _defaultDark = System.Drawing.Color.FromArgb(79, 70, 229);
+
     public static TeamColor ActiveTeam
     {
         get => _activeTeam;
@@ -41,39 +43,93 @@ internal static class Theme
     }
 
     public static System.Drawing.Color WindowBg => System.Drawing.Color.FromArgb(15, 15, 19);
-    public static System.Drawing.Color Accent => ActiveTeam.Accent;
-    public static System.Drawing.Color AccentDark => ActiveTeam.Primary;
-    public static System.Drawing.Color AccentBright => ActiveTeam.Accent;
+
+    // Accent is non-nullable — TeamColor.Accent always returns a Color (Primary ?? DefaultAccent)
+    public static System.Drawing.Color Accent => _activeTeam.Accent;
+
+    // Primary is Color? — fall back to a dark indigo if null
+    public static System.Drawing.Color AccentDark => _activeTeam.Primary ?? _defaultDark;
+
+    // Same as Accent
+    public static System.Drawing.Color AccentBright => _activeTeam.Accent;
 }
 
-/// <summary>Mac-compatible TeamBackdrop stub — provides FindImagePath matching Windows signature.</summary>
+/// <summary>Mac-compatible TeamBackdrop stub — provides FindImagePath matching Windows signature.
+/// Checks both UserData/TeamBackgrounds (downloaded) and the bundled TeamBackgrounds folder.</summary>
 internal static class TeamBackdrop
 {
     public static string? FindImagePath(string teamName)
     {
-        string folder = Path.Combine(
+        // 1. Check UserData/TeamBackgrounds (downloaded via marketplace)
+        string userFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Bandroom", "UserData", "TeamBackgrounds");
-        if (!Directory.Exists(folder)) return null;
-        foreach (var ext in new[] { ".png", ".jpg", ".jpeg" })
+        if (Directory.Exists(userFolder))
         {
-            string path = Path.Combine(folder, teamName + ext);
-            if (File.Exists(path)) return path;
+            foreach (var ext in new[] { ".png", ".jpg", ".jpeg" })
+            {
+                string path = Path.Combine(userFolder, teamName + ext);
+                if (File.Exists(path)) return path;
+            }
         }
+
+        // 2. Check bundled TeamBackgrounds folder in app base directory
+        string appBase = AppDomain.CurrentDomain.BaseDirectory;
+        string bundledFolder = Path.Combine(appBase, "TeamBackgrounds");
+        if (!Directory.Exists(bundledFolder))
+        {
+            // Fallback for dev builds
+            bundledFolder = Path.GetFullPath(Path.Combine(appBase, "..", "..", "..", "TeamBackgrounds"));
+        }
+        if (Directory.Exists(bundledFolder))
+        {
+            foreach (var ext in new[] { ".png", ".jpg", ".jpeg" })
+            {
+                string path = Path.Combine(bundledFolder, teamName + ext);
+                if (File.Exists(path)) return path;
+            }
+        }
+
         return null;
     }
 }
 
-/// <summary>Mac-compatible TeamBackgroundDownloadService stub.
-/// The Windows version downloads trophy room images and saves them locally.
-/// On Mac, this is a future TODO for native NSImage-based download.</summary>
+/// <summary>Mac-compatible TeamBackgroundDownloadService — downloads team background images
+/// and saves them to the UserData/TeamBackgrounds folder.</summary>
 internal static class TeamBackgroundDownloadService
 {
     public static async System.Threading.Tasks.Task<string?> DownloadAndSaveAsync(string team, string url)
     {
-        // Stub — real implementation would use HttpClient to download
-        // and save to ConfigStore.TeamBackgroundsFolder
-        await System.Threading.Tasks.Task.CompletedTask;
-        return null;
+        try
+        {
+            string folder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Bandroom", "UserData", "TeamBackgrounds");
+            Directory.CreateDirectory(folder);
+
+            // Determine extension from URL or default to .jpg
+            string ext = ".jpg";
+            try
+            {
+                string urlPath = new Uri(url).AbsolutePath;
+                string urlExt = Path.GetExtension(urlPath).ToLowerInvariant();
+                if (urlExt == ".png" || urlExt == ".jpg" || urlExt == ".jpeg")
+                    ext = urlExt;
+            }
+            catch { }
+
+            string filePath = Path.Combine(folder, team + ext);
+
+            using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            byte[] imageBytes = await http.GetByteArrayAsync(url);
+            await File.WriteAllBytesAsync(filePath, imageBytes);
+
+            return filePath;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TeamBackgroundDownloadService.Mac] Download failed: {ex.Message}");
+            return null;
+        }
     }
 }

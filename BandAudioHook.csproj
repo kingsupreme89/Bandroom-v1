@@ -47,7 +47,12 @@
     <Content Include="TeamLogos\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="Songs\Default\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="Songs\Default" />
+    <!-- 2,241 files / 2.8GB: bundling this pushes the installer past GitHub Releases' 2GB
+         per-asset cap, so public builds publish with /p:BundleDefaultSongs=false and the app
+         fetches the pack separately (DefaultSongPackService) after install. Defaults to true so
+         local dev builds keep working exactly as before. -->
+    <Content Include="Songs\Default\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="Songs\Default"
+             Condition="'$(BundleDefaultSongs)' != 'false'" />
     <Content Include="Assets\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

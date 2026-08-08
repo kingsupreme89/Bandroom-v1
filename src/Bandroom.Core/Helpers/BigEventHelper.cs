@@ -14,6 +14,16 @@ public sealed class BigEventHelper : IRuleEvaluator
             };
         }
 
+        if (state.Current.Down == 4 && state.Delta.LostYards)
+        {
+            return new TriggerEvent
+            {
+                EventKey = "Defense: Fourth Down (Loss)",
+                Volume = state.Current.BigGame ? 100 : 85,
+                IsEarnedBigEvent = true
+            };
+        }
+
         if (state.Current.Down == 4 && state.Delta.NewPossession)
         {
             return new TriggerEvent
