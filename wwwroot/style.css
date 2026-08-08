@@ -1277,16 +1277,26 @@ input, select, textarea, [contenteditable] {
 
 /* Clip Preview island -- static panel in the empty strip below the situations grid, same width
    as the grid above it. Houses the shared song-preview bar (moved out of its old fixed-position
-   floating strip, see index.html) so it's always present instead of popping up over content. */
+   floating strip, see index.html) so it's always present instead of popping up over content.
+   Pill-shaped bottom player (Session 9 task queue item 4): fully rounded ends instead of the
+   old rectangular panel, closer to a Spotify/Apple-Music-style bottom player bar. Assign mode
+   (#clipper-assign) grows taller for its picker list, so only the collapsed/idle height uses the
+   full pill radius -- min() keeps the corner radius from looking odd once the panel grows past a
+   simple single-row bar. */
 #clipper-island {
   margin-top: 10px;
-  border-radius: var(--radius-panel);
-  padding: 16px 20px;
+  border-radius: min(999px, calc(var(--clipper-island-height, 96px) / 2 + 6px));
+  padding: 14px 28px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-height: 96px;
   justify-content: center;
+}
+/* Assign mode expands with a track picker list -- switch to the panel radius so the pill corners
+   don't dwarf the content once it's several rows tall. */
+#clipper-island:has(#clipper-assign:not([hidden])) {
+  border-radius: var(--radius-panel);
 }
 .clipper-header { display: flex; align-items: center; justify-content: space-between; }
 
