@@ -680,7 +680,21 @@ public sealed class WebMainForm : Form
     /// island's inline song picker (see initClipperIsland in app.js), which replaces the native
     /// AssignTrackForm popup for the main-song assign flow -- Trim still opens the real
     /// TrimmerForm (see OpenTrimmerFromWeb) since that's real waveform-cut/normalize work, not
-    /// something worth re-implementing in JS.</summary>
+    /// something worth re-implementing in JS.
+    ///
+    /// Tags each entry with a "source" so the JS side can group/label the list instead of
+    /// dumping every file from every subfolder into one flat wall of songs (owner feedback,
+    /// Session 10) -- SongsFolder mixes THREE genuinely different origins that all land as plain
+    /// audio files with no other distinguishing marker: drag-drop/Browse imports and marketplace
+    /// downloads both physically land in SongsUploadedFolder (see ConfigStore.ImportIntoSongsLibrary
+    /// and MarketplaceDownloadService), trimmed clips land in SongsTrimmedFolder, and the "import
+    /// my own song" pipeline lands in LocalTracksFolder. Marketplace downloads are distinguished
+    /// from plain imports by cross-referencing ConfigStore.LoadMarketplaceDownloads() (the only
+    /// place that distinction is recorded) rather than folder alone, since both share
+    /// SongsUploadedFolder. NOTE: the default song pack (ConfigStore.DefaultSongsFolder) is
+    /// deliberately NOT included here -- it lives outside SongsFolder entirely (see
+    /// DefaultSongPackService's own comment on why) and is never copied in, so it can't be part
+    /// of this mess; don't "fix" that by scanning it in too.</summary>
     public string GetTrackLibraryFromWeb()
     {
         var library = new List<string>();
@@ -688,9 +702,21 @@ public sealed class WebMainForm : Form
             library.AddRange(Directory.GetFiles(ConfigStore.SongsFolder, "*", SearchOption.AllDirectories)
                 .Where(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())));
 
+        var marketplacePaths = new HashSet<string>(
+            ConfigStore.LoadMarketplaceDownloads().Where(e => e.Type == "song").Select(e => e.Path),
+            StringComparer.OrdinalIgnoreCase);
+
+        string SourceFor(string path)
+        {
+            if (path.StartsWith(ConfigStore.SongsTrimmedFolder, StringComparison.OrdinalIgnoreCase)) return "trimmed";
+            if (path.StartsWith(ConfigStore.LocalTracksFolder, StringComparison.OrdinalIgnoreCase)) return "local";
+            if (marketplacePaths.Contains(path)) return "marketplace";
+            return "uploaded"; // drag-drop or AssignTrackForm Browse import -- ImportIntoSongsLibrary
+        }
+
         var items = library.Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(Path.GetFileNameWithoutExtension, StringComparer.OrdinalIgnoreCase)
-            .Select(p => new { name = Path.GetFileNameWithoutExtension(p), path = p });
+            .Select(p => new { name = Path.GetFileNameWithoutExtension(p), path = p, source = SourceFor(p) });
         return System.Text.Json.JsonSerializer.Serialize(items);
     }
 
