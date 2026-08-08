@@ -181,6 +181,86 @@ async function init() {
   pollUserCount();
   loadChangelog();
   pollTickerActivity();
+  initSuggestedPanel();
+}
+
+// ---- "Suggested for You" panel (Mixer sidebar) -------------------------------------------
+// Top-downloaded songs/images/profiles across the whole marketplace (not scoped to the active
+// team), pulled via the same /list?sort=downloads the hub grids already use. Shows a small
+// rotating batch instead of a static top-N so the panel doesn't go stale between sessions --
+// cycles to the next batch every 5 minutes on a plain setInterval (no server push needed, this
+// is just paging through an already-fetched, already-sorted list).
+let _suggestedPool = [];
+let _suggestedRotationIndex = 0;
+const SUGGESTED_BATCH_SIZE = 4;
+const SUGGESTED_ROTATE_MS = 5 * 60 * 1000;
+
+async function initSuggestedPanel() {
+  await refreshSuggestedPool();
+  renderSuggestedBatch();
+  setInterval(async () => {
+    // Re-pull periodically too (every rotation), not just page through one stale snapshot --
+    // otherwise a brand-new top downloaded item never shows up until a full app restart.
+    await refreshSuggestedPool();
+    _suggestedRotationIndex += SUGGESTED_BATCH_SIZE;
+    if (_suggestedRotationIndex >= _suggestedPool.length) _suggestedRotationIndex = 0;
+    renderSuggestedBatch();
+  }, SUGGESTED_ROTATE_MS);
+}
+
+async function refreshSuggestedPool() {
+  try {
+    const [songs, images, profiles] = await Promise.all([
+      fetchUploadList("song", null, "downloads"),
+      fetchUploadList("image", null, "downloads"),
+      fetchUploadList("profile", null, "downloads"),
+    ]);
+    _suggestedPool = [...songs, ...images, ...profiles]
+      .filter((it) => (it.downloads ?? 0) > 0)
+      .sort((a, b) => (b.downloads ?? 0) - (a.downloads ?? 0));
+  } catch (err) {
+    console.error("refreshSuggestedPool failed", err);
+    _suggestedPool = [];
+  }
+}
+
+function renderSuggestedBatch() {
+  const list = document.getElementById("suggested-list");
+  if (!list) return;
+  if (!_suggestedPool.length) {
+    list.innerHTML = `<div class="suggested-empty">Nothing downloaded yet -- check back soon.</div>`;
+    return;
+  }
+  if (_suggestedRotationIndex >= _suggestedPool.length) _suggestedRotationIndex = 0;
+  const batch = _suggestedPool.slice(_suggestedRotationIndex, _suggestedRotationIndex + SUGGESTED_BATCH_SIZE);
+  list.innerHTML = "";
+  for (const item of batch) {
+    const row = document.createElement("div");
+    row.className = "suggested-row";
+    const icon = item.type === "image" ? "\u{1F5BC}" : item.type === "profile" ? "\u{1F464}" : "\u{1F3B5}";
+    const nameEl = document.createElement("div");
+    nameEl.className = "suggested-row-name";
+    nameEl.textContent = item.name;
+    const metaEl = document.createElement("div");
+    metaEl.className = "suggested-row-meta";
+    metaEl.textContent = item.school;
+    const body = document.createElement("div");
+    body.className = "suggested-row-body";
+    body.append(nameEl, metaEl);
+    const typeEl = document.createElement("span");
+    typeEl.className = "suggested-row-type";
+    typeEl.textContent = icon;
+    const dlEl = document.createElement("span");
+    dlEl.className = "suggested-row-dl";
+    dlEl.textContent = `\u{2B07} ${(item.downloads ?? 0).toLocaleString()}`;
+    row.append(typeEl, body, dlEl);
+    row.title = `${item.name} — ${item.school}`;
+    row.addEventListener("click", () => {
+      openTeamAlbum(item.school);
+      if (item.type !== "profile") setAlbumTab(item.type === "song" ? "songs" : "images");
+    });
+    list.appendChild(row);
+  }
 }
 
 // Populates the bottom ticker with real recent marketplace uploads (see fetchRecentUploads),
@@ -458,7 +538,18 @@ function setActiveTeam(name, fromInit = false) {
   applyBackground(name);
   const team = state.teams.find((t) => t.name === name);
   const secondary = team?.secondary ?? "#22d3ee";
-  const primary = team?.primary ?? "#0f766e";
+  // A handful of teams (Appalachian State, Army, ...) have literal black as their primary --
+  // fine as a jersey color, unreadable as a glow/accent color. Fall back to secondary for those
+  // so every current and future --team-primary consumer (glows, accent fills) is covered from
+  // this one spot instead of needing a black-check at every call site.
+  const isNearBlack = (hex) => {
+    const h = (hex || "").replace("#", "");
+    if (h.length !== 6) return false;
+    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return r < 20 && g < 20 && b < 20;
+  };
+  const rawPrimary = team?.primary ?? "#0f766e";
+  const primary = isNearBlack(rawPrimary) ? secondary : rawPrimary;
   document.documentElement.style.setProperty("--team-secondary", secondary);
   document.documentElement.style.setProperty("--team-primary", primary);
   document.documentElement.style.setProperty("--team-secondary-ink", pickContrastInk(secondary, primary));
@@ -889,7 +980,9 @@ function wireControls() {
   document.getElementById("bandroom-overlay").addEventListener("click", (e) => {
     if (e.target.id === "bandroom-overlay") closeBandroomMarketplace();
   });
-  document.getElementById("bandroom-search").addEventListener("input", (e) => renderBandroomTeamGrid(e.target.value));
+  // Debounced (200ms) via setupSearchDebounce()'s filterBandroomTeams -- filters the grid
+  // already rendered by openBandroomMarketplace's renderBandroomTeamGrid("") instead of an
+  // instant full-rebuild on every keystroke.
 
   document.getElementById("btn-close-bandroom-album").addEventListener("click", closeTeamAlbum);
   document.getElementById("bandroom-album-overlay").addEventListener("click", (e) => {
@@ -1033,7 +1126,9 @@ function wireControls() {
   document.getElementById("team-picker-overlay").addEventListener("click", (e) => {
     if (e.target.id === "team-picker-overlay") closeTeamPicker();
   });
-  document.getElementById("team-picker-search").addEventListener("input", (e) => renderTeamPickerGrid(e.target.value));
+  // Debounced (200ms) via setupSearchDebounce()'s filterTeamPicker -- filters the grid already
+  // rendered by openTeamPicker's renderTeamPickerGrid("") instead of an instant full-rebuild on
+  // every keystroke.
 
   document.getElementById("btn-matchup").addEventListener("click", openMatchupDialog);
   document.getElementById("btn-close-matchup").addEventListener("click", closeMatchupDialog);
@@ -1606,12 +1701,18 @@ function buildMyDownloadTile(item) {
     shareBtn.textContent = "\u{1F4E4} Share";
     shareBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      const school = window.prompt(`Share "${item.name}" to the marketplace -- which team is it for?`);
-      if (!school || !school.trim()) return;
+      const typed = window.prompt(`Share "${item.name}" to the marketplace -- which team is it for? (exact team name, e.g. "Georgia")`);
+      if (!typed || !typed.trim()) return;
+      const match = state.teams.find((t) => t.name.toLowerCase() === typed.trim().toLowerCase());
+      if (!match) {
+        showToast(`"${typed.trim()}" isn't a team in your roster -- use the exact team name so it shows up in that team's Sound Bank.`);
+        return;
+      }
+      const school = match.name;
       shareBtn.disabled = true;
       shareBtn.textContent = "Sharing...";
       try {
-        const raw = bridge ? await bridge.ShareLocalTrackToMarketplace(item.id, school.trim()) : null;
+        const raw = bridge ? await bridge.ShareLocalTrackToMarketplace(item.id, school) : null;
         const result = raw ? JSON.parse(raw) : null;
         if (result?.success) {
           showToast(`Shared "${item.name}" to ${school.trim()}'s Sound Bank!`);
@@ -1721,13 +1822,17 @@ function buildItemTile(item, inHub) {
   tile.className = inHub ? "bandroom-item-tile" : "marketplace-card";
   const thumb = document.createElement("div");
   thumb.className = inHub ? "bandroom-item-thumb" : "marketplace-card-thumb";
+  // item.name/item.school/item.url come from other users' marketplace uploads (worker.js
+  // stores whatever string was posted for "name"/"school") -- innerHTML with those interpolated
+  // raw is a real stored-XSS vector, sanitizeHTML() actually needs to run here rather than just
+  // exist unused elsewhere in the file.
   if (item.type === "image") {
-    thumb.innerHTML = `<img src="${item.url}" alt="${item.name}" loading="lazy">`;
+    thumb.innerHTML = `<img src="${sanitizeHTML(item.url)}" alt="${sanitizeHTML(item.name)}" loading="lazy">`;
     if (!inHub) thumb.innerHTML += '<span class="card-type-badge">IMAGE</span>';
   } else {
     const logo = teamLogoUrl(item.school);
     thumb.innerHTML = logo
-      ? `<img src="${logo}" alt="${item.school}" ${inHub ? 'class="bandroom-item-thumb-logo"' : ""} loading="lazy">`
+      ? `<img src="${sanitizeHTML(logo)}" alt="${sanitizeHTML(item.school)}" ${inHub ? 'class="bandroom-item-thumb-logo"' : ""} loading="lazy">`
       : `<span>\u{1F3B5}</span>`;
     if (!inHub) thumb.innerHTML += '<span class="card-type-badge">SONG</span>';
   }
@@ -2263,8 +2368,9 @@ function initClipperAssign() {
 // the installer as of v1.0.48 to stay under GitHub Releases' 2GB asset cap.
 function initDefaultSongPackPrompt() {
   const promptOverlay = document.getElementById("songpack-prompt-overlay");
+  const importOverlay = document.getElementById("songpack-import-overlay");
   const progressOverlay = document.getElementById("songpack-progress-overlay");
-  const progressHeader = document.getElementById("songpack-progress-header");
+  const progressTitle = document.getElementById("songpack-progress-title");
   const progressFill = document.getElementById("songpack-progress-fill");
   const progressSub = document.getElementById("songpack-progress-sub");
 
@@ -2277,15 +2383,24 @@ function initDefaultSongPackPrompt() {
   document.getElementById("btn-songpack-skip").addEventListener("click", () => { promptOverlay.hidden = true; });
   document.getElementById("btn-songpack-download").addEventListener("click", () => {
     promptOverlay.hidden = true;
-    // Temporary: the pack is too large for the in-app R2 download pipeline to be wired up yet
-    // (see DefaultSongPackService.cs), so this opens the pack's Google Drive link in the
-    // system browser instead. Switch back to bridge?.DownloadDefaultSongPack() once pack.zip
-    // is actually uploaded to the bandroom-default-songs R2 bucket.
+    // The pack is too large for GitHub Releases / the in-app R2 pipeline isn't populated yet
+    // (see DefaultSongPackService.cs), so this opens the pack's Google Drive link in the system
+    // browser. importOverlay is the bridge back: once the user has the .zip, Locate & Import
+    // extracts it locally (no R2 needed) via ImportDefaultSongPackZipFromWeb.
     bridge?.OpenExternalUrl("https://drive.google.com/file/d/1kZKcqfOSfMv9k2sppduTE9hWpaVrPerN/view");
+    importOverlay.hidden = false;
+  });
+
+  document.getElementById("btn-songpack-import-later").addEventListener("click", () => { importOverlay.hidden = true; });
+  document.getElementById("btn-songpack-import").addEventListener("click", async () => {
+    const zipPath = await bridge?.BrowseForSongPackZip();
+    if (!zipPath) return;
+    importOverlay.hidden = true;
+    bridge?.ImportDefaultSongPackZip(zipPath);
   });
 
   window.addEventListener("bandroom:songpackdownloading", () => {
-    progressHeader.textContent = "Downloading song pack…";
+    progressTitle.textContent = "Downloading song pack…";
     progressFill.style.width = "0%";
     progressSub.textContent = "Hang tight -- this is a big one-time download.";
     progressOverlay.hidden = false;
@@ -2296,15 +2411,29 @@ function initDefaultSongPackPrompt() {
     const fmt = (b) => `${(b / 1073741824).toFixed(1)} GB`;
     progressSub.textContent = `${fmt(downloaded)} of ${fmt(total)}`;
   });
+  window.addEventListener("bandroom:songpackimporting", () => {
+    progressTitle.textContent = "Unpacking song pack…";
+    progressFill.style.width = "5%";
+    progressSub.textContent = "Extracting and indexing every team's songs.";
+    progressOverlay.hidden = false;
+  });
+  window.addEventListener("bandroom:songpackimportprogress", (e) => {
+    progressFill.style.width = `${Math.max(0, Math.min(100, e.detail.fraction * 100))}%`;
+  });
   window.addEventListener("bandroom:songpackready", () => {
-    progressHeader.textContent = "Song pack ready";
+    progressTitle.textContent = "Song pack ready";
     progressFill.style.width = "100%";
     progressSub.textContent = "Every team can now auto-fill with default songs.";
     setTimeout(() => { progressOverlay.hidden = true; }, 1800);
+    refreshCategories?.();
   });
   window.addEventListener("bandroom:songpackfailed", () => {
     progressOverlay.hidden = true;
     showToast("Song pack download failed -- check your connection and try again from Settings.");
+  });
+  window.addEventListener("bandroom:songpackimportfailed", () => {
+    progressOverlay.hidden = true;
+    showToast("Couldn't unpack that file -- make sure you picked the song pack .zip and try again.");
   });
 }
 
@@ -2483,8 +2612,34 @@ function buildUploadTile(type) {
   tile.className = "bandroom-slot";
   tile.innerHTML = `<span class="bandroom-slot-plus">+</span><span class="bandroom-slot-label">Upload ${type === "song" ? "Song" : "Image"}</span>`;
   tile.title = `${albumTeam.name} — upload a ${type === "song" ? "song" : "background image"}`;
-  tile.addEventListener("click", () => openUploadPicker(type));
+  // Songs go through the native Clipper pipeline (pick -> name -> trim/normalize, same as
+  // My Downloads local import) instead of uploading a raw untrimmed file straight to the
+  // worker -- images have no clip concept so they keep the browser file-picker + compress flow.
+  tile.addEventListener("click", () => type === "song" ? uploadSongViaClipper() : openUploadPicker(type));
   return tile;
+}
+
+/// Marketplace "+ Upload Song" for a team's Sound Bank: runs the native file-picker -> name ->
+/// TrimmerForm pipeline (bridge.ImportAndUploadSongToMarketplace) instead of the raw browser
+/// upload path, so every marketplace song is trimmed/normalized like every other song in the
+/// app, not just locally-imported ones. Requires the native bridge (no browser-only fallback --
+/// trimming needs the native TrimmerForm).
+async function uploadSongViaClipper() {
+  if (!albumTeam || !bridge) { showToast("Uploading needs the desktop app -- not available here."); return; }
+  try {
+    const raw = await bridge.ImportAndUploadSongToMarketplace(albumTeam.name);
+    const result = raw ? JSON.parse(raw) : null;
+    if (result?.cancelled) return;
+    if (result?.success) {
+      showToast(`Uploaded to ${albumTeam.name}'s Sound Bank!`);
+      if (!document.getElementById("bandroom-songs-grid").hidden) renderSoundBankGrid();
+    } else {
+      showToast(result?.error ?? "Couldn't upload that -- try again.");
+    }
+  } catch (err) {
+    console.error("uploadSongViaClipper failed", err);
+    showToast("Couldn't upload that -- try again.");
+  }
 }
 
 // ---- Upload flow --------------------------------------------------------------------------
@@ -3891,24 +4046,6 @@ document.addEventListener("contextmenu", (e) => {
 });
 
 // ================================================================
-// KILL-FEED EVENT LOG
-// ================================================================
-function pushKillFeedEntry(text, category) {
-  const feed = document.getElementById("kill-feed");
-  const entry = document.createElement("div");
-  entry.className = "kill-feed-entry " + (category || "situations");
-  entry.textContent = text;
-  feed.appendChild(entry);
-  // Auto-remove after 6 seconds
-  setTimeout(() => {
-    entry.classList.add("removing");
-    setTimeout(() => entry.remove(), 300);
-  }, 6000);
-  // Cap at 20 entries
-  while (feed.children.length > 20) feed.firstChild.remove();
-}
-
-// ================================================================
 // HUD OVERLAY (live game data)
 // ================================================================
 function updateHUD(homeScore, awayScore, quarter, downDistance) {
@@ -4678,6 +4815,176 @@ function toggleDiscordChat() {
 }
 function openMatchupPicker() {
   document.getElementById("btn-matchup")?.click();
+}
+
+// ================================================================
+// ITEM 2: KILL-FEED EVENT LOG + HUD OVERLAY
+// ================================================================
+let _killFeedVisible = false;
+function showKillFeed() {
+  const feed = document.getElementById("kill-feed");
+  if (!_killFeedVisible) { feed.hidden = false; _killFeedVisible = true; }
+}
+function pushKillFeedEntry(icon, text, side) {
+  showKillFeed();
+  const feed = document.getElementById("kill-feed");
+  const entry = document.createElement("div");
+  entry.className = "kill-feed-entry";
+  entry.style.borderLeftColor = side === "home" ? "var(--home-color, var(--accent))" : "var(--away-color, #ef4444)";
+  entry.innerHTML = `<span class="kill-feed-icon">${icon}</span><span class="kill-feed-text">${text}</span>`;
+  feed.prepend(entry);
+  // Keep last 20 entries
+  while (feed.children.length > 20) feed.lastChild.remove();
+  // Auto-remove after 8s
+  setTimeout(() => { entry.style.opacity = "0"; setTimeout(() => entry.remove(), 400); }, 8000);
+  // Remove kill-feed container when empty
+  setTimeout(() => { if (feed.children.length === 0) { feed.hidden = true; _killFeedVisible = false; } }, 8500);
+}
+
+// HUD overlay — updated from bridge events when the engine fires
+function updateHUDOverlay(down, distance, quarter, awayScore, homeScore) {
+  document.getElementById("hud-overlay").hidden = false;
+  document.getElementById("hud-away-score").textContent = awayScore ?? "0";
+  document.getElementById("hud-home-score").textContent = homeScore ?? "0";
+  document.getElementById("hud-quarter").textContent = quarter ?? "1ST";
+  const d = down ? ordinalLabel(down) : "1st";
+  const dist = distance != null ? ` & ${distance}` : " & 10";
+  document.getElementById("hud-down-distance").textContent = d + dist;
+}
+function ordinalLabel(n) { return n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : "4th"; }
+// Listen for engine events from the C# host
+window.addEventListener("bandroom:hudupdate", (e) => {
+  try { if (e.detail) updateHUDOverlay(e.detail.down, e.detail.distance, e.detail.quarter, e.detail.awayScore, e.detail.homeScore); } catch (_) {}
+});
+window.addEventListener("bandroom:killfeed", (e) => {
+  try { if (e.detail) pushKillFeedEntry(e.detail.icon || "🏈", e.detail.text || "", e.detail.side || "home"); } catch (_) {}
+});
+
+// ================================================================
+// ITEM 8: LAZY LOADING FOR TEAM LOGOS (IntersectionObserver)
+// ================================================================
+let _logoObserver = null;
+function enableLazyLogos() {
+  if (_logoObserver || !("IntersectionObserver" in window)) return;
+  _logoObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        const img = entry.target;
+        if (img.dataset.src && !img.src) { img.src = img.dataset.src; img.removeAttribute("data-src"); }
+      }
+    });
+  }, { rootMargin: "200px" });
+}
+function observeLogos(container) {
+  if (!_logoObserver) enableLazyLogos();
+  container.querySelectorAll("img.team-logo-img[data-src]").forEach((img) => _logoObserver?.observe(img));
+}
+// Modify fillTeamSwatch to use data-src for lazy loading
+const _originalFillTeamSwatch = fillTeamSwatch;
+fillTeamSwatch = function (el, t) {
+  _originalFillTeamSwatch(el, t);
+  // If a logo was set (innerHTML contains img), convert to lazy
+  const img = el.querySelector("img.team-logo-img");
+  if (img && img.src) {
+    img.dataset.src = img.src;
+    img.removeAttribute("src");
+  }
+};
+
+// ================================================================
+// ITEM 8: EXPLICIT IMG WIDTH/HEIGHT to prevent layout shift
+// ================================================================
+document.addEventListener("DOMContentLoaded", () => {
+  // Add explicit sizing to team-swatch images
+  const style = document.createElement("style");
+  style.textContent = `
+    .team-swatch img.team-logo-img { width: 100%; height: 100%; object-fit: contain; }
+    .backdrop-vs-logo { width: min(30vh, 220px); height: min(30vh, 220px); }
+    .matchup-side-btn img { width: 24px; height: 24px; }
+    .bandroom-album-icon img.team-logo-img { width: 32px; height: 32px; }
+  `;
+  document.head.appendChild(style);
+});
+
+// ================================================================
+// ITEM 9: ACCESSIBILITY — aria-labels on dynamically rendered elements
+// ================================================================
+// Wraps the existing renderTeamGrid / renderCategories / openSituations
+// to add aria-labels after DOM is built. Non-invasive — original functions unchanged.
+const _origRenderTeamGrid = renderTeamGrid;
+const _origRenderCategories = renderCategories;
+const _origOpenSituations = openSituations;
+renderTeamGrid = function () {
+  _origRenderTeamGrid();
+  setTimeout(() => {
+    document.querySelectorAll("#team-grid .team-swatch").forEach((tile, i) => {
+      tile.setAttribute("role", "button");
+      tile.setAttribute("aria-label", tile.title || `Team ${i + 1}`);
+      tile.setAttribute("tabindex", "0");
+      tile.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tile.click(); } });
+    });
+  }, 0);
+};
+renderCategories = function () {
+  _origRenderCategories();
+  setTimeout(() => {
+    document.querySelectorAll("#category-list .category-row").forEach((row, i) => {
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-label", row.querySelector(".category-name")?.textContent || `Category ${i + 1}`);
+      row.setAttribute("tabindex", "0");
+    });
+  }, 0);
+};
+openSituations = async function (category) {
+  await _origOpenSituations(category);
+  setTimeout(() => {
+    document.querySelectorAll("#situations-list .situation-row").forEach((row) => {
+      const name = row.querySelector(".situation-name-text")?.textContent || "";
+      row.setAttribute("aria-label", `Situation: ${name}`);
+      row.querySelectorAll("button").forEach((btn, i) => {
+        btn.setAttribute("aria-label", btn.textContent?.trim() || `Action ${i + 1}`);
+      });
+    });
+  }, 0);
+};
+
+// ================================================================
+// ITEM 7: DYNASTY JOURNAL + SCHEDULE/RESULTS TRACKER
+// ================================================================
+let _dynastyJournal = [];
+function loadDynastyJournal() {
+  try { _dynastyJournal = JSON.parse(localStorage.getItem("bandroom-dynasty-journal") || "[]"); } catch (_) { _dynastyJournal = []; }
+}
+function logDynastyGame(result) {
+  _dynastyJournal.unshift({ ...result, date: new Date().toISOString() });
+  if (_dynastyJournal.length > 100) _dynastyJournal = _dynastyJournal.slice(0, 100);
+  try { localStorage.setItem("bandroom-dynasty-journal", JSON.stringify(_dynastyJournal)); } catch (_) {}
+}
+// Renamed from getDynastyRecord (was colliding with the unrelated save-scan version above,
+// which returns a formatted "W-L" string, not this journal-count {wins,losses} object -- same
+// name, incompatible shapes, second declaration silently wins via hoisting either way).
+function getDynastyJournalRecord() {
+  let w = 0, l = 0;
+  _dynastyJournal.forEach(g => { if (g.result === "win") w++; else if (g.result === "loss") l++; });
+  return { wins: w, losses: l };
+}
+function clearDynastyJournal() {
+  _dynastyJournal = [];
+  try { localStorage.removeItem("bandroom-dynasty-journal"); } catch (_) {}
+  showToast("Dynasty journal cleared.");
+}
+loadDynastyJournal();
+
+// Log every game to the dynasty journal automatically when matchup confirmed
+const _origOpenMatchupConfirm = document.getElementById("btn-matchup-confirm")?.onclick;
+if (document.getElementById("btn-matchup-confirm")) {
+  document.getElementById("btn-matchup-confirm").addEventListener("click", () => {
+    setTimeout(() => {
+      if (state.matchupLocked && state.matchupAway && state.matchupHome) {
+        logDynastyGame({ away: state.matchupAway, home: state.matchupHome, result: "pending", matchup: `${state.matchupAway} @ ${state.matchupHome}` });
+      }
+    }, 500);
+  });
 }
 
 // Show on first launch after this update

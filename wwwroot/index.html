@@ -249,6 +249,14 @@
             <button class="reverb-tile" data-reverb="nightgame">Night Game</button>
           </div>
         </div>
+        <!-- Top-downloaded songs/images/profiles across the whole marketplace, pulled by
+             /list?sort=downloads per type (same worker endpoint the hub grids already use).
+             Cycles to the next batch every 5 minutes (see rotateSuggested in app.js) instead of
+             always showing the same fixed top-3 forever. -->
+        <div class="panel-section" id="suggested-section">
+          <div class="panel-title">Suggested for You</div>
+          <div class="suggested-list" id="suggested-list"><!-- populated by app.js --></div>
+        </div>
         <!-- Real changelog (see ChangelogService.cs / WebBridge.GetChangelog), embedded directly
              in the panel instead of behind a button so it's actually seen. -->
         <div class="panel-section" id="changelog-section">
@@ -283,33 +291,41 @@
        across every team at once -- clicking any tile jumps straight into that team's album on
        the right tab. No fake/placeholder content anywhere: if nothing's been uploaded yet, the
        hub says so plainly instead of showing empty grid slots. -->
+  <!-- Spotify-style layout: fixed left "Your Library" team sidebar (search + scrollable icon
+       list) alongside a scrolling main pane of horizontal shelves (Uploads, Top Contributing
+       Teams) -- explicit reference was Spotify desktop's sidebar+shelves+bottom-player shape;
+       the bottom player is #clipper-island/#preview-bar, already global, so no change needed
+       there. -->
   <div id="bandroom-overlay" hidden>
     <div id="bandroom-picker" class="glass">
       <div class="team-picker-header">
         <span>The Bandroom</span>
         <button id="btn-close-bandroom" class="icon-btn">&times;</button>
       </div>
-      <p class="bandroom-instructions">
-        Search for a team below to open its Sound Bank / Trophy Room, or click anything in
-        Newest Uploads to jump straight to it. Every team has its own Sound Bank (songs) and
-        Trophy Room (background images) -- open one and hit <strong>+ Upload</strong> to
-        contribute.
-      </p>
-      <div class="bandroom-hub-section-label">
-        Uploads
-        <select id="bandroom-hub-sort" class="bandroom-hub-sort">
-          <option value="newest">Newest</option>
-          <option value="views">Most Viewed</option>
-          <option value="downloads">Most Downloaded</option>
-          <option value="likes">Most Liked</option>
-        </select>
+      <div class="bandroom-sidebar">
+        <div class="bandroom-hub-section-label">Your Library</div>
+        <input type="text" id="bandroom-search" placeholder="Search teams..." class="team-picker-search" />
+        <div class="team-picker-grid" id="bandroom-team-grid"><!-- populated by app.js --></div>
       </div>
-      <div class="bandroom-recent-grid" id="bandroom-recent-grid"><!-- populated by app.js --></div>
-      <div class="bandroom-hub-section-label">Top Contributing Teams</div>
-      <div class="bandroom-leaderboard" id="bandroom-leaderboard"><!-- populated by app.js --></div>
-      <div class="bandroom-hub-section-label">Find a Team</div>
-      <input type="text" id="bandroom-search" placeholder="Search teams..." class="team-picker-search" />
-      <div class="team-picker-grid" id="bandroom-team-grid"><!-- populated by app.js --></div>
+      <div class="bandroom-main">
+        <p class="bandroom-instructions">
+          Search for a team to open its Sound Bank / Trophy Room, or click anything below to
+          jump straight to it. Every team has its own Sound Bank (songs) and Trophy Room
+          (background images) -- open one and hit <strong>+ Upload</strong> to contribute.
+        </p>
+        <div class="bandroom-hub-section-label">
+          Uploads
+          <select id="bandroom-hub-sort" class="bandroom-hub-sort">
+            <option value="newest">Newest</option>
+            <option value="views">Most Viewed</option>
+            <option value="downloads">Most Downloaded</option>
+            <option value="likes">Most Liked</option>
+          </select>
+        </div>
+        <div class="bandroom-recent-grid" id="bandroom-recent-grid"><!-- populated by app.js --></div>
+        <div class="bandroom-hub-section-label">Top Contributing Teams</div>
+        <div class="bandroom-leaderboard" id="bandroom-leaderboard"><!-- populated by app.js --></div>
+      </div>
     </div>
   </div>
 
@@ -688,11 +704,12 @@
        happening" rather than a new UI pattern. -->
   <div id="songpack-prompt-overlay" hidden>
     <div class="update-dialog glass">
-      <div class="update-header">Download the default song pack?</div>
+      <div class="update-header"><span class="songpack-led"></span>Download the default song pack?</div>
       <p class="update-sub" id="songpack-prompt-sub">
         2,241 songs across every team (about 2.8&nbsp;GB), so teams auto-fill with real cues
-        instead of staying silent. One-time download -- entirely optional, and you can add it
-        later from Settings if you skip it now.
+        instead of staying silent. Opens in your browser -- once it's downloaded, come back here
+        and hit Import to unpack it and auto-fill every team. Entirely optional, and you can add
+        it later from Settings if you skip it now.
       </p>
       <div class="update-actions">
         <button id="btn-songpack-skip" class="btn-ghost">Not Now</button>
@@ -700,9 +717,26 @@
       </div>
     </div>
   </div>
+  <!-- Shown after btn-songpack-download opens the Drive link -- the browser download itself
+       isn't visible to the app, so this is the bridge back: point the app at the finished .zip
+       and it extracts + auto-indexes locally (ConfigStore.ImportDefaultPackForTeam/GetDefaultPackTeams
+       already drive team auto-assign off whatever lands in DownloadedDefaultSongsFolder). -->
+  <div id="songpack-import-overlay" hidden>
+    <div class="update-dialog glass">
+      <div class="update-header"><span class="songpack-led"></span>Finished downloading?</div>
+      <p class="update-sub">
+        Locate the .zip you just downloaded and Bandroom will unpack it and auto-fill every
+        team's Sound Bank -- no need to unzip it yourself.
+      </p>
+      <div class="update-actions">
+        <button id="btn-songpack-import-later" class="btn-ghost">I'll Import Later</button>
+        <button id="btn-songpack-import" class="btn-primary">Locate & Import</button>
+      </div>
+    </div>
+  </div>
   <div id="songpack-progress-overlay" hidden>
     <div id="songpack-progress-dialog" class="glass">
-      <div class="update-header" id="songpack-progress-header">Downloading song pack&hellip;</div>
+      <div class="update-header" id="songpack-progress-header"><span class="songpack-led"></span><span id="songpack-progress-title">Downloading song pack&hellip;</span></div>
       <div class="update-progress-track">
         <div class="update-progress-fill" id="songpack-progress-fill" style="width:0%"></div>
       </div>

@@ -199,6 +199,33 @@ public sealed class WebBridge
         }
     }
 
+    /// <summary>Marketplace song uploads (app.js's "+ Upload Song" tile in a team's Sound Bank)
+    /// went straight from file picker to the worker with no trim step -- every other song path
+    /// in the app (local import, AssignTrackForm) goes through TrimmerForm first. Reuses that
+    /// exact same native pick/name/trim/normalize pipeline (ImportLocalSongFromWeb) instead of
+    /// building a second one, then shares the resulting trimmed local track straight to
+    /// <paramref name="school"/> via the existing ShareLocalTrackToMarketplace path -- so a
+    /// marketplace upload now ends up trimmed/normalized exactly like a locally-kept track, and
+    /// also lands in My Downloads since ImportLocalSongFromWeb registers it there regardless.</summary>
+    public async Task<string> ImportAndUploadSongToMarketplace(string school)
+    {
+        if (string.IsNullOrWhiteSpace(school))
+            return JsonSerializer.Serialize(new { success = false, error = "No team selected." });
+
+        var raw = _host.ImportLocalSongFromWeb();
+        using var import = JsonDocument.Parse(raw);
+        var root = import.RootElement;
+        if (!root.TryGetProperty("success", out var successEl) || !successEl.GetBoolean())
+            return raw; // cancelled or failed at the pick/name/trim stage -- same shape either way
+
+        var path = root.GetProperty("path").GetString();
+        var entry = ConfigStore.LoadLocalTracks().FirstOrDefault(e => e.Path == path);
+        if (entry == null)
+            return JsonSerializer.Serialize(new { success = false, error = "Track was trimmed but couldn't be found for upload." });
+
+        return await ShareLocalTrackToMarketplace(entry.Id, school);
+    }
+
     // ---- Profile sharing ("Load Profile from Others") -----------------------------------------
     // Shares/loads a whole team's trigger->song assignment MAP, not audio bytes -- the uploaded
     // JSON only ever contains trigger/event/filename, never a full local path (those are
@@ -883,6 +910,13 @@ public sealed class WebBridge
     public bool HasDefaultSongPack() => ConfigStore.HasDefaultSongPack;
 
     public void DownloadDefaultSongPack() => _host.DownloadDefaultSongPackFromWeb();
+
+    /// <summary>Lets the user point the app at the pack .zip they just downloaded from the
+    /// Drive link (btn-songpack-download opens that externally, so the app has no other way to
+    /// know the download finished). Null if they cancel the picker.</summary>
+    public string? BrowseForSongPackZip() => _host.BrowseForSongPackZipFromWeb();
+
+    public void ImportDefaultSongPackZip(string zipPath) => _host.ImportDefaultSongPackZipFromWeb(zipPath);
     public void RestartForUpdate() => _host.RestartForUpdateFromWeb();
     public void ResetTeamProfile() => _host.ResetTeamProfileFromWeb();
     public void OpenHelp() => _host.OpenHelpFromWeb();

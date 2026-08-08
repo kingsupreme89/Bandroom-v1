@@ -93,4 +93,47 @@ internal static class DefaultSongPackService
         progress(1.0, info.SizeBytes, info.SizeBytes);
         return true;
     }
+
+    /// <summary>Extracts an already-downloaded pack zip (e.g. from the Google Drive link opened
+    /// in the system browser, since the pack isn't uploaded to R2 yet) into
+    /// ConfigStore.DownloadedDefaultSongsFolder. Same move-up-a-level logic as
+    /// DownloadAndExtractAsync's tail end, split out so the browser-download path doesn't need
+    /// the HTTP half. progress(fractionComplete) is called at coarse milestones only --
+    /// ZipFile.ExtractToDirectory has no per-entry callback to report finer-grained progress.</summary>
+    public static Task<bool> ExtractExistingZipAsync(string zipPath, Action<double> progress, CancellationToken ct)
+    {
+        return Task.Run(() =>
+        {
+            if (!File.Exists(zipPath)) return false;
+
+            progress(0.05);
+            Directory.CreateDirectory(ConfigStore.UserDataRoot);
+            string tempExtractRoot = Path.Combine(ConfigStore.UserDataRoot, "_songpack_import_tmp");
+            if (Directory.Exists(tempExtractRoot)) Directory.Delete(tempExtractRoot, recursive: true);
+            Directory.CreateDirectory(tempExtractRoot);
+
+            ZipFile.ExtractToDirectory(zipPath, tempExtractRoot, overwriteFiles: true);
+            ct.ThrowIfCancellationRequested();
+            progress(0.85);
+
+            // The pack zips "Default\..." at its root -- accept that either directly or nested
+            // one level under a "Songs\Default" folder (matches the R2 pack.zip's own layout).
+            string extractedTo = Path.Combine(tempExtractRoot, "Default");
+            if (!Directory.Exists(extractedTo))
+                extractedTo = Path.Combine(tempExtractRoot, "Songs", "Default");
+            if (!Directory.Exists(extractedTo))
+            {
+                Directory.Delete(tempExtractRoot, recursive: true);
+                return false;
+            }
+
+            if (Directory.Exists(ConfigStore.DownloadedDefaultSongsFolder))
+                Directory.Delete(ConfigStore.DownloadedDefaultSongsFolder, recursive: true);
+            Directory.Move(extractedTo, ConfigStore.DownloadedDefaultSongsFolder);
+            Directory.Delete(tempExtractRoot, recursive: true);
+
+            progress(1.0);
+            return true;
+        }, ct);
+    }
 }
