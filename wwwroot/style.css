@@ -1230,16 +1230,20 @@ input, select, textarea, [contenteditable] {
   0%, 100%  { box-shadow: 0 0 4px 0 var(--accent), 0 2px 5px rgba(0, 0, 0, 0.4); transform: scale(1); }
   50%       { box-shadow: 0 0 16px 4px var(--accent), 0 2px 5px rgba(0, 0, 0, 0.4); transform: scale(1.07); }
 }
+/* Team-colored header wordmark (Session 9 task queue item 5): uses --team-primary, the same CSS
+   var setActiveTeam() in app.js already writes -- including its near-black-primary fallback to
+   --team-secondary (Appalachian State, Army, etc.), so this needs no separate black-check of its
+   own. Falls back to --accent before any team is picked (e.g. first-run onboarding, General). */
 .brand-name {
   font-family: "Outfit", "Segoe UI", sans-serif;
   font-weight: 700;
   font-size: 24px;
   letter-spacing: 0.2px;
-  background: linear-gradient(120deg, #ffffff 0%, var(--accent) 90%);
+  background: linear-gradient(120deg, #ffffff 0%, var(--team-primary, var(--accent)) 90%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 0 14px rgba(34, 211, 238, 0.35));
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--team-primary, var(--accent)) 35%, transparent));
 }
 .brand-dot { color: var(--accent); }
 .app-version {
