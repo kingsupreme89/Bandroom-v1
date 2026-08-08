@@ -1628,21 +1628,11 @@ input, select, textarea, [contenteditable] {
 .bandroom-album-title { display: flex; align-items: center; gap: 10px; }
 .bandroom-album-icon { width: 28px; height: 28px; border-radius: 8px; flex: none; }
 
-.bandroom-album-tabs { display: flex; gap: 8px; margin: 10px 0 12px; flex: 0 0 auto; }
-.bandroom-album-tab {
-  padding: 6px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-muted-2);
-  font-size: 12px; font-weight: 600;
-  cursor: pointer;
-}
-.bandroom-album-tab.active { background: var(--team-secondary, var(--accent)); color: var(--team-secondary-ink, #06222a); border-color: transparent; }
-
 .bandroom-album-grid { overflow-y: auto; min-height: 0; }
-/* SOUND BANK & TROPHY ROOM & MY DOWNLOADS — Nexus Mods-style 4-column card grid */
-#bandroom-songs-grid, #bandroom-images-grid, #my-downloads-grid {
+/* Team album (songs + background images together) & MY DOWNLOADS — Nexus Mods-style 4-column
+   card grid. Trophy Room used to be its own #bandroom-images-grid; folded into
+   #bandroom-songs-grid (kept the id to avoid churning every other selector/JS reference). */
+#bandroom-songs-grid, #my-downloads-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 14px;

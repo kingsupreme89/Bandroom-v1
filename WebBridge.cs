@@ -72,6 +72,10 @@ public sealed class WebBridge
     public async Task<bool> DownloadAndSetTeamBackground(string team, string url) =>
         await _host.DownloadAndSetTeamBackgroundFromWeb(team, url);
 
+    /// <summary>"Set as Background" from My Downloads -- the image is already local, so this
+    /// looks it up by download id and copies it directly instead of re-fetching over HTTP.</summary>
+    public bool SetTeamBackgroundFromDownload(string downloadId) => _host.SetTeamBackgroundFromDownloadFromWeb(downloadId);
+
     /// <summary>Downloads a marketplace song or image into the local library ("My Downloads")
     /// with a clear "[School] - [Name]" filename. Songs land in the Songs library so they're
     /// immediately assignable to a trigger; images land in a general downloaded-images library.

@@ -57,12 +57,14 @@
         </div>
         <button id="btn-stop-watching" class="btn-ghost" title="End this game and unlock the matchup" hidden>Stop Watching</button>
         <!-- Marketplace island tabs -- "The Bandroom" opens the full team-browser; Sound Bank
-             / Trophy Room jump straight into the ACTIVE team's album on that specific tab,
-             skipping the team-picker step since you're usually already working on one team. -->
+             jumps straight into the ACTIVE team's album (songs + background images together,
+             see bandroom-album below -- Trophy Room was folded into this same album instead of
+             being a separate destination), skipping the team-picker step since you're usually
+             already working on one team. Background images you've grabbed still show up in My
+             Downloads, indexed the same way as songs. -->
         <div class="marketplace-tabs">
           <button id="btn-bandroom-cloud" class="pill pill-rainbow" title="Browse The Bandroom">The Bandroom</button>
           <button id="btn-sound-bank" class="pill pill-marketplace" title="This team's Sound Bank">Sound Bank</button>
-          <button id="btn-trophy-room" class="pill pill-marketplace" title="This team's Trophy Room">Trophy Room</button>
           <button id="btn-my-downloads" class="pill pill-marketplace" title="Songs and images you've downloaded">My Downloads</button>
           <button id="btn-discord-chat" class="pill pill-marketplace" title="Live Discord chat feed">Discord</button>
         </div>
@@ -167,7 +169,7 @@
             <span class="clipper-title" id="clipper-title-text">Clip Preview</span>
             <button id="btn-clipper-close-assign" class="icon-btn" hidden title="Close">&times;</button>
           </div>
-          <div class="clipper-empty-state" id="clipper-empty">Click any song in Sound Bank, Trophy Room, or My Downloads to preview it here.</div>
+          <div class="clipper-empty-state" id="clipper-empty">Click any song in Sound Bank or My Downloads to preview it here.</div>
           <div id="preview-bar" hidden>
             <button id="btn-preview-playpause" class="preview-bar-btn" title="Play/Pause">▶</button>
             <button id="btn-preview-stop" class="preview-bar-btn" title="Stop">⏹</button>
@@ -309,9 +311,9 @@
       </div>
       <div class="bandroom-main">
         <p class="bandroom-instructions">
-          Search for a team to open its Sound Bank / Trophy Room, or click anything below to
-          jump straight to it. Every team has its own Sound Bank (songs) and Trophy Room
-          (background images) -- open one and hit <strong>+ Upload</strong> to contribute.
+          Search for a team to open its Sound Bank, or click anything below to jump straight to
+          it. Every team's Sound Bank holds both songs and background images together -- open
+          one and hit <strong>+ Upload</strong> to contribute.
         </p>
         <div class="bandroom-hub-section-label">
           Uploads
@@ -329,9 +331,10 @@
     </div>
   </div>
 
-  <!-- A team's album -- Sound Bank (songs) / Trophy Room (images). Only real uploads render as
-       tiles; an empty team shows a clear "nothing here yet" message instead of a wall of empty
-       placeholder slots. -->
+  <!-- A team's album -- songs and background images together in one indexed list (Trophy Room
+       used to be a separate tab here; folded into this same album so there's one "this team's
+       stuff" surface instead of two). Only real uploads render as tiles; an empty team shows a
+       clear "nothing here yet" message instead of a wall of empty placeholder slots. -->
   <div id="bandroom-album-overlay" hidden>
     <div id="bandroom-album" class="glass">
       <div class="team-picker-header">
@@ -341,17 +344,12 @@
         </div>
         <button id="btn-close-bandroom-album" class="icon-btn">&times;</button>
       </div>
-      <div class="bandroom-album-tabs">
-        <button class="bandroom-album-tab active" id="tab-sound-bank">Sound Bank</button>
-        <button class="bandroom-album-tab" id="tab-trophy-room">Trophy Room</button>
-      </div>
       <p class="bandroom-instructions" id="bandroom-album-instructions"></p>
       <div class="bandroom-album-toolbar">
         <input type="text" id="bandroom-album-search" placeholder="Search this album..." class="team-picker-search" />
         <button id="btn-bandroom-album-download-all" class="btn-ghost" title="Download every item in this album">Download All</button>
       </div>
-      <div class="bandroom-album-grid bandroom-songs-grid" id="bandroom-songs-grid"><!-- populated by app.js --></div>
-      <div class="bandroom-album-grid bandroom-images-grid" id="bandroom-images-grid" hidden><!-- populated by app.js --></div>
+      <div class="bandroom-album-grid" id="bandroom-songs-grid"><!-- populated by app.js: songs + background images together --></div>
     </div>
   </div>
 
@@ -528,8 +526,8 @@
       </div>
       <p class="bandroom-instructions">
         Songs you download here are added straight to your Sound Bank library (Assign Track will
-        list them right away). Images are saved for later -- open one from a team's Trophy Room
-        if you want to set it as that team's background.
+        list them right away). Images are saved for later -- open a downloaded background from
+        here if you want to set it as that team's live background.
       </p>
       <!-- End-user "import my own song" pipeline (item 21) -- picks a local file, names it,
            trims/normalizes it through the same tool a marketplace track uses, and it lands
@@ -665,8 +663,10 @@
     </div>
   </div>
 
-  <!-- First-run onboarding -- shown once (gated by ConfigStore.IsFirstRun) to pick a
-       favorite team before the app is used normally, like the game's own team-select. -->
+  <!-- First-run onboarding -- shown once (gated by ConfigStore.IsFirstRun) to pick a favorite
+       team before the app is used normally. Same cover-flow carousel as Set Matchup (CFB 27
+       team-select reference, see matchupCoverflowTeams) instead of a plain grid -- this is the
+       very first thing a new user sees, so it gets the same widened/cropped cover-flow treatment. -->
   <div id="onboarding-overlay" hidden>
     <div id="onboarding" class="glass">
       <div class="onboarding-header">
@@ -676,7 +676,13 @@
       <p class="onboarding-sub">Bandroom plays your sounds automatically while you watch CFB 27 --
         pick your team to get started. You can change this anytime from the Teams panel.</p>
       <input type="text" id="onboarding-search" placeholder="Search teams..." class="team-picker-search" />
-      <div class="team-picker-grid" id="onboarding-grid"><!-- populated by app.js --></div>
+      <div class="coverflow-stage">
+        <button class="coverflow-arrow coverflow-arrow-left" data-dir="-1" title="Previous team">&#8249;</button>
+        <div class="coverflow-track" id="onboarding-track"></div>
+        <button class="coverflow-arrow coverflow-arrow-right" data-dir="1" title="Next team">&#8250;</button>
+      </div>
+      <div class="coverflow-name" id="onboarding-name"></div>
+      <button id="btn-onboarding-confirm" class="btn-primary">Confirm Team</button>
     </div>
   </div>
 

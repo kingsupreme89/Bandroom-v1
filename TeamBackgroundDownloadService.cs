@@ -107,6 +107,45 @@ internal static class TeamBackgroundDownloadService
         }
     }
 
+    /// <summary>Sets a team's background from a file already on disk (a My Downloads image, whose
+    /// URL is a WebView2-only virtual-host address like https://downloadedimages/foo.jpg -- not a
+    /// real network URL a server-side HttpClient could ever fetch, unlike DownloadAndSaveAsync's
+    /// case of a fresh marketplace worker URL). Same replace-any-existing-extension logic as
+    /// DownloadAndSaveAsync, just a file copy instead of an HTTP download.</summary>
+    public static string? SetFromLocalFile(string teamName, string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(teamName) || string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+            return null;
+
+        string ext = Path.GetExtension(sourcePath).ToLowerInvariant();
+        if (!AllowedExtensions.Contains(ext)) ext = ".jpg";
+
+        Directory.CreateDirectory(ConfigStore.TeamBackgroundsFolder);
+        string safeTeam = System.Text.RegularExpressions.Regex.Replace(teamName, @"[^\w\s-]", "").Trim();
+        if (safeTeam.Length == 0) return null;
+
+        foreach (var oldExt in AllowedExtensions)
+        {
+            string oldPath = Path.Combine(ConfigStore.TeamBackgroundsFolder, safeTeam + oldExt);
+            if (File.Exists(oldPath))
+            {
+                try { File.Delete(oldPath); } catch { /* best-effort */ }
+            }
+        }
+
+        string outPath = Path.Combine(ConfigStore.TeamBackgroundsFolder, safeTeam + ext);
+        try
+        {
+            File.Copy(sourcePath, outPath, overwrite: true);
+            return outPath;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write($"TeamBackgroundDownloadService.SetFromLocalFile failed for \"{teamName}\" <- {sourcePath}", ex);
+            return null;
+        }
+    }
+
     static string ExtensionFromResponse(HttpResponseMessage response, Uri url)
     {
         // Prefer the URL's own path extension (the worker's /file/<key> URLs preserve the

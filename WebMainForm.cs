@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.IO;
+using System.Text.Json;
 using System.Windows.Forms;
 using Bandroom.Core;
 using Microsoft.Web.WebView2.Core;
@@ -184,6 +185,20 @@ public sealed class WebMainForm : Form
     public async Task<bool> DownloadAndSetTeamBackgroundFromWeb(string team, string url)
     {
         string? saved = await TeamBackgroundDownloadService.DownloadAndSaveAsync(team, url);
+        return saved != null;
+    }
+
+    /// <summary>Sets a team's background from a My Downloads image that's already local (id
+    /// looked up in the marketplace-download manifest) -- the "Set as Background" action on the
+    /// My Downloads grid, distinct from DownloadAndSetTeamBackgroundFromWeb above which fetches
+    /// a fresh marketplace URL over HTTP.</summary>
+    public bool SetTeamBackgroundFromDownloadFromWeb(string downloadId)
+    {
+        var entry = ConfigStore.LoadMarketplaceDownloads().FirstOrDefault(e => e.Id == downloadId && e.Type == "image");
+        if (entry == null) return false;
+        string? saved = TeamBackgroundDownloadService.SetFromLocalFile(entry.School ?? "", entry.Path);
+        if (saved != null && Theme.ActiveTeam.Name == entry.School)
+            RunOnUi(() => _ = _webView.ExecuteScriptAsync($"window.applyBackground && window.applyBackground({JsonSerializer.Serialize(entry.School)})"));
         return saved != null;
     }
 

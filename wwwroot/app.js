@@ -255,10 +255,7 @@ function renderSuggestedBatch() {
     dlEl.textContent = `\u{2B07} ${(item.downloads ?? 0).toLocaleString()}`;
     row.append(typeEl, body, dlEl);
     row.title = `${item.name} — ${item.school}`;
-    row.addEventListener("click", () => {
-      openTeamAlbum(item.school);
-      if (item.type !== "profile") setAlbumTab(item.type === "song" ? "songs" : "images");
-    });
+    row.addEventListener("click", () => openTeamAlbum(item.school));
     list.appendChild(row);
   }
 }
@@ -969,8 +966,7 @@ function wireControls() {
   });
   document.getElementById("btn-update").addEventListener("click", () => bridge?.ShowUpdate());
   document.getElementById("btn-bandroom-cloud").addEventListener("click", openBandroomMarketplace);
-  document.getElementById("btn-sound-bank").addEventListener("click", () => { openTeamAlbum(state.activeTeam); setAlbumTab("songs"); });
-  document.getElementById("btn-trophy-room").addEventListener("click", () => { openTeamAlbum(state.activeTeam); setAlbumTab("images"); });
+  document.getElementById("btn-sound-bank").addEventListener("click", () => openTeamAlbum(state.activeTeam));
   document.getElementById("btn-my-downloads").addEventListener("click", openMyDownloads);
   document.getElementById("btn-close-my-downloads").addEventListener("click", closeMyDownloads);
   document.getElementById("btn-discord-chat").addEventListener("click", openDiscordChat);
@@ -988,8 +984,6 @@ function wireControls() {
   document.getElementById("bandroom-album-overlay").addEventListener("click", (e) => {
     if (e.target.id === "bandroom-album-overlay") closeTeamAlbum();
   });
-  document.getElementById("tab-sound-bank").addEventListener("click", () => setAlbumTab("songs"));
-  document.getElementById("tab-trophy-room").addEventListener("click", () => setAlbumTab("images"));
   document.getElementById("bandroom-album-search").addEventListener("input", onAlbumSearchInput);
   document.getElementById("btn-bandroom-album-download-all").addEventListener("click", downloadAlbumAll);
   document.getElementById("btn-reset").addEventListener("click", () => bridge?.ResetTeamProfile());
@@ -1545,7 +1539,7 @@ async function renderMyDownloadsGrid() {
 
   grid.innerHTML = "";
   if (items.length === 0) {
-    grid.innerHTML = `<div class="bandroom-empty-state">Nothing downloaded yet -- open a team's Sound Bank or Trophy Room and hit the ⬇ button on anything you like.</div>`;
+    grid.innerHTML = `<div class="bandroom-empty-state">Nothing downloaded yet -- open a team's Sound Bank and hit the ⬇ button on anything you like.</div>`;
     return;
   }
   for (const item of items) grid.appendChild(buildMyDownloadTile(item));
@@ -1737,6 +1731,34 @@ function buildMyDownloadTile(item) {
     actions.appendChild(sharedLabel);
   }
 
+  // Set as Background -- image downloads used to need a trip back into that team's Trophy Room
+  // tab to do this; now that Trophy Room is folded into My Downloads, this needs to live here
+  // too (mirrors the same action in buildItemTile's album view).
+  if (item.type === "image" && item.school) {
+    const bgBtn = document.createElement("button");
+    bgBtn.className = "bandroom-item-action";
+    bgBtn.title = `Set as ${item.school}'s background`;
+    bgBtn.textContent = "\u{1F5BC} Set as Background";
+    bgBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      bgBtn.disabled = true;
+      bgBtn.textContent = "Saving...";
+      // This is an already-downloaded local file (item.fileUrl is a WebView2-only virtual-host
+      // address, not a real network URL) -- SetTeamBackgroundFromDownload copies the local file
+      // directly instead of trying to re-fetch it over HTTP like the album/hub version does.
+      const ok = bridge ? await bridge.SetTeamBackgroundFromDownload(item.id) : false;
+      if (ok) {
+        showToast(`Set as ${item.school}'s background!`);
+        if (state.activeTeam === item.school) applyBackground(item.school);
+      } else {
+        showToast("Couldn't set that background -- try again.");
+      }
+      bgBtn.disabled = false;
+      bgBtn.textContent = "\u{1F5BC} Set as Background";
+    });
+    actions.appendChild(bgBtn);
+  }
+
   const removeBtn = document.createElement("button");
   removeBtn.className = "bandroom-item-action bandroom-item-action-danger";
   removeBtn.title = "Remove from My Downloads";
@@ -1803,7 +1825,7 @@ async function renderBandroomHub() {
   if (document.getElementById("bandroom-overlay").hidden) return;
   grid.innerHTML = "";
   if (items.length === 0) {
-    grid.innerHTML = `<div class="bandroom-recent-empty">Nothing uploaded yet -- open any team's Sound Bank or Trophy Room and be the first!</div>`;
+    grid.innerHTML = `<div class="bandroom-recent-empty">Nothing uploaded yet -- open any team's Sound Bank and be the first!</div>`;
     return;
   }
   for (const item of items) grid.appendChild(buildItemTile(item, /*inHub*/ true));
@@ -1891,9 +1913,8 @@ function buildItemTile(item, inHub) {
   tile.addEventListener("click", (e) => {
     if (e.target.closest(".bandroom-item-action")) return; // hover-button clicks handle themselves
     if (inHub) {
-      // Jump straight into that upload's own team/tab, same as picking the team from search.
+      // Jump straight into that upload's own team album, same as picking the team from search.
       openTeamAlbum(item.school);
-      setAlbumTab(item.type === "song" ? "songs" : "images");
     } else if (item.type === "song") {
       previewSong(item);
     }
@@ -2456,7 +2477,12 @@ function openTeamAlbum(name) {
     document.getElementById("bandroom-album-overlay").hidden = false;
     fillTeamSwatch(document.getElementById("bandroom-album-icon"), team);
     document.getElementById("bandroom-album-name").textContent = team.name;
-    setAlbumTab("songs");
+    document.getElementById("bandroom-album-instructions").textContent =
+      "Click a song to preview it, or a background to set it live. Hit + Upload to add your own "
+      + "-- songs are trimmed/normalized automatically, images resized to a consistent size.";
+    const albumSearch = document.getElementById("bandroom-album-search");
+    if (albumSearch) albumSearch.value = "";
+    renderTeamAlbumGrid();
   }, "openTeamAlbum");
 }
 
@@ -2466,101 +2492,66 @@ function closeTeamAlbum() {
   albumTeam = null;
 }
 
-function setAlbumTab(tab) {
-  marketplaceGuard(() => {
-    // Guard against openTeamAlbum never having found a matching team (e.g. state.teams hasn't
-    // loaded yet) -- rendering would otherwise throw on albumTeam.secondary and leave the album
-    // in a half-broken state instead of just declining to open.
-    if (!albumTeam) return;
-    document.getElementById("tab-sound-bank").classList.toggle("active", tab === "songs");
-    document.getElementById("tab-trophy-room").classList.toggle("active", tab === "images");
-    const songsGrid = document.getElementById("bandroom-songs-grid");
-    const imagesGrid = document.getElementById("bandroom-images-grid");
-    songsGrid.hidden = tab !== "songs";
-    imagesGrid.hidden = tab !== "images";
-    // Reset scroll on both grids every switch -- without this, flipping Sound Bank -> Trophy
-    // Room -> Sound Bank could leave a grid mid-scroll under its own hidden state, so it opens
-    // scrolled partway down instead of at the top the next time its tab is picked.
-    songsGrid.scrollTop = 0;
-    imagesGrid.scrollTop = 0;
-    const albumSearch = document.getElementById("bandroom-album-search");
-    if (albumSearch) albumSearch.value = "";
-    document.getElementById("bandroom-album-instructions").textContent = tab === "songs"
-      ? "Click a song to preview it. Hit + Upload to add your own -- it'll be compressed automatically and named after this team."
-      : "Click + Upload to add a background. Hit \u{1F5BC} Set as Background on any image to make it this team's live background.";
-    if (tab === "songs") renderSoundBankGrid(); else renderTrophyRoomGrid();
-  }, "setAlbumTab");
-}
-
-// Cache of the currently-open album's items (per type), so the in-album search box (item 7)
-// can filter instantly client-side instead of re-hitting the worker on every keystroke.
+// Cache of the currently-open album's items (both types together, songs + background images --
+// Trophy Room used to be its own tab/fetch; folded into one indexed list here), so the in-album
+// search box (item 7) can filter instantly client-side instead of re-hitting the worker on every
+// keystroke.
 let _albumItemsCache = { songs: [], images: [] };
 
-async function renderSoundBankGrid() {
+async function renderTeamAlbumGrid() {
   const grid = document.getElementById("bandroom-songs-grid");
   const team = albumTeam;
   grid.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
-  const items = await fetchUploadList("song", team.name);
-  if (!albumTeam || albumTeam !== team || document.getElementById("bandroom-songs-grid").hidden) return;
-  _albumItemsCache.songs = items;
-  paintAlbumGrid("songs", getAlbumSearchFilter());
-}
-
-async function renderTrophyRoomGrid() {
-  const grid = document.getElementById("bandroom-images-grid");
-  const team = albumTeam;
-  grid.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
-  const items = await fetchUploadList("image", team.name);
-  if (!albumTeam || albumTeam !== team || document.getElementById("bandroom-images-grid").hidden) return;
-  _albumItemsCache.images = items;
-  paintAlbumGrid("images", getAlbumSearchFilter());
+  const [songs, images] = await Promise.all([
+    fetchUploadList("song", team.name),
+    fetchUploadList("image", team.name),
+  ]);
+  if (!albumTeam || albumTeam !== team) return; // closed/switched while awaiting
+  _albumItemsCache = { songs, images };
+  paintAlbumGrid(getAlbumSearchFilter());
 }
 
 function getAlbumSearchFilter() {
   return (document.getElementById("bandroom-album-search")?.value ?? "").trim().toLowerCase();
 }
 
-/// Renders whichever tab's grid is currently visible from the cached item list, filtered by the
-/// in-album search box -- called both after a fresh fetch and on every search keystroke, so
-/// searching never re-hits the network.
-function paintAlbumGrid(tab, filter) {
+/// Renders the combined songs+images list from the cached item lists, filtered by the in-album
+/// search box -- called both after a fresh fetch and on every search keystroke, so searching
+/// never re-hits the network.
+function paintAlbumGrid(filter) {
   if (!albumTeam) return;
-  const isSongs = tab === "songs";
-  const grid = document.getElementById(isSongs ? "bandroom-songs-grid" : "bandroom-images-grid");
+  const grid = document.getElementById("bandroom-songs-grid");
   const team = albumTeam;
-  const all = isSongs ? _albumItemsCache.songs : _albumItemsCache.images;
+  const all = [..._albumItemsCache.songs, ..._albumItemsCache.images];
   const items = filter ? all.filter((it) => it.name.toLowerCase().includes(filter)) : all;
 
   grid.innerHTML = "";
   if (all.length === 0) {
     const empty = document.createElement("div");
     empty.className = "bandroom-empty-state";
-    empty.textContent = isSongs
-      ? `No songs uploaded for ${team.name} yet -- be the first!`
-      : `No background images uploaded for ${team.name} yet -- be the first!`;
+    empty.textContent = `Nothing uploaded for ${team.name} yet -- be the first!`;
     grid.appendChild(empty);
   } else if (items.length === 0) {
     const empty = document.createElement("div");
     empty.className = "bandroom-empty-state";
-    empty.textContent = `No ${isSongs ? "songs" : "images"} match "${filter}".`;
+    empty.textContent = `Nothing matches "${filter}".`;
     grid.appendChild(empty);
   } else {
     for (const item of items) {
       const tile = buildItemTile(item, /*inHub*/ false);
-      if (!isSongs) {
+      if (item.type === "image") {
         tile.querySelector(".bandroom-item-thumb").style.setProperty("--tile-color", team.secondary);
         tile.querySelector(".bandroom-item-thumb").classList.add("bandroom-image-slot");
       }
       grid.appendChild(tile);
     }
   }
-  grid.appendChild(buildUploadTile(isSongs ? "song" : "image"));
+  grid.appendChild(buildUploadTile("song"));
+  grid.appendChild(buildUploadTile("image"));
 }
 
 function onAlbumSearchInput() {
-  const filter = getAlbumSearchFilter();
-  const isSongs = !document.getElementById("bandroom-songs-grid").hidden;
-  paintAlbumGrid(isSongs ? "songs" : "images", filter);
+  paintAlbumGrid(getAlbumSearchFilter());
 }
 
 /// Bulk-download (item 21): sequential downloads of every currently-visible item in the album's
@@ -2569,9 +2560,8 @@ function onAlbumSearchInput() {
 /// to vendor it through (same constraint noted on the audio compression path).
 async function downloadAlbumAll() {
   if (!albumTeam) return;
-  const isSongs = !document.getElementById("bandroom-songs-grid").hidden;
   const filter = getAlbumSearchFilter();
-  const all = isSongs ? _albumItemsCache.songs : _albumItemsCache.images;
+  const all = [..._albumItemsCache.songs, ..._albumItemsCache.images];
   const items = filter ? all.filter((it) => it.name.toLowerCase().includes(filter)) : all;
   if (items.length === 0) { showToast("Nothing to download here."); return; }
 
@@ -2588,7 +2578,7 @@ async function downloadAlbumAll() {
       // that kept its original format) doesn't get mislabeled -- falls back to the expected
       // compressed-format extension only if the URL has none.
       const urlExt = (item.url.split("?")[0].match(/\.([a-zA-Z0-9]{1,5})$/) || [])[1];
-      const ext = urlExt || (isSongs ? "webm" : "jpg");
+      const ext = urlExt || (item.type === "song" ? "webm" : "jpg");
       a.download = `${sanitizeForFilename(albumTeam.name)}-${sanitizeForFilename(item.name)}.${ext}`;
       document.body.appendChild(a);
       a.click();
@@ -2632,7 +2622,7 @@ async function uploadSongViaClipper() {
     if (result?.cancelled) return;
     if (result?.success) {
       showToast(`Uploaded to ${albumTeam.name}'s Sound Bank!`);
-      if (!document.getElementById("bandroom-songs-grid").hidden) renderSoundBankGrid();
+      renderTeamAlbumGrid();
     } else {
       showToast(result?.error ?? "Couldn't upload that -- try again.");
     }
@@ -2665,12 +2655,18 @@ function onUploadFileChosen(e) {
   document.getElementById("bandroom-upload-header").textContent =
     pendingUpload.type === "song" ? "Upload Song" : "Upload Background Image";
   document.getElementById("bandroom-upload-instructions").textContent =
-    `Uploading to ${albumTeam.name}'s ${pendingUpload.type === "song" ? "Sound Bank" : "Trophy Room"}. `
+    `Uploading to ${albumTeam.name}'s Sound Bank. `
     + (pendingUpload.type === "song"
-      ? "It'll be compressed automatically so every upload plays at a consistent volume/size."
-      : "It'll be resized/compressed automatically so every Trophy Room image is a consistent size.");
+      ? "It'll be compressed automatically so every upload plays at a consistent volume/size. "
+        + "Name it Team + Situation + Description (e.g. “"
+        + (albumTeam.initials || albumTeam.name) + " 3rd Down Stop”) -- that's what makes "
+        + "auto-assign and profile sharing able to find and match it later."
+      : "It'll be resized/compressed automatically so every background image is a consistent size.");
   const nameInput = document.getElementById("bandroom-upload-name");
   nameInput.value = "";
+  nameInput.placeholder = pendingUpload.type === "song"
+    ? `e.g. ${albumTeam.initials || albumTeam.name} Touchdown Hype`
+    : "Name...";
   document.getElementById("bandroom-upload-subtext").textContent = "";
   document.getElementById("btn-bandroom-upload-confirm").disabled = false;
   overlay.hidden = false;
@@ -2738,9 +2734,7 @@ async function confirmUpload() {
     try { await bridge?.RecordMarketplaceUpload(); } catch (err) { console.error("RecordMarketplaceUpload failed", err); }
     closeUploadDialog();
     showToast(`Uploaded "${name}" to ${albumTeam.name}!`);
-    // Re-render whichever grid is currently visible for this album.
-    if (!document.getElementById("bandroom-songs-grid").hidden) renderSoundBankGrid();
-    if (!document.getElementById("bandroom-images-grid").hidden) renderTrophyRoomGrid();
+    renderTeamAlbumGrid();
   } catch (err) {
     stopProgress();
     console.error("Upload failed", err);
@@ -3938,8 +3932,7 @@ function sanitizeMarketplaceItem(item) {
 // ================================================================
 const COMMANDS = [
   { icon: "🎵", label: "The Bandroom", hint: "marketplace", action: () => toggleBandroom() },
-  { icon: "🏆", label: "Sound Bank", hint: "team sounds", action: () => openTeamSoundBank(state.activeTeam) },
-  { icon: "🖼️", label: "Trophy Room", hint: "backgrounds", action: () => openTeamTrophyRoom(state.activeTeam) },
+  { icon: "🏆", label: "Sound Bank", hint: "songs + backgrounds", action: () => openTeamSoundBank(state.activeTeam) },
   { icon: "⬇️", label: "My Downloads", hint: "library", action: () => toggleMyDownloads() },
   { icon: "💬", label: "Discord Chat", hint: "chat", action: () => toggleDiscordChat() },
   { icon: "⚔️", label: "Set Matchup", hint: "home/away", action: () => openMatchupPicker() },
@@ -4011,7 +4004,6 @@ function buildContextMenu(teamName, x, y) {
   const items = [
     { label: "Set as Active Team", icon: "🎯", action: () => { if (_contextMenuTarget) selectTeam(_contextMenuTarget); } },
     { label: "Open Sound Bank", icon: "🎵", action: () => { if (_contextMenuTarget) openTeamSoundBank(_contextMenuTarget); } },
-    { label: "Open Trophy Room", icon: "🖼️", action: () => { if (_contextMenuTarget) openTeamTrophyRoom(_contextMenuTarget); } },
     { sep: true },
     { label: "Pin to Top", icon: "📌", action: () => { if (_contextMenuTarget) pinTeam(_contextMenuTarget); } },
     { label: "Duplicate Profile To...", icon: "📋", action: () => { if (_contextMenuTarget) duplicateTeamProfile(_contextMenuTarget); } },
@@ -4148,7 +4140,7 @@ const TIPS_DATABASE = [
   "Each team has its own independent song profile.",
   "Download songs from The Bandroom to build your library.",
   "Upload your own songs to share with other Bandroom users.",
-  "Use the Trophy Room to download custom team background art.",
+  "Open a team's Sound Bank to download custom background art too.",
   "The sensitivity slider controls how long songs play before fading.",
   "Reverb settings make your sounds feel like they're in a stadium.",
   "You can export your team profiles to share with friends.",
@@ -4773,20 +4765,6 @@ function filterBandroomTeams(query) {
     tile.style.display = !q || (tile.title || "").toLowerCase().includes(q) ? "" : "none";
   });
 }
-function filterAlbumSearch(query) {
-  const songsGrid = document.getElementById("bandroom-songs-grid");
-  const imagesGrid = document.getElementById("bandroom-images-grid");
-  const q = query.toLowerCase().trim();
-  [songsGrid, imagesGrid].forEach((grid) => {
-    if (!grid || grid.hidden) return;
-    const cards = grid.querySelectorAll(".marketplace-card, .bandroom-item-tile");
-    cards.forEach((card) => {
-      const title = card.querySelector(".marketplace-card-title, .bandroom-item-name");
-      card.style.display = !q || (title?.textContent || "").toLowerCase().includes(q) ? "" : "none";
-    });
-  });
-}
-
 // ================================================================
 // DUPLICATE HELPERS (referenced by context menu)
 // ================================================================
@@ -4802,9 +4780,6 @@ function toggleBandroom() {
 }
 function openTeamSoundBank(teamName) {
   // Navigate to the sound bank via the marketplace buttons
-  openTeamAlbum(teamName);
-}
-function openTeamTrophyRoom(teamName) {
   openTeamAlbum(teamName);
 }
 function toggleMyDownloads() {
