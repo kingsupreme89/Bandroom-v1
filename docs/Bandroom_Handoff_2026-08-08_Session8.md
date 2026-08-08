@@ -167,3 +167,37 @@ bigger than a simple file cleanup (43 profiles, dozens of songs.json/situation e
    filename-match this session is a working proof of concept for the mechanism.
 5. Font-readability pass, DL-button auto-extract pipeline, full HUD redesign — in that order,
    per owner's own stated priority from this session.
+
+---
+
+## 8. Update — later same session (still Aug 8)
+
+Three more real, committed/pushed changes after the above was written:
+
+- **Naming-convention hint wired into the song upload dialog.** Both the instructions text and
+  the name field's placeholder now show a concrete example (`"UGA 3rd Down Stop"` style — Team +
+  Situation + Description) using the active team's initials. Directly matters because the
+  filename-matching in §5/§7's profile-sharing/auto-assign keys on this exact typed name, scanned
+  across *every* team's folder together (not scoped per-school) — bad names silently break
+  matching. Owner called this "one of the most important pieces."
+- **Picked up a concurrent edit from another tool session** (looked like Cline, working live in
+  the same repo at the same time — `WebBridge.cs`/`WebMainForm.cs`/`TeamBackgroundDownloadService.cs`
+  grew by ~60 lines and `wwwroot/app.js` shifted ~150 lines between two reads of the same
+  session): a real "Set as Background" from My Downloads feature (copies an already-local image
+  directly instead of re-fetching over HTTP). Verified it builds clean together with this
+  session's own changes before committing. **Flag for next session: if multiple tools/sessions
+  are actively editing this repo concurrently, re-read files before every edit (don't trust a
+  stale offset/line-number from earlier in the same turn) — this already caused one failed Edit
+  this session that had to be retried after a fresh read.** The Mac-side files
+  (`src/Bandroom.Mac/*`) were left uncommitted deliberately — didn't review/test that surface,
+  left it for whatever session is actually driving the Mac port.
+- **Clipping island's assign-mode song list now has per-row transport.** Each row got its own
+  condensed ▶ Play / ⏹ Stop (same `PreviewLocalFile`/`StopPreview` the shared toolbar already
+  used, just scoped to that specific row instead of whatever's currently selected) plus a new
+  **⬇ DL button**. DL doesn't copy or move the file — it's already in `ConfigStore.SongsFolder`
+  — it registers it in the My Downloads manifest via `ConfigStore.RecordLocalTrack` (new
+  `AddLibraryFileToDownloadsFromWeb`/`AddLibraryFileToDownloads` bridge methods) so it's reachable
+  from My Downloads too instead of only by re-browsing the whole Songs folder every time.
+
+All of §1–§7's open items are still open — nothing above closes any of them, this section is
+purely additive.
