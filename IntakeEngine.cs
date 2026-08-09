@@ -29,11 +29,23 @@ public static class IntakeEngine
         string[] ReviewFlags);
 
     private static Dictionary<string, TeamData>? _teams;
-    private static Dictionary<string, string>? _aliasIndex;
+    // alias -> every team that claims it. Was a single string (first/only claimant silently won,
+    // e.g. "UM" -> Miami even for a Big Ten pack where it means Michigan) -- now a list so
+    // ResolveTeam can disambiguate using a conference hint parsed from the filename (see
+    // ConferenceHintFor) instead of one candidate always shadowing every other.
+    private static Dictionary<string, List<string>>? _aliasIndex;
     private static Dictionary<string, string[]>? _triggerToEventKeys;
     private static HashSet<string>? _validTriggers;
 
     private sealed record TeamData(string Conference, string[] Abbreviations, string[] Variants);
+
+    private static void AddAlias(string alias, string team)
+    {
+        if (string.IsNullOrWhiteSpace(alias)) return;
+        if (!_aliasIndex!.TryGetValue(alias, out var list))
+            _aliasIndex[alias] = list = new List<string>();
+        if (!list.Contains(team, StringComparer.Ordinal)) list.Add(team);
+    }
 
     private static void EnsureLoaded()
     {
@@ -43,7 +55,7 @@ public static class IntakeEngine
         var triggerMapPath = Path.Combine(AppContext.BaseDirectory, "scripts", "trigger_event_map.json");
 
         _teams = new Dictionary<string, TeamData>(StringComparer.Ordinal);
-        _aliasIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _aliasIndex = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         _triggerToEventKeys = new Dictionary<string, string[]>(StringComparer.Ordinal);
         _validTriggers = new HashSet<string>(StringComparer.Ordinal);
 
@@ -66,8 +78,15 @@ public static class IntakeEngine
             if (root.TryGetProperty("alias_index", out var aliasEl))
             {
                 foreach (var a in aliasEl.EnumerateObject())
-                    _aliasIndex[a.Name] = a.Value.GetString() ?? "";
+                    AddAlias(a.Name, a.Value.GetString() ?? "");
             }
+            // Backfill from each team's own `abbreviations` array -- confirmed real gap: several
+            // teams (e.g. Maryland's "MRLD"/"UMD") declare abbreviations there that were never
+            // copied into the shared alias_index map above, so IntakeEngine could never actually
+            // match them despite the data existing right next to it.
+            foreach (var (teamName, data) in _teams)
+                foreach (var abbr in data.Abbreviations)
+                    AddAlias(abbr, teamName);
         }
 
         if (File.Exists(triggerMapPath))
@@ -145,7 +164,11 @@ public static class IntakeEngine
         return string.Join(' ', result);
     }
 
-    public static (string Team, string Conference, string MatchType) ResolveTeam(string? name)
+    /// <summary>conferenceHint (see GuessConferenceHint) disambiguates an alias multiple teams
+    /// claim -- e.g. "UM" is Michigan in a Big Ten pack but Miami elsewhere, "OSU" is Ohio State,
+    /// Oklahoma State, or Oregon State depending which. Without a hint (or no candidate matches
+    /// it), falls back to the first candidate, same as the old single-value behavior.</summary>
+    public static (string Team, string Conference, string MatchType) ResolveTeam(string? name, string? conferenceHint = null)
     {
         EnsureLoaded();
         if (string.IsNullOrWhiteSpace(name)) return ("Unknown", "General", "unknown");
@@ -154,8 +177,18 @@ public static class IntakeEngine
         if (_teams!.TryGetValue(nameClean, out var exact))
             return (nameClean, exact.Conference, "exact");
 
-        if (_aliasIndex!.TryGetValue(nameClean.ToUpperInvariant(), out var resolved) && _teams.TryGetValue(resolved, out var aliasTeam))
-            return (resolved, aliasTeam.Conference, "abbreviation");
+        if (_aliasIndex!.TryGetValue(nameClean.ToUpperInvariant(), out var candidates) && candidates.Count > 0)
+        {
+            string chosen = candidates[0];
+            if (conferenceHint != null)
+            {
+                var confMatch = candidates.FirstOrDefault(c =>
+                    _teams.TryGetValue(c, out var d) && string.Equals(d.Conference, conferenceHint, StringComparison.OrdinalIgnoreCase));
+                if (confMatch != null) chosen = confMatch;
+            }
+            if (_teams.TryGetValue(chosen, out var aliasTeam))
+                return (chosen, aliasTeam.Conference, "abbreviation");
+        }
 
         foreach (var (teamName, data) in _teams)
         {
@@ -262,7 +295,7 @@ public static class IntakeEngine
     {
         EnsureLoaded();
         var cleaned = CleanTitle(originalFilename);
-        var (team, _, matchType) = ResolveTeam(GuessTeamToken(originalFilename));
+        var (team, _, matchType) = ResolveTeam(GuessTeamToken(originalFilename), GuessConferenceHint(originalFilename));
         var (trigger, source) = MapTrigger(originalFilename);
         var confidence = ComputeConfidence(cleaned, matchType, source);
 
@@ -275,11 +308,57 @@ public static class IntakeEngine
         return new IntakeResult(cleaned, team, matchType, trigger, source, EventKeysFor(trigger), confidence, flags.ToArray());
     }
 
+    /// <summary>True if `alias` appears in `lowerText` without being embedded in a longer run of
+    /// letters on either side -- e.g. "nw" matches "b1g nw '21" (space-delimited) but not inside
+    /// "answer". Digits/punctuation/apostrophes are fine neighbors (matches "clem4thdown"'s
+    /// glued-to-a-digit style on purpose, see GuessTeamToken's original design note) -- this is
+    /// deliberately looser than a strict regex \b word boundary (where letter-to-digit isn't a
+    /// boundary at all) so that still works, while finally making short 2-letter aliases like
+    /// "NW"/"UM"/"UW" safe to check at all (they were blanket-excluded below length 3 before,
+    /// which is why Northwestern silently never matched despite being in the alias table).</summary>
+    private static bool ContainsAliasToken(string lowerText, string aliasLower)
+    {
+        int idx = 0;
+        while ((idx = lowerText.IndexOf(aliasLower, idx, StringComparison.Ordinal)) >= 0)
+        {
+            bool leftOk = idx == 0 || !char.IsLetter(lowerText[idx - 1]);
+            int endIdx = idx + aliasLower.Length;
+            bool rightOk = endIdx >= lowerText.Length || !char.IsLetter(lowerText[endIdx]);
+            if (leftOk && rightOk) return true;
+            idx++;
+        }
+        return false;
+    }
+
+    /// <summary>Recognizes a conference name baked into the filename (e.g. pack files named
+    /// "b1g ala '21 ...") so ResolveTeam can pick the right team when an alias is genuinely
+    /// ambiguous across conferences (see ResolveTeam's conferenceHint doc). Best-effort only --
+    /// null just means no hint was found, ResolveTeam falls back to its default candidate.</summary>
+    private static readonly (string token, string conference)[] ConferenceHintTokens =
+    {
+        ("b1g", "Big Ten"), ("bigten", "Big Ten"),
+        ("sec", "SEC"),
+        ("acc", "ACC"),
+        ("big12", "Big 12"),
+        ("pac12", "Pac-12"), ("pac", "Pac-12"),
+    };
+
+    private static string? GuessConferenceHint(string filename)
+    {
+        var lower = Path.GetFileNameWithoutExtension(filename).ToLowerInvariant();
+        foreach (var (token, conference) in ConferenceHintTokens)
+            if (ContainsAliasToken(lower, token)) return conference;
+        return null;
+    }
+
     /// <summary>Best-effort scan of a raw filename for a team name/abbreviation token, so
     /// ResolveTeam has something to try even though ImportLocalSongFromWeb doesn't collect an
     /// explicit team field today (see ConfigStore.cs -- team is implied by profile file, not a
     /// TriggerEntry field). Checks the whole registry rather than word-splitting, since team
-    /// names/abbreviations can appear glued to other text (e.g. "clem4thdown").</summary>
+    /// names/abbreviations can appear glued to other text (e.g. "clem4thdown"). Returns the raw
+    /// alias/name token found, NOT a pre-resolved team -- ResolveTeam owns actual resolution
+    /// (including conference-hint disambiguation for an alias multiple teams claim), so this
+    /// can't shortcut past that by resolving the alias itself.</summary>
     private static string GuessTeamToken(string filename)
     {
         EnsureLoaded();
@@ -290,10 +369,10 @@ public static class IntakeEngine
             if (lower.Contains(teamName.ToLowerInvariant()))
                 return teamName;
         }
-        foreach (var (alias, team) in _aliasIndex!)
+        foreach (var alias in _aliasIndex!.Keys)
         {
-            if (alias.Length >= 3 && lower.Contains(alias.ToLowerInvariant()) && _teams.ContainsKey(team))
-                return team;
+            if (ContainsAliasToken(lower, alias.ToLowerInvariant()))
+                return alias;
         }
         return "";
     }

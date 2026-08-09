@@ -228,11 +228,18 @@ internal static class DefaultSongPackService
                     var result = IntakeEngine.Process(Path.GetFileName(file));
                     if (result.Team == "Unknown") { unmatchedCount++; continue; }
 
-                    if (result.SuggestedEventKeys.Length == 0)
+                    // Verified against a real 174-file Big Ten pack: MapTrigger's keyword list
+                    // misses plenty of real filenames ("1st dwn", "KO", "3rd dwn old" -- shorthand
+                    // never in KeywordMap) and falls back to GENERAL_HYPE, which itself maps to
+                    // "Start of Quarter"/"Drive Starter" event keys -- 110 of 174 files in that
+                    // test would have auto-filled those two slots with essentially random,
+                    // unrelated clips (whichever file won the collision first). A fallback trigger
+                    // means "no real keyword match", not "confidently a hype clip" -- must not be
+                    // auto-assigned to a specific slot on that guess. File it under the team by its
+                    // own name instead, same as the no-suggestion case below, so it's still
+                    // browsable/manually assignable rather than silently landing somewhere wrong.
+                    if (result.SuggestedEventKeys.Length == 0 || result.TriggerSource == "fallback")
                     {
-                        // No situation guess at all -- still file it under the team (by original
-                        // name) so it shows up in that team's library for manual assignment,
-                        // rather than silently dropping a file we DID identify the team for.
                         CopyFile(file, result.Team, Path.GetFileNameWithoutExtension(file));
                         continue;
                     }
