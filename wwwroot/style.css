@@ -88,9 +88,6 @@ button:focus-visible, .team-swatch:focus-visible, .rail-item:focus-visible,
   .btn-ghost:hover { background: rgba(0,0,0,0.08); }
   .pill { background: rgba(0,0,0,0.04); color: var(--text-muted); }
   .pill:hover { background: rgba(0,0,0,0.08); }
-  .marketplace-sort-tab { color: var(--text-muted); }
-  .marketplace-sort-tab.active { color: #06222a; }
-  .marketplace-filter-chip { background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.12); }
   .whats-new-card { background: rgba(0,0,0,0.03); }
   ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); }
   * { scrollbar-color: rgba(0,0,0,0.15) transparent; }
@@ -333,8 +330,7 @@ button:focus-visible, .team-swatch:focus-visible, .rail-item:focus-visible,
    ================================================================ */
 button, .rail-item, .team-swatch, .category-row, .situation-row,
 .marketplace-card, .bandroom-item-tile, .bandroom-slot, .pill,
-.marketplace-sort-tab, .marketplace-filter-chip, .reverb-tile,
-.matchup-side-btn, .wc-btn {
+.reverb-tile, .matchup-side-btn, .wc-btn {
   cursor: pointer;
 }
 input, select, textarea, [contenteditable] {
@@ -1870,42 +1866,6 @@ input, select, textarea, [contenteditable] {
 }
 .marketplace-card-actions .btn-ghost {
   flex: 1; text-align: center; padding: 6px 10px; font-size: 11.5px;
-}
-
-/* Marketplace sort/filter bar */
-.marketplace-toolbar {
-  display: flex; align-items: center; gap: 10px;
-  margin-bottom: 14px; flex: 0 0 auto; flex-wrap: wrap;
-}
-.marketplace-sort-tabs {
-  display: flex; gap: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 999px; padding: 3px;
-}
-.marketplace-sort-tab {
-  padding: 6px 14px; border-radius: 999px; border: none;
-  background: transparent; color: var(--text-muted-2);
-  font-size: 11.5px; font-weight: 600; cursor: pointer;
-  white-space: nowrap;
-}
-.marketplace-sort-tab.active {
-  background: var(--team-secondary, var(--accent));
-  color: #06222a;
-}
-.marketplace-filter-chips {
-  display: flex; gap: 6px; margin-left: auto;
-}
-.marketplace-filter-chip {
-  padding: 5px 12px; border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-muted-2); font-size: 11px; font-weight: 600;
-  cursor: pointer; white-space: nowrap;
-}
-.marketplace-filter-chip.active {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-  border-color: rgba(255, 255, 255, 0.2);
 }
 
 /* My Downloads team grouping headers */
