@@ -1886,6 +1886,13 @@ input, select, textarea, [contenteditable] {
   font-size: 13px;
   line-height: 1.6;
 }
+.bandroom-error-state {
+  color: rgba(255, 138, 128, 0.85);
+}
+.bandroom-error-state .bandroom-item-action {
+  margin-left: 6px;
+  display: inline-flex;
+}
 
 .bandroom-slot {
   aspect-ratio: 1;

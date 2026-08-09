@@ -480,9 +480,21 @@ internal static class ConfigStore
         try
         {
             string json = File.ReadAllText(MarketplaceDownloadsManifestPath);
-            return JsonSerializer.Deserialize<List<MarketplaceDownloadEntry>>(json, JsonOptions) ?? new List<MarketplaceDownloadEntry>();
+            var entries = JsonSerializer.Deserialize<List<MarketplaceDownloadEntry>>(json, JsonOptions) ?? new List<MarketplaceDownloadEntry>();
+            return PruneMissingFiles(entries, e => e.Path, SaveMarketplaceDownloads);
         }
         catch { return new List<MarketplaceDownloadEntry>(); } // corrupt manifest shouldn't crash the whole downloads tab
+    }
+
+    /// <summary>Self-heals "My Downloads" disk-drift: if a manifest entry's backing file has been
+    /// deleted/moved outside the app, the entry would otherwise keep showing up in My Downloads
+    /// forever as a "download" that immediately 404s when clicked. Every load drops entries whose
+    /// file no longer exists and persists the pruned list.</summary>
+    static List<T> PruneMissingFiles<T>(List<T> entries, Func<T, string> pathOf, Action<List<T>> save)
+    {
+        var alive = entries.Where(e => File.Exists(pathOf(e))).ToList();
+        if (alive.Count != entries.Count) save(alive);
+        return alive;
     }
 
     static void SaveMarketplaceDownloads(List<MarketplaceDownloadEntry> entries)
@@ -561,7 +573,8 @@ internal static class ConfigStore
         try
         {
             string json = File.ReadAllText(LocalTracksManifestPath);
-            return JsonSerializer.Deserialize<List<LocalTrackEntry>>(json, JsonOptions) ?? new List<LocalTrackEntry>();
+            var entries = JsonSerializer.Deserialize<List<LocalTrackEntry>>(json, JsonOptions) ?? new List<LocalTrackEntry>();
+            return PruneMissingFiles(entries, e => e.Path, SaveLocalTracks);
         }
         catch { return new List<LocalTrackEntry>(); } // corrupt manifest shouldn't crash the downloads tab
     }

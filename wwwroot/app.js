@@ -1699,17 +1699,25 @@ function marketplaceGuard(fn, label) {
 // a network hiccup returns an empty list instead of throwing, since marketplaceGuard's job is
 // to keep the UI alive, not to surface raw fetch errors to the user.
 async function fetchUploadList(type, school, sort) {
+  const result = await fetchUploadListDetailed(type, school, sort);
+  return result.items;
+}
+
+// Same as fetchUploadList, but also reports whether the fetch itself failed -- callers that need
+// to tell "the worker said this team really has zero uploads" apart from "the fetch failed" (no
+// false empty states) should use this instead.
+async function fetchUploadListDetailed(type, school, sort) {
   try {
     const qs = new URLSearchParams({ type });
     if (school) qs.set("school", school);
     if (sort) qs.set("sort", sort);
     const res = await fetch(`${MARKETPLACE_URL}/list?${qs}`);
-    if (!res.ok) return [];
+    if (!res.ok) return { items: [], error: true };
     const data = await res.json();
-    return Array.isArray(data.items) ? data.items : [];
+    return { items: Array.isArray(data.items) ? data.items : [], error: false };
   } catch (err) {
     console.error(`fetchUploadList(${type}) failed`, err);
-    return [];
+    return { items: [], error: true };
   }
 }
 
@@ -3152,17 +3160,22 @@ function closeTeamAlbum() {
 // search box (item 7) can filter instantly client-side instead of re-hitting the worker on every
 // keystroke.
 let _albumItemsCache = { songs: [], images: [] };
+// Whether the *last* fetch failed (vs. genuinely returned zero items) -- a fetch error must
+// render as an explicit retry state, not silently collapse into the same "no uploads yet" empty
+// state a real empty team gets. Reset on every fresh fetch.
+let _albumFetchError = false;
 
 async function renderTeamAlbumGrid() {
   const grid = document.getElementById("bandroom-songs-grid");
   const team = albumTeam;
   grid.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
-  const [songs, images] = await Promise.all([
-    fetchUploadList("song", team.name),
-    fetchUploadList("image", team.name),
+  const [songsResult, imagesResult] = await Promise.all([
+    fetchUploadListDetailed("song", team.name),
+    fetchUploadListDetailed("image", team.name),
   ]);
   if (!albumTeam || albumTeam !== team) return; // closed/switched while awaiting
-  _albumItemsCache = { songs, images };
+  _albumItemsCache = { songs: songsResult.items, images: imagesResult.items };
+  _albumFetchError = songsResult.error || imagesResult.error;
   paintAlbumGrid(getAlbumSearchFilter());
 }
 
@@ -3181,7 +3194,19 @@ function paintAlbumGrid(filter) {
   const items = filter ? all.filter((it) => it.name.toLowerCase().includes(filter)) : all;
 
   grid.innerHTML = "";
-  if (all.length === 0) {
+  if (_albumFetchError && all.length === 0) {
+    // Distinct from the "genuinely zero uploads" case below -- offers a retry instead of
+    // implying there's really nothing here.
+    const errorState = document.createElement("div");
+    errorState.className = "bandroom-empty-state bandroom-error-state";
+    errorState.textContent = `Couldn't load ${team.name}'s uploads -- check your connection. `;
+    const retryBtn = document.createElement("button");
+    retryBtn.className = "bandroom-item-action";
+    retryBtn.textContent = "Retry";
+    retryBtn.addEventListener("click", () => renderTeamAlbumGrid());
+    errorState.appendChild(retryBtn);
+    grid.appendChild(errorState);
+  } else if (all.length === 0) {
     const empty = document.createElement("div");
     empty.className = "bandroom-empty-state";
     empty.textContent = `Nothing uploaded for ${team.name} yet -- be the first!`;
