@@ -2281,10 +2281,16 @@ input, select, textarea, [contenteditable] {
   /* margin-top: auto alone only pushes the pill via flex ordering -- .side-panel is
      overflow-y: auto, so on a tall sidebar the pill would scroll out of view along with
      everything else instead of staying reachable. position: sticky pins it to the bottom
-     of the scrollable area itself regardless of content length. */
+     of the scrollable area itself regardless of content length.
+     bottom: 44px (not 0) -- #bandroom-ticker is `position: fixed; bottom: 0; height: 44px;
+     z-index: 50`, well above this pill's z-index: 1. At bottom: 0 the ticker painted directly
+     on top of the pill, making it invisible and unclickable in the real app (only reachable in
+     a screenshot with no ticker/scaled viewport) -- confirmed by a live owner screenshot where
+     the pill never rendered. Offsetting by the ticker's own height sits the pill just above it
+     instead of underneath. */
   margin-top: auto;
   position: sticky;
-  bottom: 0;
+  bottom: 44px;
   z-index: 1;
   flex: 0 0 auto;
   display: flex;
