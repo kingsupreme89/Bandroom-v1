@@ -247,6 +247,29 @@ internal sealed class GameWatcher
         // (Auburn @ Georgia Tech) -- estimated by eye from the images, not pixel-measured, so
         // treat these as a starting point that likely needs a small live-tightening pass, not
         // as exact. Same FxY/FxH as the wide band above since the score bug shares one row.
+        // Pregame team-intro/"READY" screen -- UNCALIBRATED PLACEHOLDER. FxX/FxY/FxW/FxH below
+        // are NOT measured from a live screenshot of the CFB27 pregame READY screen and must be
+        // treated as 0 (Calibrated => false, so this region is skipped entirely until someone
+        // fills these in) -- see the "flag"/"banner" regions above for the same honest-flagging
+        // pattern before they got calibrated, and ScorebugPreset.ConsoleScorebugV1's doc comment
+        // for the project's convention of saying so explicitly instead of guessing.
+        //
+        // CRITICAL: when calibrating this for real, the crop box AND the regex below must both
+        // stay anchored on team-color-INDEPENDENT elements only -- the READY screen's side panels
+        // are colored per-matchup (e.g. red/blue for Ohio State vs Michigan, completely different
+        // colors for any other pairing), so this must never key off panel color. Anchor on the
+        // "READY" text's fixed screen position instead (or a center rivalry/game-name badge, or
+        // the ratings-badge layout -- whatever is confirmed team-neutral from a real screenshot).
+        // This project already had to fix three bugs this session caused by exactly the opposite
+        // mistake (color-matching something that isn't actually team-neutral) -- see commit
+        // b6e1c8f ("Fix dead TFL/Defense/BigEvent signal, kickoff OCR word-split, and possession
+        // misread during situation banners"). Do not repeat that pattern here.
+        new WatchedRegion
+        {
+            Name = "pregameready",
+            FxX = 0, FxY = 0, FxW = 0, FxH = 0,
+            Pattern = new Regex(@"\bREADY\b", RegexOptions.IgnoreCase),
+        },
         new WatchedRegion
         {
             Name = "awayscore",
@@ -778,6 +801,7 @@ internal sealed class GameWatcher
         var situationRegion = _regions.FirstOrDefault(r => r.Name == "situation");
         var clockRegion = _regions.FirstOrDefault(r => r.Name == "clock");
         var penaltyAgainstRegion = _regions.FirstOrDefault(r => r.Name == "penaltyagainst");
+        var pregameReadyRegion = _regions.FirstOrDefault(r => r.Name == "pregameready");
 
         int down = ParseOrdinal(_lastKnownDown);
         int quarter = ParseOrdinal(_lastKnownQuarter);
@@ -846,6 +870,11 @@ internal sealed class GameWatcher
             IsNoPuntReturn = situation == "nopuntreturn",
             IsPenaltyOnOffense = isPenaltyOnOffense,
             IsPenaltyOnDefense = isPenaltyOnDefense,
+            // Not sticky like _lastKnownDown/_lastKnownAwayScore/etc: the READY screen is a
+            // one-shot pregame overlay, not a value that legitimately needs to survive a blank
+            // OCR tick, so PregameHelper's edge-trigger (Previous.IsPregameReady == false &&
+            // Current.IsPregameReady == true) reading straight off region.Last is correct here.
+            IsPregameReady = pregameReadyRegion?.Last == "ready",
             YardLine = 0,
             HomeScore = homeScore,
             AwayScore = awayScore,
@@ -889,6 +918,7 @@ internal sealed class GameWatcher
             new OffenseDownHelper(),
             new NoPuntReturnHelper(),
             new PenaltyHelper(),
+            new PregameHelper(),
             new SafetyHelper(),
             new TflHelper(),
             new TimeoutHelper(),
