@@ -944,6 +944,11 @@
       </div>
     </div>
   </div>
+  <!-- Owner report: imports finished before the old 3-milestone progress bar (5%/90%/100%) ever
+       moved, so it looked like nothing was happening, and the completion message auto-hid after
+       3-6s -- easy to miss entirely. Now shows the actual filename being processed as it goes
+       (songpack-progress-filelog) and stays open until dismissed (btn-songpack-progress-done),
+       with an opt-out (songpack-progress-skip-future) for anyone who'd rather it just toast. -->
   <div id="songpack-progress-overlay" hidden>
     <div id="songpack-progress-dialog" class="glass">
       <div class="update-header" id="songpack-progress-header"><span class="songpack-led"></span><span id="songpack-progress-title">Downloading song pack&hellip;</span></div>
@@ -951,6 +956,14 @@
         <div class="update-progress-fill" id="songpack-progress-fill" style="width:0%"></div>
       </div>
       <p class="update-sub" id="songpack-progress-sub">Hang tight -- this is a big one-time download.</p>
+      <div id="songpack-progress-filelog"></div>
+      <div id="songpack-progress-done-actions" hidden>
+        <label id="songpack-progress-skip-label">
+          <input type="checkbox" id="songpack-progress-skip-future" />
+          Don't show this popup next time (just notify me quietly)
+        </label>
+        <button id="btn-songpack-progress-done" class="btn-primary">Got it</button>
+      </div>
     </div>
   </div>
 

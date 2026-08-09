@@ -919,8 +919,8 @@ public sealed class WebMainForm : Form
                 RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:songpackimporting'))"));
 
                 bool ok = await DefaultSongPackService.ExtractExistingZipAsync(zipPath,
-                    frac => RunOnUi(() => _ = _webView.ExecuteScriptAsync(
-                        $"window.dispatchEvent(new CustomEvent('bandroom:songpackimportprogress', {{ detail: {{ fraction: {frac.ToString(System.Globalization.CultureInfo.InvariantCulture)} }} }}))")),
+                    (frac, file) => RunOnUi(() => _ = _webView.ExecuteScriptAsync(
+                        $"window.dispatchEvent(new CustomEvent('bandroom:songpackimportprogress', {{ detail: {{ fraction: {frac.ToString(System.Globalization.CultureInfo.InvariantCulture)}, file: {System.Text.Json.JsonSerializer.Serialize(file)} }} }}))")),
                     _lifetimeCts.Token);
 
                 RunOnUi(() => _ = _webView.ExecuteScriptAsync(
@@ -947,8 +947,8 @@ public sealed class WebMainForm : Form
                 RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:songpackimporting'))"));
 
                 var result = await DefaultSongPackService.ImportExistingFolderAsync(folderPath,
-                    frac => RunOnUi(() => _ = _webView.ExecuteScriptAsync(
-                        $"window.dispatchEvent(new CustomEvent('bandroom:songpackimportprogress', {{ detail: {{ fraction: {frac.ToString(System.Globalization.CultureInfo.InvariantCulture)} }} }}))")),
+                    (frac, file) => RunOnUi(() => _ = _webView.ExecuteScriptAsync(
+                        $"window.dispatchEvent(new CustomEvent('bandroom:songpackimportprogress', {{ detail: {{ fraction: {frac.ToString(System.Globalization.CultureInfo.InvariantCulture)}, file: {System.Text.Json.JsonSerializer.Serialize(file)} }} }}))")),
                     _lifetimeCts.Token);
 
                 string msgJson = System.Text.Json.JsonSerializer.Serialize(result.Message);

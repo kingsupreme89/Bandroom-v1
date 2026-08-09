@@ -100,13 +100,13 @@ internal static class DefaultSongPackService
     /// DownloadAndExtractAsync's tail end, split out so the browser-download path doesn't need
     /// the HTTP half. progress(fractionComplete) is called at coarse milestones only --
     /// ZipFile.ExtractToDirectory has no per-entry callback to report finer-grained progress.</summary>
-    public static Task<bool> ExtractExistingZipAsync(string zipPath, Action<double> progress, CancellationToken ct)
+    public static Task<bool> ExtractExistingZipAsync(string zipPath, Action<double, string> progress, CancellationToken ct)
     {
         return Task.Run(() =>
         {
             if (!File.Exists(zipPath)) return false;
 
-            progress(0.05);
+            progress(0.05, "");
             Directory.CreateDirectory(ConfigStore.UserDataRoot);
             string tempExtractRoot = Path.Combine(ConfigStore.UserDataRoot, "_songpack_import_tmp");
             if (Directory.Exists(tempExtractRoot)) Directory.Delete(tempExtractRoot, recursive: true);
@@ -114,7 +114,7 @@ internal static class DefaultSongPackService
 
             ZipFile.ExtractToDirectory(zipPath, tempExtractRoot, overwriteFiles: true);
             ct.ThrowIfCancellationRequested();
-            progress(0.85);
+            progress(0.85, "");
 
             // The pack zips "Default\..." at its root -- accept that either directly or nested
             // one level under a "Songs\Default" folder (matches the R2 pack.zip's own layout).
@@ -132,7 +132,7 @@ internal static class DefaultSongPackService
             Directory.Move(extractedTo, ConfigStore.DownloadedDefaultSongsFolder);
             Directory.Delete(tempExtractRoot, recursive: true);
 
-            progress(1.0);
+            progress(1.0, "");
             return true;
         }, ct);
     }
@@ -149,13 +149,13 @@ internal static class DefaultSongPackService
     /// nested one level under "Default" or "Songs\Default" like the zip flow), a folder of team
     /// folders with no conference level (Team\*.mp3), or a single team's folder with the audio
     /// files directly inside it (e.g. the user pointed us straight at "Alabama").</summary>
-    public static Task<FolderImportResult> ImportExistingFolderAsync(string folderPath, Action<double> progress, CancellationToken ct)
+    public static Task<FolderImportResult> ImportExistingFolderAsync(string folderPath, Action<double, string> progress, CancellationToken ct)
     {
         return Task.Run(() =>
         {
             if (!Directory.Exists(folderPath))
                 return new FolderImportResult(false, "That folder doesn't exist.", new List<string>(), 0);
-            progress(0.05);
+            progress(0.05, "");
 
             string root = folderPath;
             string nested = Path.Combine(folderPath, "Default");
@@ -170,6 +170,13 @@ internal static class DefaultSongPackService
             var teamsImported = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int songCount = 0;
             int unmatchedCount = 0;
+            // Set once the full file list is known (below, right before the copy loop starts) --
+            // CopyFile reads it live via closure capture so per-file progress(fraction, filename)
+            // calls can report real percentages instead of jumping straight from 5% to 90% with
+            // nothing in between (owner report: an import "just finished" with no visible progress
+            // or filenames scrolling by, because that's literally all this used to report).
+            int totalFiles = 0;
+            int processedFiles = 0;
 
             bool HasAudioFilesDirectly(string dir) =>
                 Directory.Exists(dir) && Directory.EnumerateFiles(dir).Any(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()));
@@ -198,6 +205,8 @@ internal static class DefaultSongPackService
                 File.Copy(sourceFile, destPath, overwrite: true);
                 songCount++;
                 teamsImported.Add(team);
+                processedFiles++;
+                progress(0.05 + 0.85 * Math.Min(1.0, (double)processedFiles / Math.Max(1, totalFiles)), Path.GetFileName(sourceFile));
             }
 
             // Bulk-copies a folder that already IS one team's own folder (its files keep their
@@ -267,6 +276,9 @@ internal static class DefaultSongPackService
             }
             if (Directory.Exists(root)) Scan(root, 0);
 
+            totalFiles = audioDirs.Sum(d => Directory.EnumerateFiles(d)
+                .Count(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())));
+
             foreach (var dir in audioDirs)
             {
                 var (resolvedTeam, _, matchType) = IntakeEngine.ResolveTeam(new DirectoryInfo(dir).Name);
@@ -275,7 +287,7 @@ internal static class DefaultSongPackService
                 else
                     ClassifyFolderByFilename(dir);
             }
-            progress(0.9);
+            progress(0.9, "");
 
             if (songCount == 0)
             {
@@ -303,7 +315,7 @@ internal static class DefaultSongPackService
             foreach (var t in teamsImported) allTeams.Add(t);
             File.WriteAllText(indexPath, System.Text.Json.JsonSerializer.Serialize(new { Teams = allTeams.OrderBy(t => t).ToList() }));
 
-            progress(1.0);
+            progress(1.0, "");
             var names = teamsImported.OrderBy(t => t).ToList();
             string msg = names.Count == 1
                 ? $"Imported {songCount} song{(songCount == 1 ? "" : "s")} for {names[0]}. Open {names[0]}'s Assign panel -- matching situations are already filled in."

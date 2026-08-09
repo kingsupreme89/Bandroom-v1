@@ -3285,6 +3285,12 @@ function initClipperAssign() {
 
 // Optional one-time default song pack download (see DefaultSongPackService.cs). Pulled out of
 // the installer as of v1.0.48 to stay under GitHub Releases' 2GB asset cap.
+// Opt-out for the import progress/confirmation popups (owner request: "with the option to turn
+// off pop ups") -- purely a local display preference, not app data worth round-tripping through
+// ConfigStore/the bridge for. When set, imports still run identically, they just report through a
+// single toast instead of holding the dialog open for a manual "Got it" dismiss.
+const SONGPACK_POPUP_SKIP_KEY = "bandroom:hideSongpackProgressPopup";
+
 function initDefaultSongPackPrompt() {
   const promptOverlay = document.getElementById("songpack-prompt-overlay");
   const importOverlay = document.getElementById("songpack-import-overlay");
@@ -3292,6 +3298,16 @@ function initDefaultSongPackPrompt() {
   const progressTitle = document.getElementById("songpack-progress-title");
   const progressFill = document.getElementById("songpack-progress-fill");
   const progressSub = document.getElementById("songpack-progress-sub");
+  const fileLog = document.getElementById("songpack-progress-filelog");
+  const doneActions = document.getElementById("songpack-progress-done-actions");
+  const skipFutureCheckbox = document.getElementById("songpack-progress-skip-future");
+  let popupsSkipped = localStorage.getItem(SONGPACK_POPUP_SKIP_KEY) === "1";
+
+  document.getElementById("btn-songpack-progress-done").addEventListener("click", () => {
+    progressOverlay.hidden = true;
+    localStorage.setItem(SONGPACK_POPUP_SKIP_KEY, skipFutureCheckbox.checked ? "1" : "0");
+    popupsSkipped = skipFutureCheckbox.checked;
+  });
 
   (async () => {
     if (!bridge) return;
@@ -3325,29 +3341,46 @@ function initDefaultSongPackPrompt() {
   });
 
   window.addEventListener("bandroom:songpackdownloading", () => {
+    if (popupsSkipped) return;
     progressTitle.textContent = "Downloading song pack…";
     progressFill.style.width = "0%";
     progressSub.textContent = "Hang tight -- this is a big one-time download.";
+    fileLog.innerHTML = "";
+    doneActions.hidden = true;
     progressOverlay.hidden = false;
   });
   window.addEventListener("bandroom:songpackprogress", (e) => {
+    if (popupsSkipped) return;
     const { fraction, downloaded, total } = e.detail;
     progressFill.style.width = `${Math.max(0, Math.min(100, fraction * 100))}%`;
     const fmt = (b) => `${(b / 1073741824).toFixed(1)} GB`;
     progressSub.textContent = `${fmt(downloaded)} of ${fmt(total)}`;
   });
   window.addEventListener("bandroom:songpackimporting", () => {
+    if (popupsSkipped) return;
     progressTitle.textContent = "Unpacking song pack…";
     progressFill.style.width = "5%";
     progressSub.textContent = "Extracting and indexing every team's songs.";
+    fileLog.innerHTML = "";
+    doneActions.hidden = true;
     progressOverlay.hidden = false;
   });
+  // Live filename feed (owner report: nothing showed a file was even being touched between the
+  // old 5%/90% milestones) -- appends the file just processed, keeps the last 8 lines so a
+  // 100+ file pack doesn't grow the dialog unbounded, auto-scrolls to the newest.
   window.addEventListener("bandroom:songpackimportprogress", (e) => {
+    if (popupsSkipped) return;
     progressFill.style.width = `${Math.max(0, Math.min(100, e.detail.fraction * 100))}%`;
+    const file = e.detail?.file;
+    if (file) {
+      const line = document.createElement("span");
+      line.textContent = file;
+      fileLog.appendChild(line);
+      while (fileLog.children.length > 8) fileLog.removeChild(fileLog.firstChild);
+      fileLog.scrollTop = fileLog.scrollHeight;
+    }
   });
   window.addEventListener("bandroom:songpackready", async (e) => {
-    progressTitle.textContent = "Song pack ready";
-    progressFill.style.width = "100%";
     // Task queue item 7a (Session 10): be explicit about WHERE the files landed and WHAT
     // auto-fill actually does -- "every team can now auto-fill" was true but didn't say the pack
     // only fills events you haven't already assigned yourself (see ConfigStore.
@@ -3364,13 +3397,23 @@ function initDefaultSongPackPrompt() {
       if (path) folderLine = ` Files live at: ${path}.`;
     } catch (err) { console.error("GetDefaultSongsFolderPath failed", err); }
     const specific = e.detail?.message;
-    progressSub.textContent = specific
+    const fullMessage = specific
       ? `${specific}${folderLine}`
       : `Every team can now auto-fill any situation you haven't already assigned a song to yourself -- it never overwrites your own picks.${folderLine}`;
-    // Longer hold when there's a specific "go check X team" instruction to actually read.
-    setTimeout(() => { progressOverlay.hidden = true; }, specific ? 6000 : 3200);
     refreshCategories?.();
-    if (specific) showToast(specific);
+    if (popupsSkipped) {
+      showToast(specific || "Song pack imported.");
+      return;
+    }
+    // No auto-hide timer (owner report: the old 3.2-6s auto-dismiss was easy to miss entirely) --
+    // stays open until the owner clicks "Got it", same as every other confirm-to-dismiss dialog
+    // in this app.
+    progressTitle.textContent = "✅ Song pack imported!";
+    progressFill.style.width = "100%";
+    progressSub.textContent = fullMessage;
+    skipFutureCheckbox.checked = false;
+    doneActions.hidden = false;
+    progressOverlay.hidden = false;
   });
   window.addEventListener("bandroom:songpackfailed", () => {
     progressOverlay.hidden = true;

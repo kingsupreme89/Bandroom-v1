@@ -18,7 +18,12 @@
   --glass-blur: 26px;
   --header-h: 56px;
   --rail-w: 88px;
-  --side-w: 240px;
+  /* Was a fixed 240px with no responsive shrink -- at a narrower window the panel just clipped/
+     overflowed past the viewport instead of adapting (body has overflow:hidden, so the excess
+     wasn't scrollable either, just invisible), which read as a big blank gap between the rail
+     and wherever content actually ended up. clamp() lets both side panels (#left-panel,
+     #adjust-panel share this var) shrink gracefully instead. */
+  --side-w: clamp(180px, 16vw, 240px);
   --radius-panel: 24px;
   --radius-card: 14px;
 
@@ -3081,6 +3086,41 @@ input, select, textarea, [contenteditable] {
 #songpack-progress-overlay .update-sub {
   font-size: 15px;
   line-height: 1.65;
+}
+/* Live filename feed -- each processed file gets appended as a line and auto-scrolls, so the
+   dialog visibly does something the whole time instead of sitting still between the 5% and 90%
+   milestones. Capped height (not unbounded) since a big pack can process 100+ files. */
+#songpack-progress-filelog {
+  margin-top: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: "Consolas", "SFMono-Regular", monospace;
+  color: var(--text-muted-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#songpack-progress-filelog:empty { display: none; }
+#songpack-progress-filelog span:last-child { color: var(--text-primary); }
+#songpack-progress-done-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+}
+#songpack-progress-skip-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
 }
 .songpack-steps {
   font-size: 15px;
