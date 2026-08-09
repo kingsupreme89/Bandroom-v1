@@ -797,6 +797,28 @@ public sealed class WebMainForm : Form
             AudioPlayer.Play(path, AudioPlayer.MasterVolume, interruptPrevious: true, isPreview: true);
     }
 
+    /// <summary>Soundboard bar (currently hidden via #soundboard-bar[hidden] -- not yet a shipped
+    /// feature) plays a user-assigned favorite by key. Was calling a bridge method that didn't
+    /// exist (bridge?.PlaySoundboardSlot), which would have thrown the moment the bar is
+    /// unhidden. Same fire-and-forget path as PreviewLocalFileFromWeb above, since a soundboard
+    /// hit is conceptually the same as a manual preview -- play immediately, interrupt whatever's
+    /// already playing.</summary>
+    public void PlaySoundboardSlotFromWeb(string key, string path)
+    {
+        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            AudioPlayer.Play(path, AudioPlayer.MasterVolume, interruptPrevious: true, isPreview: true);
+    }
+
+    /// <summary>Dynasty-mode save-file scanning (currently has no caller anywhere in app.js --
+    /// unreachable UI, same "coded but never wired" state as the soundboard bar). Was calling a
+    /// bridge method that didn't exist (bridge.ScanDynastySave). There is no actual CFB27 dynasty
+    /// save-file format parser anywhere in this codebase -- reverse-engineering that format is a
+    /// real, separate feature, not something to fake here. Returns null (the JS caller's existing
+    /// .catch() already renders that as "No dynasty save found") instead of throwing, so a future
+    /// UI hookup doesn't crash the instant it's wired up -- it'll just honestly report nothing
+    /// found until a real parser exists.</summary>
+    public Task<string?> ScanDynastySaveFromWeb() => Task.FromResult<string?>(null);
+
     public void AssignTrackFileFromWeb(string trigger, bool isPa, string path)
     {
         var entry = _config.FirstOrDefault(e => e.Trigger == trigger);

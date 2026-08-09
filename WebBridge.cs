@@ -1022,6 +1022,8 @@ public sealed class WebBridge
     // assign path (see initClipperIsland in app.js). Trim still opens the real TrimmerForm.
     public string GetTrackLibrary() => _host.GetTrackLibraryFromWeb();
     public void PreviewLocalFile(string path) => _host.PreviewLocalFileFromWeb(path);
+    public void PlaySoundboardSlot(string key, string path) => _host.PlaySoundboardSlotFromWeb(key, path);
+    public Task<string?> ScanDynastySave() => _host.ScanDynastySaveFromWeb();
     public void AssignTrackFile(string trigger, bool isPa, string path) => _host.AssignTrackFileFromWeb(trigger, isPa, path);
     public void ClearTrackAssignment(string trigger, bool isPa) => _host.ClearTrackAssignmentFromWeb(trigger, isPa);
     public bool AddLibraryFileToDownloads(string path) => _host.AddLibraryFileToDownloadsFromWeb(path);
