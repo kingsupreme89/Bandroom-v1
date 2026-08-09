@@ -293,6 +293,7 @@
               <button id="btn-clipper-assign-select" class="btn-primary" disabled>Assign Selected</button>
               <button id="btn-clipper-assign-browse" class="btn-ghost">Browse for file...</button>
               <button id="btn-clipper-assign-trim" class="btn-ghost">Trim...</button>
+              <button id="btn-clipper-assign-import-pack" class="btn-ghost" title="Import the default song pack from a .zip or folder">Import Song Pack</button>
               <button id="btn-clipper-assign-clear" class="btn-ghost btn-danger">Clear Assignment</button>
             </div>
           </div>
@@ -458,6 +459,7 @@
       <p class="bandroom-instructions" id="bandroom-album-instructions"></p>
       <div class="bandroom-album-toolbar">
         <input type="text" id="bandroom-album-search" placeholder="Search this album..." class="team-picker-search" />
+        <button id="btn-bandroom-album-import-pack" class="btn-ghost" title="Import the default song pack from a .zip or folder">Import Song Pack</button>
         <button id="btn-bandroom-album-download-all" class="btn-ghost" title="Download every item in this album">Download All</button>
       </div>
       <div class="bandroom-album-grid" id="bandroom-songs-grid"><!-- populated by app.js: songs + background images together --></div>
@@ -910,17 +912,19 @@
       <div class="update-header"><span class="songpack-led"></span>Ready to Import?</div>
       <p class="update-sub">
         Once your download has finished, click <strong>Locate &amp; Import</strong> below and pick
-        the .zip file from your Downloads folder. Bandroom will unzip it and fill in every team's
-        Sound Bank for you &mdash; you don't need to unzip anything yourself.
+        the .zip file from your Downloads folder &mdash; or, if you already unzipped it (or someone
+        handed you a folder instead), use <strong>Import from Folder</strong>. Either way Bandroom
+        fills in every team's Sound Bank for you automatically.
       </p>
       <ol class="songpack-steps">
         <li>Make sure the download from the last step has fully finished.</li>
-        <li>Click <strong>Locate &amp; Import</strong> below.</li>
-        <li>In the window that pops up, find and select the .zip file (it's usually in your Downloads folder).</li>
+        <li>Click <strong>Locate &amp; Import</strong> (.zip) or <strong>Import from Folder</strong> (already unzipped) below.</li>
+        <li>In the window that pops up, find and select the .zip file or the folder.</li>
         <li>Wait for the progress bar &mdash; when it's done, every team will have songs ready to go.</li>
       </ol>
       <div class="update-actions">
         <button id="btn-songpack-import-later" class="btn-ghost">I'll Import Later</button>
+        <button id="btn-songpack-import-folder" class="btn-ghost">Import from Folder</button>
         <button id="btn-songpack-import" class="btn-primary">Locate & Import</button>
       </div>
     </div>

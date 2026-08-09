@@ -868,6 +868,14 @@ public sealed class WebMainForm : Form
         return dlg.ShowDialog(this) == DialogResult.OK ? dlg.FileName : null;
     }
 
+    /// <summary>Folder-flavored counterpart to BrowseForSongPackZipFromWeb -- for a user who
+    /// already unzipped the pack, or was handed a plain folder instead of a .zip.</summary>
+    public string? BrowseForSongPackFolderFromWeb()
+    {
+        using var dlg = new FolderBrowserDialog { Description = "Locate Song Pack Folder", UseDescriptionForTitle = true };
+        return dlg.ShowDialog(this) == DialogResult.OK ? dlg.SelectedPath : null;
+    }
+
     /// <summary>Extracts a pack zip the user already downloaded from the Drive link into
     /// ConfigStore.DownloadedDefaultSongsFolder -- the local counterpart to
     /// DownloadDefaultSongPackFromWeb's R2 path below, minus the HTTP download half. Reuses the
@@ -892,6 +900,34 @@ public sealed class WebMainForm : Form
             catch (Exception ex)
             {
                 CrashLog.Write("Default song pack import failed", ex);
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:songpackimportfailed'))"));
+            }
+        });
+    }
+
+    /// <summary>Folder-flavored counterpart to ImportDefaultSongPackZipFromWeb -- for a user who
+    /// already extracted the pack (or was handed a folder instead of the .zip). Same
+    /// bandroom:songpack* events, so app.js's existing progress UI works unchanged for either path.</summary>
+    public void ImportDefaultSongPackFolderFromWeb(string folderPath)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:songpackimporting'))"));
+
+                bool ok = await DefaultSongPackService.ImportExistingFolderAsync(folderPath,
+                    frac => RunOnUi(() => _ = _webView.ExecuteScriptAsync(
+                        $"window.dispatchEvent(new CustomEvent('bandroom:songpackimportprogress', {{ detail: {{ fraction: {frac.ToString(System.Globalization.CultureInfo.InvariantCulture)} }} }}))")),
+                    _lifetimeCts.Token);
+
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync(
+                    ok ? "window.dispatchEvent(new CustomEvent('bandroom:songpackready'))"
+                       : "window.dispatchEvent(new CustomEvent('bandroom:songpackimportfailed'))"));
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Default song pack folder import failed", ex);
                 RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:songpackimportfailed'))"));
             }
         });

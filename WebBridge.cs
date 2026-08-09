@@ -955,6 +955,12 @@ public sealed class WebBridge
 
     public void ImportDefaultSongPackZip(string zipPath) => _host.ImportDefaultSongPackZipFromWeb(zipPath);
 
+    /// <summary>Folder-flavored counterparts to BrowseForSongPackZip/ImportDefaultSongPackZip --
+    /// for a user who already extracted the pack, or was handed a folder instead of a .zip.</summary>
+    public string? BrowseForSongPackFolder() => _host.BrowseForSongPackFolderFromWeb();
+
+    public void ImportDefaultSongPackFolder(string folderPath) => _host.ImportDefaultSongPackFolderFromWeb(folderPath);
+
     /// <summary>Current on-disk location of the default song pack (task queue item 7a, Session
     /// 10) -- shown in-app so it's actually clear where these files land, instead of that only
     /// being documented in code comments nobody but a developer ever reads.</summary>

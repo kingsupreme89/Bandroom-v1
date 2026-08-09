@@ -1331,6 +1331,13 @@ function wireControls() {
   });
   document.getElementById("bandroom-album-search").addEventListener("input", onAlbumSearchInput);
   document.getElementById("btn-bandroom-album-download-all").addEventListener("click", downloadAlbumAll);
+  // Direct entry point for the pack importer -- previously Ctrl+K-only (and the "already have
+  // the zip" overlay had no CSS to actually display when opened that way, see style.css). Skips
+  // straight to "Ready to Import?" since someone already digging in Sound Bank has files, not a
+  // fresh-download need.
+  document.getElementById("btn-bandroom-album-import-pack").addEventListener("click", () => {
+    document.getElementById("songpack-import-overlay").hidden = false;
+  });
   document.getElementById("btn-reset").addEventListener("click", () => bridge?.ResetTeamProfile());
 
   document.getElementById("bandroom-upload-file-input").addEventListener("change", onUploadFileChosen);
@@ -3117,6 +3124,10 @@ function initClipperAssign() {
     closeClipperAssign();
   });
 
+  document.getElementById("btn-clipper-assign-import-pack").addEventListener("click", () => {
+    document.getElementById("songpack-import-overlay").hidden = false;
+  });
+
   document.getElementById("btn-clipper-assign-clear").addEventListener("click", async () => {
     if (!_clipperAssignTrigger) return;
     await bridge?.ClearTrackAssignment(_clipperAssignTrigger, _clipperAssignIsPa);
@@ -3159,6 +3170,12 @@ function initDefaultSongPackPrompt() {
     if (!zipPath) return;
     importOverlay.hidden = true;
     bridge?.ImportDefaultSongPackZip(zipPath);
+  });
+  document.getElementById("btn-songpack-import-folder").addEventListener("click", async () => {
+    const folderPath = await bridge?.BrowseForSongPackFolder();
+    if (!folderPath) return;
+    importOverlay.hidden = true;
+    bridge?.ImportDefaultSongPackFolder(folderPath);
   });
 
   window.addEventListener("bandroom:songpackdownloading", () => {

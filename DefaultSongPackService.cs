@@ -136,4 +136,48 @@ internal static class DefaultSongPackService
             return true;
         }, ct);
     }
+
+    /// <summary>Folder-flavored counterpart to ExtractExistingZipAsync -- for a user who already
+    /// unzipped the pack (or was handed a folder directly instead of a zip) rather than one who
+    /// still has the .zip. Copies rather than moves, since unlike the zip's throwaway temp-extract
+    /// folder this source folder is the user's own and shouldn't be touched/deleted. Accepts the
+    /// folder either directly (its own root IS the pack) or with the pack nested one level under
+    /// "Default" or "Songs\Default", same acceptance rule as the zip flow.</summary>
+    public static Task<bool> ImportExistingFolderAsync(string folderPath, Action<double> progress, CancellationToken ct)
+    {
+        return Task.Run(() =>
+        {
+            if (!Directory.Exists(folderPath)) return false;
+            progress(0.05);
+
+            string sourceRoot = folderPath;
+            string nested = Path.Combine(folderPath, "Default");
+            if (Directory.Exists(nested)) sourceRoot = nested;
+            else
+            {
+                nested = Path.Combine(folderPath, "Songs", "Default");
+                if (Directory.Exists(nested)) sourceRoot = nested;
+            }
+
+            var files = Directory.GetFiles(sourceRoot, "*", SearchOption.AllDirectories);
+            if (files.Length == 0) return false;
+
+            if (Directory.Exists(ConfigStore.DownloadedDefaultSongsFolder))
+                Directory.Delete(ConfigStore.DownloadedDefaultSongsFolder, recursive: true);
+            Directory.CreateDirectory(ConfigStore.DownloadedDefaultSongsFolder);
+
+            for (int i = 0; i < files.Length; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                string rel = Path.GetRelativePath(sourceRoot, files[i]);
+                string dest = Path.Combine(ConfigStore.DownloadedDefaultSongsFolder, rel);
+                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                File.Copy(files[i], dest, overwrite: true);
+                if (i % 25 == 0) progress(Math.Clamp(0.05 + 0.9 * (i / (double)files.Length), 0, 0.95));
+            }
+
+            progress(1.0);
+            return true;
+        }, ct);
+    }
 }
