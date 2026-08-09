@@ -2072,11 +2072,15 @@ function buildMyDownloadTile(item) {
   tile.className = "bandroom-item-tile";
   const thumb = document.createElement("div");
   thumb.className = "bandroom-item-thumb";
+  // name/school/fileUrl/schoolLogoUrl all ultimately trace back to whatever an uploader typed
+  // when sharing to the marketplace (any user, not just the current one) -- sanitizeHTML() here
+  // matches the treatment marketplace tiles already get elsewhere (sanitizeMarketplaceItem), so a
+  // crafted upload name can't break out of the alt="..." attribute and inject a script.
   if (item.type === "image") {
-    thumb.innerHTML = `<img src="${item.fileUrl}" alt="${item.name}" loading="lazy">`;
+    thumb.innerHTML = `<img src="${sanitizeHTML(item.fileUrl)}" alt="${sanitizeHTML(item.name)}" loading="lazy">`;
   } else {
     thumb.innerHTML = item.schoolLogoUrl
-      ? `<img src="${item.schoolLogoUrl}" alt="${item.school}" class="bandroom-item-thumb-logo" loading="lazy">`
+      ? `<img src="${sanitizeHTML(item.schoolLogoUrl)}" alt="${sanitizeHTML(item.school)}" class="bandroom-item-thumb-logo" loading="lazy">`
       : `<span>\u{1F3B5}</span>`;
   }
   const name = document.createElement("div");
@@ -5642,6 +5646,13 @@ const _safeSetInnerHTML = {
   },
   get() { return _originalSetInnerHTML.get.call(this); },
 };
+// This guard was written but never actually installed -- the descriptor object above existed
+// with no corresponding Object.defineProperty call, so every innerHTML assignment in the app
+// (including the one in buildMyDownloadTile that let an unsanitized marketplace upload name
+// break out of an alt="..." attribute) went through the plain, unguarded setter the whole time.
+// Installing it here makes it a real last-resort net for any call site that forgets
+// sanitizeHTML(), on top of (not instead of) fixing individual call sites directly.
+Object.defineProperty(Element.prototype, "innerHTML", _safeSetInnerHTML);
 
 // ================================================================
 // FPS/PING STATUS INDICATOR

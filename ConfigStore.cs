@@ -249,13 +249,19 @@ internal static class ConfigStore
     {
         int assigned = 0;
 
+        // teamName ultimately comes from the roster (TeamColors.All / custom_teams.json), but
+        // this method's own signature makes no such guarantee to callers -- sanitize defensively
+        // so a crafted name (e.g. "..\..\..\SomeFolder") can't walk Path.Combine outside
+        // DefaultSongsFolder to enumerate/read files from an arbitrary directory.
+        string safeTeamName = string.Join("_", teamName.Split(Path.GetInvalidFileNameChars().Concat(new[] { '.', '/', '\\' }).ToArray()));
+
         // Search all conference subfolders for this team
         string? teamFolder = null;
         if (Directory.Exists(DefaultSongsFolder))
         {
             foreach (var confDir in Directory.GetDirectories(DefaultSongsFolder))
             {
-                string candidate = Path.Combine(confDir, teamName);
+                string candidate = Path.Combine(confDir, safeTeamName);
                 if (Directory.Exists(candidate))
                 {
                     teamFolder = candidate;
