@@ -384,6 +384,12 @@
 
   <!-- Full team picker -- Teams rail button opens this instead of just pointing at the small
        sidebar grid, since browsing all ~148 teams needs more room and search. -->
+  <!-- Large iTunes CoverFlow-style team picker (owner request) -- replaces the old 4-col grid.
+       Browsing IS picking for the side tiles (arrows/click re-center), the CENTER tile is what
+       Confirm-selects (clicking it calls selectTeam + closes), same "confirm step only where it
+       matters" reasoning the favorite-team coverflow already uses. Edit-logo/edit-bg pencil
+       buttons (team-swatch-edit-logo/-bg) only render on the center tile -- they need to be
+       clickable, which only the full-size centered swatch is. -->
   <div id="team-picker-overlay" hidden>
     <div id="team-picker" class="glass">
       <div class="team-picker-header">
@@ -391,7 +397,12 @@
         <button id="btn-close-picker" class="icon-btn">&times;</button>
       </div>
       <input type="text" id="team-picker-search" placeholder="Search teams..." class="team-picker-search" />
-      <div class="team-picker-grid" id="team-picker-grid"><!-- populated by app.js --></div>
+      <div class="coverflow-stage">
+        <button class="coverflow-arrow coverflow-arrow-left" data-dir="-1" title="Previous team">&#8249;</button>
+        <div class="coverflow-track" id="team-picker-track"><!-- populated by app.js --></div>
+        <button class="coverflow-arrow coverflow-arrow-right" data-dir="1" title="Next team">&#8250;</button>
+      </div>
+      <div class="coverflow-name" id="team-picker-name"></div>
     </div>
   </div>
 

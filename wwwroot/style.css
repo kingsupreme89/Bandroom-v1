@@ -2838,12 +2838,13 @@ input, select, textarea, [contenteditable] {
   font-size: 12px;
 }
 #team-picker {
-  width: min(560px, 90vw);
-  max-height: 75vh;
+  width: min(980px, 92vw);
+  height: min(700px, 88vh);
   display: flex;
   flex-direction: column;
-  padding: 16px;
-  border-radius: 16px;
+  padding: 24px;
+  border-radius: var(--radius-panel);
+  gap: 12px;
 }
 
 .team-picker-header {
@@ -3214,7 +3215,7 @@ input, select, textarea, [contenteditable] {
    than a 3D library, since it's just 5 fixed positions, not free-form scroll physics. */
 .coverflow-stage {
   position: relative;
-  height: 168px;
+  height: 340px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3223,36 +3224,43 @@ input, select, textarea, [contenteditable] {
   position: relative;
   flex: 1 1 auto;
   height: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
+/* iTunes CoverFlow scale + reflection pass (owner request) -- was a compact 96/128px carousel,
+   sized up to read as the actual centerpiece of the screen, plus a -webkit-box-reflect mirror
+   underneath each cover (WebView2 is Chromium, so this renders fine, same trick classic iTunes/
+   Front Row used). overflow-y on the track had to switch from hidden to visible or the reflection
+   got clipped at the track's bottom edge. */
 .coverflow-track .team-swatch {
   position: absolute;
   left: 50%; top: 50%;
-  width: 96px; height: 96px;
-  margin: -48px 0 0 -48px;
+  width: 150px; height: 150px;
+  margin: -75px 0 0 -75px;
   transition: transform 0.22s ease, opacity 0.22s ease, filter 0.22s ease;
   cursor: pointer;
+  -webkit-box-reflect: below 4px linear-gradient(to bottom, rgba(255,255,255,0.25), transparent 65%);
 }
 .coverflow-track .team-swatch.cf-center {
-  width: 128px; height: 128px;
-  margin: -64px 0 0 -64px;
+  width: 240px; height: 240px;
+  margin: -120px 0 0 -120px;
   transform: translateX(0) scale(1) rotateY(0deg);
   z-index: 5;
   opacity: 1;
-  box-shadow: 0 0 24px 2px color-mix(in srgb, var(--team-secondary, var(--accent)) 45%, transparent);
+  box-shadow: 0 0 40px 4px color-mix(in srgb, var(--team-secondary, var(--accent)) 45%, transparent);
 }
-.coverflow-track .team-swatch.cf-l1 { transform: translateX(-96px) scale(0.72) rotateY(28deg); z-index: 4; opacity: 0.75; filter: brightness(0.75); }
-.coverflow-track .team-swatch.cf-r1 { transform: translateX(96px) scale(0.72) rotateY(-28deg); z-index: 4; opacity: 0.75; filter: brightness(0.75); }
-.coverflow-track .team-swatch.cf-l2 { transform: translateX(-158px) scale(0.52) rotateY(38deg); z-index: 3; opacity: 0.4; filter: brightness(0.55); }
-.coverflow-track .team-swatch.cf-r2 { transform: translateX(158px) scale(0.52) rotateY(-38deg); z-index: 3; opacity: 0.4; filter: brightness(0.55); }
+.coverflow-track .team-swatch.cf-l1 { transform: translateX(-175px) scale(0.72) rotateY(32deg); z-index: 4; opacity: 0.78; filter: brightness(0.72); }
+.coverflow-track .team-swatch.cf-r1 { transform: translateX(175px) scale(0.72) rotateY(-32deg); z-index: 4; opacity: 0.78; filter: brightness(0.72); }
+.coverflow-track .team-swatch.cf-l2 { transform: translateX(-290px) scale(0.5) rotateY(38deg); z-index: 3; opacity: 0.4; filter: brightness(0.5); }
+.coverflow-track .team-swatch.cf-r2 { transform: translateX(290px) scale(0.5) rotateY(-38deg); z-index: 3; opacity: 0.4; filter: brightness(0.5); }
 .coverflow-arrow {
   flex: none;
-  width: 34px; height: 34px;
+  width: 44px; height: 44px;
   border-radius: 50%;
   border: 1px solid var(--glass-border);
   background: rgba(255, 255, 255, 0.05);
   color: var(--text-primary);
-  font-size: 18px;
+  font-size: 22px;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   z-index: 6;
@@ -3260,10 +3268,12 @@ input, select, textarea, [contenteditable] {
 .coverflow-arrow:hover { background: var(--team-secondary, var(--accent)); color: var(--team-secondary-ink, #06222a); }
 .coverflow-name {
   text-align: center;
-  margin-top: 6px;
-  font-size: 14px;
-  font-weight: 700;
+  margin-top: 16px;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
+  text-shadow: 0 0 18px color-mix(in srgb, var(--team-secondary, var(--accent)) 45%, transparent);
 }
 
 /* Matchup-only: scale the shared coverflow up to CFB27's "giant logo per half" proportions.
@@ -3353,8 +3363,8 @@ input, select, textarea, [contenteditable] {
 }
 #onboarding-overlay[hidden] { display: none; }
 #onboarding {
-  width: min(900px, 90vw);
-  height: min(680px, 85vh);
+  width: min(980px, 92vw);
+  height: min(760px, 88vh);
   border-radius: var(--radius-panel);
   padding: 28px;
   display: flex;
@@ -3389,8 +3399,8 @@ input, select, textarea, [contenteditable] {
 }
 #favorite-team-overlay[hidden] { display: none; }
 #favorite-team-dialog {
-  width: min(900px, 90vw);
-  height: min(620px, 85vh);
+  width: min(980px, 92vw);
+  height: min(700px, 88vh);
   border-radius: var(--radius-panel);
   padding: 28px;
   display: flex;

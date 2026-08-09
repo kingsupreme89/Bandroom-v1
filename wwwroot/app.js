@@ -1546,9 +1546,11 @@ function wireControls() {
   document.getElementById("team-picker-overlay").addEventListener("click", (e) => {
     if (e.target.id === "team-picker-overlay") closeTeamPicker();
   });
-  // Debounced (200ms) via setupSearchDebounce()'s filterTeamPicker -- filters the grid already
-  // rendered by openTeamPicker's renderTeamPickerGrid("") instead of an instant full-rebuild on
-  // every keystroke.
+  // Debounced (200ms) via setupSearchDebounce() -- re-renders the coverflow filtered to the
+  // search text instead of an instant full-rebuild on every keystroke.
+  document.getElementById("team-picker-search").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { selectTeam(_teamPickerPicked); closeTeamPicker(); }
+  });
 
   document.getElementById("btn-close-import-target-team").addEventListener("click", closeImportTargetTeamDialog);
   document.getElementById("import-target-team-overlay").addEventListener("click", (e) => {
@@ -1675,20 +1677,94 @@ async function loadChangelog() {
   }
 }
 
+// "Choose a Team" picker (owner request: same large iTunes CoverFlow the favorite-team picker
+// uses, replacing the old 4-col grid). Side tiles browse (re-center, same as
+// favorite/onboarding), the CENTER tile is the one that actually selects+closes -- matches the
+// old grid's "click = pick" immediacy while still letting you browse past a team without
+// committing to it, which a plain grid's every-tile-is-a-button never allowed.
+let _teamPickerPicked = null;
+let _teamPickerWired = false;
+
 function openTeamPicker() {
   document.getElementById("team-picker-overlay").hidden = false;
   const search = document.getElementById("team-picker-search");
   search.value = "";
-  renderTeamPickerGrid("");
+  _teamPickerPicked = state.activeTeam || null;
+  renderTeamPickerCoverflow("");
   search.focus();
+
+  if (!_teamPickerWired) {
+    _teamPickerWired = true;
+    document.querySelectorAll("#team-picker .coverflow-arrow").forEach((btn) => {
+      btn.addEventListener("click", () => shiftTeamPicker(parseInt(btn.dataset.dir, 10)));
+    });
+  }
 }
 
 function closeTeamPicker() {
   document.getElementById("team-picker-overlay").hidden = true;
+  restoreActiveTeamGlow();
 }
 
-function renderTeamPickerGrid(filter) {
-  renderTeamGridInto("team-picker-grid", filter, (name) => { selectTeam(name); closeTeamPicker(); }, /*showEditLogo*/ true);
+function shiftTeamPicker(dir) {
+  const filter = document.getElementById("team-picker-search")?.value || "";
+  const teams = matchupCoverflowTeams(filter);
+  if (!teams.length) return;
+  let idx = teams.findIndex((t) => t.name === _teamPickerPicked);
+  if (idx === -1) idx = 0;
+  idx = ((idx + dir) % teams.length + teams.length) % teams.length;
+  _teamPickerPicked = teams[idx].name;
+  renderTeamPickerCoverflow(filter);
+}
+
+function renderTeamPickerCoverflow(filter) {
+  const track = document.getElementById("team-picker-track");
+  const nameEl = document.getElementById("team-picker-name");
+  if (!track || !nameEl) return;
+  const teams = matchupCoverflowTeams(filter);
+  track.innerHTML = "";
+  if (!teams.length) {
+    nameEl.textContent = "No teams found";
+    return;
+  }
+
+  let centerIdx = teams.findIndex((t) => t.name === _teamPickerPicked);
+  if (centerIdx === -1) centerIdx = 0;
+
+  const positions = [[-2, "cf-l2"], [-1, "cf-l1"], [0, "cf-center"], [1, "cf-r1"], [2, "cf-r2"]];
+  for (const [offset, cls] of positions) {
+    const idx = ((centerIdx + offset) % teams.length + teams.length) % teams.length;
+    const t = teams[idx];
+    const tile = document.createElement("div");
+    tile.className = "team-swatch " + cls;
+    tile.title = t.name;
+    fillTeamSwatch(tile, t);
+    if (cls === "cf-center") {
+      tile.addEventListener("click", () => { selectTeam(t.name); closeTeamPicker(); });
+      if (t.name !== "General") {
+        const editBtn = document.createElement("button");
+        editBtn.className = "team-swatch-edit-logo";
+        editBtn.title = `Set a custom logo for ${t.name}`;
+        editBtn.textContent = "✎";
+        editBtn.addEventListener("click", (e) => { e.stopPropagation(); openLogoCropTool(t.name); });
+        tile.appendChild(editBtn);
+
+        const bgBtn = document.createElement("button");
+        bgBtn.className = "team-swatch-edit-bg";
+        bgBtn.title = `Set a custom background for ${t.name}`;
+        bgBtn.textContent = "\u{1F5BC}";
+        bgBtn.addEventListener("click", (e) => { e.stopPropagation(); openBackgroundCropTool(t.name); });
+        tile.appendChild(bgBtn);
+      }
+    } else {
+      tile.addEventListener("click", () => { _teamPickerPicked = t.name; renderTeamPickerCoverflow(filter); });
+    }
+    track.appendChild(tile);
+  }
+
+  _teamPickerPicked = teams[centerIdx].name;
+  nameEl.textContent = _teamPickerPicked;
+  previewTeamGlow(teams[centerIdx]);
 }
 
 /// Import now asks WHICH team the profile file is for instead of assuming state.activeTeam -- a
@@ -4530,7 +4606,7 @@ async function refreshTeamsAfterLogoChange() {
     return;
   }
   if (!document.getElementById("team-picker-overlay").hidden)
-    renderTeamPickerGrid(document.getElementById("team-picker-search").value);
+    renderTeamPickerCoverflow(document.getElementById("team-picker-search").value);
   const active = state.teams.find((t) => t.name === state.activeTeam);
   if (active) updateHeaderTeamBadge(active);
 }
@@ -5965,14 +6041,13 @@ setTimeout(() => {
 // ================================================================
 // FILTER HELPERS for debounced search
 // ================================================================
+// Now the coverflow's own search filter (was a grid tile show/hide before the coverflow
+// conversion) -- re-centers on the first match instead of graying out non-matching tiles, since
+// a coverflow only ever shows 5 tiles at once anyway.
 function filterTeamPicker(query) {
-  const grid = document.getElementById("team-picker-grid");
-  if (!grid) return;
-  const tiles = grid.querySelectorAll(".team-swatch");
-  const q = query.toLowerCase().trim();
-  tiles.forEach((tile) => {
-    tile.style.display = !q || (tile.title || "").toLowerCase().includes(q) ? "" : "none";
-  });
+  if (document.getElementById("team-picker-overlay")?.hidden) return;
+  _teamPickerPicked = null; // let renderTeamPickerCoverflow re-pick centerIdx 0 of the filtered set
+  renderTeamPickerCoverflow(query);
 }
 function filterBandroomTeams(query) {
   const grid = document.getElementById("bandroom-team-grid");
