@@ -4775,6 +4775,12 @@ const COMMANDS = [
   { icon: "🔄", label: "Reset Team Profile", hint: "reset", action: () => resetTeamProfile() },
   { icon: "📁", label: "Move Default Song Pack Folder", hint: "relocate", action: () => relocateDefaultSongsFolder() },
   { icon: "🎵", label: "Download / Import Default Song Pack", hint: "song pack", action: () => { document.getElementById("songpack-prompt-overlay").hidden = false; } },
+  // Direct entry point for someone who already has the .zip on disk (downloaded earlier, or
+  // handed to them by someone else) -- previously the ONLY way to reach the "Locate & Import"
+  // button was to click "Download" first (which re-opens the Google Drive page), even if the
+  // user already had the file. #songpack-import-overlay's own buttons are wired independently in
+  // initDefaultSongPackPrompt, so just showing it here reuses that wiring with no duplication.
+  { icon: "📂", label: "Locate & Import Song Pack (I already have the .zip)", hint: "song pack", action: () => { document.getElementById("songpack-import-overlay").hidden = false; } },
 ];
 
 /// Task queue item 7b (Session 10) -- lets the user move the default song pack (2,241 files,
