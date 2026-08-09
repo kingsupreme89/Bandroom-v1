@@ -2907,12 +2907,12 @@ input, select, textarea, [contenteditable] {
 /* Update / default-song-pack download dialogs -- #update-overlay, #songpack-prompt-overlay,
    #songpack-progress-overlay all share the same .update-dialog shape but had no CSS anywhere,
    same shipped-with-markup-no-CSS gap as the crop tools above. */
-#update-overlay, #songpack-prompt-overlay, #songpack-progress-overlay, #songpack-import-overlay {
+#update-overlay, #songpack-prompt-overlay, #songpack-progress-overlay, #songpack-import-overlay, #default-profile-prompt-overlay {
   position: fixed; inset: 0; z-index: 80;
   display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.6);
 }
-#update-overlay[hidden], #songpack-prompt-overlay[hidden], #songpack-progress-overlay[hidden], #songpack-import-overlay[hidden] { display: none; }
+#update-overlay[hidden], #songpack-prompt-overlay[hidden], #songpack-progress-overlay[hidden], #songpack-import-overlay[hidden], #default-profile-prompt-overlay[hidden] { display: none; }
 #update-dialog, #songpack-progress-dialog, .update-dialog {
   width: min(420px, 90vw);
   padding: 24px;

@@ -137,47 +137,109 @@ internal static class DefaultSongPackService
         }, ct);
     }
 
+    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac" };
+
+    public sealed record FolderImportResult(bool Success, string Message, List<string> TeamNames, int SongCount);
+
     /// <summary>Folder-flavored counterpart to ExtractExistingZipAsync -- for a user who already
-    /// unzipped the pack (or was handed a folder directly instead of a zip) rather than one who
-    /// still has the .zip. Copies rather than moves, since unlike the zip's throwaway temp-extract
-    /// folder this source folder is the user's own and shouldn't be touched/deleted. Accepts the
-    /// folder either directly (its own root IS the pack) or with the pack nested one level under
-    /// "Default" or "Songs\Default", same acceptance rule as the zip flow.</summary>
-    public static Task<bool> ImportExistingFolderAsync(string folderPath, Action<double> progress, CancellationToken ct)
+    /// unzipped the pack, was handed a folder instead of a .zip, or only has ONE team's folder
+    /// (not the whole pack). Merges into ConfigStore.DownloadedDefaultSongsFolder rather than
+    /// wiping it first -- a single-team import must not erase teams imported earlier. Accepts
+    /// three shapes for the selected folder: the full pack root (Conference\Team\*.mp3, optionally
+    /// nested one level under "Default" or "Songs\Default" like the zip flow), a folder of team
+    /// folders with no conference level (Team\*.mp3), or a single team's folder with the audio
+    /// files directly inside it (e.g. the user pointed us straight at "Alabama").</summary>
+    public static Task<FolderImportResult> ImportExistingFolderAsync(string folderPath, Action<double> progress, CancellationToken ct)
     {
         return Task.Run(() =>
         {
-            if (!Directory.Exists(folderPath)) return false;
+            if (!Directory.Exists(folderPath))
+                return new FolderImportResult(false, "That folder doesn't exist.", new List<string>(), 0);
             progress(0.05);
 
-            string sourceRoot = folderPath;
+            string root = folderPath;
             string nested = Path.Combine(folderPath, "Default");
-            if (Directory.Exists(nested)) sourceRoot = nested;
+            if (Directory.Exists(nested)) root = nested;
             else
             {
                 nested = Path.Combine(folderPath, "Songs", "Default");
-                if (Directory.Exists(nested)) sourceRoot = nested;
+                if (Directory.Exists(nested)) root = nested;
             }
 
-            var files = Directory.GetFiles(sourceRoot, "*", SearchOption.AllDirectories);
-            if (files.Length == 0) return false;
-
-            if (Directory.Exists(ConfigStore.DownloadedDefaultSongsFolder))
-                Directory.Delete(ConfigStore.DownloadedDefaultSongsFolder, recursive: true);
             Directory.CreateDirectory(ConfigStore.DownloadedDefaultSongsFolder);
+            var teamsImported = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int songCount = 0;
 
-            for (int i = 0; i < files.Length; i++)
+            bool HasAudioFilesDirectly(string dir) =>
+                Directory.Exists(dir) && Directory.EnumerateFiles(dir).Any(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()));
+
+            void CopyTeamFolder(string sourceTeamDir, string conference, string teamName)
             {
-                ct.ThrowIfCancellationRequested();
-                string rel = Path.GetRelativePath(sourceRoot, files[i]);
-                string dest = Path.Combine(ConfigStore.DownloadedDefaultSongsFolder, rel);
-                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-                File.Copy(files[i], dest, overwrite: true);
-                if (i % 25 == 0) progress(Math.Clamp(0.05 + 0.9 * (i / (double)files.Length), 0, 0.95));
+                string destDir = Path.Combine(ConfigStore.DownloadedDefaultSongsFolder, conference, teamName);
+                Directory.CreateDirectory(destDir);
+                foreach (var file in Directory.GetFiles(sourceTeamDir))
+                {
+                    if (!AudioExtensions.Contains(Path.GetExtension(file).ToLowerInvariant())) continue;
+                    File.Copy(file, Path.Combine(destDir, Path.GetFileName(file)), overwrite: true);
+                    songCount++;
+                }
+                teamsImported.Add(teamName);
             }
+
+            if (HasAudioFilesDirectly(root))
+            {
+                CopyTeamFolder(root, "Imported", new DirectoryInfo(root).Name);
+            }
+            else if (Directory.Exists(root))
+            {
+                foreach (var sub in Directory.GetDirectories(root))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (HasAudioFilesDirectly(sub))
+                    {
+                        CopyTeamFolder(sub, "Imported", new DirectoryInfo(sub).Name);
+                    }
+                    else
+                    {
+                        string conference = new DirectoryInfo(sub).Name;
+                        foreach (var teamDir in Directory.GetDirectories(sub))
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            if (HasAudioFilesDirectly(teamDir))
+                                CopyTeamFolder(teamDir, conference, new DirectoryInfo(teamDir).Name);
+                        }
+                    }
+                }
+            }
+            progress(0.9);
+
+            if (songCount == 0)
+                return new FolderImportResult(false, "No audio files were found in that folder.", new List<string>(), 0);
+
+            // Merge into index.json (what GetDefaultPackTeams reads) instead of overwriting it --
+            // a team imported earlier (a prior folder, or the full pack) must not get forgotten.
+            string indexPath = Path.Combine(ConfigStore.DownloadedDefaultSongsFolder, "index.json");
+            var allTeams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (File.Exists(indexPath))
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(indexPath));
+                    if (doc.RootElement.TryGetProperty("Teams", out var arr))
+                        foreach (var t in arr.EnumerateArray())
+                            if (t.GetString() is string s) allTeams.Add(s);
+                }
+                catch { /* corrupt/missing index -- rebuild from what this import found */ }
+            }
+            foreach (var t in teamsImported) allTeams.Add(t);
+            File.WriteAllText(indexPath, System.Text.Json.JsonSerializer.Serialize(new { Teams = allTeams.OrderBy(t => t).ToList() }));
 
             progress(1.0);
-            return true;
+            var names = teamsImported.OrderBy(t => t).ToList();
+            string msg = names.Count == 1
+                ? $"Imported {songCount} song{(songCount == 1 ? "" : "s")} for {names[0]}. Open {names[0]}'s Assign panel -- matching situations are already filled in."
+                : $"Imported {songCount} songs across {names.Count} teams: {string.Join(", ", names)}. Open each team's Assign panel to see them filled in.";
+            return new FolderImportResult(true, msg, names, songCount);
         }, ct);
     }
 }

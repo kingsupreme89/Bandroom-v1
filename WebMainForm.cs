@@ -916,14 +916,15 @@ public sealed class WebMainForm : Form
             {
                 RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:songpackimporting'))"));
 
-                bool ok = await DefaultSongPackService.ImportExistingFolderAsync(folderPath,
+                var result = await DefaultSongPackService.ImportExistingFolderAsync(folderPath,
                     frac => RunOnUi(() => _ = _webView.ExecuteScriptAsync(
                         $"window.dispatchEvent(new CustomEvent('bandroom:songpackimportprogress', {{ detail: {{ fraction: {frac.ToString(System.Globalization.CultureInfo.InvariantCulture)} }} }}))")),
                     _lifetimeCts.Token);
 
-                RunOnUi(() => _ = _webView.ExecuteScriptAsync(
-                    ok ? "window.dispatchEvent(new CustomEvent('bandroom:songpackready'))"
-                       : "window.dispatchEvent(new CustomEvent('bandroom:songpackimportfailed'))"));
+                string msgJson = System.Text.Json.JsonSerializer.Serialize(result.Message);
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync(result.Success
+                    ? $"window.dispatchEvent(new CustomEvent('bandroom:songpackready', {{ detail: {{ message: {msgJson} }} }}))"
+                    : $"window.dispatchEvent(new CustomEvent('bandroom:songpackimportfailed', {{ detail: {{ message: {msgJson} }} }}))"));
             }
             catch (Exception ex)
             {

@@ -3199,7 +3199,7 @@ function initDefaultSongPackPrompt() {
   window.addEventListener("bandroom:songpackimportprogress", (e) => {
     progressFill.style.width = `${Math.max(0, Math.min(100, e.detail.fraction * 100))}%`;
   });
-  window.addEventListener("bandroom:songpackready", async () => {
+  window.addEventListener("bandroom:songpackready", async (e) => {
     progressTitle.textContent = "Song pack ready";
     progressFill.style.width = "100%";
     // Task queue item 7a (Session 10): be explicit about WHERE the files landed and WHAT
@@ -3207,22 +3207,32 @@ function initDefaultSongPackPrompt() {
     // only fills events you haven't already assigned yourself (see ConfigStore.
     // ImportDefaultPackForTeam's "never overwrites existing assignments" doc comment), which the
     // owner specifically wants to be unambiguous rather than left to a silent success toast.
+    // A folder import (see ImportDefaultSongPackFolderFromWeb) reports exactly which team(s) and
+    // how many songs it found instead of this generic line -- that specific confirmation is what
+    // tells the user "yes, it actually did something" for a single-team folder, since nothing
+    // about that shows up in the Sound Bank album grid (that's marketplace uploads, a different
+    // data source from the default-pack files this fills into event slots directly).
     let folderLine = "";
     try {
       const path = bridge ? await bridge.GetDefaultSongsFolderPath() : null;
       if (path) folderLine = ` Files live at: ${path}.`;
     } catch (err) { console.error("GetDefaultSongsFolderPath failed", err); }
-    progressSub.textContent = `Every team can now auto-fill any situation you haven't already assigned a song to yourself -- it never overwrites your own picks.${folderLine}`;
-    setTimeout(() => { progressOverlay.hidden = true; }, 3200);
+    const specific = e.detail?.message;
+    progressSub.textContent = specific
+      ? `${specific}${folderLine}`
+      : `Every team can now auto-fill any situation you haven't already assigned a song to yourself -- it never overwrites your own picks.${folderLine}`;
+    // Longer hold when there's a specific "go check X team" instruction to actually read.
+    setTimeout(() => { progressOverlay.hidden = true; }, specific ? 6000 : 3200);
     refreshCategories?.();
+    if (specific) showToast(specific);
   });
   window.addEventListener("bandroom:songpackfailed", () => {
     progressOverlay.hidden = true;
     showToast("Song pack download failed -- check your connection and try again from Settings.");
   });
-  window.addEventListener("bandroom:songpackimportfailed", () => {
+  window.addEventListener("bandroom:songpackimportfailed", (e) => {
     progressOverlay.hidden = true;
-    showToast("Couldn't unpack that file -- make sure you picked the song pack .zip and try again.");
+    showToast(e.detail?.message || "Couldn't unpack that file -- make sure you picked the song pack .zip and try again.");
   });
 }
 
