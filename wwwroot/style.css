@@ -1309,30 +1309,16 @@ input, select, textarea, [contenteditable] {
 #clipper-assign { display: flex; flex-direction: column; gap: 10px; }
 .clipper-assign-meta { display: flex; align-items: baseline; gap: 10px; }
 
-/* Team sidebar (task queue item 2) -- same sidebar+main split as #bandroom-picker's "Your
-   Library" sidebar (see .bandroom-sidebar/.bandroom-main rules above), reused here with its own
-   selector scope (.clipper-assign-sidebar/.clipper-assign-main) instead of overloading the
-   #bandroom-picker-scoped rules, since this lives in a differently-shaped parent (a column flex
-   panel, not #bandroom-picker's grid). */
+/* Team-filter sidebar (round 2 task queue item 2) was removed here (round 4) -- owner reported a
+   large wasted-space gap in it, same dead-space class of bug as the clipper-island layout fix
+   elsewhere this round; rather than debug the gap, the sidebar itself was dropped. See the
+   matching comment in index.html. .clipper-assign-body is kept as the flex wrapper (still useful
+   if .clipper-assign-main ever gets a sibling again) but now has exactly one child. */
 .clipper-assign-body {
   display: flex;
   gap: 16px;
   min-height: 0;
   flex: 1 1 auto;
-}
-.clipper-assign-sidebar {
-  flex: 0 0 180px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  max-height: 260px;
-  border-right: 1px solid var(--glass-border);
-  padding-right: 14px;
-}
-.clipper-assign-sidebar .team-picker-grid {
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  overflow-y: auto;
 }
 .clipper-assign-main {
   flex: 1 1 auto;
@@ -1385,19 +1371,26 @@ input, select, textarea, [contenteditable] {
   display: flex;
   gap: 3px;
 }
+/* Task queue item 5 (round 4): these were plain circular OS-button-looking controls ("still
+   microsoft looking" per the owner) -- restyled to the same glass-pill treatment as
+   .bandroom-item-action (Popular Songs / Suggested for You's per-row transport), just sized for
+   this row's tighter 13.5px line-height instead of the bigger tile-overlay context. */
 .clipper-assign-row-btn {
   flex: none;
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.05);
+  min-width: 22px; height: 20px;
+  padding: 0 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(10, 14, 18, 0.72);
   color: var(--text-primary);
   font-size: 10px;
+  font-weight: 600;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   line-height: 1;
+  backdrop-filter: blur(4px);
 }
-.clipper-assign-row-btn:hover { background: var(--team-secondary, var(--accent)); color: var(--team-secondary-ink, #06222a); }
+.clipper-assign-row-btn:hover { background: rgba(255, 255, 255, 0.15); }
 .clipper-assign-row-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .clipper-assign-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 /* Section headers grouping the song list by source (task queue item 1) -- reuses
@@ -2105,9 +2098,11 @@ input, select, textarea, [contenteditable] {
   overflow-x: hidden;
 }
 #category-bar, #matchup-side-bar { flex: 0 0 auto; }
-/* Clip Preview island stays its natural size; the situations panel below flexes to fill
-   whatever's left, so adding/removing panels here never has to be balanced against a magic
-   pixel offset for the others to keep scrolling correctly. */
+/* Clip Preview island stays its natural size, and (round 4, Session 11) so does the situations
+   panel below it now -- see the #situations-panel rule further down for why it changed from
+   flex: 1 1 auto (which used to force it to fill all leftover space, leaving dead gap under the
+   grid) to flex: 0 1 auto. #center-column's own overflow-y: auto is what handles the case where
+   total content exceeds the viewport, not this panel force-growing. */
 #clipper-island { flex: 0 0 auto; }
 #category-bar {
   border-radius: var(--radius-panel);
@@ -2146,11 +2141,26 @@ input, select, textarea, [contenteditable] {
 }
 
 #situations-panel[hidden] { display: none; }
+/* Layout fix (round 4, Session 11): this panel used to be flex: 1 1 auto, which forced its box
+   to grow and fill ALL leftover vertical space in #center-column -- but .situations-list below
+   (its only meaningfully-sized child) is NOT itself flex-grow, so it just sat at its natural
+   content height while the panel's own box kept stretching underneath it. That left a large
+   dead gap of pure .glass background (translucent, blurred -- see --glass-fill) between the
+   actual event grid and #clipper-island below, and because that glass background is only ~6%
+   opaque, it was translucent enough for #backdrop-vs-seam's diagonal glow-seam (the persistent
+   away/home VS split backdrop shown for the duration of a locked-in game, see applyVsBackdrop in
+   app.js) to visibly bleed through across that whole oversized empty area -- normally only a
+   thin sliver of it shows through a properly content-sized panel, reading as faint ambient glow,
+   not a stray diagonal beam. flex: 0 1 auto makes this panel size to its actual content (the
+   header + however many rows the situations grid needs) instead of force-filling -- clipper-island
+   (also flex: 0 0 auto, see above) then sits directly against it with only its own 10px
+   margin-top, no dead space in between. #center-column's own overflow-y: auto still covers the
+   case where the grid has enough rows to need real scrolling. */
 #situations-panel {
   margin-top: 10px;
   border-radius: var(--radius-panel);
   padding: 14px 18px;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2354,6 +2364,12 @@ input, select, textarea, [contenteditable] {
   color: var(--text-muted);
   margin-bottom: 6px;
 }
+.leadin-whistle-hint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
 
 .rail {
   width: var(--rail-w);
@@ -2550,6 +2566,29 @@ input, select, textarea, [contenteditable] {
   font-size: 10px; font-weight: 700; color: var(--accent);
 }
 .suggested-empty { font-size: 11px; color: var(--text-muted); padding: 4px 0; }
+
+/* Per-item transport (task queue item 8, Session 11) -- inline row, not the absolute-overlay
+   .bandroom-item-actions the Popular Songs shelf tiles use (see the comment in
+   renderSuggestedBatch for why that class doesn't fit here). Hidden until hover/focus, same
+   reveal-on-hover treatment as .bandroom-item-tile's own actions, so the row still reads as
+   "name + download count" at rest and doesn't get visually noisy. */
+.suggested-row-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.suggested-row:hover .suggested-row-actions,
+.suggested-row:focus-within .suggested-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.suggested-row-actions .bandroom-item-action {
+  padding: 2px 5px;
+  font-size: 10px;
+}
 
 #team-picker-overlay {
   position: fixed; inset: 0; z-index: 40;

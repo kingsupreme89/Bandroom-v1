@@ -221,17 +221,14 @@
               <span id="clipper-assign-event"></span>
               <span id="clipper-assign-current"></span>
             </div>
-            <!-- Team sidebar (task queue item 2) -- same "Your Library" sidebar pattern as the
-                 marketplace hub (#bandroom-sidebar/.team-picker-grid, see openBandroomMarketplace
-                 in app.js), reused rather than a new component. Picking a team filters the song
-                 list on the right to that team's songs (trimmed clips / marketplace downloads
-                 whose name references the team); "All Teams" clears the filter. -->
+            <!-- Team-filter sidebar (round 2 task queue item 2) was removed here (round 4) --
+                 owner reported a large wasted-space gap between the sidebar's nav items and
+                 where the team grid actually started, same class of dead-space problem as the
+                 clipper-island layout fix elsewhere this round. Rather than debug the gap, the
+                 sidebar itself goes; song-list grouping/source-labeling from that same round 2
+                 change is untouched (see groupClipperSongsBySource / the "source" tags on
+                 library entries in app.js) -- separate concern, not part of this removal. -->
             <div class="clipper-assign-body">
-              <div class="bandroom-sidebar clipper-assign-sidebar">
-                <div class="bandroom-hub-section-label">Teams</div>
-                <input type="text" id="clipper-assign-team-search" placeholder="Search teams..." class="team-picker-search" />
-                <div class="team-picker-grid" id="clipper-assign-team-grid"><!-- populated by app.js --></div>
-              </div>
               <div class="clipper-assign-main">
                 <div class="clipper-assign-toolbar">
                   <button id="btn-clipper-assign-play" class="preview-bar-btn" title="Play selected">▶</button>
@@ -275,14 +272,23 @@
           <input type="range" id="slider-pa-volume" min="0" max="100" value="100" class="slider" />
           <div class="slider-value"><span id="pa-volume-value">100</span>%</div>
         </div>
-        <!-- Only shown once a whistle clip actually exists (see GetLeadInWhistleAvailable) --
-             set via TrimmerForm's "Set as Lead-In Whistle" button, not from here. -->
-        <div class="panel-section" id="leadin-whistle-section" hidden>
+        <!-- Task queue item 5 (Session 11): was hidden entirely until a whistle clip existed
+             (only settable via TrimmerForm's native "Set as Lead-In Whistle" button, buried in a
+             completely different flow). Always visible now, with its own real upload/replace
+             button (btn-leadin-whistle-upload -> WebBridge.BrowseAndSetLeadInWhistle, same
+             native-file-picker pattern as every other audio browse/import flow) so there's a
+             direct path to setting one right here -- the toggle row only shows once a clip
+             actually exists (see refreshLeadInWhistleSection in app.js). -->
+        <div class="panel-section" id="leadin-whistle-section">
           <div class="panel-title">Lead-In Whistle</div>
-          <label class="toggle-row">
+          <p class="leadin-whistle-hint" id="leadin-whistle-hint">A short sound that plays right
+            before every triggered clip -- like a referee's whistle starting a play. No whistle
+            set yet.</p>
+          <label class="toggle-row" id="leadin-whistle-toggle-row" hidden>
             <input type="checkbox" id="toggle-leadin-whistle" />
             <span>Play before every triggered clip</span>
           </label>
+          <button id="btn-leadin-whistle-upload" class="btn-ghost">Upload / Replace Whistle...</button>
         </div>
         <div class="panel-section">
           <div class="panel-title">Fire Sensitivity (Delay)</div>
@@ -664,6 +670,28 @@
       <div class="save-profile-actions">
         <button id="btn-matchup-cancel" class="btn-ghost">Cancel</button>
         <button id="btn-matchup-confirm" class="gametime-btn" disabled>GAMETIME</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Default/starter profile prompt (task queue item 6, Session 11) -- shown when confirmMatchup
+       finds a team with nothing assigned yet (see showDefaultProfilePrompt in app.js). Makes the
+       existing silent default-pack auto-fill (WebMainForm.ConfirmGametimeFromWeb) a visible,
+       explicit choice instead of something that just quietly happens. Same glass-dialog shape as
+       the matchup dialog above it, on purpose. -->
+  <div id="default-profile-prompt-overlay" hidden>
+    <div class="update-dialog glass">
+      <div class="update-header"><span class="songpack-led"></span>No songs assigned yet</div>
+      <p class="update-sub">
+        <span id="default-profile-prompt-teams">This team</span> doesn't have any songs assigned
+        yet. Hitting GAMETIME will automatically fill it in with a starter profile from the
+        Default Song Pack (only the events you haven't picked yourself -- nothing gets
+        overwritten). Or you can back out and assign songs yourself first in the Clipper, then
+        come back to Set Matchup when you're ready.
+      </p>
+      <div class="update-actions">
+        <button id="btn-default-profile-skip" class="btn-ghost">I'll Assign Songs Myself</button>
+        <button id="btn-default-profile-apply" class="btn-primary">Use Starter Profile &amp; Continue</button>
       </div>
     </div>
   </div>

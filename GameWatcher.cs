@@ -778,6 +778,20 @@ internal sealed class GameWatcher
         int homeScore = int.TryParse(_lastKnownHomeScore, out int hScore) ? hScore : 0;
         int timeRemainingSeconds = ParseClockToSeconds(clockRegion?.Last);
 
+        // BigGame (task queue item 3, Session 11): used to be hardcoded `false` unconditionally --
+        // BigEventHelper/DefenseHelper/TflHelper/TimeoutHelper/TouchdownHelper/TurnoverHelper/
+        // OffenseDownHelper all already check state.Current.BigGame to boost volume to 100, so the
+        // boost simply never fired. There's no OCR'd team-ranking or rivalry-schedule signal
+        // anywhere in this codebase to detect "big game" from (checked TeamColors.cs and
+        // scripts/team_registry.json -- neither has rankings or rivalry data), so this uses the
+        // one real, already-OCR'd signal that's actually reliable: a close 4th-quarter score.
+        // "One-score game" = 8 points or fewer (touchdown + 2-point conversion), the standard
+        // definition broadcasters use. Quarter is only ever 1-4 here (ParseOrdinal has no
+        // overtime case -- see its own comment), so this intentionally doesn't try to detect OT
+        // specifically; a tied/close OT game still reads as "4th quarter, close score" from the
+        // scorebug's perspective anyway since the quarter indicator doesn't change.
+        bool isBigGame = quarter == 4 && Math.Abs(homeScore - awayScore) <= 8;
+
         // "penaltyagainst" holds "Against <Team Name>" text while the penalty decision overlay
         // is up (null otherwise -- see EnsureAllEvents/the region's own comment for why this is
         // the only way to resolve which side committed it). Compare against the known team
@@ -821,7 +835,7 @@ internal sealed class GameWatcher
             AwayScore = awayScore,
             TimeRemainingSeconds = timeRemainingSeconds,
             AwayTimeoutsRemaining = _lastAwayTimeoutsRemaining,
-            BigGame = false,
+            BigGame = isBigGame,
         };
 
         _snapshotPrevious = _snapshotCurrent;

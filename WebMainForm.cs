@@ -256,6 +256,44 @@ public sealed class WebMainForm : Form
     public string? GetProfileSavedAtFromWeb(string name) =>
         ConfigStore.GetProfileSavedAt(name)?.ToString("h:mm tt");
 
+    /// <summary>Task queue item 6 (Session 11): SetGameTeamsFromWeb below already silently
+    /// auto-fills an empty team profile from the default pack the moment a matchup is confirmed
+    /// (see its own "Auto-assign default songs ONLY if empty" comment) -- that safety net is left
+    /// completely untouched here, still fires exactly as before regardless of this method, so
+    /// in-game audio never regresses. This is a NEW, purely informational check the JS side calls
+    /// BEFORE confirming the matchup, so the previously-silent auto-fill becomes a visible,
+    /// explicit choice: "these teams have nothing assigned yet, continuing will auto-fill them
+    /// from the Default Song Pack -- or cancel to assign songs yourself first." Mirrors the exact
+    /// same "has assignments" check SetGameTeamsFromWeb uses, just read-only.</summary>
+    public List<string> GetTeamsNeedingDefaultProfileFromWeb(string homeName, string awayName)
+    {
+        var needsDefault = new List<string>();
+        foreach (var name in new[] { homeName, awayName })
+        {
+            var config = ConfigStore.ListProfiles().Contains(name, StringComparer.OrdinalIgnoreCase)
+                ? ConfigStore.LoadProfile(name) : ConfigStore.BuildDefault();
+            if (!config.Any(e => !string.IsNullOrWhiteSpace(e.AudioFile)))
+                needsDefault.Add(name);
+        }
+        return needsDefault;
+    }
+
+    /// <summary>Task queue item 6 -- explicit opt-in counterpart to GetTeamsNeedingDefaultProfileFromWeb
+    /// above. Reuses ConfigStore.ImportDefaultPackForTeam (fills empty slots only, never
+    /// overwrites) against whatever profile the team already has (or ConfigStore.BuildDefault if
+    /// none), then saves it -- same shape as SetGameTeamsFromWeb's own silent safety-net below,
+    /// just callable directly. Returns the count assigned so the JS side can show a real number
+    /// ("Filled 28 songs") instead of a generic success toast.</summary>
+    public int ApplyDefaultProfileForTeamFromWeb(string teamName)
+    {
+        var config = ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(teamName) : ConfigStore.BuildDefault();
+        int assigned = ConfigStore.ImportDefaultPackForTeam(teamName, config);
+        if (assigned > 0) ConfigStore.SaveProfile(teamName, config);
+        RefreshHomeAwayConfigIfNeeded(teamName);
+        return assigned;
+    }
+
     /// <summary>Matchup picker (JS) calls this with both teams for the game about to be
     /// watched. Loads each team's OWN saved profile if they have one (falls back to defaults
     /// otherwise) -- these are separate from _config/Theme.ActiveTeam, which stay pointed at
@@ -853,6 +891,36 @@ public sealed class WebMainForm : Form
     {
         AudioPlayer.LeadInEnabled = enabled;
         ConfigStore.SaveLeadInWhistleEnabled(enabled);
+    }
+
+    /// <summary>Task queue item 5 (Session 11): the ONLY way to set a lead-in whistle used to be
+    /// TrimmerForm's "Set as Lead-In Whistle" button, buried inside the trim-a-song flow -- there
+    /// was no direct upload path at all. Native OpenFileDialog (same "web &lt;input type=file&gt;
+    /// can't hand back a real filesystem path" reasoning as every other browse method in this
+    /// class), copies the chosen file straight to ConfigStore.LeadInWhistlePath (overwriting
+    /// whatever was there -- this IS the "replace" flow, not just "add"), points AudioPlayer at
+    /// it, and turns it on so picking a new whistle doesn't silently stay disabled from a
+    /// previous session. Returns bool, not JSON -- there's nothing else the caller needs back.</summary>
+    public bool BrowseAndSetLeadInWhistleFromWeb()
+    {
+        using var dlg = new OpenFileDialog { Filter = "Audio Files|*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac|All Files|*.*", Title = "Choose Lead-In Whistle Clip" };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return false;
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.SongsFolder);
+            File.Copy(dlg.FileName, ConfigStore.LeadInWhistlePath, overwrite: true);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("BrowseAndSetLeadInWhistleFromWeb failed to copy file", ex);
+            return false;
+        }
+
+        AudioPlayer.LeadInClipPath = ConfigStore.LeadInWhistlePath;
+        AudioPlayer.LeadInEnabled = true;
+        ConfigStore.SaveLeadInWhistleEnabled(true);
+        return true;
     }
 
     /// <summary>"Fire Sensitivity" slider -- delay in seconds before a fired cue starts fading

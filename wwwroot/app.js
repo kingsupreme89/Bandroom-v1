@@ -156,13 +156,7 @@ async function init() {
       _isAdminMode = await bridge.IsAdminMode();
     } catch (err) { console.error("IsAdminMode failed", err); }
     try {
-      // Lead-in whistle toggle only makes sense once a whistle clip actually exists (set via
-      // TrimmerForm's "Set as Lead-In Whistle") -- hidden otherwise so an empty toggle for a
-      // feature that isn't configured yet doesn't clutter the Mixer panel.
-      const whistleAvailable = await bridge.GetLeadInWhistleAvailable();
-      document.getElementById("leadin-whistle-section").hidden = !whistleAvailable;
-      if (whistleAvailable)
-        document.getElementById("toggle-leadin-whistle").checked = await bridge.GetLeadInWhistleEnabled();
+      await refreshLeadInWhistleSection();
     } catch (err) { console.error("GetLeadInWhistleAvailable/Enabled failed", err); }
   } else {
     state.teams = [{ name: "General", primary: "#22d3ee", secondary: "#22d3ee" }];
@@ -254,8 +248,61 @@ function renderSuggestedBatch() {
     dlEl.className = "suggested-row-dl";
     dlEl.textContent = `\u{2B07} ${(item.downloads ?? 0).toLocaleString()}`;
     row.append(typeEl, body, dlEl);
+
+    // Task queue item 8 (Session 11): this row previously had no per-item transport at all --
+    // just a type icon/name/school/download-count, and clicking anywhere on the row navigated
+    // away to that item's team album. Same .bandroom-item-action button pattern already used on
+    // the marketplace hub's Popular Songs shelf tiles (buildItemTile's inHub branch), and the
+    // same click-guard that lets those buttons coexist with the row's own click-to-navigate
+    // handler.
+    // NOTE: intentionally NOT the .bandroom-item-actions class the Popular Songs shelf uses --
+    // that one is absolutely-positioned to overlay a square .bandroom-item-tile thumbnail, which
+    // would badly misplace itself on this row's horizontal list-item layout. Same
+    // .bandroom-item-action BUTTON styling is reused (the actual icon-button look), just laid out
+    // inline via .suggested-row-actions instead of as an overlay.
+    const actions = document.createElement("div");
+    actions.className = "suggested-row-actions";
+    if (item.type === "song") {
+      const playBtn = document.createElement("button");
+      playBtn.className = "bandroom-item-action";
+      playBtn.title = "Play";
+      playBtn.textContent = "▶";
+      playBtn.addEventListener("click", (e) => { e.stopPropagation(); previewSong(item); });
+      actions.appendChild(playBtn);
+
+      const stopBtn = document.createElement("button");
+      stopBtn.className = "bandroom-item-action";
+      stopBtn.title = "Stop";
+      stopBtn.textContent = "⏹";
+      stopBtn.addEventListener("click", (e) => { e.stopPropagation(); stopPreview(); });
+      actions.appendChild(stopBtn);
+    }
+    // Download only applies to song/image types -- the worker's DownloadAsync (server-side) only
+    // handles those two, a "profile" item (shared song-assignment maps, not a file) has no
+    // downloadable file at all, so no button for that type.
+    if (item.type === "song" || item.type === "image") {
+      const dlBtn = document.createElement("button");
+      dlBtn.className = "bandroom-item-action";
+      dlBtn.title = "Download to My Downloads";
+      dlBtn.textContent = "⬇";
+      dlBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        dlBtn.disabled = true;
+        dlBtn.textContent = "...";
+        const ok = bridge ? await downloadMarketplaceItem(item) : false;
+        showToast(ok ? `Downloaded "${item.name}"!` : "Couldn't download that.");
+        dlBtn.disabled = false;
+        dlBtn.textContent = "⬇";
+      });
+      actions.appendChild(dlBtn);
+    }
+    if (actions.childElementCount > 0) row.appendChild(actions);
+
     row.title = `${item.name} — ${item.school}`;
-    row.addEventListener("click", () => openTeamAlbum(item.school));
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".bandroom-item-action")) return; // button clicks handle themselves
+      openTeamAlbum(item.school);
+    });
     list.appendChild(row);
   }
 }
@@ -1035,6 +1082,21 @@ const HELP_GUIDE_HTML = `
 </div>
 `;
 
+/// Task queue item 5 (Session 11) -- the panel section is now always visible (see index.html's
+/// comment on #leadin-whistle-section), but the enable/disable toggle row only makes sense once a
+/// clip actually exists; the hint text swaps to reflect which state we're in. Pulled out of
+/// initClipperIsland's inline try/catch into its own function so the upload button's success
+/// handler can re-run it without duplicating this logic.
+async function refreshLeadInWhistleSection() {
+  const whistleAvailable = await bridge.GetLeadInWhistleAvailable();
+  document.getElementById("leadin-whistle-toggle-row").hidden = !whistleAvailable;
+  document.getElementById("leadin-whistle-hint").textContent = whistleAvailable
+    ? "A short sound that plays right before every triggered clip."
+    : "A short sound that plays right before every triggered clip -- like a referee's whistle starting a play. No whistle set yet.";
+  if (whistleAvailable)
+    document.getElementById("toggle-leadin-whistle").checked = await bridge.GetLeadInWhistleEnabled();
+}
+
 function wireControls() {
   wireLogoCropTool();
   wireBgCropTool();
@@ -1226,6 +1288,28 @@ function wireControls() {
   });
   document.getElementById("toggle-leadin-whistle").addEventListener("change", (e) => {
     bridge?.SetLeadInWhistleEnabled(e.target.checked);
+  });
+  // Task queue item 5 (Session 11) -- direct upload/replace path for the lead-in whistle clip,
+  // instead of the only way to set one being buried in TrimmerForm's "Set as Lead-In Whistle"
+  // button. Native file picker (BrowseAndSetLeadInWhistle copies the chosen file straight to
+  // ConfigStore.LeadInWhistlePath and turns the whistle on) -- same reasoning as every other
+  // audio browse flow in this app, a web <input type=file> can't hand back a real path.
+  document.getElementById("btn-leadin-whistle-upload").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-leadin-whistle-upload");
+    btn.disabled = true;
+    try {
+      const ok = bridge ? await bridge.BrowseAndSetLeadInWhistle() : false;
+      if (ok) {
+        showToast("Lead-in whistle updated.");
+        await refreshLeadInWhistleSection();
+      }
+      // ok === false also covers "user cancelled the picker" -- no toast needed for that, same
+      // as every other cancel-a-native-dialog path elsewhere in this file.
+    } catch (err) {
+      console.error("BrowseAndSetLeadInWhistle failed", err);
+      showToast("Couldn't set that whistle clip -- try again.");
+    }
+    btn.disabled = false;
   });
   document.getElementById("slider-sensitivity").addEventListener("input", (e) => {
     document.getElementById("sensitivity-value").textContent = e.target.value;
@@ -2640,12 +2724,6 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName) {
       _clipperAssignLibrary = [];
     }
   }
-  // Team filter intentionally NOT reset here -- reopening Assign for a different event while
-  // browsing "UGA only" is a reasonable thing to keep, same as the marketplace hub keeps its
-  // last sort choice across opens.
-  const teamSearch = document.getElementById("clipper-assign-team-search");
-  if (teamSearch) teamSearch.value = "";
-  renderClipperAssignTeamSidebar("");
   renderClipperAssignList("");
 }
 
@@ -2658,11 +2736,6 @@ function closeClipperAssign() {
   document.getElementById("preview-bar").hidden = !_previewAudio;
   _clipperAssignTrigger = null;
 }
-
-// Which team the sidebar currently has selected -- null means "All Teams" (no filter). Module
-// level so it survives re-renders while the assign popup stays open (e.g. typing in the search
-// box shouldn't reset the team you just picked).
-let _clipperAssignTeamFilter = null;
 
 // Source -> section label, in display order. Matches the "source" tag GetTrackLibraryFromWeb
 // (WebMainForm.cs) now stamps on every entry -- keep these two lists in sync if a new source
@@ -2757,19 +2830,9 @@ function renderClipperAssignList(filter) {
   const list = document.getElementById("clipper-assign-list");
   list.innerHTML = "";
   const q = filter.toLowerCase().trim();
-  const teamQ = _clipperAssignTeamFilter ? _clipperAssignTeamFilter.toLowerCase() : null;
-  const items = (_clipperAssignLibrary || []).filter((it) => {
-    if (q && !it.name.toLowerCase().includes(q)) return false;
-    // Song files carry no structured team metadata outside marketplace downloads/trimmed clips
-    // (which bake the team name into the filename, e.g. "UGA - Fight Song" / "UGA-FightSong") --
-    // a plain drag-drop import or local recording has no team association at all, so team
-    // filtering is a best-effort filename substring match, not a guaranteed-accurate index.
-    if (teamQ && !it.name.toLowerCase().includes(teamQ)) return false;
-    return true;
-  });
+  const items = (_clipperAssignLibrary || []).filter((it) => !q || it.name.toLowerCase().includes(q));
   if (!items.length) {
-    const reason = teamQ ? ` for ${_clipperAssignTeamFilter}` : "";
-    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No songs found${q ? " for that search" : reason || " in the Songs library"}.</div>`;
+    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No songs found${q ? " for that search" : " in the Songs library"}.</div>`;
     return;
   }
 
@@ -2784,48 +2847,9 @@ function renderClipperAssignList(filter) {
   }
 }
 
-/// Team sidebar (task queue item 2) -- same team-swatch grid used by the marketplace hub's
-/// "Your Library" sidebar (renderTeamGridInto), reused rather than reinvented. "All Teams" is a
-/// synthetic first entry (not a real team) that clears _clipperAssignTeamFilter.
-function renderClipperAssignTeamSidebar(filter) {
-  const grid = document.getElementById("clipper-assign-team-grid");
-  if (!grid) return;
-  grid.innerHTML = "";
-
-  const allTile = document.createElement("div");
-  allTile.className = "team-swatch" + (_clipperAssignTeamFilter === null ? " active" : "");
-  allTile.title = "All Teams";
-  allTile.textContent = "All";
-  allTile.style.display = "flex";
-  allTile.style.alignItems = "center";
-  allTile.style.justifyContent = "center";
-  allTile.style.fontSize = "10px";
-  allTile.style.fontWeight = "700";
-  allTile.addEventListener("click", () => {
-    _clipperAssignTeamFilter = null;
-    renderClipperAssignTeamSidebar(document.getElementById("clipper-assign-team-search")?.value ?? "");
-    renderClipperAssignList(document.getElementById("clipper-assign-search")?.value ?? "");
-  });
-
-  // renderTeamGridInto clears the grid itself (grid.innerHTML = "") first thing -- build the
-  // synthetic "All" tile above but only insert it AFTER this call, or it gets wiped along with
-  // everything else. It isn't one of state.teams, so renderTeamGridInto can never render it for us.
-  renderTeamGridInto("clipper-assign-team-grid", filter ?? "", (name) => {
-    _clipperAssignTeamFilter = name;
-    renderClipperAssignTeamSidebar(document.getElementById("clipper-assign-team-search")?.value ?? "");
-    renderClipperAssignList(document.getElementById("clipper-assign-search")?.value ?? "");
-  });
-  grid.insertBefore(allTile, grid.firstChild);
-  if (_clipperAssignTeamFilter) {
-    const activeSwatch = [...grid.querySelectorAll(".team-swatch")].find((el) => el.title === _clipperAssignTeamFilter);
-    activeSwatch?.classList.add("active");
-  }
-}
-
 function initClipperAssign() {
   document.getElementById("btn-clipper-close-assign").addEventListener("click", closeClipperAssign);
   document.getElementById("clipper-assign-search").addEventListener("input", (e) => renderClipperAssignList(e.target.value));
-  document.getElementById("clipper-assign-team-search")?.addEventListener("input", (e) => renderClipperAssignTeamSidebar(e.target.value));
 
   document.getElementById("btn-clipper-assign-play").addEventListener("click", () => {
     if (!_clipperAssignSelectedPath) return;
@@ -4166,6 +4190,35 @@ function updateMatchupSubtext() {
 /// after this for editing songs; only the routing itself is locked until Stop Watching.
 async function confirmMatchup() {
   if (!state.matchupHome || !state.matchupAway || state.matchupHome === state.matchupAway) return;
+
+  // Task queue item 6 (Session 11): WebMainForm.ConfirmGametimeFromWeb already silently
+  // auto-fills an empty team's profile from the default pack the moment the matchup locks (see
+  // its own comment) -- untouched here, still happens exactly as before. This check runs BEFORE
+  // that call so the user gets a real, visible choice instead of it happening invisibly: either
+  // proceed now (accepting the starter-profile auto-fill), or back out and assign songs
+  // themselves first via the Clipper, then re-open Set Matchup once ready.
+  try {
+    const needsDefault = bridge ? JSON.parse(await bridge.GetTeamsNeedingDefaultProfile(state.matchupHome, state.matchupAway)) : [];
+    if (needsDefault.length > 0) {
+      const proceed = await showDefaultProfilePrompt(needsDefault);
+      if (!proceed) return; // user chose to assign songs themselves first -- matchup stays unlocked
+      // Explicitly apply now (rather than relying on ConfirmGametime's own silent safety-net
+      // fallback, which would do the same thing invisibly) so we can report real numbers and so
+      // the "Use Starter Profile" button actually does what it says instead of being a no-op that
+      // just trusts a side effect elsewhere.
+      let totalAssigned = 0;
+      for (const name of needsDefault) {
+        try { totalAssigned += (await bridge?.ApplyDefaultProfileForTeam(name)) ?? 0; }
+        catch (err) { console.error(`ApplyDefaultProfileForTeam(${name}) failed`, err); }
+      }
+      if (totalAssigned > 0) showToast(`Filled ${totalAssigned} starter song${totalAssigned === 1 ? "" : "s"} from the Default Song Pack.`);
+    }
+  } catch (err) {
+    console.error("GetTeamsNeedingDefaultProfile failed", err);
+    // Best-effort -- if the check itself fails, fall through to the normal confirm flow rather
+    // than blocking GAMETIME entirely over a broken informational prompt.
+  }
+
   await bridge?.ConfirmGametime(state.matchupHome, state.matchupAway);
   state.matchupLocked = true;
   updateMatchupLabel();
@@ -4175,6 +4228,31 @@ async function confirmMatchup() {
   // -- reflect that immediately instead of requiring a separate Start Watching click.
   setWatching("waiting");
   showToast(`GAMETIME! ${state.matchupAway} @ ${state.matchupHome} -- watching started`);
+}
+
+/// Glass-styled confirm prompt (task queue item 6) -- resolves true if the user wants to proceed
+/// with GAMETIME (accepting the default-pack starter-profile auto-fill for whichever team(s)
+/// don't have one yet), false if they'd rather back out and assign songs themselves first.
+/// Reuses #default-profile-prompt-overlay's markup (see index.html), matching the rest of the
+/// app's glass-island/pill styling instead of a plain confirm() dialog.
+function showDefaultProfilePrompt(teamNames) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("default-profile-prompt-overlay");
+    document.getElementById("default-profile-prompt-teams").textContent = teamNames.join(" and ");
+    overlay.hidden = false;
+
+    const cleanup = () => {
+      overlay.hidden = true;
+      btnApply.removeEventListener("click", onApply);
+      btnSkip.removeEventListener("click", onSkip);
+    };
+    const onApply = () => { cleanup(); resolve(true); };
+    const onSkip = () => { cleanup(); resolve(false); };
+    const btnApply = document.getElementById("btn-default-profile-apply");
+    const btnSkip = document.getElementById("btn-default-profile-skip");
+    btnApply.addEventListener("click", onApply);
+    btnSkip.addEventListener("click", onSkip);
+  });
 }
 
 /// Populates the two-team VS backdrop (photo + logo + name + team-color underglow per side)

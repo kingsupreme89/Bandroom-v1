@@ -1017,6 +1017,7 @@ public sealed class WebBridge
     public bool GetLeadInWhistleAvailable() => _host.GetLeadInWhistleAvailableFromWeb();
     public bool GetLeadInWhistleEnabled() => _host.GetLeadInWhistleEnabledFromWeb();
     public void SetLeadInWhistleEnabled(bool enabled) => _host.SetLeadInWhistleEnabledFromWeb(enabled);
+    public bool BrowseAndSetLeadInWhistle() => _host.BrowseAndSetLeadInWhistleFromWeb();
     public void SetFadeDelay(int seconds) => _host.SetFadeDelayFromWeb(seconds);
     public void SetReverb(string key) => _host.SetReverbFromWeb(key);
 
@@ -1056,6 +1057,20 @@ public sealed class WebBridge
     public void SetGameTeams(string home, string away) => _host.SetGameTeamsFromWeb(home, away);
     public string? GetGameTeams() => _host.GetGameTeamsFromWeb();
     public void ConfirmGametime(string home, string away) => _host.ConfirmGametimeFromWeb(home, away);
+
+    /// <summary>Task queue item 6 -- returns JSON (not the raw List&lt;string&gt;) for the same
+    /// reason every other structured return in this class does: WebView2's host-object marshaling
+    /// reliably hands JS primitives and JSON strings, not arbitrary .NET collection types.</summary>
+    public string GetTeamsNeedingDefaultProfile(string home, string away) =>
+        JsonSerializer.Serialize(_host.GetTeamsNeedingDefaultProfileFromWeb(home, away));
+
+    /// <summary>Explicit opt-in apply of the default/starter profile for one team (task queue
+    /// item 6) -- reuses ConfigStore.ImportDefaultPackForTeam, the SAME logic
+    /// SetGameTeamsFromWeb's silent safety-net uses, just invoked directly and immediately rather
+    /// than as a side effect of confirming the matchup. Loads the team's existing profile (or
+    /// BuildDefault if none) so this is safe to call even if the team already has SOME
+    /// assignments -- ImportDefaultPackForTeam only ever fills empty slots, never overwrites.</summary>
+    public int ApplyDefaultProfileForTeam(string teamName) => _host.ApplyDefaultProfileForTeamFromWeb(teamName);
     public void PlayClickSound() => _host.PlayUiClickSoundFromWeb();
     public bool IsMatchupLocked() => _host.IsMatchupLockedFromWeb();
     public void CopyCurrentToAllTeams() => _host.CopyCurrentToAllTeamsFromWeb();
