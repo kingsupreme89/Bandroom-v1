@@ -4252,6 +4252,16 @@ function renderMatchupCoverflow(side, filter) {
   const centerTeam = teams[centerIdx];
   nameEl.textContent = centerTeam.name;
   if (side === "home") state.matchupHome = centerTeam.name; else state.matchupAway = centerTeam.name;
+
+  // Tint this side's half of the split screen toward the centered team's own color -- same
+  // --half-color pattern applyVsBackdrop already uses for the in-game VS backdrop, just applied
+  // to the picker column instead of the backdrop half.
+  const column = track.closest(".matchup-column");
+  const sideColor = centerTeam.secondary || centerTeam.primary;
+  if (column && sideColor) column.style.setProperty("--side-color", sideColor);
+  const badge = document.getElementById("matchup-vs-badge");
+  if (badge && sideColor) badge.style.setProperty(`--${side}-badge-color`, sideColor);
+
   updateMatchupSubtext();
 }
 

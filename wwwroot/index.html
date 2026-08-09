@@ -691,8 +691,12 @@
         <!-- Cover-flow team select, same idea as CFB 27's own team-select screen: center tile
              large/sharp, neighbors tilted+faded, arrows or click-a-tile to cycle. Browsing IS
              picking (the name label updates live as you cycle), matching the reference screen
-             instead of a separate confirm step -- GAMETIME below is the real commit point. -->
-        <div class="matchup-column">
+             instead of a separate confirm step -- GAMETIME below is the real commit point.
+             Full-bleed split-screen layout (CFB27 team-select proportions): each side's own
+             team color tints its half via --side-color, set on .matchup-column in
+             renderMatchupCoverflow the same way applyVsBackdrop tints the in-game VS backdrop
+             halves via --half-color -- same mechanism, different element. -->
+        <div class="matchup-column matchup-column-away">
           <div class="matchup-column-title">Away</div>
           <input type="text" id="matchup-away-search" placeholder="Search teams..." class="team-picker-search" />
           <div class="coverflow-stage">
@@ -702,7 +706,8 @@
           </div>
           <div class="coverflow-name" id="matchup-away-name"></div>
         </div>
-        <div class="matchup-column">
+        <div class="matchup-vs-badge" id="matchup-vs-badge"><span>VS</span></div>
+        <div class="matchup-column matchup-column-home">
           <div class="matchup-column-title">Home</div>
           <input type="text" id="matchup-home-search" placeholder="Search teams..." class="team-picker-search" />
           <div class="coverflow-stage">

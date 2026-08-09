@@ -2905,37 +2905,105 @@ input, select, textarea, [contenteditable] {
 }
 #load-profile-list { max-height: 50vh; }
 
+/* Big cinematic split-screen "Start a Game" dialog (CFB27 team-select proportions, mined for
+   LAYOUT ONLY -- our own glass/neon language, not their chrome). Near-full-viewport instead of
+   a small centered card; header/instructions/subtext/actions stay compact so the split-screen
+   columns get the vertical room, and the dialog itself never grows a scrollbar. */
 #matchup-dialog {
-  width: min(720px, 92vw);
-  max-height: 85vh;
-  padding: 24px;
+  width: min(1400px, 96vw);
+  height: min(880px, 90vh);
+  padding: clamp(14px, 2vw, 24px);
   border-radius: var(--radius-panel);
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  overflow-y: auto;
+  gap: 10px;
+  overflow: hidden;
 }
 .matchup-header {
   display: flex; justify-content: space-between; align-items: center;
   font-size: 16px; font-weight: 700;
+  flex: none;
 }
 .matchup-instructions {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
-  line-height: 1.5;
+  line-height: 1.4;
+  flex: none;
+  max-width: 900px;
 }
+/* Full-bleed split screen: two halves tinted toward whichever team is centered in that side's
+   coverflow (--side-color, set in renderMatchupCoverflow -- same pattern as applyVsBackdrop's
+   --half-color on the in-game VS backdrop), divided by a pulsing VS badge. */
 .matchup-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 0;
+  margin: 0 clamp(-24px, -2vw, -14px);
+  overflow: hidden;
 }
+.matchup-column {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: clamp(12px, 2.4vw, 32px);
+  overflow: hidden;
+  --side-color: var(--accent);
+  background:
+    radial-gradient(ellipse 90% 70% at 50% 42%, color-mix(in srgb, var(--side-color) 30%, transparent) 0%, transparent 72%),
+    linear-gradient(180deg, color-mix(in srgb, var(--side-color) 14%, transparent) 0%, transparent 45%);
+  transition: background 0.35s ease;
+}
+.matchup-column-away { border-right: 1px solid color-mix(in srgb, var(--side-color) 35%, var(--glass-border)); }
+.matchup-column-home { border-left: 1px solid color-mix(in srgb, var(--side-color) 35%, var(--glass-border)); }
 .matchup-column-title {
-  font-size: 12px;
+  font-size: clamp(11px, 1.1vw, 13px);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-  margin-bottom: 8px;
+  letter-spacing: 0.14em;
+  color: var(--side-color);
+  margin-bottom: 6px;
+}
+.matchup-column .team-picker-search {
+  width: min(280px, 80%);
+  margin: 0 auto 4px;
+}
+/* Center divider badge -- our equivalent of CFB27's bowl-game emblem between the two sides,
+   just a team-accent-colored "VS" pill instead of copying their iconography. */
+.matchup-vs-badge {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 7;
+  width: clamp(52px, 6vw, 84px);
+  height: clamp(52px, 6vw, 84px);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 11, 13, 0.78);
+  border: 2px solid var(--glass-border);
+  pointer-events: none;
+  animation: matchup-vs-pulse 1.8s ease-in-out infinite;
+}
+.matchup-vs-badge span {
+  font-size: clamp(13px, 1.6vw, 20px);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+}
+@keyframes matchup-vs-pulse {
+  0%, 100% {
+    box-shadow: 0 0 16px 2px color-mix(in srgb, var(--away-badge-color, var(--accent)) 45%, transparent),
+                0 0 16px 2px color-mix(in srgb, var(--home-badge-color, var(--accent)) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 28px 6px color-mix(in srgb, var(--away-badge-color, var(--accent)) 65%, transparent),
+                0 0 28px 6px color-mix(in srgb, var(--home-badge-color, var(--accent)) 65%, transparent);
+  }
 }
 /* Cover-flow team select (CFB 27 team-select reference) -- center tile large/sharp, up to two
    neighbors each side scaled down + tilted + faded, rest hidden. Pure CSS transforms on plain
@@ -2993,6 +3061,33 @@ input, select, textarea, [contenteditable] {
   font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
+}
+
+/* Matchup-only: scale the shared coverflow up to CFB27's "giant logo per half" proportions.
+   Scoped to .matchup-columns so the onboarding/favorite-team coverflows (same shared classes)
+   are untouched. */
+.matchup-columns .coverflow-stage { height: min(48vh, 420px); flex: 1 1 auto; }
+.matchup-columns .coverflow-track .team-swatch {
+  width: clamp(90px, 13vw, 150px);
+  height: clamp(90px, 13vw, 150px);
+  margin: calc(clamp(90px, 13vw, 150px) / -2) 0 0 calc(clamp(90px, 13vw, 150px) / -2);
+}
+.matchup-columns .coverflow-track .team-swatch.cf-center {
+  width: clamp(210px, 26vw, 320px);
+  height: clamp(210px, 26vw, 320px);
+  margin: calc(clamp(210px, 26vw, 320px) / -2) 0 0 calc(clamp(210px, 26vw, 320px) / -2);
+  box-shadow: 0 0 48px 6px color-mix(in srgb, var(--side-color, var(--accent)) 55%, transparent);
+}
+.matchup-columns .coverflow-track .team-swatch.cf-l1 { transform: translateX(-15vw) scale(0.72) rotateY(28deg); }
+.matchup-columns .coverflow-track .team-swatch.cf-r1 { transform: translateX(15vw) scale(0.72) rotateY(-28deg); }
+.matchup-columns .coverflow-track .team-swatch.cf-l2 { transform: translateX(-25vw) scale(0.52) rotateY(38deg); }
+.matchup-columns .coverflow-track .team-swatch.cf-r2 { transform: translateX(25vw) scale(0.52) rotateY(-38deg); }
+.matchup-columns .coverflow-name {
+  margin-top: clamp(10px, 1.6vw, 20px);
+  font-size: clamp(18px, 2.4vw, 30px);
+  font-weight: 800;
+  color: var(--text-primary);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
 }
 .gametime-btn {
   padding: 10px 20px;
