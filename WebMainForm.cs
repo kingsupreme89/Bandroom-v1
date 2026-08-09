@@ -786,6 +786,25 @@ public sealed class WebMainForm : Form
         return System.Text.Json.JsonSerializer.Serialize(items);
     }
 
+    /// <summary>Lists a team's slice of the (locally imported) default song pack, so the Sound
+    /// Bank album can actually show what "Import Song Pack" put there -- these files never show
+    /// up as marketplace/community uploads (the album grid's normal data source, see
+    /// renderTeamAlbumGrid in app.js) since they're purely local and get assigned straight into
+    /// event slots, not published anywhere. Owner report: importing a team's pack and then
+    /// opening that team's Sound Bank looked like nothing happened, because this section didn't
+    /// exist -- the import DID work, there was just nowhere in this view to see it.</summary>
+    public string GetDefaultPackSongsForTeamFromWeb(string teamName)
+    {
+        string? teamFolder = ConfigStore.FindDefaultPackTeamFolder(teamName);
+        if (teamFolder == null) return "[]";
+
+        var items = Directory.GetFiles(teamFolder, "*.*", SearchOption.TopDirectoryOnly)
+            .Where(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+            .OrderBy(Path.GetFileNameWithoutExtension, StringComparer.OrdinalIgnoreCase)
+            .Select(p => new { name = Path.GetFileNameWithoutExtension(p), path = p });
+        return System.Text.Json.JsonSerializer.Serialize(items);
+    }
+
     /// <summary>Preview an arbitrary local library file from the clipping island's song list --
     /// distinct from PreviewEventFromWeb (which previews whatever's already assigned to a
     /// trigger). Routes through the same native AudioPlayer as everything else local, not a JS

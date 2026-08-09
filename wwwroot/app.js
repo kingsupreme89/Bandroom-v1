@@ -3280,17 +3280,26 @@ let _albumItemsCache = { songs: [], images: [] };
 // state a real empty team gets. Reset on every fresh fetch.
 let _albumFetchError = false;
 
+// Local default-song-pack files for the currently open album's team (see
+// GetDefaultPackSongsForTeamFromWeb) -- these come from "Import Song Pack", never from the
+// marketplace, so they'd otherwise never appear anywhere in this view. Owner report: importing
+// a team's pack and opening that team's Sound Bank looked like nothing happened, because
+// nothing here ever showed it.
+let _albumDefaultPackCache = [];
+
 async function renderTeamAlbumGrid() {
   const grid = document.getElementById("bandroom-songs-grid");
   const team = albumTeam;
   grid.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
-  const [songsResult, imagesResult] = await Promise.all([
+  const [songsResult, imagesResult, defaultPackJson] = await Promise.all([
     fetchUploadListDetailed("song", team.name),
     fetchUploadListDetailed("image", team.name),
+    bridge ? bridge.GetDefaultPackSongsForTeam(team.name) : Promise.resolve("[]"),
   ]);
   if (!albumTeam || albumTeam !== team) return; // closed/switched while awaiting
   _albumItemsCache = { songs: songsResult.items, images: imagesResult.items };
   _albumFetchError = songsResult.error || imagesResult.error;
+  try { _albumDefaultPackCache = JSON.parse(defaultPackJson) || []; } catch { _albumDefaultPackCache = []; }
   paintAlbumGrid(getAlbumSearchFilter());
 }
 
@@ -3309,6 +3318,38 @@ function paintAlbumGrid(filter) {
   const items = filter ? all.filter((it) => it.name.toLowerCase().includes(filter)) : all;
 
   grid.innerHTML = "";
+
+  const packSongs = filter
+    ? _albumDefaultPackCache.filter((s) => s.name.toLowerCase().includes(filter))
+    : _albumDefaultPackCache;
+  if (packSongs.length > 0) {
+    const section = document.createElement("div");
+    section.className = "bandroom-defaultpack-section";
+    const header = document.createElement("div");
+    header.className = "bandroom-defaultpack-header";
+    header.textContent = `Default Song Pack (${packSongs.length}) -- already filling in matching situations for ${team.name}`;
+    section.appendChild(header);
+    const list = document.createElement("div");
+    list.className = "bandroom-defaultpack-list";
+    packSongs.forEach((s) => {
+      const row = document.createElement("div");
+      row.className = "bandroom-defaultpack-row";
+      const name = document.createElement("span");
+      name.className = "bandroom-defaultpack-name";
+      name.textContent = s.name;
+      const btn = document.createElement("button");
+      btn.className = "preview-bar-btn";
+      btn.title = "Preview";
+      btn.textContent = "▶";
+      btn.addEventListener("click", () => bridge?.PreviewLocalFile(s.path));
+      row.appendChild(name);
+      row.appendChild(btn);
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+    grid.appendChild(section);
+  }
+
   if (_albumFetchError && all.length === 0) {
     // Distinct from the "genuinely zero uploads" case below -- offers a retry instead of
     // implying there's really nothing here.

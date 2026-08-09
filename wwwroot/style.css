@@ -1748,6 +1748,48 @@ input, select, textarea, [contenteditable] {
   grid-template-columns: repeat(4, 1fr);
   gap: 14px;
 }
+/* Default Song Pack section (owner report: "Import Song Pack" songs landed nowhere visible in
+   this album, since they're local-only and never show up in the marketplace grid below) --
+   spans the full grid width, sits above the marketplace tiles. */
+.bandroom-defaultpack-section {
+  grid-column: 1 / -1;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-panel);
+  padding: 12px 14px;
+  margin-bottom: 4px;
+}
+.bandroom-defaultpack-header {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.bandroom-defaultpack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.bandroom-defaultpack-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.bandroom-defaultpack-row:hover { background: rgba(255, 255, 255, 0.06); }
+.bandroom-defaultpack-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* Marketplace card */
 .marketplace-card {
   display: flex;

@@ -1027,6 +1027,7 @@ public sealed class WebBridge
     // Clipping-island assign flow -- replaces the native AssignTrackForm popup for the main-song
     // assign path (see initClipperIsland in app.js). Trim still opens the real TrimmerForm.
     public string GetTrackLibrary() => _host.GetTrackLibraryFromWeb();
+    public string GetDefaultPackSongsForTeam(string teamName) => _host.GetDefaultPackSongsForTeamFromWeb(teamName);
     public void PreviewLocalFile(string path) => _host.PreviewLocalFileFromWeb(path);
     public void PlaySoundboardSlot(string key, string path) => _host.PlaySoundboardSlotFromWeb(key, path);
     public Task<string?> ScanDynastySave() => _host.ScanDynastySaveFromWeb();
