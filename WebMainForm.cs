@@ -1400,7 +1400,24 @@ public sealed class WebMainForm : Form
             // this file (penalizedIsHome/possessionIsHomeNow in GameWatcher.RouteEngineTick,
             // OnTackleForLoss above) already waits for a real read instead of guessing; this now
             // matches that convention rather than being the one place that guesses wrong.
-            if (_possession == null) return;
+            if (_possession == null)
+            {
+                // Side-agnostic "Other:*" events (kickoff, quarter starts, pregame) aren't tied to
+                // a real team the way Offense:/Defense: cues are, but they CAN legitimately fire
+                // before _possession has ever been read -- possession sampling is itself suppressed
+                // while a "situation" like kickoff is on screen (GameWatcher.RouteEngineTick's
+                // situationActive gate), so opening kickoff can hit this branch on literally the
+                // game's first tick. Fall back to "home" for just these; every side-specific event
+                // still returns above and waits for a real read, preserving the STATE_MACHINE_
+                // ANALYSIS.md Race #3 fix (guessing "home" there misroutes a defensive/offensive
+                // cue to the wrong team -- that risk doesn't apply to a side-agnostic cue).
+                foreach (var evt in events.Where(e => e.EventKey.StartsWith("Other:")))
+                {
+                    string result = FireEventForSide("home", evt.EventKey);
+                    OnLog($"[engine] {evt.EventKey} -> home (no possession read yet): {result}");
+                }
+                return;
+            }
             string side = _possession;
 
             foreach (var evt in events)

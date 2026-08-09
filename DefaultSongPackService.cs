@@ -169,52 +169,114 @@ internal static class DefaultSongPackService
             Directory.CreateDirectory(ConfigStore.DownloadedDefaultSongsFolder);
             var teamsImported = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int songCount = 0;
+            int unmatchedCount = 0;
 
             bool HasAudioFilesDirectly(string dir) =>
                 Directory.Exists(dir) && Directory.EnumerateFiles(dir).Any(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()));
 
-            void CopyTeamFolder(string sourceTeamDir, string conference, string teamName)
+            // Filename -> app EventKey (e.g. "Offense: 1st Down") is the exact reverse of
+            // ConfigStore.ImportDefaultPackFromFolder's `name.Replace("_", ": ")` match rule --
+            // this is the only filename shape that lands in the right situation slot automatically.
+            string EventKeyToFileStem(string eventKey) => eventKey.Replace(": ", "_");
+
+            void CopyFile(string sourceFile, string team, string destStem)
             {
-                string destDir = Path.Combine(ConfigStore.DownloadedDefaultSongsFolder, conference, teamName);
+                string destDir = Path.Combine(ConfigStore.DownloadedDefaultSongsFolder, "Imported", team);
                 Directory.CreateDirectory(destDir);
+                string ext = Path.GetExtension(sourceFile);
+                string destPath = Path.Combine(destDir, destStem + ext);
+                // A collision means a second file wants the same situation slot -- keep the first
+                // (whichever wins the EventKey-exact filename that auto-fill matches on) and give
+                // the rest a numbered alternate so they're still copied and browsable/assignable by
+                // hand, they just won't auto-fill (matches how the app already stores alternates,
+                // e.g. "Defense_Earned First Down_3.mp3").
+                if (File.Exists(destPath))
+                {
+                    int n = 2;
+                    while (File.Exists(destPath = Path.Combine(destDir, $"{destStem}_{n}{ext}"))) n++;
+                }
+                File.Copy(sourceFile, destPath, overwrite: true);
+                songCount++;
+                teamsImported.Add(team);
+            }
+
+            // Bulk-copies a folder that already IS one team's own folder (its files keep their
+            // original names -- this is the official pack's own shape, Conference\Team\EventKey.mp3,
+            // where the names are already exact EventKeys and don't need IntakeEngine's help).
+            void CopyTeamFolder(string sourceTeamDir, string teamName)
+            {
                 foreach (var file in Directory.GetFiles(sourceTeamDir))
                 {
                     if (!AudioExtensions.Contains(Path.GetExtension(file).ToLowerInvariant())) continue;
-                    File.Copy(file, Path.Combine(destDir, Path.GetFileName(file)), overwrite: true);
-                    songCount++;
+                    CopyFile(file, teamName, Path.GetFileNameWithoutExtension(file));
                 }
-                teamsImported.Add(teamName);
             }
 
-            if (HasAudioFilesDirectly(root))
+            // Per-file classification for a folder whose OWN name doesn't identify a team (a
+            // conference dump, "SEC" with 268 files loose inside it, everyone's songs mixed
+            // together with team+event baked into each filename instead of folder structure --
+            // owner's actual pack shape). Runs each file through IntakeEngine, the same
+            // filename-parsing engine ImportLocalSongFromWeb already uses, to recover team +
+            // situation from names like "sec ala '21 1st downs.mp3".
+            void ClassifyFolderByFilename(string dir)
             {
-                CopyTeamFolder(root, "Imported", new DirectoryInfo(root).Name);
-            }
-            else if (Directory.Exists(root))
-            {
-                foreach (var sub in Directory.GetDirectories(root))
+                foreach (var file in Directory.GetFiles(dir))
                 {
                     ct.ThrowIfCancellationRequested();
-                    if (HasAudioFilesDirectly(sub))
+                    if (!AudioExtensions.Contains(Path.GetExtension(file).ToLowerInvariant())) continue;
+
+                    var result = IntakeEngine.Process(Path.GetFileName(file));
+                    if (result.Team == "Unknown") { unmatchedCount++; continue; }
+
+                    if (result.SuggestedEventKeys.Length == 0)
                     {
-                        CopyTeamFolder(sub, "Imported", new DirectoryInfo(sub).Name);
+                        // No situation guess at all -- still file it under the team (by original
+                        // name) so it shows up in that team's library for manual assignment,
+                        // rather than silently dropping a file we DID identify the team for.
+                        CopyFile(file, result.Team, Path.GetFileNameWithoutExtension(file));
+                        continue;
                     }
-                    else
-                    {
-                        string conference = new DirectoryInfo(sub).Name;
-                        foreach (var teamDir in Directory.GetDirectories(sub))
-                        {
-                            ct.ThrowIfCancellationRequested();
-                            if (HasAudioFilesDirectly(teamDir))
-                                CopyTeamFolder(teamDir, conference, new DirectoryInfo(teamDir).Name);
-                        }
-                    }
+                    foreach (var eventKey in result.SuggestedEventKeys)
+                        CopyFile(file, result.Team, EventKeyToFileStem(eventKey));
                 }
+            }
+
+            // Recursive scan, not just 2 fixed levels -- a "conference" folder can hold loose
+            // files of its own AND per-team subfolders side by side (owner report: an "SEC" folder
+            // landed as one bogus "SEC" team because the scan stopped at the first audio it found
+            // instead of also descending further). Every directory (any depth, guarded to 5 levels)
+            // that has audio files directly inside gets handled -- as a real team's own folder if
+            // its name resolves to one via IntakeEngine, otherwise per-file by filename.
+            var audioDirs = new List<string>();
+            void Scan(string dir, int depth)
+            {
+                if (depth > 5) return;
+                if (HasAudioFilesDirectly(dir)) audioDirs.Add(dir);
+                foreach (var sub in Directory.GetDirectories(dir))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    Scan(sub, depth + 1);
+                }
+            }
+            if (Directory.Exists(root)) Scan(root, 0);
+
+            foreach (var dir in audioDirs)
+            {
+                var (resolvedTeam, _, matchType) = IntakeEngine.ResolveTeam(new DirectoryInfo(dir).Name);
+                if (resolvedTeam != "Unknown" && matchType is "exact" or "abbreviation" or "variant")
+                    CopyTeamFolder(dir, resolvedTeam);
+                else
+                    ClassifyFolderByFilename(dir);
             }
             progress(0.9);
 
             if (songCount == 0)
-                return new FolderImportResult(false, "No audio files were found in that folder.", new List<string>(), 0);
+            {
+                string why = unmatchedCount > 0
+                    ? $"Found {unmatchedCount} audio file(s), but couldn't tell which team any of them belong to from their filenames."
+                    : "No audio files were found in that folder.";
+                return new FolderImportResult(false, why, new List<string>(), 0);
+            }
 
             // Merge into index.json (what GetDefaultPackTeams reads) instead of overwriting it --
             // a team imported earlier (a prior folder, or the full pack) must not get forgotten.
@@ -239,6 +301,8 @@ internal static class DefaultSongPackService
             string msg = names.Count == 1
                 ? $"Imported {songCount} song{(songCount == 1 ? "" : "s")} for {names[0]}. Open {names[0]}'s Assign panel -- matching situations are already filled in."
                 : $"Imported {songCount} songs across {names.Count} teams: {string.Join(", ", names)}. Open each team's Assign panel to see them filled in.";
+            if (unmatchedCount > 0)
+                msg += $" {unmatchedCount} file(s) couldn't be matched to a team by filename and were skipped.";
             return new FolderImportResult(true, msg, names, songCount);
         }, ct);
     }

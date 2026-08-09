@@ -5,6 +5,13 @@ namespace Bandroom.Core.Helpers;
 /// that detect quarter changes and late-game clinching scenarios.</summary>
 public sealed class GameStateEventHelper : IRuleEvaluator
 {
+    // Victory in Hand's condition (4th quarter, clock <= 30s, 9+ point lead) is level-triggered,
+    // not edge-triggered like everything else this class fires -- with 30 seconds of game clock
+    // and a tick roughly every 250ms, that's up to ~120 evaluations where the condition holds, all
+    // returning the same TriggerEvent. FireCooldown masks some of the resulting duplicates but not
+    // all. Same self-tracked-flag fix as KickoffHelper's _didFire for the same class of bug.
+    bool _didFireVictoryInHand;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         // --- Quarter transitions ---
@@ -57,21 +64,26 @@ public sealed class GameStateEventHelper : IRuleEvaluator
         }
 
         // --- Victory in Hand: 4th quarter under 30 seconds, leading by 9+ ---
+        bool victoryInHandNow = false;
         if (state.Current.Quarter >= 4 && state.Current.TimeRemainingSeconds <= 30)
         {
             int homeLead = state.Current.HomeScore - state.Current.AwayScore;
             int awayLead = state.Current.AwayScore - state.Current.HomeScore;
-
-            if (homeLead >= 9 || awayLead >= 9)
-            {
-                return new TriggerEvent
-                {
-                    EventKey = "Offense: Victory in Hand",
-                    Volume = 100,
-                    IsEarnedBigEvent = true
-                };
-            }
+            victoryInHandNow = homeLead >= 9 || awayLead >= 9;
         }
+
+        if (victoryInHandNow)
+        {
+            if (_didFireVictoryInHand) return null;
+            _didFireVictoryInHand = true;
+            return new TriggerEvent
+            {
+                EventKey = "Offense: Victory in Hand",
+                Volume = 100,
+                IsEarnedBigEvent = true
+            };
+        }
+        _didFireVictoryInHand = false;
 
         return null;
     }
