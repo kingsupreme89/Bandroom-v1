@@ -2596,6 +2596,81 @@ input, select, textarea, [contenteditable] {
   background: rgba(0, 0, 0, 0.55);
 }
 #team-picker-overlay[hidden] { display: none; }
+
+/* Import-target-team picker / Add School overlays -- same fixed-backdrop pattern as
+   #team-picker-overlay above (position:fixed + centered flex + ID-selector [hidden] override),
+   given their own IDs so they can be shown independently. NOT #load-profile-overlay -- that ID
+   is already used by the separate "Load Profile from Others" marketplace feature (styled further
+   down this file). */
+#import-target-team-overlay, #add-school-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 7, 8, 0.55);
+}
+#import-target-team-overlay[hidden], #add-school-overlay[hidden] {
+  display: none;
+}
+#import-target-team-dialog {
+  width: min(700px, 90vw);
+  height: min(600px, 80vh);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+#add-school-dialog {
+  width: min(420px, 90vw);
+  border-radius: var(--radius-panel);
+  padding: 22px;
+}
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.panel-title-row .panel-title { margin-bottom: 0; }
+#btn-add-school { font-size: 18px; line-height: 1; }
+.add-school-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.add-school-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: -6px;
+}
+.add-school-colors {
+  display: flex;
+  gap: 16px;
+}
+.add-school-color-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+.add-school-color-field input[type="color"] {
+  width: 100%;
+  height: 38px;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+}
+.add-school-error {
+  color: var(--danger, #e5484d);
+  font-size: 12px;
+}
 #team-picker {
   width: min(560px, 90vw);
   max-height: 75vh;

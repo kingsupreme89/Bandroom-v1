@@ -46,6 +46,56 @@ internal static class ConfigStore
     static readonly string UserProfilePath = Path.Combine(UserDataRoot, "user_profile.json");
     static readonly string FirstRunFlagPath = Path.Combine(UserDataRoot, ".firstrun_done");
     static readonly string ScorebugPresetPath = Path.Combine(UserDataRoot, "scorebug_preset.txt");
+    /// <summary>User-created "TeamBuilder" schools (custom/team-builder "add school" v1) --
+    /// name + colors only, never mapped to in-game OCR/matching. Kept in their own manifest
+    /// rather than folded into triggers.json/user_profile.json so TeamColors can load them at
+    /// static-init time without depending on the rest of ConfigStore's per-user state.</summary>
+    static readonly string CustomTeamsPath = Path.Combine(UserDataRoot, "custom_teams.json");
+    static readonly object CustomTeamsLock = new();
+
+    public sealed record CustomTeamEntry
+    {
+        public string Name { get; init; } = "";
+        public string PrimaryHex { get; init; } = "#22d3ee";
+        public string SecondaryHex { get; init; } = "#22d3ee";
+    }
+
+    public static List<CustomTeamEntry> LoadCustomTeams()
+    {
+        lock (CustomTeamsLock)
+        {
+            if (!File.Exists(CustomTeamsPath)) return new List<CustomTeamEntry>();
+            try
+            {
+                string json = File.ReadAllText(CustomTeamsPath);
+                return JsonSerializer.Deserialize<List<CustomTeamEntry>>(json, JsonOptions) ?? new List<CustomTeamEntry>();
+            }
+            catch { return new List<CustomTeamEntry>(); } // corrupt manifest shouldn't crash team loading
+        }
+    }
+
+    /// <summary>Adds (or replaces, by case-insensitive name) one custom team and persists the
+    /// whole manifest. Caller (TeamColors.AddCustomTeam) is responsible for keeping its in-memory
+    /// list in sync -- this only owns the on-disk copy.</summary>
+    public static void SaveCustomTeam(string name, string primaryHex, string secondaryHex)
+    {
+        lock (CustomTeamsLock)
+        {
+            List<CustomTeamEntry> entries;
+            if (File.Exists(CustomTeamsPath))
+            {
+                try { entries = JsonSerializer.Deserialize<List<CustomTeamEntry>>(File.ReadAllText(CustomTeamsPath), JsonOptions) ?? new(); }
+                catch { entries = new List<CustomTeamEntry>(); }
+            }
+            else entries = new List<CustomTeamEntry>();
+
+            entries.RemoveAll(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase));
+            entries.Add(new CustomTeamEntry { Name = name, PrimaryHex = primaryHex, SecondaryHex = secondaryHex });
+
+            Directory.CreateDirectory(UserDataRoot);
+            File.WriteAllText(CustomTeamsPath, JsonSerializer.Serialize(entries, JsonOptions));
+        }
+    }
     static readonly string LeadInWhistleEnabledPath = Path.Combine(UserDataRoot, "leadin_whistle_enabled.txt");
 
     /// <summary>Where the installer would have bundled the default song pack, if this build

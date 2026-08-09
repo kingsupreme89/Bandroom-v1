@@ -1041,13 +1041,21 @@ public sealed class WebMainForm : Form
         });
     }
 
-    public void ImportProfileFromWeb()
+    /// <summary>targetTeamName is chosen by the user in the Load Profile dialog's team-select
+    /// step (app.js openLoadProfileDialog) BEFORE this runs -- a shared/downloaded profile is
+    /// very often meant for a team other than whatever is currently active, so this always
+    /// imports into the explicitly-picked team rather than assuming Theme.ActiveTeam. If the
+    /// target happens to be the currently-active team, _config/PushCategories are updated live
+    /// too so the assign screen reflects the import immediately; otherwise it's saved straight to
+    /// that team's profile on disk and picked up next time that team is selected.</summary>
+    public void ImportProfileFromWeb(string targetTeamName)
     {
+        if (string.IsNullOrWhiteSpace(targetTeamName)) return;
         RunOnUi(() =>
         {
             using var dlg = new OpenFileDialog
             {
-                Title = "Import Profile",
+                Title = $"Import Profile for {targetTeamName}",
                 Filter = "Bandroom Profile (*.json)|*.json",
             };
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
@@ -1057,10 +1065,21 @@ public sealed class WebMainForm : Form
                     File.ReadAllText(dlg.FileName),
                     new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 if (imported == null) return;
-                _config = imported;
-                ConfigStore.Save(_config);
-                SaveCurrentTeamProfile();
-                PushCategories();
+
+                ConfigStore.SaveProfile(targetTeamName, imported);
+                RefreshHomeAwayConfigIfNeeded(targetTeamName);
+
+                if (string.Equals(targetTeamName, Theme.ActiveTeam.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    _config = imported;
+                    ConfigStore.Save(_config);
+                    PushCategories();
+                }
+
+                // profileschanged (not profileimported -- that event is for the separate
+                // universal user-profile/stats import flow) is what the save-list/song-assign UI
+                // already listens for on any trigger-profile mutation.
+                _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:profileschanged'))");
             }
             catch
             {

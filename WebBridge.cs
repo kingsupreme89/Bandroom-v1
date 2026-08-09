@@ -24,7 +24,16 @@ public sealed class WebBridge
     {
         string? path = TeamLogo.FindImagePath(teamName);
         if (path == null) return null;
-        return "https://teamlogo/" + Uri.EscapeDataString(Path.GetFileName(path));
+        // FIXED: logo/background files are always saved back to the SAME filename (the crop
+        // tool overwrites <team>.png in place), so this URL string was identical before and
+        // after a crop-and-save. fillTeamSwatch happens to work anyway because it rebuilds a
+        // fresh <img> via innerHTML every render, but applyBackground/applyVsBackdrop mutate an
+        // existing element's style.backgroundImage/src in place -- setting a CSS/attr property to
+        // a string identical to its current value is a browser no-op, so the newly-cropped image
+        // silently never displayed until the user switched teams and back (or restarted). A
+        // last-write-time query param makes the URL genuinely change whenever the file's content
+        // changes, regardless of which DOM-update pattern the caller uses.
+        return $"https://teamlogo/{Uri.EscapeDataString(Path.GetFileName(path))}?v={File.GetLastWriteTimeUtc(path).Ticks}";
     }
 
     /// <summary>Fallback badge text for teams without a logo file in TeamLogos\ (see
@@ -62,7 +71,10 @@ public sealed class WebBridge
     {
         string? path = TeamBackdrop.FindImagePath(teamName);
         if (path == null) return null;
-        return "https://teambg/" + Uri.EscapeDataString(Path.GetFileName(path));
+        // FIXED: see the matching comment on LogoUrl() above -- same stable-filename +
+        // in-place-DOM-mutation no-op issue, except here nothing else masked it, so a saved
+        // background crop never visibly updated at all until a team switch or app restart.
+        return $"https://teambg/{Uri.EscapeDataString(Path.GetFileName(path))}?v={File.GetLastWriteTimeUtc(path).Ticks}";
     }
 
     /// <summary>Downloads a Trophy Room image from the marketplace worker and sets it as
@@ -1076,7 +1088,51 @@ public sealed class WebBridge
     public void CopyCurrentToAllTeams() => _host.CopyCurrentToAllTeamsFromWeb();
     public void DeleteCurrentProfile() => _host.DeleteCurrentProfileFromWeb();
     public void ExportProfile() => _host.ExportProfileFromWeb();
-    public void ImportProfile() => _host.ImportProfileFromWeb();
+    /// <summary>targetTeamName is the school the imported profile should apply to (chosen by the
+    /// user in the Load Profile dialog's team-select step) -- NOT assumed to be whatever team
+    /// happens to be active right now, since a shared/downloaded profile is very often meant for
+    /// a different team than the one currently on screen.</summary>
+    public void ImportProfile(string targetTeamName) => _host.ImportProfileFromWeb(targetTeamName);
+
+    /// <summary>Adds a user-created "TeamBuilder" custom school (name + primary/secondary color
+    /// only -- no in-game OCR/matching) and returns JSON {success, error, team} following the
+    /// same shape as the other add/edit bridge calls above. Rejects blank names and duplicates
+    /// (case-insensitive) rather than silently overwriting or creating a shadow entry.</summary>
+    public string AddCustomTeam(string name, string primaryHex, string secondaryHex)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return JsonSerializer.Serialize(new { success = false, error = "A school name is required." });
+
+            string trimmed = name.Trim();
+            if (TeamColors.All.Any(t => t.Name.Equals(trimmed, StringComparison.OrdinalIgnoreCase)))
+                return JsonSerializer.Serialize(new { success = false, error = $"\"{trimmed}\" already exists." });
+
+            System.Drawing.Color primary, secondary;
+            try
+            {
+                primary = System.Drawing.ColorTranslator.FromHtml(primaryHex);
+                secondary = System.Drawing.ColorTranslator.FromHtml(secondaryHex);
+            }
+            catch
+            {
+                return JsonSerializer.Serialize(new { success = false, error = "Pick valid primary and secondary colors." });
+            }
+
+            var team = TeamColors.AddCustomTeam(trimmed, primary, secondary);
+            return JsonSerializer.Serialize(new
+            {
+                success = true,
+                error = (string?)null,
+                team = new { name = team.Name, primary = ColorHex(primary), secondary = ColorHex(secondary) },
+            });
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { success = false, error = $"Couldn't add school: {ex.Message}" });
+        }
+    }
 
     static string ColorHex(System.Drawing.Color c) => $"#{c.R:x2}{c.G:x2}{c.B:x2}";
 }

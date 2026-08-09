@@ -98,7 +98,10 @@
       <!-- Left panel: team grid + profiles -->
       <div class="side-panel glass" id="left-panel">
         <div class="panel-section">
-          <div class="panel-title">Team</div>
+          <div class="panel-title-row">
+            <div class="panel-title">Team</div>
+            <button class="icon-btn" id="btn-add-school" title="Add a custom TeamBuilder school (name, colors, logo -- not matched to in-game data)">+</button>
+          </div>
           <div class="team-grid" id="team-grid"><!-- populated by app.js --></div>
         </div>
         <div class="panel-section" id="profiles-section">
@@ -108,7 +111,7 @@
             <button class="btn-ghost" id="btn-copy-all" title="Apply current team's tracks to every team">Apply to All Teams</button>
             <div class="profile-io">
               <button class="btn-ghost" id="btn-export-profile">Export</button>
-              <button class="btn-ghost" id="btn-import-profile">Import</button>
+              <button class="btn-ghost" id="btn-import-profile" title="Import a profile file onto a team you choose">Import</button>
               <button class="btn-ghost btn-danger" id="btn-delete-profile" title="Clear this team's saved profile">Delete</button>
             </div>
             <!-- Marketplace profile sharing -- shares/loads the trigger->song ASSIGNMENT MAP
@@ -152,6 +155,50 @@
           <div class="help-guide-body">
             <div id="help-guide-tips" class="help-guide-panel"><!-- populated by app.js from HELP_TIPS --></div>
             <div id="help-guide-full" class="help-guide-panel" hidden><!-- populated by app.js from HELP_GUIDE_HTML --></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Import Profile target-team picker -- clicking "Import" no longer assumes the imported
+           file is for whatever team is currently active; the user picks the target school here
+           FIRST, then the native file picker opens for that team (see
+           openImportTargetTeamDialog/WebBridge.ImportProfile). Distinct from #load-profile-overlay
+           below ("Load Profile from Others" -- shared marketplace profiles, unrelated feature). -->
+      <div id="import-target-team-overlay" hidden>
+        <div id="import-target-team-dialog" class="glass">
+          <div class="team-picker-header">
+            <span>Import Profile Onto Which Team?</span>
+            <button id="btn-close-import-target-team" class="icon-btn">&times;</button>
+          </div>
+          <input type="text" id="import-target-team-search" placeholder="Search teams..." class="team-picker-search" />
+          <div class="team-picker-grid" id="import-target-team-grid"><!-- populated by app.js --></div>
+        </div>
+      </div>
+
+      <!-- Add School (TeamBuilder custom school v1) -- name + primary/secondary color only. No
+           in-game OCR/matching for these; logo is set afterward via the existing per-team pencil
+           icon in the full Team picker, which already works for any team name. -->
+      <div id="add-school-overlay" hidden>
+        <div id="add-school-dialog" class="glass">
+          <div class="team-picker-header">
+            <span>Add a Custom School</span>
+            <button id="btn-close-add-school" class="icon-btn">&times;</button>
+          </div>
+          <div class="add-school-body">
+            <label class="add-school-label" for="add-school-name">School name</label>
+            <input type="text" id="add-school-name" placeholder="e.g. Montana" class="team-picker-search" maxlength="40" />
+            <div class="add-school-colors">
+              <div class="add-school-color-field">
+                <label class="add-school-label" for="add-school-primary">Primary color</label>
+                <input type="color" id="add-school-primary" value="#22d3ee" />
+              </div>
+              <div class="add-school-color-field">
+                <label class="add-school-label" for="add-school-secondary">Secondary color</label>
+                <input type="color" id="add-school-secondary" value="#ffffff" />
+              </div>
+            </div>
+            <div id="add-school-error" class="add-school-error" hidden></div>
+            <button id="btn-add-school-confirm" class="btn-ghost btn-block">Add School</button>
           </div>
         </div>
       </div>

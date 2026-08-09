@@ -1221,7 +1221,8 @@ function wireControls() {
 
   document.getElementById("btn-copy-all").addEventListener("click", () => bridge?.CopyCurrentToAllTeams());
   document.getElementById("btn-export-profile").addEventListener("click", () => bridge?.ExportProfile());
-  document.getElementById("btn-import-profile").addEventListener("click", () => bridge?.ImportProfile());
+  document.getElementById("btn-import-profile").addEventListener("click", openImportTargetTeamDialog);
+  document.getElementById("btn-add-school").addEventListener("click", openAddSchoolDialog);
   document.getElementById("btn-delete-profile").addEventListener("click", () => bridge?.DeleteCurrentProfile());
   document.getElementById("btn-share-profile").addEventListener("click", shareCurrentProfile);
   document.getElementById("btn-load-profile").addEventListener("click", openLoadProfileDialog);
@@ -1418,6 +1419,21 @@ function wireControls() {
   // rendered by openTeamPicker's renderTeamPickerGrid("") instead of an instant full-rebuild on
   // every keystroke.
 
+  document.getElementById("btn-close-import-target-team").addEventListener("click", closeImportTargetTeamDialog);
+  document.getElementById("import-target-team-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "import-target-team-overlay") closeImportTargetTeamDialog();
+  });
+  document.getElementById("import-target-team-search").addEventListener("input", (e) => renderImportTargetTeamGrid(e.target.value));
+
+  document.getElementById("btn-close-add-school").addEventListener("click", closeAddSchoolDialog);
+  document.getElementById("add-school-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "add-school-overlay") closeAddSchoolDialog();
+  });
+  document.getElementById("btn-add-school-confirm").addEventListener("click", submitAddSchool);
+  document.getElementById("add-school-name").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitAddSchool();
+  });
+
   document.getElementById("btn-matchup").addEventListener("click", openMatchupDialog);
   document.getElementById("btn-close-matchup").addEventListener("click", closeMatchupDialog);
   document.getElementById("btn-matchup-cancel").addEventListener("click", closeMatchupDialog);
@@ -1460,6 +1476,8 @@ function wireControls() {
     if (!document.getElementById("team-picker-overlay").hidden) closeTeamPicker();
     if (!document.getElementById("save-profile-overlay").hidden) closeSaveProfileDialog();
     if (!document.getElementById("matchup-overlay").hidden) closeMatchupDialog();
+    if (!document.getElementById("import-target-team-overlay").hidden) closeImportTargetTeamDialog();
+    if (!document.getElementById("add-school-overlay").hidden) closeAddSchoolDialog();
     // Album closes first if both happen to be open (it renders on top of the team-grid overlay).
     if (!document.getElementById("bandroom-upload-overlay").hidden) closeUploadDialog();
     else if (!document.getElementById("bandroom-album-overlay").hidden) closeTeamAlbum();
@@ -1538,6 +1556,83 @@ function closeTeamPicker() {
 
 function renderTeamPickerGrid(filter) {
   renderTeamGridInto("team-picker-grid", filter, (name) => { selectTeam(name); closeTeamPicker(); }, /*showEditLogo*/ true);
+}
+
+/// Import now asks WHICH team the profile file is for instead of assuming state.activeTeam -- a
+/// profile file someone hands you is very often meant for a different school than whatever
+/// happens to be selected right now. Picking a team here closes the dialog and immediately hands
+/// off to the native file picker (WebBridge.ImportProfile -> WebMainForm.ImportProfileFromWeb)
+/// for that explicit team. Distinct from openLoadProfileDialog/closeLoadProfileDialog below,
+/// which is the unrelated "Load Profile from Others" marketplace feature.
+function openImportTargetTeamDialog() {
+  document.getElementById("import-target-team-overlay").hidden = false;
+  const search = document.getElementById("import-target-team-search");
+  search.value = "";
+  renderImportTargetTeamGrid("");
+  search.focus();
+}
+
+function closeImportTargetTeamDialog() {
+  document.getElementById("import-target-team-overlay").hidden = true;
+}
+
+function renderImportTargetTeamGrid(filter) {
+  renderTeamGridInto("import-target-team-grid", filter, (name) => {
+    closeImportTargetTeamDialog();
+    bridge?.ImportProfile(name);
+  });
+}
+
+/// TeamBuilder "Add School" v1 -- name + primary/secondary color only (custom schools are never
+/// matched against in-game OCR data, purely a naming/branding feature). Logo isn't set here --
+/// once added, the new school shows up in the full Team picker like any other, where the existing
+/// per-tile pencil icon (openLogoCropTool) already works for it.
+function openAddSchoolDialog() {
+  document.getElementById("add-school-name").value = "";
+  document.getElementById("add-school-primary").value = "#22d3ee";
+  document.getElementById("add-school-secondary").value = "#ffffff";
+  const err = document.getElementById("add-school-error");
+  err.hidden = true;
+  err.textContent = "";
+  document.getElementById("add-school-overlay").hidden = false;
+  document.getElementById("add-school-name").focus();
+}
+
+function closeAddSchoolDialog() {
+  document.getElementById("add-school-overlay").hidden = true;
+}
+
+async function submitAddSchool() {
+  const err = document.getElementById("add-school-error");
+  err.hidden = true;
+  err.textContent = "";
+  if (!bridge) return;
+
+  const name = document.getElementById("add-school-name").value.trim();
+  const primary = document.getElementById("add-school-primary").value;
+  const secondary = document.getElementById("add-school-secondary").value;
+  if (!name) {
+    err.textContent = "A school name is required.";
+    err.hidden = false;
+    return;
+  }
+
+  try {
+    const result = JSON.parse(await bridge.AddCustomTeam(name, primary, secondary));
+    if (!result.success) {
+      err.textContent = result.error || "Couldn't add that school.";
+      err.hidden = false;
+      return;
+    }
+    closeAddSchoolDialog();
+    showToast(`Added ${result.team.name}. Set a logo for it from the full Team picker.`);
+    await refreshTeamsAfterLogoChange();
+    renderTeamGrid();
+  } catch (err2) {
+    console.error("AddCustomTeam failed", err2);
+    err.textContent = "Couldn't add that school -- try again.";
+    err.hidden = false;
+  }
 }
 
 function renderTeamGridInto(gridId, filter, onPick, showEditLogo = false) {

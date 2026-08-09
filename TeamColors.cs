@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Linq;
 
 namespace SupremeStadiumSoundSelector;
 
@@ -20,7 +21,10 @@ internal static class TeamColors
 {
     static Color Hex(string hex) => ColorTranslator.FromHtml(hex);
 
-    public static readonly TeamColor[] All =
+    /// <summary>The base ~140-team FBS roster (see class summary). Custom "TeamBuilder" schools
+    /// added via AddCustomTeam below are layered on top of this at load time, not mixed into it,
+    /// so this table stays a straight port of the design handoff's PROFILE_LIST.</summary>
+    static readonly TeamColor[] BaseTeams =
     {
         new("General", null, null),
         new("Air Force", Hex("#003087"), Hex("#8a8d8f")),
@@ -161,10 +165,45 @@ internal static class TeamColors
         new("Wyoming", Hex("#492f24"), Hex("#ffc425")),
     };
 
+    /// <summary>Base roster plus any user-created custom schools (TeamBuilder "add school" v1),
+    /// loaded once from ConfigStore's custom_teams.json manifest and kept in sync in-memory by
+    /// AddCustomTeam so a newly-added team shows up everywhere immediately, no restart needed.</summary>
+    static readonly List<TeamColor> _all = BuildAll();
+
+    static List<TeamColor> BuildAll()
+    {
+        var list = new List<TeamColor>(BaseTeams);
+        foreach (var custom in ConfigStore.LoadCustomTeams())
+        {
+            if (list.Any(t => t.Name.Equals(custom.Name, StringComparison.OrdinalIgnoreCase))) continue;
+            try { list.Add(new TeamColor(custom.Name, Hex(custom.PrimaryHex), Hex(custom.SecondaryHex))); }
+            catch { /* corrupt hex in manifest -- skip this one custom team, don't break the roster */ }
+        }
+        return list;
+    }
+
+    public static TeamColor[] All => _all.ToArray();
+
     public static TeamColor ByName(string name)
     {
-        foreach (var t in All)
+        foreach (var t in _all)
             if (t.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return t;
-        return All[0];
+        return _all[0];
+    }
+
+    /// <summary>Adds a new user-created custom school (name + primary/secondary color, no
+    /// in-game OCR/matching -- explicitly out of scope for v1), persists it, and makes it
+    /// available immediately via TeamColors.All. Returns the existing team unchanged if the name
+    /// (case-insensitive) is already taken, rather than creating a duplicate/shadow entry.</summary>
+    public static TeamColor AddCustomTeam(string name, Color primary, Color secondary)
+    {
+        name = name.Trim();
+        var existing = _all.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (existing.Name != null) return existing;
+
+        var team = new TeamColor(name, primary, secondary);
+        _all.Add(team);
+        ConfigStore.SaveCustomTeam(name, ColorTranslator.ToHtml(primary), ColorTranslator.ToHtml(secondary));
+        return team;
     }
 }
