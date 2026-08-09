@@ -39,6 +39,28 @@ body {
   font-family: "Outfit", "Segoe UI", sans-serif;
   color: var(--text-primary);
   background: var(--window-bg);
+  position: relative;
+}
+/* Active-team background tint (owner request) -- the plain grey window-bg didn't reflect who's
+   selected at all, only panel borders/pulse did (those use --team-secondary and stay untouched
+   here). This is a separate radial layer keyed to --team-primary instead, sitting behind #scrim
+   (z-index 1) and #app (z-index 2) so it reads as ambient light behind the glass, not a flat
+   color swap -- and gives the light text on top a touch more contrast than pure flat grey did. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(130% 90% at 50% -12%,
+    color-mix(in srgb, var(--team-primary, var(--accent)) 24%, transparent) 0%,
+    color-mix(in srgb, var(--team-primary, var(--accent)) 8%, transparent) 45%,
+    transparent 72%);
+  animation: team-bg-pulse 6s ease-in-out infinite;
+}
+@keyframes team-bg-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
 }
 
 /* ================================================================
