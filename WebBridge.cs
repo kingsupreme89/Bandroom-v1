@@ -113,6 +113,15 @@ public sealed class WebBridge
     /// that pipeline -- never on an item that's already sourced from the marketplace.</summary>
     public string GetMyDownloads()
     {
+        // FIX (Music Library UX Brief v2 §2.3 "My Downloads drift"): this used to trust the
+        // manifest blindly -- a file deleted outside the app (disk cleanup, antivirus quarantine,
+        // manual delete in Explorer) left a manifest entry that still rendered as a normal,
+        // playable/downloadable tile with no indication anything was wrong. Checking File.Exists
+        // here on every open makes the list self-healing against the manifest drifting from disk:
+        // a missing file is still LISTED (so the user can see it and remove it -- per brief §4,
+        // "a broken/missing local file is visibly flagged, not silently absent"), but is flagged
+        // via fileExists=false so app.js can disable play/set-as-background and show a clear
+        // "missing" state instead of silently trying (and failing) to load a dead file.
         var marketplace = ConfigStore.LoadMarketplaceDownloads().Select(e => new
         {
             id = e.Id,
@@ -127,6 +136,7 @@ public sealed class WebBridge
             source = "marketplace",
             shared = false,
             canShare = false,
+            fileExists = File.Exists(e.Path),
         });
 
         var local = ConfigStore.LoadLocalTracks().Select(e => new
@@ -142,6 +152,7 @@ public sealed class WebBridge
             source = "local",
             shared = e.Shared,
             canShare = !e.Shared,
+            fileExists = File.Exists(e.Path),
         });
 
         var combined = marketplace.Concat(local)
@@ -150,7 +161,7 @@ public sealed class WebBridge
             {
                 e.id, e.type, e.name, e.school,
                 downloadedAt = e.downloadedAt.ToString("O"),
-                e.fileUrl, e.schoolLogoUrl, e.source, e.shared, e.canShare,
+                e.fileUrl, e.schoolLogoUrl, e.source, e.shared, e.canShare, e.fileExists,
             });
         return JsonSerializer.Serialize(combined);
     }

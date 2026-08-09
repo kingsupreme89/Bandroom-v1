@@ -1716,6 +1716,26 @@ input, select, textarea, [contenteditable] {
   max-width: 100%;
 }
 
+/* Self-healing "My Downloads" missing-file state (Music Library UX Brief v2 §2.3/§4/§5) -- an
+   entry whose file has been deleted outside the app stays visible (never silently absent) but is
+   clearly distinguished from a normal, playable tile: dimmed thumb, dashed amber outline instead
+   of the normal solid border, and an explicit badge. Deliberately NOT reusing any loading/error
+   empty-state look -- per brief §5 an empty list, a load failure, and a broken individual item
+   must all read as visually distinct situations. */
+.bandroom-item-missing .bandroom-item-thumb {
+  opacity: 0.45;
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--warning, #f5a623) 55%, var(--glass-border));
+}
+.bandroom-item-missing .bandroom-item-name,
+.bandroom-item-missing .bandroom-item-school { opacity: 0.6; }
+.bandroom-item-missing-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--warning, #f5a623);
+  white-space: nowrap;
+}
+
 .bandroom-album-title { display: flex; align-items: center; gap: 10px; }
 .bandroom-album-icon { width: 28px; height: 28px; border-radius: 8px; flex: none; }
 

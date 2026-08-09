@@ -2080,8 +2080,24 @@ function buildMyDownloadTile(item) {
   school.textContent = item.source === "local" ? "Your library" : item.school;
   tile.append(thumb, name, school);
   tile.title = item.source === "local" ? item.name : `${item.school} — ${item.name}`;
+
+  // Self-healing "My Downloads" (Music Library UX Brief v2 §2.3): the manifest can drift from
+  // disk (file deleted outside the app), and GetMyDownloads now reports fileExists per entry
+  // instead of silently rendering a dead file as if it were fine. A missing file stays visible
+  // (so the user can see and remove it, per brief §4 -- "flagged, not silently absent") but is
+  // marked and can't be previewed, since the underlying file is gone.
+  if (item.fileExists === false) {
+    tile.classList.add("bandroom-item-missing");
+    const missingBadge = document.createElement("div");
+    missingBadge.className = "bandroom-item-missing-badge";
+    missingBadge.textContent = "\u{26A0}\u{FE0F} File missing";
+    missingBadge.title = "This file is no longer on disk -- remove it below.";
+    tile.appendChild(missingBadge);
+  }
+
   tile.addEventListener("click", (e) => {
     if (e.target.closest(".bandroom-item-action")) return;
+    if (item.fileExists === false) { showToast("That file is missing from disk -- remove it and re-download if needed."); return; }
     if (item.type === "song") previewSong({ url: item.fileUrl });
   });
 
@@ -2518,8 +2534,26 @@ function buildItemTile(item, inHub) {
         e.stopPropagation();
         const newName = prompt("Edit name:", item.name);
         if (newName === null) return;
-        const newSchool = prompt("Edit school/team:", item.school ?? "");
-        if (newSchool === null) return;
+        const typedSchool = prompt("Edit school/team:", item.school ?? "");
+        if (typedSchool === null) return;
+        // ROOT CAUSE FIX (Music Library UX Brief v2 §1/§2.2 team-key mismatch): this used to send
+        // whatever free text was typed here straight to the worker's PATCH /item with zero
+        // validation against the actual team roster -- unlike the "Share to Marketplace" flow
+        // (buildMyDownloadTile's shareBtn handler), which already resolves the typed name against
+        // state.teams before using it. A typo/abbreviation/stray-whitespace school here (e.g.
+        // "UGA" or "Georgia " instead of "Georgia") would still PATCH successfully, silently
+        // detaching the item from its team: fetchUploadList("school","Georgia") does an exact
+        // (case-insensitive) match against the worker's stored meta.school, so a mistyped school
+        // here makes the item permanently invisible in that team's Sound Bank/Trophy Room even
+        // though it's still sitting in the worker's index -- the exact "modal opens, list is
+        // empty despite real uploads" symptom reported for Georgia. Resolving against the
+        // canonical roster here closes that off the same way the Share flow already does.
+        const matchedTeam = state.teams.find((t) => t.name.toLowerCase() === typedSchool.trim().toLowerCase());
+        if (!matchedTeam) {
+          showToast(`"${typedSchool.trim()}" isn't a team in your roster -- use the exact team name (e.g. "Georgia").`);
+          return;
+        }
+        const newSchool = matchedTeam.name;
         editBtn.disabled = true;
         const result = await editUploadedItem(item, newName, newSchool);
         if (result) {
@@ -2571,8 +2605,16 @@ function buildItemTile(item, inHub) {
         e.stopPropagation();
         const newName = prompt("Admin edit -- name:", item.name);
         if (newName === null) return;
-        const newSchool = prompt("Admin edit -- school:", item.school ?? "");
-        if (newSchool === null) return;
+        const typedSchool = prompt("Admin edit -- school:", item.school ?? "");
+        if (typedSchool === null) return;
+        // Same team-key validation as the per-owner edit above (root cause fix, Music Library UX
+        // Brief v2 §1/§2.2) -- the admin path had the identical unvalidated free-text hole.
+        const matchedAdminTeam = state.teams.find((t) => t.name.toLowerCase() === typedSchool.trim().toLowerCase());
+        if (!matchedAdminTeam) {
+          showToast(`"${typedSchool.trim()}" isn't a team in your roster -- use the exact team name (e.g. "Georgia").`);
+          return;
+        }
+        const newSchool = matchedAdminTeam.name;
         adminEditBtn.disabled = true;
         try {
           const raw = await bridge.AdminEditMarketplaceItem(item.type, item.id, newName, newSchool);
