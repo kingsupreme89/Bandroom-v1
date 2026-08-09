@@ -798,10 +798,21 @@ public sealed class WebMainForm : Form
         string? teamFolder = ConfigStore.FindDefaultPackTeamFolder(teamName);
         if (teamFolder == null) return "[]";
 
+        // "category" strips the trailing "_4"/" 4" index the importer appends when several files
+        // resolved to the same trigger (e.g. "Defense_Drive Starter_4" -> "Defense_Drive Starter")
+        // so the web UI can group this flat folder listing into Spotify-style category clusters
+        // instead of one long alphabetical list of near-duplicate names (owner report: the flat
+        // list read as unsorted noise once a team had 100+ pack extras).
         var items = Directory.GetFiles(teamFolder, "*.*", SearchOption.TopDirectoryOnly)
             .Where(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
             .OrderBy(Path.GetFileNameWithoutExtension, StringComparer.OrdinalIgnoreCase)
-            .Select(p => new { name = Path.GetFileNameWithoutExtension(p), path = p });
+            .Select(p =>
+            {
+                string name = Path.GetFileNameWithoutExtension(p);
+                string category = System.Text.RegularExpressions.Regex.Replace(name, @"[\s_]+\d+$", "").Trim();
+                if (category.Length == 0) category = "Other";
+                return new { name, path = p, category };
+            });
         return System.Text.Json.JsonSerializer.Serialize(items);
     }
 

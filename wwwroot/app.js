@@ -579,27 +579,51 @@ function pickContrastInk(bg, altColor) {
   return whiteRatio > blackRatio ? "#ffffff" : "#06222a";
 }
 
-function setActiveTeam(name, fromInit = false) {
-  document.getElementById("team-name").textContent = name;
-  applyBackground(name);
-  const team = state.teams.find((t) => t.name === name);
+// A handful of teams (Appalachian State, Army, ...) have literal black as their primary -- fine
+// as a jersey color, unreadable as a glow/accent color. Shared by every --team-primary consumer
+// (setActiveTeam, previewTeamGlow, applySchoolGlow) so there's one fallback rule, not one per call site.
+function isNearBlack(hex) {
+  const h = (hex || "").replace("#", "");
+  if (h.length !== 6) return false;
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return r < 20 && g < 20 && b < 20;
+}
+
+/// Sets the four --team-* CSS custom properties (primary/secondary + their contrast inks) that
+/// drive the app-wide background tint and glow pulse. Split out of setActiveTeam so a coverflow
+/// can call it live while just browsing (previewTeamGlow below) without triggering
+/// setActiveTeam's other side effects (header text, background image swap, bridge calls).
+function applyTeamGlowVars(team) {
   const secondary = team?.secondary ?? "#22d3ee";
-  // A handful of teams (Appalachian State, Army, ...) have literal black as their primary --
-  // fine as a jersey color, unreadable as a glow/accent color. Fall back to secondary for those
-  // so every current and future --team-primary consumer (glows, accent fills) is covered from
-  // this one spot instead of needing a black-check at every call site.
-  const isNearBlack = (hex) => {
-    const h = (hex || "").replace("#", "");
-    if (h.length !== 6) return false;
-    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-    return r < 20 && g < 20 && b < 20;
-  };
   const rawPrimary = team?.primary ?? "#0f766e";
   const primary = isNearBlack(rawPrimary) ? secondary : rawPrimary;
   document.documentElement.style.setProperty("--team-secondary", secondary);
   document.documentElement.style.setProperty("--team-primary", primary);
   document.documentElement.style.setProperty("--team-secondary-ink", pickContrastInk(secondary, primary));
   document.documentElement.style.setProperty("--team-primary-ink", pickContrastInk(primary, secondary));
+}
+
+/// Live-updates the background tint/glow to whichever team is centered in a coverflow or
+/// hovered in a team-picker grid, WITHOUT changing state.activeTeam -- browsing is not picking.
+/// Callers must call restoreActiveTeamGlow() when the picker closes without confirming, so the
+/// real active team's glow comes back instead of staying stuck on whatever was last previewed.
+function previewTeamGlow(teamNameOrObj) {
+  const team = typeof teamNameOrObj === "string"
+    ? state.teams?.find((t) => t.name === teamNameOrObj)
+    : teamNameOrObj;
+  if (team) applyTeamGlowVars(team);
+}
+
+function restoreActiveTeamGlow() {
+  const team = state.teams?.find((t) => t.name === state.activeTeam);
+  applyTeamGlowVars(team);
+}
+
+function setActiveTeam(name, fromInit = false) {
+  document.getElementById("team-name").textContent = name;
+  applyBackground(name);
+  const team = state.teams.find((t) => t.name === name);
+  applyTeamGlowVars(team);
   updateProfileStatus();
   updateHeaderTeamBadge(team);
   updateMatchupSideBar();
@@ -1202,6 +1226,7 @@ function wireControls() {
   initHelpGuide();
   document.getElementById("btn-profile").addEventListener("click", openProfile);
   document.getElementById("btn-close-profile").addEventListener("click", closeProfile);
+  document.getElementById("btn-close-profile-top").addEventListener("click", closeProfile);
   document.getElementById("btn-google-signin").addEventListener("click", async () => {
     const btn = document.getElementById("btn-google-signin");
     btn.disabled = true;
@@ -1585,6 +1610,7 @@ function wireControls() {
     if (!document.getElementById("matchup-overlay").hidden) closeMatchupDialog();
     if (!document.getElementById("import-target-team-overlay").hidden) closeImportTargetTeamDialog();
     if (!document.getElementById("add-school-overlay").hidden) closeAddSchoolDialog();
+    if (!document.getElementById("favorite-team-overlay").hidden) { document.getElementById("favorite-team-overlay").hidden = true; restoreActiveTeamGlow(); }
     // Album closes first if both happen to be open (it renders on top of the team-grid overlay).
     if (!document.getElementById("bandroom-upload-overlay").hidden) closeUploadDialog();
     else if (!document.getElementById("bandroom-album-overlay").hidden) closeTeamAlbum();
@@ -2449,17 +2475,11 @@ function teamLogoUrl(schoolName) {
 /// Sets the school-name text to glow in that team's color (--school-glow, consumed by
 /// .bandroom-item-school[data-glow]/.marketplace-card-school[data-glow] in style.css). Per-item,
 /// not the active team's --team-primary, since a tile grid can mix schools. Same near-black
-/// fallback as setActiveTeam's isNearBlack check -- a few teams' primary is literal black, which
-/// glows invisibly, so fall back to secondary for those.
+/// fallback isNearBlack() (shared with setActiveTeam/previewTeamGlow) uses -- a few teams' primary
+/// is literal black, which glows invisibly, so fall back to secondary for those.
 function applySchoolGlow(el, schoolName) {
   const team = state.teams?.find((t) => t.name === schoolName);
   if (!team) return;
-  const isNearBlack = (hex) => {
-    const h = (hex || "").replace("#", "");
-    if (h.length !== 6) return false;
-    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-    return r < 20 && g < 20 && b < 20;
-  };
   const glow = isNearBlack(team.primary) ? (team.secondary ?? team.primary) : team.primary;
   if (!glow) return;
   el.style.setProperty("--school-glow", glow);
@@ -3379,24 +3399,59 @@ function paintAlbumGrid(filter) {
     header.className = "bandroom-defaultpack-header";
     header.textContent = `Default Song Pack (${packSongs.length}) -- already filling in matching situations for ${team.name}`;
     section.appendChild(header);
-    const list = document.createElement("div");
-    list.className = "bandroom-defaultpack-list";
-    packSongs.forEach((s) => {
-      const row = document.createElement("div");
-      row.className = "bandroom-defaultpack-row";
-      const name = document.createElement("span");
-      name.className = "bandroom-defaultpack-name";
-      name.textContent = s.name;
-      const btn = document.createElement("button");
-      btn.className = "preview-bar-btn";
-      btn.title = "Preview";
-      btn.textContent = "▶";
-      btn.addEventListener("click", () => bridge?.PreviewLocalFile(s.path));
-      row.appendChild(name);
-      row.appendChild(btn);
-      list.appendChild(row);
-    });
-    section.appendChild(list);
+
+    // Grouped by "category" (the trigger name with its trailing dedupe index stripped, see
+    // GetDefaultPackSongsForTeamFromWeb) instead of one flat alphabetical list -- a team with
+    // 100+ pack extras used to read as unsorted noise ("Defense_Drive Starter_4/_5/_6..." one
+    // after another with nothing telling them apart at a glance). Each group is its own
+    // collapsible folder, same visual language as My Downloads' team grouping headers.
+    const groups = new Map();
+    for (const s of packSongs) {
+      const key = s.category || "Other";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(s);
+    }
+    const sortedKeys = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+
+    for (const key of sortedKeys) {
+      const songs = groups.get(key);
+      const groupEl = document.createElement("div");
+      groupEl.className = "bandroom-defaultpack-group";
+
+      const groupHeader = document.createElement("button");
+      groupHeader.type = "button";
+      groupHeader.className = "bandroom-defaultpack-group-header";
+      groupHeader.innerHTML = `<span class="bandroom-defaultpack-group-chevron">›</span><span>${sanitizeHTML(key.replace(/_/g, " "))}</span><span class="bandroom-defaultpack-group-count">${songs.length}</span>`;
+
+      const list = document.createElement("div");
+      list.className = "bandroom-defaultpack-list";
+      songs.forEach((s) => {
+        const row = document.createElement("div");
+        row.className = "bandroom-defaultpack-row";
+        const name = document.createElement("span");
+        name.className = "bandroom-defaultpack-name";
+        name.textContent = s.name;
+        const btn = document.createElement("button");
+        btn.className = "preview-bar-btn";
+        btn.title = "Preview";
+        btn.textContent = "▶";
+        btn.addEventListener("click", () => bridge?.PreviewLocalFile(s.path));
+        row.appendChild(name);
+        row.appendChild(btn);
+        list.appendChild(row);
+      });
+
+      // Collapsed by default when there are several groups (a fresh 100+ song pack import can
+      // produce a dozen+ categories) -- expanded automatically while actively searching, since a
+      // filtered group is one the user specifically asked to see into.
+      const collapsed = !filter && sortedKeys.length > 1;
+      groupEl.classList.toggle("collapsed", collapsed);
+      groupHeader.addEventListener("click", () => groupEl.classList.toggle("collapsed"));
+
+      groupEl.appendChild(groupHeader);
+      groupEl.appendChild(list);
+      section.appendChild(groupEl);
+    }
     grid.appendChild(section);
   }
 
@@ -3777,6 +3832,7 @@ function renderOnboardingCoverflow(filter) {
   _onboardingPicked = teams[centerIdx].name;
   nameEl.textContent = _onboardingPicked;
   document.getElementById("btn-onboarding-confirm").disabled = false;
+  previewTeamGlow(teams[centerIdx]);
 }
 
 function shiftOnboardingCoverflow(dir) {
@@ -3819,7 +3875,7 @@ function openFavoriteTeamCoverflow() {
     document.querySelectorAll("#favorite-team-dialog .coverflow-arrow").forEach((btn) => {
       btn.addEventListener("click", () => shiftFavoriteCoverflow(parseInt(btn.dataset.dir, 10)));
     });
-    document.getElementById("btn-close-favorite-team").addEventListener("click", () => { overlay.hidden = true; });
+    document.getElementById("btn-close-favorite-team").addEventListener("click", () => { overlay.hidden = true; restoreActiveTeamGlow(); });
     document.getElementById("btn-favorite-team-confirm").addEventListener("click", async () => {
       const team = _favoriteCoverflowPicked;
       try {
@@ -3874,6 +3930,7 @@ function renderFavoriteCoverflow(filter) {
   _favoriteCoverflowPicked = teams[centerIdx].name;
   nameEl.textContent = _favoriteCoverflowPicked;
   document.getElementById("btn-favorite-team-confirm").disabled = false;
+  previewTeamGlow(teams[centerIdx]);
 }
 
 function shiftFavoriteCoverflow(dir) {
