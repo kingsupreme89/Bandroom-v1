@@ -1077,6 +1077,7 @@ public sealed class WebBridge
     public string GetSavedProfiles() => JsonSerializer.Serialize(ConfigStore.ListProfiles());
     public string SaveProfileAs(string? name) => _host.SaveProfileAsFromWeb(name);
     public string? GetProfileSavedAt(string name) => _host.GetProfileSavedAtFromWeb(name);
+    public bool DuplicateProfile(string fromTeam, string toTeam) => _host.DuplicateProfileFromWeb(fromTeam, toTeam);
     public void SetGameTeams(string home, string away) => _host.SetGameTeamsFromWeb(home, away);
     public string? GetGameTeams() => _host.GetGameTeamsFromWeb();
     public void ConfirmGametime(string home, string away) => _host.ConfirmGametimeFromWeb(home, away);

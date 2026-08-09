@@ -27,7 +27,9 @@ public sealed class BigEventHelper : IRuleEvaluator
             };
         }
 
-        if (state.Current.Down == 4 && state.Delta.NewPossession)
+        // A missed field goal is also a 4th-down possession flip -- FieldGoalMissedHelper already
+        // covers that specific case with its own cue, so skip here to avoid both firing together.
+        if (state.Current.Down == 4 && state.Delta.NewPossession && !state.Current.IsFieldGoalAttempt)
         {
             return new TriggerEvent
             {

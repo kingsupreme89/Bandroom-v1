@@ -802,6 +802,7 @@ internal sealed class GameWatcher
         var clockRegion = _regions.FirstOrDefault(r => r.Name == "clock");
         var penaltyAgainstRegion = _regions.FirstOrDefault(r => r.Name == "penaltyagainst");
         var pregameReadyRegion = _regions.FirstOrDefault(r => r.Name == "pregameready");
+        var bannerRegion = _regions.FirstOrDefault(r => r.Name == "banner");
 
         int down = ParseOrdinal(_lastKnownDown);
         int quarter = ParseOrdinal(_lastKnownQuarter);
@@ -875,6 +876,7 @@ internal sealed class GameWatcher
             // OCR tick, so PregameHelper's edge-trigger (Previous.IsPregameReady == false &&
             // Current.IsPregameReady == true) reading straight off region.Last is correct here.
             IsPregameReady = pregameReadyRegion?.Last == "ready",
+            IsFieldGoalAttempt = bannerRegion?.Last == "fieldgoal",
             YardLine = 0,
             HomeScore = homeScore,
             AwayScore = awayScore,

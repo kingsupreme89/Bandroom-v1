@@ -20,11 +20,12 @@ namespace Bandroom.Mac;
 /// KeyboardHook, AudioPlayer, ConfigStore, and marketplace pipeline.
 ///
 /// Web UI rendering: serves wwwroot/ via embedded HTTP listener on port 18765.
-/// Opens system default browser on launch. On future macOS, replace with
-/// WKWebView via Avalonia NativeControlHost for true 1:1 embedded rendering.
+/// Opens system default browser on launch.
 /// </summary>
 public partial class MainWindow : Window
 {
+    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac" };
+
     // ---- State (mirrors WebMainForm.cs exactly) ----
     private List<TriggerEntry> _config = new();
     private readonly KeyboardHook _hook = new();
@@ -39,8 +40,9 @@ public partial class MainWindow : Window
     private bool _matchupLocked;
     private readonly EventRouter _router;
 
-    private const bool HomeOnlyEventsForNow = true;
-    private bool _useEngineForEvents;
+    // Match Windows: both sides fire now
+    private const bool HomeOnlyEventsForNow = false;
+    private bool _useEngineForEvents = true;
 
     public MainWindow()
     {
@@ -55,6 +57,13 @@ public partial class MainWindow : Window
 
         ConfigStore.MigrateFromVersionedFolderIfNeeded();
         _config = ConfigStore.LoadOrCreate();
+
+        // Lead-in whistle
+        if (File.Exists(ConfigStore.LeadInWhistlePath))
+        {
+            AudioPlayer.LeadInClipPath = ConfigStore.LeadInWhistlePath;
+            AudioPlayer.LeadInEnabled = ConfigStore.LoadLeadInWhistleEnabled();
+        }
 
         Opened += OnOpened;
         Closing += (_, _) =>
@@ -71,7 +80,6 @@ public partial class MainWindow : Window
 
         try
         {
-            // Serve wwwroot via embedded HTTP listener
             StartWebServer();
 
             string wwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
@@ -80,7 +88,6 @@ public partial class MainWindow : Window
 
             if (Directory.Exists(wwwroot))
             {
-                // Open system browser to the local server
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = "/usr/bin/open",
@@ -95,6 +102,8 @@ public partial class MainWindow : Window
             {
                 LoadingText.Text = $"wwwroot not found at: {wwwroot}";
             }
+
+            PlayDraftChime();
         }
         catch (Exception ex)
         {
@@ -102,10 +111,20 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// Starts a lightweight HTTP server on localhost:18765 serving wwwroot/.
-    /// This mirrors how Windows WebView2 serves files via virtual host mappings.
-    /// </summary>
+    /// <summary>The shared "draft chime" for app open.</summary>
+    static void PlayDraftChime()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "Assets", "nfl-draft-chime.mp3");
+        AudioPlayer.Play(path);
+    }
+
+    /// <summary>The GAMETIME confirmation cue.</summary>
+    static void PlayGametimeSound()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "Assets", "gametime-tackle.mp3");
+        AudioPlayer.Play(path);
+    }
+
     private void StartWebServer()
     {
         Task.Run(() =>
@@ -143,7 +162,6 @@ public partial class MainWindow : Window
 
             string filePath = Path.Combine(wwwroot, path);
 
-            // Virtual host mappings (mirrors WebView2 virtual hosts)
             string? virtualPath = MapVirtualHost(ctx.Request.Url.AbsolutePath);
             if (virtualPath != null) filePath = virtualPath;
 
@@ -189,6 +207,7 @@ public partial class MainWindow : Window
         if (path.StartsWith("/downloadedimages/")) return Path.Combine(ConfigStore.DownloadedImagesFolder, path[18..]);
         if (path.StartsWith("/downloadedsongs/")) return Path.Combine(ConfigStore.SongsUploadedFolder, path[16..]);
         if (path.StartsWith("/localtracks/")) return Path.Combine(ConfigStore.LocalTracksFolder, path[13..]);
+        if (path.StartsWith("/avatar/")) return Path.Combine(ConfigStore.AvatarFolder, path[8..]);
         return null;
     }
 
@@ -220,14 +239,22 @@ public partial class MainWindow : Window
     {
         Dispatcher.UIThread.Post(() =>
         {
-            if (_homeConfig == null || _awayConfig == null || _possession == null) return;
+            if (_homeConfig == null || _awayConfig == null) return;
+            string side = _possession ?? "home";
+
             foreach (var evt in events)
             {
-                string side = evt.EventKey.StartsWith("Defense:")
-                    ? (_possession == "home" ? "away" : "home")
-                    : _possession;
-                bool sideAllowed = HomeOnlyEventsForNow ? side == "home" : true;
-                if (sideAllowed) FireEventForSide(side, evt.EventKey);
+                bool routesLikeDefense = evt.EventKey.StartsWith("Defense:") || evt.EventKey == "Penalty: Offense";
+                string routedSide = routesLikeDefense
+                    ? (side == "home" ? "away" : "home")
+                    : side;
+
+                bool sideAllowed = HomeOnlyEventsForNow ? routedSide == "home" : true;
+                if (sideAllowed)
+                {
+                    string result = FireEventForSide(routedSide, evt.EventKey);
+                    OnLog($"[engine] {evt.EventKey} -> {routedSide}: {result}");
+                }
             }
         });
     }
@@ -241,35 +268,141 @@ public partial class MainWindow : Window
         });
     }
 
-    private void OnLog(string message) { }
+    private static readonly string OcrLogPath = Path.Combine(AppContext.BaseDirectory, "ocr_debug.log");
+    private static readonly object OcrLogLock = new();
 
-    // ---- Core event wiring ----
-
-    private void FireEventForSide(string side, string eventName)
+    private void OnLog(string message)
     {
-        var config = side == "home" ? _homeConfig : _awayConfig;
-        var entry = config?.FirstOrDefault(e => e.Event == eventName);
-        if (entry != null) FireEvent(entry, side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume);
-    }
-
-    private void FireEvent(TriggerEntry entry, float? volumeOverride = null)
-    {
-        if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
+        lock (OcrLogLock)
         {
-            AudioPlayer.Play(entry.AudioFile, volumeOverride, interruptPrevious: true);
-            // RecordSongTriggered on background
-            Task.Run(() =>
+            try
             {
-                var p = ConfigStore.LoadUserProfile();
-                var counts = new Dictionary<string, int>(p.EventCounts);
-                if (!string.IsNullOrWhiteSpace(entry.Event))
-                    counts[entry.Event] = counts.GetValueOrDefault(entry.Event) + 1;
-                ConfigStore.SaveUserProfile(p with { SongsTriggered = p.SongsTriggered + 1, EventCounts = counts });
-            });
+                File.AppendAllText(OcrLogPath, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
+                if (new FileInfo(OcrLogPath).Length > 2_000_000)
+                {
+                    var lines = File.ReadAllLines(OcrLogPath);
+                    File.WriteAllLines(OcrLogPath, lines.Skip(Math.Max(0, lines.Length - 2000)));
+                }
+            }
+            catch { }
         }
     }
 
-    // ---- Public methods called from MacWebBridge ----
+    // =========================================================================
+    // Core event wiring
+    // =========================================================================
+
+    static readonly Dictionary<string, string> LegacyDownEventAlias = new()
+    {
+        ["Offense: Earned First Down"] = "down:1st",
+        ["Offense: Second Down"] = "down:2nd",
+        ["Offense: Third Down"] = "down:3rd",
+        ["Offense: Fourth Down"] = "down:4th",
+    };
+
+    /// <summary>Returns what happened so callers can see "fired", "no song assigned", etc.</summary>
+    string FireEventForSide(string side, string eventName, bool bypassCooldown = false)
+    {
+        var config = side == "home" ? _homeConfig : _awayConfig;
+        if (config == null) return "no-profile";
+
+        // Try the team's own profile first, then fall back to Generic profile
+        var entry = config.FirstOrDefault(e => e.Event == eventName);
+        if (entry == null || string.IsNullOrWhiteSpace(entry.AudioFile))
+        {
+            var generic = ConfigStore.GetGenericProfile();
+            entry = generic?.FirstOrDefault(e => e.Event == eventName);
+        }
+
+        if ((entry == null || string.IsNullOrWhiteSpace(entry.AudioFile))
+            && LegacyDownEventAlias.TryGetValue(eventName, out var legacyTrigger))
+        {
+            var legacyEntry = config.FirstOrDefault(e => e.Trigger.Equals(legacyTrigger, StringComparison.OrdinalIgnoreCase));
+            if (legacyEntry != null && !string.IsNullOrWhiteSpace(legacyEntry.AudioFile))
+                entry = legacyEntry;
+        }
+
+        if (entry == null || string.IsNullOrWhiteSpace(entry.AudioFile)) return "unassigned";
+
+        if (bypassCooldown) AudioPlayer.ClearCooldown(entry.AudioFile);
+        if (!File.Exists(entry.AudioFile)) return "file-missing";
+        FireEvent(entry, side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume);
+        return "fired:" + Path.GetFileName(entry.AudioFile);
+    }
+
+    static DateTime _lastSongTriggerCloudSync = DateTime.MinValue;
+
+    void FireEvent(TriggerEntry entry, float? volumeOverride = null)
+    {
+        float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
+
+        if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
+        {
+            float mainVolume = (volumeOverride ?? AudioPlayer.MasterVolume) * eventVolumeScale;
+            AudioPlayer.Play(entry.AudioFile, mainVolume, interruptPrevious: true);
+            RecordSongTriggered(entry.Event);
+
+            // PA Announcer layer: plays concurrently with main cue
+            if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
+                AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false);
+        }
+    }
+
+    static void RecordSongTriggered(string eventName)
+    {
+        var current = ConfigStore.LoadUserProfile();
+        var eventCounts = new Dictionary<string, int>(current.EventCounts);
+        if (!string.IsNullOrWhiteSpace(eventName))
+            eventCounts[eventName] = eventCounts.GetValueOrDefault(eventName) + 1;
+        var updated = current with { SongsTriggered = current.SongsTriggered + 1, EventCounts = eventCounts };
+        ConfigStore.SaveUserProfile(updated);
+
+        if (DateTime.UtcNow - _lastSongTriggerCloudSync < TimeSpan.FromSeconds(30)) return;
+        _lastSongTriggerCloudSync = DateTime.UtcNow;
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    static void RecordGameWatched(string homeName, string awayName)
+    {
+        var current = ConfigStore.LoadUserProfile();
+        var byTeam = new Dictionary<string, int>(current.GamesWatchedByTeam);
+        foreach (var team in new[] { homeName, awayName })
+            byTeam[team] = byTeam.GetValueOrDefault(team) + 1;
+
+        var today = DateTime.Now.Date;
+        int streak = current.StreakCurrentDays;
+        if (current.StreakLastActiveDate == today) { }
+        else if (current.StreakLastActiveDate == today.AddDays(-1)) streak += 1;
+        else streak = 1;
+
+        var updated = current with
+        {
+            GamesWatched = current.GamesWatched + 1,
+            GamesWatchedByTeam = byTeam,
+            StreakCurrentDays = streak,
+            StreakLastActiveDate = today,
+        };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    void SaveCurrentTeamProfile()
+    {
+        ConfigStore.SaveProfile(SupremeStadiumSoundSelector.Theme.ActiveTeam.Name, _config);
+        RefreshHomeAwayConfigIfNeeded(SupremeStadiumSoundSelector.Theme.ActiveTeam.Name);
+    }
+
+    void RefreshHomeAwayConfigIfNeeded(string savedTeamName)
+    {
+        if (_homeTeam is { } home && string.Equals(home.Name, savedTeamName, StringComparison.OrdinalIgnoreCase))
+            _homeConfig = ConfigStore.LoadProfile(savedTeamName);
+        if (_awayTeam is { } away && string.Equals(away.Name, savedTeamName, StringComparison.OrdinalIgnoreCase))
+            _awayConfig = ConfigStore.LoadProfile(savedTeamName);
+    }
+
+    // =========================================================================
+    // Public methods called from MacWebBridge
+    // =========================================================================
 
     public Dictionary<string, (int assigned, int total)> GetCategoryCounts()
     {
@@ -287,32 +420,91 @@ public partial class MainWindow : Window
         return byCategory;
     }
 
-    public void SaveCurrentTeamProfile()
-    {
-        ConfigStore.SaveProfile(SupremeStadiumSoundSelector.Theme.ActiveTeam.Name, _config);
-    }
-
     public List<TriggerEntry> GetEvents(string? category)
     {
         if (string.IsNullOrEmpty(category) || category == "All") return _config;
         return _config.Where(e => CategoryMap.Resolve(e) == category).ToList();
     }
 
-    public void OpenAssignTrackFromWeb(string trigger)
-    {
-        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
-        if (entry == null) return;
-        // On Mac, file picking uses NSOpenPanel via Avalonia
-        // For now, this is a stub that would open a file picker dialog
-    }
+    // ---- Assign Track (web-native, no native dialog dependency) ----
+
+    public void OpenAssignTrackFromWeb(string trigger) { /* Native dialog stub — web UI handles this */ }
+
+    public void OpenAssignPaTrackFromWeb(string trigger) { /* Native dialog stub — web UI handles this */ }
 
     public void PreviewEventFromWeb(string trigger)
     {
         var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
-        if (entry != null) FireEvent(entry);
+        if (entry == null) return;
+        float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
+        if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
+            AudioPlayer.Play(entry.AudioFile, AudioPlayer.MasterVolume * eventVolumeScale, interruptPrevious: true, isPreview: true);
+        if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
+            AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isPreview: true);
     }
 
     public void StopPreviewFromWeb() => AudioPlayer.StopAll();
+
+    // ---- Clipping-island assign flow ----
+
+    public string GetTrackLibraryFromWeb()
+    {
+        var library = new List<string>();
+        if (Directory.Exists(ConfigStore.SongsFolder))
+            library.AddRange(Directory.GetFiles(ConfigStore.SongsFolder, "*", SearchOption.AllDirectories)
+                .Where(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())));
+
+        var items = library.Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(Path.GetFileNameWithoutExtension, StringComparer.OrdinalIgnoreCase)
+            .Select(p => new { name = Path.GetFileNameWithoutExtension(p), path = p });
+        return JsonSerializer.Serialize(items);
+    }
+
+    public void PreviewLocalFileFromWeb(string path)
+    {
+        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            AudioPlayer.Play(path, AudioPlayer.MasterVolume, interruptPrevious: true, isPreview: true);
+    }
+
+    public void AssignTrackFileFromWeb(string trigger, bool isPa, string path)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        if (isPa) entry.PaAudioFile = path; else entry.AudioFile = path;
+        ConfigStore.Save(_config);
+        SaveCurrentTeamProfile();
+    }
+
+    public void ClearTrackAssignmentFromWeb(string trigger, bool isPa) => AssignTrackFileFromWeb(trigger, isPa, "");
+
+    public string? BrowseForAudioFileFromWeb()
+    {
+        // On macOS, use NSOpenPanel via a synchronous Task.Run
+        // For now, return null — Avalonia file picker integration is complex
+        return null;
+    }
+
+    public void OpenTrimmerFromWeb(string trigger, bool isPa)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        string currentPath = isPa ? entry.PaAudioFile : entry.AudioFile;
+        if (string.IsNullOrWhiteSpace(currentPath) || !File.Exists(currentPath)) return;
+        // TrimmerForm is WinForms-specific — on Mac this opens nothing
+        // The assign flow uses the web clipping island instead
+    }
+
+    public int GetEventVolumeFromWeb(string trigger) => _config.FirstOrDefault(e => e.Trigger == trigger)?.Volume ?? 100;
+
+    public void SetEventVolumeFromWeb(string trigger, int percent)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        entry.Volume = Math.Clamp(percent, 0, 100);
+        SaveCurrentTeamProfile();
+    }
+
+    // ---- Watching toggle ----
 
     public string ToggleWatchingFromWeb()
     {
@@ -334,6 +526,8 @@ public partial class MainWindow : Window
         return _watching ? "watching" : "off";
     }
 
+    public void UnlockMatchupFromWeb() => _matchupLocked = false;
+
     public void ResetTeamProfileFromWeb()
     {
         _config = ConfigStore.BuildDefault();
@@ -348,31 +542,51 @@ public partial class MainWindow : Window
         if (entry != null) FireEvent(entry);
     }
 
+    public string FireTestEventFromWeb(string side, string eventKey) => FireEventForSide(side, eventKey, bypassCooldown: true);
+
+    public string GetAllEventKeysFromWeb() => JsonSerializer.Serialize(ConfigStore.AllEngineEventKeys);
+
+    // ---- Volume controls ----
+
     public void SetVolumeFromWeb(int percent) => AudioPlayer.MasterVolume = percent / 100f;
     public void SetHomeVolumeFromWeb(int percent) => AudioPlayer.HomeVolume = percent / 100f;
     public void SetAwayVolumeFromWeb(int percent) => AudioPlayer.AwayVolume = percent / 100f;
     public int GetHomeVolumeFromWeb() => (int)(AudioPlayer.HomeVolume * 100);
     public int GetAwayVolumeFromWeb() => (int)(AudioPlayer.AwayVolume * 100);
+    public void SetPaVolumeFromWeb(int percent) => AudioPlayer.PaVolume = percent / 100f;
+    public int GetPaVolumeFromWeb() => (int)(AudioPlayer.PaVolume * 100);
     public void SetFadeDelayFromWeb(int seconds) => AudioPlayer.FadeStartSeconds = seconds;
+
+    // ---- Matchup ----
 
     public void SetGameTeamsFromWeb(string homeName, string awayName)
     {
         _homeTeam = TeamColors.All.FirstOrDefault(t => t.Name == homeName);
         _awayTeam = TeamColors.All.FirstOrDefault(t => t.Name == awayName);
-        _homeConfig = ConfigStore.LoadProfile(homeName);
-        _awayConfig = ConfigStore.LoadProfile(awayName);
+        _homeConfig = ConfigStore.ListProfiles().Contains(homeName, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(homeName) : ConfigStore.BuildDefault();
+        _awayConfig = ConfigStore.ListProfiles().Contains(awayName, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(awayName) : ConfigStore.BuildDefault();
         _watcher.UserIsHome = true;
         _useEngineForEvents = true;
         _possession = null;
+
+        // Auto-assign default songs if profile is empty
+        bool homeHasAssignments = _homeConfig.Any(e => !string.IsNullOrWhiteSpace(e.AudioFile));
+        bool awayHasAssignments = _awayConfig.Any(e => !string.IsNullOrWhiteSpace(e.AudioFile));
+        if (!homeHasAssignments) ConfigStore.ImportDefaultPackForTeam(homeName, _homeConfig);
+        if (!awayHasAssignments) ConfigStore.ImportDefaultPackForTeam(awayName, _awayConfig);
     }
 
     public void ConfirmGametimeFromWeb(string homeName, string awayName)
     {
         SetGameTeamsFromWeb(homeName, awayName);
         _matchupLocked = true;
-        // Play gametime sound
-        string path = Path.Combine(AppContext.BaseDirectory, "Assets", "gametime-tackle.mp3");
-        AudioPlayer.Play(path);
+        _hook.Start();
+        _watcher.Start();
+        _watching = true;
+        PlayGametimeSound();
+        RecordGameWatched(homeName, awayName);
     }
 
     public string? GetGameTeamsFromWeb() =>
@@ -382,13 +596,17 @@ public partial class MainWindow : Window
 
     public bool IsMatchupLockedFromWeb() => _matchupLocked;
 
+    // ---- Team selection & profiles ----
+
     public void SelectTeamFromWeb(string name)
     {
         var team = TeamColors.All.FirstOrDefault(t => t.Name == name);
         if (team.Name == null || team.Name == SupremeStadiumSoundSelector.Theme.ActiveTeam.Name) return;
         SaveCurrentTeamProfile();
         SupremeStadiumSoundSelector.Theme.ActiveTeam = team;
-        _config = ConfigStore.LoadProfile(team.Name);
+        _config = ConfigStore.ListProfiles().Contains(team.Name, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(team.Name)
+            : ConfigStore.BuildDefault();
         ConfigStore.Save(_config);
     }
 
@@ -397,10 +615,13 @@ public partial class MainWindow : Window
         ConfigStore.Save(_config);
         string target = string.IsNullOrWhiteSpace(name) ? SupremeStadiumSoundSelector.Theme.ActiveTeam.Name : name.Trim();
         ConfigStore.SaveProfile(target, _config);
+        RefreshHomeAwayConfigIfNeeded(target);
         return target;
     }
 
     public string? GetProfileSavedAtFromWeb(string name) => ConfigStore.GetProfileSavedAt(name)?.ToString("h:mm tt");
+
+    // ---- Backgrounds ----
 
     public async Task<bool> DownloadAndSetTeamBackgroundFromWeb(string team, string url)
     {
@@ -408,9 +629,31 @@ public partial class MainWindow : Window
         return saved != null;
     }
 
+    public bool SetTeamBackgroundFromDownloadFromWeb(string downloadId)
+    {
+        var entry = ConfigStore.LoadMarketplaceDownloads().FirstOrDefault(e => e.Id == downloadId && e.Type == "image");
+        if (entry == null) return false;
+        string? saved = TeamBackgroundDownloadService.SetFromLocalFile(entry.School ?? "", entry.Path);
+        return saved != null;
+    }
+
+    // ---- Profiles ----
+
     public string ImportLocalSongFromWeb() => JsonSerializer.Serialize(new { success = false });
 
-    public void CopyCurrentToAllTeamsFromWeb() { }
+    public void CopyCurrentToAllTeamsFromWeb()
+    {
+        var snapshot = _config.Select(e => new TriggerEntry { Trigger = e.Trigger, Event = e.Event, AudioFile = e.AudioFile }).ToList();
+        Task.Run(() =>
+        {
+            foreach (var team in TeamColors.All)
+            {
+                if (team.Name == SupremeStadiumSoundSelector.Theme.ActiveTeam.Name) continue;
+                ConfigStore.SaveProfile(team.Name, snapshot);
+            }
+        });
+    }
+
     public void DeleteCurrentProfileFromWeb()
     {
         ConfigStore.DeleteProfile(SupremeStadiumSoundSelector.Theme.ActiveTeam.Name);
@@ -420,18 +663,113 @@ public partial class MainWindow : Window
 
     public void ExportProfileFromWeb() { }
     public void ImportProfileFromWeb() { }
+    public void ExportUserProfileFromWeb() { }
+    public void ImportUserProfileFromWeb() { }
+
+    // ---- Default song pack ----
+
+    public void DownloadDefaultSongPackFromWeb()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                bool ok = await DefaultSongPackService.DownloadAndExtractAsync(
+                    (frac, downloaded, total) => { }, _lifetimeCts.Token);
+            }
+            catch { }
+        });
+    }
+
+    public string? BrowseForSongPackZipFromWeb() => null;
+
+    public void ImportDefaultSongPackZipFromWeb(string zipPath)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DefaultSongPackService.ExtractExistingZipAsync(zipPath,
+                    frac => { }, _lifetimeCts.Token);
+            }
+            catch { }
+        });
+    }
+
+    // ---- Open Settings (stub — web UI handles audio settings) ----
     public void OpenSettingsFromWeb() { }
 
-    public void BeginWindowDrag()
-    {
-        // On macOS Avalonia, we don't need the native drag trick
-        // that Windows uses (WM_NCLBUTTONDOWN) since Avalonia
-        // handles title bar dragging natively on Mac.
-    }
+    // ---- Window controls ----
+
+    public void BeginWindowDrag() { }
 
     public void MinimizeWindowFromWeb() => WindowState = WindowState.Minimized;
     public void MaximizeWindowFromWeb() => WindowState = WindowState == WindowState.Maximized
         ? WindowState.Normal : WindowState.Maximized;
     public void CloseWindowFromWeb() => Close();
-    public void PlayUiClickSoundFromWeb() { }
+
+    public void PlayUiClickSoundFromWeb()
+    {
+        // Synthesized tick — minimal implementation for Mac
+        Task.Run(() =>
+        {
+            try
+            {
+                string tempDir = Path.GetTempPath();
+                string clickPath = Path.Combine(tempDir, "bandroom_click.wav");
+                int sampleRate = 44100;
+                int n = 10 * sampleRate / 1000;
+                var buf = new float[n];
+                var rng = new Random();
+                float prev = 0f;
+                for (int i = 0; i < n; i++)
+                {
+                    float env = MathF.Pow(1f - (float)i / n, 4f);
+                    float noise = (float)(rng.NextDouble() * 2 - 1);
+                    prev = prev * 0.6f + noise * 0.4f;
+                    buf[i] = prev * 0.14f * env;
+                }
+                var bytes = new byte[buf.Length * 2];
+                for (int i = 0; i < buf.Length; i++)
+                {
+                    short s = (short)(Math.Clamp(buf[i], -1f, 1f) * 32767);
+                    bytes[i * 2] = (byte)(s & 0xFF);
+                    bytes[i * 2 + 1] = (byte)(s >> 8);
+                }
+
+                using (var fs = new FileStream(clickPath, FileMode.Create, FileAccess.Write))
+                using (var bw = new BinaryWriter(fs))
+                {
+                    int dataSize = bytes.Length;
+                    bw.Write(new byte[] { 0x52, 0x49, 0x46, 0x46 });
+                    bw.Write(36 + dataSize);
+                    bw.Write(new byte[] { 0x57, 0x41, 0x56, 0x45 });
+                    bw.Write(new byte[] { 0x66, 0x6D, 0x74, 0x20 });
+                    bw.Write(16);
+                    bw.Write((short)1);
+                    bw.Write((short)1);
+                    bw.Write(sampleRate);
+                    bw.Write(sampleRate * 2);
+                    bw.Write((short)2);
+                    bw.Write((short)16);
+                    bw.Write(new byte[] { 0x64, 0x61, 0x74, 0x61 });
+                    bw.Write(dataSize);
+                    bw.Write(bytes);
+                }
+
+                // Quick play through afplay for the click sound (short, disposable)
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "/usr/bin/afplay",
+                    Arguments = $"\"{clickPath}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using var proc = System.Diagnostics.Process.Start(psi);
+                proc?.WaitForExit(500);
+                try { File.Delete(clickPath); } catch { }
+            }
+            catch { }
+        });
+    }
 }

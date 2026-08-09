@@ -256,6 +256,34 @@ public sealed class WebMainForm : Form
     public string? GetProfileSavedAtFromWeb(string name) =>
         ConfigStore.GetProfileSavedAt(name)?.ToString("h:mm tt");
 
+    /// <summary>Copies fromTeam's saved profile onto toTeam ("Duplicate Profile To..." context
+    /// menu item, wwwroot/app.js duplicateTeamProfile). Was calling a bridge method that didn't
+    /// exist (bridge.DuplicateProfile) -- WebView2 throws on an unresolved host-object call,
+    /// which the JS caller's .catch() surfaced as a generic "Failed to duplicate profile" toast,
+    /// but under some call paths (right-click before the context menu's own try/catch settled)
+    /// this reached the user as an unhandled exception instead. Returns false rather than
+    /// throwing if fromTeam has no saved profile, so the JS side's existing catch/toast handles
+    /// it the same way as any other failure.</summary>
+    public bool DuplicateProfileFromWeb(string fromTeam, string toTeam)
+    {
+        if (string.IsNullOrWhiteSpace(fromTeam) || string.IsNullOrWhiteSpace(toTeam)) return false;
+        if (!ConfigStore.ListProfiles().Contains(fromTeam, StringComparer.OrdinalIgnoreCase)) return false;
+
+        var entries = ConfigStore.LoadProfile(fromTeam);
+        ConfigStore.SaveProfile(toTeam, entries);
+
+        // If the destination is the currently active/loaded team, refresh in-memory state so the
+        // UI reflects the duplicated profile immediately instead of only on next reload.
+        if (string.Equals(toTeam, Theme.ActiveTeam.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            _config = entries;
+            ConfigStore.Save(_config);
+            PushCategories();
+        }
+        RefreshHomeAwayConfigIfNeeded(toTeam);
+        return true;
+    }
+
     /// <summary>Task queue item 6 (Session 11): SetGameTeamsFromWeb below already silently
     /// auto-fills an empty team profile from the default pack the moment a matchup is confirmed
     /// (see its own "Auto-assign default songs ONLY if empty" comment) -- that safety net is left
@@ -1279,15 +1307,16 @@ public sealed class WebMainForm : Form
         });
     }
 
-    /// <summary>The offense (whoever the live possession color says has the ball) just showed a
-    /// negative distance-to-go -- that only happens on a penalty or a loss of yards, and since we
-    /// already know who's on offense, we know their opponent's Defense caused it.
-    /// NOT gated by <see cref="HomeOnlyEventsForNow"/> -- this away-side TFL detection is
-    /// considered "concrete"/solid (side-agnostic distance read, confirmed via live screenshot
-    /// per the comments on GameWatcher.CheckForLossOfYards), so the owner explicitly asked to
-    /// leave it firing for both sides while everything else gets simplified to home-only.</summary>
+    /// <summary>Legacy TFL fire path -- gated off now that TflHelper covers the same signal
+    /// through the engine (STATE_MACHINE_ANALYSIS.md Discrepancy #9: this and the engine's
+    /// TflHelper both fired "Defense: Tackle for Loss" for the same play, masked only by
+    /// AudioPlayer.FireCooldown suppressing the second call within 20s -- not a fix, just a
+    /// window where it happened to not be audible). Kept, not deleted, as the fallback path for
+    /// if _useEngineForEvents is ever turned off again, same as OnDownChanged/OnRegionChanged
+    /// above.</summary>
     void OnTackleForLoss()
     {
+        if (_useEngineForEvents) return;
         RunOnUi(() =>
         {
             if (_homeConfig == null || _awayConfig == null || _possession == null) return;
@@ -1305,9 +1334,15 @@ public sealed class WebMainForm : Form
         {
             // If matchup not set yet, fall back to the single-team config (legacy mode).
             if (_homeConfig == null || _awayConfig == null) return;
-            // Default to "home" when possession hasn't been read yet (menus, replays, etc)
-            // instead of silently dropping every event — the engine already knows UserIsHome=true.
-            string side = _possession ?? "home";
+            // STATE_MACHINE_ANALYSIS.md Race #3: this used to default to "home" when possession
+            // hadn't been read yet (right after GAMETIME, before the first real possession-color
+            // sample), which could fire a "Defense:*" cue for the wrong team -- e.g. an away-team
+            // defensive stop misrouted to home's audio. Every other possession-dependent read in
+            // this file (penalizedIsHome/possessionIsHomeNow in GameWatcher.RouteEngineTick,
+            // OnTackleForLoss above) already waits for a real read instead of guessing; this now
+            // matches that convention rather than being the one place that guesses wrong.
+            if (_possession == null) return;
+            string side = _possession;
 
             foreach (var evt in events)
             {

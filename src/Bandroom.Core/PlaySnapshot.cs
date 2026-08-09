@@ -20,6 +20,14 @@ public sealed class PlaySnapshot
     public bool IsTurnover { get; init; }
     public bool IsNoPuntReturn { get; init; }
 
+    /// <summary>True while the "FIELD GOAL" full-screen banner (GameWatcher's "banner" region)
+    /// is on screen -- fires for BOTH made and missed attempts (the banner text itself doesn't
+    /// distinguish the two). FieldGoalMissedHelper uses the true->false transition of this flag
+    /// combined with no score change to detect a miss, since IsPAT never gets set for an attempt
+    /// that fails (see STATE_MACHINE_ANALYSIS.md Discrepancy #6 -- the OCR situation region only
+    /// ever maps success text like "PAT GOOD").</summary>
+    public bool IsFieldGoalAttempt { get; init; }
+
     /// <summary>True while CFB27's pregame team-intro/"READY" screen is on screen (the screen
     /// shown right before kickoff where both teams' ratings badges and a center READY prompt
     /// are displayed). Detection must be team-color-independent -- see PregameHelper.cs and the
