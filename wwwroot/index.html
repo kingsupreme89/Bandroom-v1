@@ -181,9 +181,13 @@
       <div id="add-school-overlay" hidden>
         <div id="add-school-dialog" class="glass">
           <div class="team-picker-header">
-            <span>Add a Custom School</span>
+            <span id="add-school-title">Add a Custom School</span>
             <button id="btn-close-add-school" class="icon-btn">&times;</button>
           </div>
+          <!-- The 50 most popular FCS programs now ship as real roster entries (TeamColors.cs
+               FcsTeams) -- they're already in the main Team picker, so this dialog is back to
+               its original v1 job: a fully custom name+color entry for a school not in either
+               list. -->
           <div class="add-school-body">
             <label class="add-school-label" for="add-school-name">School name</label>
             <input type="text" id="add-school-name" placeholder="e.g. Montana" class="team-picker-search" maxlength="40" />
@@ -875,15 +879,21 @@
        happening" rather than a new UI pattern. -->
   <div id="songpack-prompt-overlay" hidden>
     <div class="update-dialog glass">
-      <div class="update-header"><span class="songpack-led"></span>Download the default song pack?</div>
+      <div class="update-header"><span class="songpack-led"></span>Get the Free Default Song Pack</div>
       <p class="update-sub" id="songpack-prompt-sub">
-        2,241 songs across every team (about 2.8&nbsp;GB), so teams auto-fill with real cues
-        instead of staying silent. Opens in your browser -- once it's downloaded, come back here
-        and hit Import to unpack it. Bandroom saves it under your local app data folder (see the
-        exact path any time via the command palette's "Move Default Song Pack Folder", which also
-        lets you relocate it) and auto-fills only the events you haven't already assigned a song
-        to yourself -- it never overwrites your own picks. Entirely optional, and you can add it
-        later from the command palette if you skip it now.
+        This is a one-time download that fills every team with real songs automatically, so you
+        don't have to upload your own. It's about 2.8&nbsp;GB (2,241 songs), so it can take a
+        few minutes depending on your internet speed.
+      </p>
+      <ol class="songpack-steps">
+        <li>Click <strong>Download</strong> below &mdash; it opens the download page in your web browser.</li>
+        <li>Wait for the download to finish (check your browser's download bar).</li>
+        <li>Come back to Bandroom and click <strong>Import</strong> when it appears &mdash; Bandroom will unpack the file for you automatically.</li>
+      </ol>
+      <p class="update-sub">
+        It only fills in songs for events you haven't already picked one for yourself, so nothing
+        you've already set up gets overwritten. Totally optional &mdash; skip it now and add it
+        later from the command palette any time.
       </p>
       <div class="update-actions">
         <button id="btn-songpack-skip" class="btn-ghost">Not Now</button>
@@ -897,11 +907,18 @@
        already drive team auto-assign off whatever lands in DownloadedDefaultSongsFolder). -->
   <div id="songpack-import-overlay" hidden>
     <div class="update-dialog glass">
-      <div class="update-header"><span class="songpack-led"></span>Finished downloading?</div>
+      <div class="update-header"><span class="songpack-led"></span>Ready to Import?</div>
       <p class="update-sub">
-        Locate the .zip you just downloaded and Bandroom will unpack it and auto-fill every
-        team's Sound Bank -- no need to unzip it yourself.
+        Once your download has finished, click <strong>Locate &amp; Import</strong> below and pick
+        the .zip file from your Downloads folder. Bandroom will unzip it and fill in every team's
+        Sound Bank for you &mdash; you don't need to unzip anything yourself.
       </p>
+      <ol class="songpack-steps">
+        <li>Make sure the download from the last step has fully finished.</li>
+        <li>Click <strong>Locate &amp; Import</strong> below.</li>
+        <li>In the window that pops up, find and select the .zip file (it's usually in your Downloads folder).</li>
+        <li>Wait for the progress bar &mdash; when it's done, every team will have songs ready to go.</li>
+      </ol>
       <div class="update-actions">
         <button id="btn-songpack-import-later" class="btn-ghost">I'll Import Later</button>
         <button id="btn-songpack-import" class="btn-primary">Locate & Import</button>

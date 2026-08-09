@@ -866,6 +866,7 @@ async function renderProfileMyUploads() {
 // projections", etc -- this list only covers things actually in this codebase) plus a full
 // ELI7 install/feature/FAQ guide, opened from the new sidebar Help pill.
 const HELP_TIPS = [
+  "New: the 50 most popular FCS schools now ship built-in, right alongside every FBS team -- check the Team picker.",
   "Press Ctrl+K anytime to open the command palette and jump straight to any screen.",
   "Click a team's tile in the Team panel to make it the active team -- its color becomes the whole app's glow color.",
   "Set Matchup lets you pick a Home and Away team so Bandroom can auto-switch which team's songs play.",
@@ -980,6 +981,26 @@ const HELP_GUIDE_HTML = `
   </ul>
 </div>
 <div class="help-guide-section">
+  <h3>Don't see your team? Add it yourself (TeamBuilder)</h3>
+  <p>If your school isn't in the list, you can add it in about 30 seconds:</p>
+  <ol>
+    <li>Open the full Team picker and click <strong>Add School</strong>.</li>
+    <li>Type your school's name.</li>
+    <li>Pick a <strong>primary color</strong> and a <strong>secondary color</strong> -- these are
+    just the two main colors of your team, so Bandroom can color the app to match, like it does
+    for every other school.</li>
+    <li>Click the button to save it. Your new school shows up right away in the Team picker, no
+    restart needed.</li>
+    <li>Last step -- give it a logo: find your new school's tile in the Team picker and click the
+    small pencil icon on it. That opens the logo tool where you can upload and crop a picture to
+    use as its logo.</li>
+  </ol>
+  <p><strong>Good to know:</strong> a school you add this way is just a name, colors, and a logo
+  -- it won't automatically detect scores or plays for a game engine that doesn't know that school
+  (no real-world team roster data). You still assign its songs the normal way, and it works with
+  Set Matchup and everything else just like any other team.</p>
+</div>
+<div class="help-guide-section">
   <h3>The Sound Bank and The Bandroom marketplace</h3>
   <p>Every team has its own <strong>Sound Bank</strong> -- a folder of that team's songs and
   background pictures. <strong>The Bandroom</strong> is the shared marketplace where every
@@ -1081,6 +1102,55 @@ const HELP_GUIDE_HTML = `
     default pack, PA announcer, whistle, backgrounds) is optional. Bandroom works with just you
     picking your own songs by hand if that's all you want.</li>
   </ul>
+</div>
+<div class="help-guide-section">
+  <h3>No sound is playing? Try this, in order</h3>
+  <p>Go down this list one step at a time -- most "no sound" problems are one of these five things.</p>
+  <ol>
+    <li><strong>Turn the volume up.</strong> Open the gear icon (Settings) and check the big
+    <strong>VOLUME</strong> slider isn't all the way down or at 0%. Also check your computer's own
+    volume (the speaker icon on your taskbar) isn't muted.</li>
+    <li><strong>Make sure a song is actually assigned.</strong> A situation with no song picked
+    for it will always stay silent -- that's not a bug, it's just empty. Click <strong>Assign /
+    Edit</strong> on that card and check a song is listed there. If it says "Unassigned" or
+    "none", pick one, or use the <strong>Default Song Pack</strong> to auto-fill everything at
+    once.</li>
+    <li><strong>Make sure you've set a matchup.</strong> Click <strong>Set Matchup</strong> and
+    pick your Home and Away teams before kickoff. Without this, Bandroom doesn't know which
+    team's songs belong to which side, so it may play nothing (or the wrong team's song).</li>
+    <li><strong>Make sure Bandroom is actually watching the game.</strong> Look at the top of the
+    screen -- it should say <strong>Watching</strong>, not <strong>Not watching</strong>. If it
+    says "Not watching," click it (or use Set Matchup again) to start watching before you kick
+    off.</li>
+    <li><strong>Still nothing? Try a full restart.</strong> Close Bandroom completely, close the
+    game too, then reopen Bandroom first and reopen the game after. This clears up almost every
+    remaining case, especially right after updating to a new version.</li>
+  </ol>
+  <p>If you tried all five and it's still silent, please tell us in Discord exactly which step
+  didn't work -- that's the fastest way for us to fix it for everyone.</p>
+</div>
+<div class="help-guide-section">
+  <h3>An update broke something -- how do I go back to an older version?</h3>
+  <p>Sometimes a new update has a bug we haven't caught yet. You can always go back to a version
+  that worked for you while we fix it. Here's how, step by step:</p>
+  <ol>
+    <li>Close Bandroom completely if it's open.</li>
+    <li>Open your web browser and go to
+    <a href="https://github.com/kingsupreme89/Bandroom-v1/releases" target="_blank" rel="noopener">github.com/kingsupreme89/Bandroom-v1/releases</a>
+    -- this is the page with every version of Bandroom we've ever released.</li>
+    <li>Find the version you want (for example, an older one that you know worked, like
+    <strong>v1.0.52</strong>). Click on it to open that version's page.</li>
+    <li>Click the download link/file for that version (near the bottom of the page, under
+    "Assets") and save it to your computer.</li>
+    <li>Run the file you downloaded and install it like normal -- it will replace the newer
+    version. Your songs, teams, and settings all stay exactly as they were; installing an older
+    version does not delete anything you've set up.</li>
+    <li>Bandroom may try to auto-update itself back to the newest version the next time you open
+    it. If you want to stay on the older version for now, just click "Not Now" / skip if it asks
+    about updating.</li>
+  </ol>
+  <p>Please also tell us in Discord which version broke and what stopped working -- that's the
+  only way we know to fix it before turning updates back on for you.</p>
 </div>
 `;
 
@@ -1586,9 +1656,11 @@ function renderImportTargetTeamGrid(filter) {
 }
 
 /// TeamBuilder "Add School" v1 -- name + primary/secondary color only (custom schools are never
-/// matched against in-game OCR data, purely a naming/branding feature). Logo isn't set here --
-/// once added, the new school shows up in the full Team picker like any other, where the existing
-/// per-tile pencil icon (openLogoCropTool) already works for it.
+/// matched against in-game OCR data, purely a naming/branding feature). The 50 most popular FCS
+/// programs now ship as real roster entries (TeamColors.cs FcsTeams) and already show up in the
+/// main Team picker, so this dialog stays a fully custom entry point for anything not in either
+/// list. Logo isn't set here -- once added, the new school shows up in the full Team picker like
+/// any other, where the existing per-tile pencil icon (openLogoCropTool) already works for it.
 function openAddSchoolDialog() {
   document.getElementById("add-school-name").value = "";
   document.getElementById("add-school-primary").value = "#22d3ee";
@@ -1610,6 +1682,13 @@ async function submitAddSchool() {
   err.textContent = "";
   if (!bridge) return;
 
+  // Bug blocker: double-click or a slow bridge call could otherwise fire AddCustomTeam twice
+  // for one click, and WebBridge's own duplicate-name guard would then surface the SECOND call
+  // as a confusing "already exists" error for a school the user just added themselves in this
+  // same action. Disabling the button for the duration of the one in-flight call closes that.
+  const confirmBtn = document.getElementById("btn-add-school-confirm");
+  if (confirmBtn.disabled) return;
+
   const name = document.getElementById("add-school-name").value.trim();
   const primary = document.getElementById("add-school-primary").value;
   const secondary = document.getElementById("add-school-secondary").value;
@@ -1619,6 +1698,7 @@ async function submitAddSchool() {
     return;
   }
 
+  confirmBtn.disabled = true;
   try {
     const result = JSON.parse(await bridge.AddCustomTeam(name, primary, secondary));
     if (!result.success) {
@@ -1634,6 +1714,8 @@ async function submitAddSchool() {
     console.error("AddCustomTeam failed", err2);
     err.textContent = "Couldn't add that school -- try again.";
     err.hidden = false;
+  } finally {
+    confirmBtn.disabled = false;
   }
 }
 

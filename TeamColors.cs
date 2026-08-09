@@ -165,6 +165,68 @@ internal static class TeamColors
         new("Wyoming", Hex("#492f24"), Hex("#ffc425")),
     };
 
+    /// <summary>The 50 most popular FCS programs, shipped as real first-class roster entries --
+    /// NOT routed through the TeamBuilder custom-team path (AddCustomTeam/custom_teams.json).
+    /// Kept as its own array rather than merged into BaseTeams so BaseTeams stays a byte-for-byte
+    /// port of the design handoff's PROFILE_LIST (see that array's doc comment), but every team
+    /// here is layered into TeamColors.All the exact same way at BuildAll() below -- same Team
+    /// picker, same Set Matchup eligibility, same ResolveTeamColor OCR possession-color matching
+    /// as any of the ~140 FBS teams above. Ships with the app for every user immediately, no
+    /// "Add School" step needed.</summary>
+    static readonly TeamColor[] FcsTeams =
+    {
+        new("North Dakota State", Hex("#134a37"), Hex("#ffc72c")),
+        new("Montana", Hex("#7c1938"), Hex("#c0c0c0")),
+        new("Montana State", Hex("#154734"), Hex("#f2a900")),
+        new("South Dakota State", Hex("#0033a0"), Hex("#ffc627")),
+        new("Villanova", Hex("#00205b"), Hex("#c8102e")),
+        new("Eastern Washington", Hex("#a10022"), Hex("#4a4a4a")),
+        new("North Dakota", Hex("#009a44"), Hex("#000000")),
+        new("Illinois State", Hex("#ce1126"), Hex("#000000")),
+        new("Southern Illinois", Hex("#8b1122"), Hex("#a2aaad")),
+        new("Youngstown State", Hex("#e6b400"), Hex("#000000")),
+        new("South Dakota", Hex("#cc0000"), Hex("#000000")),
+        new("Northern Iowa", Hex("#4b116f"), Hex("#a89968")),
+        new("Weber State", Hex("#4b116f"), Hex("#a7a9ac")),
+        new("Idaho", Hex("#8b2332"), Hex("#a7a9ac")),
+        new("Southeastern Louisiana", Hex("#00563f"), Hex("#ffd100")),
+        new("Nicholls", Hex("#c39445"), Hex("#003057")),
+        new("Incarnate Word", Hex("#c8102e"), Hex("#f2a900")),
+        new("Central Arkansas", Hex("#5b0913"), Hex("#a7a9ac")),
+        new("Furman", Hex("#4b1869"), Hex("#ffffff")),
+        new("Chattanooga", Hex("#00386b"), Hex("#f8b800")),
+        new("Wofford", Hex("#8b6f4e"), Hex("#000000")),
+        new("Samford", Hex("#0033a0"), Hex("#a7a9ac")),
+        new("Mercer", Hex("#f28e1c"), Hex("#000000")),
+        new("William & Mary", Hex("#115740"), Hex("#a89968")),
+        new("Richmond", Hex("#870020"), Hex("#003057")),
+        new("Elon", Hex("#73000a"), Hex("#a7a9ac")),
+        new("Stony Brook", Hex("#990000"), Hex("#000000")),
+        new("Albany", Hex("#461d7c"), Hex("#f4a900")),
+        new("New Hampshire", Hex("#003a70"), Hex("#a7a9ac")),
+        new("Maine", Hex("#00285e"), Hex("#a89968")),
+        new("Rhode Island", Hex("#00447c"), Hex("#a7a9ac")),
+        new("Towson", Hex("#ffc72c"), Hex("#231f20")),
+        new("UT Martin", Hex("#f47321"), Hex("#002d5b")),
+        new("Tennessee Tech", Hex("#4b116f"), Hex("#eaaa00")),
+        new("Eastern Kentucky", Hex("#652d84"), Hex("#a7a9ac")),
+        new("Southeast Missouri State", Hex("#a6192e"), Hex("#000000")),
+        new("Murray State", Hex("#002144"), Hex("#f7b500")),
+        new("Austin Peay", Hex("#b30838"), Hex("#000000")),
+        new("Lamar", Hex("#a80532"), Hex("#ffffff")),
+        new("McNeese", Hex("#003876"), Hex("#f2a900")),
+        new("Northwestern State", Hex("#582c83"), Hex("#a7a9ac")),
+        new("Southern University", Hex("#0033a0"), Hex("#f2a900")),
+        new("Jackson State", Hex("#001c54"), Hex("#a7a9ac")),
+        new("Grambling State", Hex("#000000"), Hex("#f2a900")),
+        new("Alcorn State", Hex("#4b116f"), Hex("#eaaa00")),
+        new("North Carolina A&T", Hex("#002946"), Hex("#f2a900")),
+        new("Southern Utah", Hex("#c8102e"), Hex("#231f20")),
+        new("Portland State", Hex("#00693e"), Hex("#000000")),
+        new("Idaho State", Hex("#f47321"), Hex("#000000")),
+        new("Holy Cross", Hex("#4f2c1d"), Hex("#a89968")),
+    };
+
     /// <summary>Base roster plus any user-created custom schools (TeamBuilder "add school" v1),
     /// loaded once from ConfigStore's custom_teams.json manifest and kept in sync in-memory by
     /// AddCustomTeam so a newly-added team shows up everywhere immediately, no restart needed.</summary>
@@ -173,6 +235,7 @@ internal static class TeamColors
     static List<TeamColor> BuildAll()
     {
         var list = new List<TeamColor>(BaseTeams);
+        list.AddRange(FcsTeams);
         foreach (var custom in ConfigStore.LoadCustomTeams())
         {
             if (list.Any(t => t.Name.Equals(custom.Name, StringComparison.OrdinalIgnoreCase))) continue;

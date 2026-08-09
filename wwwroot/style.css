@@ -2702,6 +2702,7 @@ input, select, textarea, [contenteditable] {
   border-radius: var(--radius-panel);
   padding: 22px;
 }
+#btn-add-school-confirm:disabled { opacity: 0.55; cursor: not-allowed; }
 .panel-title-row {
   display: flex;
   align-items: center;
@@ -2961,6 +2962,43 @@ input, select, textarea, [contenteditable] {
 }
 #songpack-progress-header { display: flex; align-items: center; }
 .songpack-import-row { display: flex; justify-content: flex-end; }
+
+/* Session request: pack-upload dialogs were too small/cramped for non-technical users to read
+   comfortably -- widen the dialog and bump header to brand-name sized/styled (same gradient
+   wordmark treatment as the header logo) and body copy up from 12px so the steps are legible. */
+#songpack-prompt-overlay .update-dialog,
+#songpack-import-overlay .update-dialog,
+#songpack-progress-dialog {
+  width: min(560px, 92vw);
+}
+#songpack-prompt-overlay .update-header,
+#songpack-import-overlay .update-header,
+#songpack-progress-header {
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 0.2px;
+  background: linear-gradient(120deg, #ffffff 0%, var(--team-primary, var(--accent)) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--team-primary, var(--accent)) 35%, transparent));
+}
+#songpack-prompt-overlay .update-sub,
+#songpack-import-overlay .update-sub,
+#songpack-progress-overlay .update-sub {
+  font-size: 15px;
+  line-height: 1.65;
+}
+.songpack-steps {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text-muted);
+  margin: 0;
+  padding-left: 22px;
+}
+.songpack-steps li { margin-bottom: 8px; }
+.songpack-steps li:last-child { margin-bottom: 0; }
 
 /* Marketplace hub / team album / My Downloads dialogs had only the plain .glass blur+border
    (no pulse) -- everywhere else with this footprint (clipper island, side panels, category bar)

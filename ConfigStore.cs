@@ -253,15 +253,28 @@ internal static class ConfigStore
         // this method's own signature makes no such guarantee to callers -- sanitize defensively
         // so a crafted name (e.g. "..\..\..\SomeFolder") can't walk Path.Combine outside
         // DefaultSongsFolder to enumerate/read files from an arbitrary directory.
-        string safeTeamName = string.Join("_", teamName.Split(Path.GetInvalidFileNameChars().Concat(new[] { '.', '/', '\\' }).ToArray()));
+        //
+        // REGRESSION FIX (v1.0.53->v1.0.54): the previous version also blanket-replaced '.', '/'
+        // and '\' with '_', which mangled any real team name containing a period (e.g. a
+        // TeamBuilder-added "St. <something>") so it no longer matched its actual on-disk folder
+        // -- that team's default pack silently imported 0 songs while every dot-free team (the
+        // vast majority) kept working, which is why only some users/teams saw "no sound".
+        // Only strip characters that are actually invalid in a filename, then verify the
+        // resolved path is still inside DefaultSongsFolder as defense-in-depth against traversal
+        // (handles ".." without punishing legitimate single dots).
+        string safeTeamName = string.Join("_", teamName.Split(Path.GetInvalidFileNameChars()));
 
         // Search all conference subfolders for this team
         string? teamFolder = null;
         if (Directory.Exists(DefaultSongsFolder))
         {
+            string defaultSongsRoot = Path.GetFullPath(DefaultSongsFolder);
             foreach (var confDir in Directory.GetDirectories(DefaultSongsFolder))
             {
                 string candidate = Path.Combine(confDir, safeTeamName);
+                string resolvedCandidate = Path.GetFullPath(candidate);
+                if (!resolvedCandidate.StartsWith(defaultSongsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    continue;
                 if (Directory.Exists(candidate))
                 {
                     teamFolder = candidate;
