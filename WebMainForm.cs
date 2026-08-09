@@ -86,6 +86,7 @@ public sealed class WebMainForm : Form
         _config = ConfigStore.LoadOrCreate();
 
         _hook.KeyCombo += OnKeyCombo;
+        _hook.Cutoff += OnCutoff;
         _watcher.WindowFoundChanged += OnWindowFoundChanged;
         _watcher.DownChanged += OnDownChanged;
         _watcher.RegionChanged += OnRegionChanged;
@@ -118,8 +119,31 @@ public sealed class WebMainForm : Form
             InitAutoUpdater();
             UserCountService.StartHeartbeat(_lifetimeCts.Token);
             PlayDraftChime();
+            // Public (everyone-sees-it) team logo sync -- fire-and-forget, works whether or not
+            // this device is signed in (pulling the public index needs no auth, only pushing
+            // does). Refreshes whatever team is currently showing so a newly-applied public logo
+            // shows up without needing a restart.
+            _ = SyncPublicTeamLogosAsync();
         };
         FormClosing += (_, _) => _lifetimeCts.Cancel();
+    }
+
+    /// <summary>Best-effort startup pass for public (everyone-sees-it) team logos -- see
+    /// PublicTeamLogoSyncService.SyncAsync for the actual pull/guardrail logic. Only tells the web
+    /// UI to refresh if something actually changed, so this never fires an unnecessary repaint on
+    /// the far more common case of "nothing new since last launch".</summary>
+    async Task SyncPublicTeamLogosAsync()
+    {
+        try
+        {
+            var updated = await PublicTeamLogoSyncService.SyncAsync(_lifetimeCts.Token);
+            if (updated.Count > 0)
+                RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:publiclogosupdated'))"));
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SyncPublicTeamLogosAsync failed", ex);
+        }
     }
 
     async Task InitWebViewAsync()
@@ -149,6 +173,8 @@ public sealed class WebMainForm : Form
         // SongsUploadedFolder.
         core.SetVirtualHostNameToFolderMapping("localtracks", ConfigStore.LocalTracksFolder, CoreWebView2HostResourceAccessKind.Allow);
         core.SetVirtualHostNameToFolderMapping("avatar", ConfigStore.AvatarFolder, CoreWebView2HostResourceAccessKind.Allow);
+        Directory.CreateDirectory(ConfigStore.TrimSourceFolder);
+        core.SetVirtualHostNameToFolderMapping("trimsrc", ConfigStore.TrimSourceFolder, CoreWebView2HostResourceAccessKind.Allow);
 
         core.AddHostObjectToScript("bandroom", new WebBridge(this));
 
@@ -319,7 +345,93 @@ public sealed class WebMainForm : Form
         int assigned = ConfigStore.ImportDefaultPackForTeam(teamName, config);
         if (assigned > 0) ConfigStore.SaveProfile(teamName, config);
         RefreshHomeAwayConfigIfNeeded(teamName);
+        RefreshActiveConfigIfNeeded(teamName, config);
         return assigned;
+    }
+
+    /// <summary>Overwrite variant of ApplyDefaultProfileForTeamFromWeb (Events-page Auto-Assign
+    /// "Overwrite" confirm flow) -- replaces EVERY slot the default pack has a file for, not just
+    /// empty ones. JS is responsible for getting an explicit yes/no from the user before calling
+    /// this; nothing here re-confirms.</summary>
+    public int ApplyDefaultProfileForTeamOverwriteFromWeb(string teamName)
+    {
+        var config = ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(teamName) : ConfigStore.BuildDefault();
+        int assigned = ConfigStore.ImportDefaultPackForTeam(teamName, config, overwrite: true);
+        if (assigned > 0) ConfigStore.SaveProfile(teamName, config);
+        RefreshHomeAwayConfigIfNeeded(teamName);
+        RefreshActiveConfigIfNeeded(teamName, config);
+        return assigned;
+    }
+
+    /// <summary>Auto-Assign's "Load Conference Pack" option -- owner-requested alternative to the
+    /// team-specific default pack: fills from files sitting directly in the team's CONFERENCE
+    /// folder (shared chants/hype cues not tied to one school) instead of that team's own
+    /// subfolder. overwrite=true replaces every slot the conference pack has a file for (same
+    /// "JS gets an explicit yes/no first" contract as ApplyDefaultProfileForTeamOverwriteFromWeb);
+    /// overwrite=false only backfills empty slots, meant to run as a second pass after the
+    /// team-specific pack so a team's own real songs always win over generic conference ones.</summary>
+    public int ApplyConferencePackForTeamFromWeb(string teamName, bool overwrite)
+    {
+        var config = ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(teamName) : ConfigStore.BuildDefault();
+        int assigned = ConfigStore.ImportConferencePackForTeam(teamName, config, overwrite);
+        if (assigned > 0) ConfigStore.SaveProfile(teamName, config);
+        RefreshHomeAwayConfigIfNeeded(teamName);
+        RefreshActiveConfigIfNeeded(teamName, config);
+        return assigned;
+    }
+
+    /// <summary>Preview step for "Load Conference Pack" -- lists every event the conference folder
+    /// has a file for, including what's already assigned (if anything), WITHOUT changing the
+    /// profile. JS uses this to prompt per already-assigned event before calling
+    /// ApplyConferencePackSelectionsFromWeb with the confirmed set -- most users already have some
+    /// songs assigned, so silently skipping those (the old backfill-only default) meant the button
+    /// often did nothing visible for them.</summary>
+    public string PreviewConferencePackForTeamFromWeb(string teamName)
+    {
+        var config = ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(teamName) : ConfigStore.BuildDefault();
+        var items = ConfigStore.PreviewConferencePackForTeam(teamName, config);
+        // Record properties are PascalCase in C# (EventKey, FileName, ...) but every other
+        // JS-facing JSON payload in this bridge uses lowerCamelCase keys (anonymous types with
+        // lowercase local names) -- app.js reads item.eventKey/item.fileName/item.currentFile, so
+        // this needs the same casing rather than the PascalCase System.Text.Json emits by default
+        // for a record's real property names.
+        var opts = new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
+        return System.Text.Json.JsonSerializer.Serialize(items, opts);
+    }
+
+    /// <summary>Applies exactly the EventKeys the user confirmed from the conference-pack preview
+    /// (JSON string array) -- see ConfigStore.ApplyConferencePackSelections.</summary>
+    public int ApplyConferencePackSelectionsFromWeb(string teamName, string eventKeysJson)
+    {
+        var config = ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(teamName) : ConfigStore.BuildDefault();
+        var eventKeys = System.Text.Json.JsonSerializer.Deserialize<List<string>>(eventKeysJson) ?? new List<string>();
+        int assigned = ConfigStore.ApplyConferencePackSelections(teamName, config, eventKeys);
+        if (assigned > 0) ConfigStore.SaveProfile(teamName, config);
+        RefreshHomeAwayConfigIfNeeded(teamName);
+        RefreshActiveConfigIfNeeded(teamName, config);
+        return assigned;
+    }
+
+    /// <summary>BUG FIX (found via pre-release audit): _config -- the in-memory snapshot behind
+    /// both the visible category/situation counts AND every autosave path (SaveCurrentTeamProfile,
+    /// AssignTrack, etc) -- was only ever refreshed by SelectTeamFromWeb/DuplicateProfileFromWeb/
+    /// ImportProfileFromWeb, never by the Auto-Assign fill/overwrite calls above. Auto-Assigning
+    /// the CURRENTLY ACTIVE team wrote the new assignments to disk correctly, but left the stale
+    /// pre-Auto-Assign _config sitting in memory -- the very next autosave (e.g. tweaking one
+    /// unrelated song) would silently overwrite disk with that stale copy, undoing the Auto-Assign
+    /// with no error or warning. Harmless for the old fill-only behavior (re-running it was a
+    /// no-op either way), but a real data-loss risk once Auto-Assign became a destructive
+    /// overwrite. Mirrors the same "if this is the active team, sync _config + PushCategories()"
+    /// pattern DuplicateProfileFromWeb/ImportProfileFromWeb already use elsewhere in this file.</summary>
+    void RefreshActiveConfigIfNeeded(string teamName, List<TriggerEntry> newConfig)
+    {
+        if (!string.Equals(teamName, Theme.ActiveTeam.Name, StringComparison.OrdinalIgnoreCase)) return;
+        _config = newConfig;
+        PushCategories();
     }
 
     /// <summary>Matchup picker (JS) calls this with both teams for the game about to be
@@ -337,6 +449,8 @@ public sealed class WebMainForm : Form
         _watcher.UserIsHome = true; // The user's selected team in the matchup picker IS the home team
         _watcher.HomeTeamName = homeName;
         _watcher.AwayTeamName = awayName;
+        _watcher.HomeTeamMascot = _homeTeam?.Mascot;
+        _watcher.AwayTeamMascot = _awayTeam?.Mascot;
         _useEngineForEvents = true; // Enable engine-driven event routing now that matchup is confirmed
         _possession = null;
 
@@ -605,6 +719,23 @@ public sealed class WebMainForm : Form
         new SettingsForm(this, opts).ShowDialog(this);
     }
 
+    /// <summary>Matchup-screen scorebug switcher (pill + arrows, owner-requested) -- same
+    /// underlying ActivePreset/SaveScorebugPresetName plumbing OpenSettingsFromWeb's native dialog
+    /// already uses, just exposed directly to the web UI so it's reachable without opening
+    /// Settings. Returns the list of preset names in ScorebugPreset.AllPresets order plus which
+    /// one is active, so app.js can cycle with </> without needing its own copy of the list.</summary>
+    public string GetScorebugPresetsFromWeb() => System.Text.Json.JsonSerializer.Serialize(new
+    {
+        names = ScorebugPreset.AllPresets.Select(p => p.Name).ToArray(),
+        active = _watcher.ActivePreset.Name,
+    });
+
+    public void SetScorebugPresetFromWeb(string name)
+    {
+        _watcher.ActivePreset = ScorebugPreset.GetByName(name);
+        ConfigStore.SaveScorebugPresetName(name);
+    }
+
     void ClearAll()
     {
         foreach (var entry in _config) entry.AudioFile = "";
@@ -816,6 +947,28 @@ public sealed class WebMainForm : Form
         return System.Text.Json.JsonSerializer.Serialize(items);
     }
 
+    /// <summary>Conference-wide counterpart to GetDefaultPackSongsForTeamFromWeb -- lists files
+    /// sitting directly in the team's conference folder (shared cues, not this specific team's own
+    /// subfolder) so Auto-Assign's "Load Conference Pack" option and the guided wizard's candidate
+    /// list can both show/search them the same way team-specific pack songs already are.</summary>
+    public string GetConferencePackSongsForTeamFromWeb(string teamName)
+    {
+        string? confFolder = ConfigStore.FindDefaultPackConferenceFolder(teamName);
+        if (confFolder == null) return "[]";
+
+        var items = Directory.GetFiles(confFolder, "*.*", SearchOption.TopDirectoryOnly)
+            .Where(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+            .OrderBy(Path.GetFileNameWithoutExtension, StringComparer.OrdinalIgnoreCase)
+            .Select(p =>
+            {
+                string name = Path.GetFileNameWithoutExtension(p);
+                string category = System.Text.RegularExpressions.Regex.Replace(name, @"[\s_]+\d+$", "").Trim();
+                if (category.Length == 0) category = "Other";
+                return new { name, path = p, category };
+            });
+        return System.Text.Json.JsonSerializer.Serialize(items);
+    }
+
     /// <summary>Preview an arbitrary local library file from the clipping island's song list --
     /// distinct from PreviewEventFromWeb (which previews whatever's already assigned to a
     /// trigger). Routes through the same native AudioPlayer as everything else local, not a JS
@@ -987,6 +1140,132 @@ public sealed class WebMainForm : Form
         }
     }
 
+    /// <summary>Copies the trigger's currently-assigned song into the single-slot TrimSourceFolder
+    /// and hands back a `trimsrc://` URL + duration so app.js can embed the waveform trimmer
+    /// directly in the Events/Assign panel instead of popping the native TrimmerForm (per the
+    /// owner's "clipper embedded in the song list, not a popup" request). Read-only probe --
+    /// nothing is trimmed or saved here, see SaveTrimFromWeb/SaveTrimAsLeadInWhistleFromWeb below.</summary>
+    public string PrepareTrimFromWeb(string trigger, bool isPa)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return JsonSerializer.Serialize(new { ok = false, error = "No such trigger." });
+        string currentPath = isPa ? entry.PaAudioFile : entry.AudioFile;
+        if (string.IsNullOrWhiteSpace(currentPath) || !File.Exists(currentPath))
+            return JsonSerializer.Serialize(new { ok = false, error = "Choose a song for this situation first, then you can trim it." });
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.TrimSourceFolder);
+            // Single working slot -- only one trim panel is ever open at a time, so this doesn't
+            // need to be keyed by trigger; just clear whatever a previous trim session left here.
+            foreach (var f in Directory.GetFiles(ConfigStore.TrimSourceFolder))
+                try { File.Delete(f); } catch { /* best-effort */ }
+
+            string fileName = "current" + Path.GetExtension(currentPath);
+            string destPath = Path.Combine(ConfigStore.TrimSourceFolder, fileName);
+            File.Copy(currentPath, destPath, overwrite: true);
+
+            double durationSec;
+            using (var probe = new NAudio.Wave.AudioFileReader(destPath)) durationSec = probe.TotalTime.TotalSeconds;
+
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                url = $"https://trimsrc/{Uri.EscapeDataString(fileName)}",
+                fileName = Path.GetFileName(currentPath),
+                durationSec,
+            });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("PrepareTrimFromWeb failed", ex);
+            return JsonSerializer.Serialize(new { ok = false, error = "Couldn't prepare that file for trimming." });
+        }
+    }
+
+    /// <summary>Trims TrimSourceFolder's current file to [startSec, endSec), runs it through the
+    /// same AudioNormalizer.NormalizeAndLimit pass TrimmerForm uses, saves it into
+    /// SongsTrimmedFolder, and assigns it back to the trigger -- the embedded-panel equivalent of
+    /// TrimmerForm.SaveTrimmed, minus the team/song-name prompts (this is re-trimming an
+    /// already-assigned, already-named track, not creating a new library entry from scratch).</summary>
+    public string SaveTrimFromWeb(string trigger, bool isPa, double startSec, double endSec)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return JsonSerializer.Serialize(new { ok = false, error = "No such trigger." });
+        string? srcPath = Directory.Exists(ConfigStore.TrimSourceFolder)
+            ? Directory.GetFiles(ConfigStore.TrimSourceFolder).FirstOrDefault() : null;
+        if (srcPath == null) return JsonSerializer.Serialize(new { ok = false, error = "Trim source is gone -- reopen the trimmer." });
+        if (endSec <= startSec) return JsonSerializer.Serialize(new { ok = false, error = "End must be after start." });
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.SongsTrimmedFolder);
+            string currentPath = isPa ? entry.PaAudioFile : entry.AudioFile;
+            string baseName = !string.IsNullOrWhiteSpace(currentPath) ? Path.GetFileNameWithoutExtension(currentPath) : trigger;
+            string safeBase = System.Text.RegularExpressions.Regex.Replace(baseName, @"[^\w\s-]", "").Replace(" ", "_");
+            string outPath = Path.Combine(ConfigStore.SongsTrimmedFolder, $"{safeBase}.wav");
+            int n = 1;
+            while (File.Exists(outPath))
+                outPath = Path.Combine(ConfigStore.SongsTrimmedFolder, $"{safeBase}_{n++}.wav");
+
+            using (var reader = new NAudio.Wave.AudioFileReader(srcPath))
+            {
+                var offset = new NAudio.Wave.SampleProviders.OffsetSampleProvider(reader)
+                {
+                    SkipOver = TimeSpan.FromSeconds(startSec),
+                    Take = TimeSpan.FromSeconds(endSec - startSec),
+                };
+                var normalized = AudioNormalizer.NormalizeAndLimit(offset);
+                NAudio.Wave.WaveFileWriter.CreateWaveFile16(outPath, normalized);
+            }
+
+            if (isPa) entry.PaAudioFile = outPath; else entry.AudioFile = outPath;
+            ConfigStore.Save(_config);
+            SaveCurrentTeamProfile();
+            PushCategories();
+
+            return JsonSerializer.Serialize(new { ok = true, fileName = Path.GetFileName(outPath) });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SaveTrimFromWeb failed", ex);
+            return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the trimmed clip." });
+        }
+    }
+
+    /// <summary>Embedded-panel equivalent of TrimmerForm.SaveTrimmedAsLeadInWhistle -- same
+    /// "no per-clip file, always overwrites the one active whistle" behavior.</summary>
+    public string SaveTrimAsLeadInWhistleFromWeb(double startSec, double endSec)
+    {
+        string? srcPath = Directory.Exists(ConfigStore.TrimSourceFolder)
+            ? Directory.GetFiles(ConfigStore.TrimSourceFolder).FirstOrDefault() : null;
+        if (srcPath == null) return JsonSerializer.Serialize(new { ok = false, error = "Trim source is gone -- reopen the trimmer." });
+        if (endSec <= startSec) return JsonSerializer.Serialize(new { ok = false, error = "End must be after start." });
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.SongsFolder);
+            using (var reader = new NAudio.Wave.AudioFileReader(srcPath))
+            {
+                var offset = new NAudio.Wave.SampleProviders.OffsetSampleProvider(reader)
+                {
+                    SkipOver = TimeSpan.FromSeconds(startSec),
+                    Take = TimeSpan.FromSeconds(endSec - startSec),
+                };
+                var normalized = AudioNormalizer.NormalizeAndLimit(offset);
+                NAudio.Wave.WaveFileWriter.CreateWaveFile16(ConfigStore.LeadInWhistlePath, normalized);
+            }
+            AudioPlayer.LeadInClipPath = ConfigStore.LeadInWhistlePath;
+            AudioPlayer.LeadInEnabled = true;
+            return JsonSerializer.Serialize(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SaveTrimAsLeadInWhistleFromWeb failed", ex);
+            return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the whistle clip." });
+        }
+    }
+
     public void SetVolumeFromWeb(int percent) => AudioPlayer.MasterVolume = percent / 100f;
 
     /// <summary>Matchup-mode independent side volumes -- lets the home and away team's cues be
@@ -1108,7 +1387,10 @@ public sealed class WebMainForm : Form
 
     public void CopyCurrentToAllTeamsFromWeb()
     {
-        var snapshot = _config.Select(e => new TriggerEntry { Trigger = e.Trigger, Event = e.Event, AudioFile = e.AudioFile }).ToList();
+        // BUG FIX (audit cross-check): this snapshot dropped PaAudioFile and Volume, silently
+        // losing every PA-announcer assignment and per-event volume tweak on every "Copy to All
+        // Teams" -- only the main AudioFile survived the copy.
+        var snapshot = _config.Select(e => new TriggerEntry { Trigger = e.Trigger, Event = e.Event, AudioFile = e.AudioFile, PaAudioFile = e.PaAudioFile, Volume = e.Volume }).ToList();
         _ = Task.Run(() =>
         {
             foreach (var team in TeamColors.All)
@@ -1539,6 +1821,16 @@ public sealed class WebMainForm : Form
             var entry = _config.FirstOrDefault(e => e.Trigger.Equals($"key:{keyCombo}", StringComparison.OrdinalIgnoreCase));
             if (entry != null) FireEvent(entry);
         });
+    }
+
+    /// <summary>Right Ctrl "band cutoff" -- global, unconditional AudioPlayer.StopAll(), no config
+    /// lookup (unlike OnKeyCombo above). Works even while some other app has focus, same as every
+    /// other KeyboardHook combo. Also pokes the web page so the UI can show a quick confirmation
+    /// that the cutoff actually landed.</summary>
+    void OnCutoff()
+    {
+        AudioPlayer.StopAll();
+        RunOnUi(() => _ = _webView.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('bandroom:cutoff'))"));
     }
 
     static readonly string OcrLogPath = Path.Combine(AppContext.BaseDirectory, "ocr_debug.log");

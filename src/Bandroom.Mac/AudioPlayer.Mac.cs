@@ -1,16 +1,25 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Bandroom.Mac;
 
 /// <summary>
-/// Cross-platform AudioPlayer for macOS using AVFoundation via interop.
-/// Same API surface as Windows AudioPlayer.cs (NAudio) so the engine
-/// and WebBridge don't need to know which platform they're on.
+/// Cross-platform AudioPlayer for macOS using afplay (bundled with macOS since 10.5).
+/// Identical API surface to Windows AudioPlayer.cs (NAudio). Uses afplay -v for volume
+/// control, Process tracking for stop/interrupt, and hard-stop at fade deadline.
+///
+/// Limitations vs Windows (documented, not hidden):
+///   - Smooth fade-out: afplay has no real-time volume ramp. Hard stop at FadeStartSeconds
+///     + FadeOutDuration. Acceptable for game cues (typically short, not crossfaded).
+///   - Lead-in whistle: sequential play (not gapless). Small gap between whistle and main
+///     clip since they're separate afplay processes.
+///   - Multi-clip overlap: afplay processes run concurrently via separate Process instances.
+///     Active tracking via ConcurrentDictionary for StopAll/interrupt management.
 /// </summary>
 internal static class AudioPlayer
 {
@@ -18,106 +27,213 @@ internal static class AudioPlayer
     public static float MasterVolume = 1.0f;
     public static float HomeVolume = 1.0f;
     public static float AwayVolume = 1.0f;
+    public static float PaVolume = 1.0f;
 
-    // --- Reverb preset (stadium/dome/nightgame/off — stubbed for now) ---
     public enum ReverbPreset { Off, Stadium, Dome, NightGame }
     public static ReverbPreset CurrentReverb = ReverbPreset.Off;
 
-    // --- Timing ---
+    public static bool LeadInEnabled = false;
+    public static string? LeadInClipPath = null;
+
     public static double PreRollSeconds = 1.0;
     public static double FadeStartSeconds = 10.0;
     public static double FadeOutDuration = 4.5;
 
-    // --- Cooldown ---
     public static readonly TimeSpan FireCooldown = TimeSpan.FromSeconds(20);
     private static readonly Dictionary<string, DateTime> _lastFireByPath = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object _lock = new();
 
+    /// <summary>Tracks all active afplay processes so StopAll can kill them.</summary>
+    private static readonly ConcurrentDictionary<int, ActivePlayback> _activePlayers = new();
+
+    private sealed class ActivePlayback
+    {
+        public int ProcessId;
+        public string FilePath;
+        public float BaseVolume;
+        public CancellationTokenSource? FadeCts;
+    }
+
+    // =========================================================================
+    // Public API (same surface as Windows AudioPlayer.cs)
+    // =========================================================================
+
+    public static void ClearCooldown(string path)
+    {
+        lock (_lock) _lastFireByPath.Remove(path);
+    }
+
+    public static void Warmup()
+    {
+        // No warmup needed — macOS CoreAudio is always ready and afplay
+        // has no equivalent of NAudio's WaveOutEvent cold-start cost.
+    }
+
+    /// <summary>Kills every active afplay process tracked by this session.</summary>
+    public static void StopAll()
+    {
+        foreach (var kvp in _activePlayers)
+        {
+            var pb = kvp.Value;
+            try
+            {
+                pb.FadeCts?.Cancel();
+                var proc = Process.GetProcessById(pb.ProcessId);
+                if (!proc.HasExited)
+                {
+                    proc.Kill();
+                    proc.WaitForExit(1000);
+                }
+            }
+            catch
+            {
+                // Process already exited or PID reused — safe to ignore
+            }
+        }
+        _activePlayers.Clear();
+    }
+
     /// <summary>
-    /// Plays an audio file. On macOS, uses the `afplay` command-line tool
-    /// (bundled with every Mac) via Process.Start. This is a straightforward
-    /// cross-platform approach that works without any native interop complexity.
-    /// Replace with AVFoundation interop for production use (volume control,
-    /// fade-out, overlapping playback).
+    /// Plays an audio file using macOS's built-in afplay command.
     /// </summary>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false)
+    /// <param name="volumeOverride">If set, used instead of MasterVolume.</param>
+    /// <param name="interruptPrevious">True stops all current playback before starting new clip.</param>
+    /// <param name="isPreview">True skips PreRollSeconds delay and FireCooldown gate.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
-        lock (_lock)
+        if (!isPreview)
         {
-            if (_lastFireByPath.TryGetValue(path, out var last) && DateTime.UtcNow - last < FireCooldown)
-                return;
-            _lastFireByPath[path] = DateTime.UtcNow;
+            lock (_lock)
+            {
+                if (_lastFireByPath.TryGetValue(path, out var last) &&
+                    DateTime.UtcNow - last < FireCooldown)
+                    return;
+                _lastFireByPath[path] = DateTime.UtcNow;
+            }
         }
 
-        float volume = volumeOverride ?? MasterVolume;
+        if (interruptPrevious) StopAll();
+
+        float volume = Math.Clamp(volumeOverride ?? MasterVolume, 0f, 1f);
 
         Task.Run(() =>
         {
+            CancellationTokenSource? fadeCts = null;
+
             try
             {
-                Thread.Sleep((int)(PreRollSeconds * 1000));
+                if (!isPreview)
+                    Thread.Sleep((int)(PreRollSeconds * 1000));
 
-                // afplay is bundled with macOS since 10.5 — plays mp3, wav, m4a, aiff, flac
-                var psi = new System.Diagnostics.ProcessStartInfo
+                // --- Lead-in whistle (sequential, not gapless on macOS) ---
+                if (LeadInEnabled && !string.IsNullOrWhiteSpace(LeadInClipPath) &&
+                    File.Exists(LeadInClipPath) && interruptPrevious)
+                {
+                    PlayProcess(LeadInClipPath, volume, wait: true, maxWaitMs: 5000);
+                }
+
+                // --- Main clip ---
+                fadeCts = new CancellationTokenSource();
+                var token = fadeCts.Token;
+
+                // Start the afplay process
+                var psi = new ProcessStartInfo
                 {
                     FileName = "/usr/bin/afplay",
-                    Arguments = $"\"{path}\"",
+                    Arguments = $"-v {volume.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)} \"{path}\"",
                     UseShellExecute = false,
                     CreateNoWindow = true,
+                    RedirectStandardOutput = false,
+                    RedirectStandardError = false,
                 };
 
-                using var process = System.Diagnostics.Process.Start(psi);
+                using var process = Process.Start(psi);
                 if (process == null)
                 {
                     Console.Error.WriteLine($"[AudioPlayer.Mac] Failed to start afplay for: {path}");
                     return;
                 }
 
-                // Wait with fade-out: afplay doesn't support volume changes,
-                // so we just kill the process at the fade deadline
+                var playback = new ActivePlayback
+                {
+                    ProcessId = process.Id,
+                    FilePath = path,
+                    BaseVolume = volume,
+                    FadeCts = fadeCts,
+                };
+                _activePlayers[process.Id] = playback;
+
+                // Monitor with fade-out deadline
                 double elapsed = 0;
-                while (!process.HasExited)
+                while (!process.HasExited && !token.IsCancellationRequested)
                 {
                     Thread.Sleep(200);
                     elapsed += 0.2;
 
                     if (elapsed >= (FadeStartSeconds + FadeOutDuration))
                     {
-                        try { process.Kill(); } catch { }
+                        // Hard stop — afplay doesn't support real-time fade
+                        try
+                        {
+                            if (!process.HasExited) process.Kill();
+                        }
+                        catch { }
                         break;
                     }
+                }
+
+                // Cleanup: wait for process if it exited naturally
+                if (!process.HasExited)
+                {
+                    try { process.Kill(); } catch { }
                 }
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"[AudioPlayer.Mac] Playback error: {ex.Message}");
             }
+            finally
+            {
+                fadeCts?.Cancel();
+                fadeCts?.Dispose();
+            }
         });
     }
 
     /// <summary>
-    /// Stops all afplay processes spawned by this session.
+    /// Plays a single audio file synchronously (blocks until done or maxWaitMs).
+    /// Used for lead-in whistle so the main clip starts after the whistle finishes.
     /// </summary>
-    public static void StopAll()
+    private static void PlayProcess(string path, float volume, bool wait, int maxWaitMs = 30000)
     {
         try
         {
-            // Kill all afplay processes belonging to this user
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            var psi = new ProcessStartInfo
             {
-                FileName = "/usr/bin/killall",
-                Arguments = "afplay",
+                FileName = "/usr/bin/afplay",
+                Arguments = $"-v {volume.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)} \"{path}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
-            })?.WaitForExit(2000);
-        }
-        catch { }
-    }
+            };
 
-    /// <summary>
-    /// No warmup needed on macOS — CoreAudio is always ready.
-    /// </summary>
-    public static void Warmup() { }
+            using var process = Process.Start(psi);
+            if (process == null) return;
+
+            if (wait)
+            {
+                // Wait for the clip to finish, with a hard cap
+                bool exited = process.WaitForExit(maxWaitMs);
+                if (!exited)
+                {
+                    try { process.Kill(); } catch { }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[AudioPlayer.Mac] PlayProcess error: {ex.Message}");
+        }
+    }
 }

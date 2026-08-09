@@ -132,4 +132,32 @@ internal static class TeamBackgroundDownloadService
             return null;
         }
     }
+
+    /// <summary>Sets a team background from a local file (used by My Downloads "Set as Background").
+    /// Copies the file to UserData/TeamBackgrounds/{team}.{ext}.</summary>
+    public static string? SetFromLocalFile(string team, string localPath)
+    {
+        if (string.IsNullOrWhiteSpace(team) || string.IsNullOrWhiteSpace(localPath) || !File.Exists(localPath))
+            return null;
+
+        try
+        {
+            string folder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Bandroom", "UserData", "TeamBackgrounds");
+            Directory.CreateDirectory(folder);
+
+            string ext = Path.GetExtension(localPath).ToLowerInvariant();
+            if (string.IsNullOrEmpty(ext)) ext = ".jpg";
+
+            string destPath = Path.Combine(folder, team + ext);
+            File.Copy(localPath, destPath, overwrite: true);
+            return destPath;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[TeamBackgroundDownloadService.Mac] SetFromLocalFile failed: {ex.Message}");
+            return null;
+        }
+    }
 }

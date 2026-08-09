@@ -645,10 +645,12 @@ public sealed class WebBridge
         return isFirstSync ? Array.Empty<string>() : changed.ToArray();
     }
 
-    /// <summary>Shared by SaveCustomTeamLogo and ApplyPulledLogos -- clears any stale file for
-    /// <paramref name="team"/> under another recognized extension, then writes the PNG. Returns the
-    /// path written, or null if the team name doesn't survive sanitization.</summary>
-    static string? WriteTeamLogoFile(string team, byte[] pngBytes)
+    /// <summary>Shared by SaveCustomTeamLogo, ApplyPulledLogos, and PublicTeamLogoSyncService --
+    /// clears any stale file for <paramref name="team"/> under another recognized extension, then
+    /// writes the PNG. Returns the path written, or null if the team name doesn't survive
+    /// sanitization. Internal (not private) so PublicTeamLogoSyncService's background sync can
+    /// reuse the exact same write/overwrite convention rather than duplicating it.</summary>
+    internal static string? WriteTeamLogoFile(string team, byte[] pngBytes)
     {
         Directory.CreateDirectory(ConfigStore.TeamLogosFolder);
         string safeTeam = System.Text.RegularExpressions.Regex.Replace(team, @"[^\w\s&-]", "").Trim();
@@ -925,7 +927,16 @@ public sealed class WebBridge
             ConfigStore.SaveTeamLogoSyncManifest(manifest with { AppliedAtUtc = appliedAt });
 
             if (ConfigStore.LoadAuthSession() != null)
+            {
                 pushFailed = !await ProfileSyncService.PushAsync(updated);
+                // "Automatic on save" per explicit owner request: every custom logo saved while
+                // signed in also becomes the new PUBLIC default for that team (everyone else who
+                // hasn't set their OWN custom logo for it will pick this up on their next sync --
+                // see PublicTeamLogoSyncService.SyncAsync's guardrail). Fire-and-forget: this is
+                // strictly best-effort on top of the private cloud push above, never allowed to
+                // affect ok/pushFailed (which describe the local save + private sync only).
+                _ = PublicTeamLogoSyncService.PushAsync(team, bytes);
+            }
 
             return JsonSerializer.Serialize(new { ok, pushFailed });
         }
@@ -938,6 +949,10 @@ public sealed class WebBridge
 
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
     public void OpenSettings() => _host.OpenSettingsFromWeb();
+    /// <summary>Matchup-screen scorebug switcher pill -- see WebMainForm.GetScorebugPresetsFromWeb/
+    /// SetScorebugPresetFromWeb.</summary>
+    public string GetScorebugPresets() => _host.GetScorebugPresetsFromWeb();
+    public void SetScorebugPreset(string name) => _host.SetScorebugPresetFromWeb(name);
     public void ShowHelp() => _host.OpenHelpFromWeb();
     public void ShowUpdate() => _host.ShowUpdateDialogFromWeb();
 
@@ -1036,6 +1051,9 @@ public sealed class WebBridge
     public bool AddLibraryFileToDownloads(string path) => _host.AddLibraryFileToDownloadsFromWeb(path);
     public string? BrowseForAudioFile() => _host.BrowseForAudioFileFromWeb();
     public void OpenTrimmer(string trigger, bool isPa) => _host.OpenTrimmerFromWeb(trigger, isPa);
+    public string PrepareTrim(string trigger, bool isPa) => _host.PrepareTrimFromWeb(trigger, isPa);
+    public string SaveTrim(string trigger, bool isPa, double startSec, double endSec) => _host.SaveTrimFromWeb(trigger, isPa, startSec, endSec);
+    public string SaveTrimAsLeadInWhistle(double startSec, double endSec) => _host.SaveTrimAsLeadInWhistleFromWeb(startSec, endSec);
     public int GetEventVolume(string trigger) => _host.GetEventVolumeFromWeb(trigger);
     public void SetEventVolume(string trigger, int percent) => _host.SetEventVolumeFromWeb(trigger, percent);
 
@@ -1104,6 +1122,27 @@ public sealed class WebBridge
     /// BuildDefault if none) so this is safe to call even if the team already has SOME
     /// assignments -- ImportDefaultPackForTeam only ever fills empty slots, never overwrites.</summary>
     public int ApplyDefaultProfileForTeam(string teamName) => _host.ApplyDefaultProfileForTeamFromWeb(teamName);
+    /// <summary>Overwrite counterpart for the Events-page Auto-Assign "Overwrite" confirm flow --
+    /// see WebMainForm.ApplyDefaultProfileForTeamOverwriteFromWeb.</summary>
+    public int ApplyDefaultProfileForTeamOverwrite(string teamName) => _host.ApplyDefaultProfileForTeamOverwriteFromWeb(teamName);
+    /// <summary>Auto-Assign's "Load Conference Pack" option -- see
+    /// WebMainForm.ApplyConferencePackForTeamFromWeb for the overwrite-vs-backfill contract.</summary>
+    public int ApplyConferencePackForTeam(string teamName, bool overwrite) => _host.ApplyConferencePackForTeamFromWeb(teamName, overwrite);
+    /// <summary>Lists conference-wide (not team-specific) songs for the Auto-Assign conference
+    /// option's preview/guided-wizard candidate list -- see WebMainForm.GetConferencePackSongsForTeamFromWeb.</summary>
+    public string GetConferencePackSongsForTeam(string teamName) => _host.GetConferencePackSongsForTeamFromWeb(teamName);
+    /// <summary>Per-event preview + selective apply for "Load Conference Pack" -- see
+    /// WebMainForm.PreviewConferencePackForTeamFromWeb / ApplyConferencePackSelectionsFromWeb.</summary>
+    public string PreviewConferencePackForTeam(string teamName) => _host.PreviewConferencePackForTeamFromWeb(teamName);
+    public int ApplyConferencePackSelections(string teamName, string eventKeysJson) => _host.ApplyConferencePackSelectionsFromWeb(teamName, eventKeysJson);
+    /// <summary>Big Game Rules panel (Adjust sidebar) -- lets the user edit the trigger rule
+    /// GameWatcher uses to boost cue volume during a close late game (see ConfigStore.
+    /// BigGameSettings / GameWatcher.cs's isBigGame computation). Returns/accepts JSON since
+    /// WebView2 host-object marshaling only reliably hands JS primitives/JSON strings.</summary>
+    public string GetBigGameSettings() => JsonSerializer.Serialize(ConfigStore.LoadBigGameSettings());
+    public void SaveBigGameSettings(bool enabled, int quarterThreshold, int scoreMargin) =>
+        ConfigStore.SaveBigGameSettings(new ConfigStore.BigGameSettings(enabled, quarterThreshold, scoreMargin));
+
     public void PlayClickSound() => _host.PlayUiClickSoundFromWeb();
     public bool IsMatchupLocked() => _host.IsMatchupLockedFromWeb();
     public void CopyCurrentToAllTeams() => _host.CopyCurrentToAllTeamsFromWeb();
@@ -1119,7 +1158,7 @@ public sealed class WebBridge
     /// only -- no in-game OCR/matching) and returns JSON {success, error, team} following the
     /// same shape as the other add/edit bridge calls above. Rejects blank names and duplicates
     /// (case-insensitive) rather than silently overwriting or creating a shadow entry.</summary>
-    public string AddCustomTeam(string name, string primaryHex, string secondaryHex)
+    public string AddCustomTeam(string name, string primaryHex, string secondaryHex, string mascot = "")
     {
         try
         {
@@ -1141,12 +1180,12 @@ public sealed class WebBridge
                 return JsonSerializer.Serialize(new { success = false, error = "Pick valid primary and secondary colors." });
             }
 
-            var team = TeamColors.AddCustomTeam(trimmed, primary, secondary);
+            var team = TeamColors.AddCustomTeam(trimmed, primary, secondary, mascot ?? "");
             return JsonSerializer.Serialize(new
             {
                 success = true,
                 error = (string?)null,
-                team = new { name = team.Name, primary = ColorHex(primary), secondary = ColorHex(secondary) },
+                team = new { name = team.Name, primary = ColorHex(primary), secondary = ColorHex(secondary), mascot = team.Mascot },
             });
         }
         catch (Exception ex)

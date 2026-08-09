@@ -9,7 +9,11 @@ public sealed class GameState
     /// Used by evaluators to determine offense vs defense from the user's perspective.</summary>
     public bool UserIsHome { get; init; }
 
-    public PlayDelta Delta => PlayDelta.Calculate(Previous, Current);
+    // Cached, not recomputed per access -- Current/Previous are init-only so the result can never
+    // change after construction, but every evaluator that reads state.Delta (7+ on a scoring play)
+    // was triggering a fresh PlayDelta.Calculate + heap allocation for identical data each time.
+    PlayDelta? _delta;
+    public PlayDelta Delta => _delta ??= PlayDelta.Calculate(Previous, Current);
 
     /// <summary>True when the USER's team currently has possession of the ball.</summary>
     public bool UserHasPossession =>

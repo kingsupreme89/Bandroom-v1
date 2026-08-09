@@ -11,6 +11,16 @@ public sealed class FirstDownHelper : IRuleEvaluator
         if (!state.Delta.WasFirstDown || state.Previous.Down == 0)
             return null;
 
+        // A turnover also resets Down to 1 for the new offense -- that's the start of a new
+        // drive by possession change, not a conversion the offense "earned" mid-drive. Without
+        // this guard, the tick after TurnoverHelper fires "Defense: Turnover Forced", the down
+        // updating to 1st fires "Offense: Earned First Down" and (via interruptPrevious) cuts off
+        // the turnover cue that was already playing -- reported live as "plays the 1st down sound
+        // instead of the turnover forced sound." Same NewPossession guard DefenseHelper already
+        // uses for its own analogous false-positive (STATE_MACHINE_ANALYSIS.md Discrepancy #4).
+        if (state.Delta.NewPossession)
+            return null;
+
         int yardsGained = state.Delta.YardsGained;
 
         // Big Gain: 15+ yard pickup

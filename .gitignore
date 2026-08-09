@@ -23,3 +23,13 @@ crash.log
 # Python venv (scripts/ tooling)
 .venv/
 __pycache__/
+
+# Squirrel release output -- built fresh by release.ps1 on every release, not source; the
+# .nupkg/.exe installer binaries here are tens of MB each and blew up a push (timed out) when
+# accidentally committed once already.
+squirrel_releases/
+
+# Cloudflare Workers local dev state (wrangler dev/miniflare cache, sqlite, R2 emulation) --
+# machine-local build/runtime artifacts, not source.
+.wrangler/
+**/.wrangler/

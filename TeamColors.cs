@@ -3,7 +3,7 @@ using System.Linq;
 
 namespace SupremeStadiumSoundSelector;
 
-public readonly record struct TeamColor(string Name, Color? Primary, Color? Secondary)
+public readonly record struct TeamColor(string Name, Color? Primary, Color? Secondary, string Mascot = "")
 {
     static readonly Color DefaultAccent = ColorTranslator.FromHtml("#22d3ee");
 
@@ -239,7 +239,7 @@ internal static class TeamColors
         foreach (var custom in ConfigStore.LoadCustomTeams())
         {
             if (list.Any(t => t.Name.Equals(custom.Name, StringComparison.OrdinalIgnoreCase))) continue;
-            try { list.Add(new TeamColor(custom.Name, Hex(custom.PrimaryHex), Hex(custom.SecondaryHex))); }
+            try { list.Add(new TeamColor(custom.Name, Hex(custom.PrimaryHex), Hex(custom.SecondaryHex), custom.Mascot)); }
             catch { /* corrupt hex in manifest -- skip this one custom team, don't break the roster */ }
         }
         return list;
@@ -254,19 +254,22 @@ internal static class TeamColors
         return _all[0];
     }
 
-    /// <summary>Adds a new user-created custom school (name + primary/secondary color, no
-    /// in-game OCR/matching -- explicitly out of scope for v1), persists it, and makes it
-    /// available immediately via TeamColors.All. Returns the existing team unchanged if the name
+    /// <summary>Adds a new user-created custom school (name + primary/secondary color + optional
+    /// mascot), persists it, and makes it available immediately via TeamColors.All. Mascot is an
+    /// OCR-matching alias only (e.g. the game's scorebug/penalty banner often shows "Bengals"
+    /// where the school picker shows "Idaho State") -- it plays no part in theming/colors, see
+    /// GameWatcher.HomeTeamMascot/AwayTeamMascot. Returns the existing team unchanged if the name
     /// (case-insensitive) is already taken, rather than creating a duplicate/shadow entry.</summary>
-    public static TeamColor AddCustomTeam(string name, Color primary, Color secondary)
+    public static TeamColor AddCustomTeam(string name, Color primary, Color secondary, string mascot = "")
     {
         name = name.Trim();
+        mascot = mascot.Trim();
         var existing = _all.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (existing.Name != null) return existing;
 
-        var team = new TeamColor(name, primary, secondary);
+        var team = new TeamColor(name, primary, secondary, mascot);
         _all.Add(team);
-        ConfigStore.SaveCustomTeam(name, ColorTranslator.ToHtml(primary), ColorTranslator.ToHtml(secondary));
+        ConfigStore.SaveCustomTeam(name, ColorTranslator.ToHtml(primary), ColorTranslator.ToHtml(secondary), mascot);
         return team;
     }
 }

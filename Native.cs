@@ -92,6 +92,7 @@ internal static class Native
     public const int VK_CONTROL = 0x11;
     public const int VK_SHIFT = 0x10;
     public const int VK_MENU = 0x12;
+    public const int VK_RCONTROL = 0xA3; // WH_KEYBOARD_LL reports the left/right-specific code, unlike GetAsyncKeyState(VK_CONTROL)
 
     // Non-client hit-test values -- returning these from WM_NCHITTEST makes DefWndProc drive
     // the standard OS resize/cursor behavior even on a FormBorderStyle.None window (which has

@@ -84,6 +84,8 @@ public sealed class MacWebBridge
     public void ResetTeamProfile() => _host.ResetTeamProfileFromWeb();
     public void OpenHelp() { }
     public void TriggerEffectsTest() => _host.TriggerEffectsTestFromWeb();
+    public void OpenExternalUrl(string url) =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
 
     // ---- Event assignment ----
 
@@ -99,18 +101,42 @@ public sealed class MacWebBridge
             trigger = e.Trigger,
             eventName = e.Event,
             fileName = string.IsNullOrWhiteSpace(e.AudioFile) ? null : Path.GetFileNameWithoutExtension(e.AudioFile),
+            paFileName = string.IsNullOrWhiteSpace(e.PaAudioFile) ? null : Path.GetFileNameWithoutExtension(e.PaAudioFile),
             confirmed = ConfirmedTriggers.Contains(e.Trigger),
         }));
 
     public void AssignEvent(string trigger) => _host.OpenAssignTrackFromWeb(trigger);
+    public void AssignPaEvent(string trigger) => _host.OpenAssignPaTrackFromWeb(trigger);
     public void PreviewEvent(string trigger) => _host.PreviewEventFromWeb(trigger);
     public void StopPreview() => _host.StopPreviewFromWeb();
+
+    // ---- Clipping-island assign flow (mirrors Windows WebBridge) ----
+
+    public string GetTrackLibrary() => _host.GetTrackLibraryFromWeb();
+    public void PreviewLocalFile(string path) => _host.PreviewLocalFileFromWeb(path);
+    public void AssignTrackFile(string trigger, bool isPa, string path) => _host.AssignTrackFileFromWeb(trigger, isPa, path);
+    public void ClearTrackAssignment(string trigger, bool isPa) => _host.ClearTrackAssignmentFromWeb(trigger, isPa);
+    public string? BrowseForAudioFile() => _host.BrowseForAudioFileFromWeb();
+    public void OpenTrimmer(string trigger, bool isPa) => _host.OpenTrimmerFromWeb(trigger, isPa);
+    public int GetEventVolume(string trigger) => _host.GetEventVolumeFromWeb(trigger);
+    public void SetEventVolume(string trigger, int percent) => _host.SetEventVolumeFromWeb(trigger, percent);
+
+    // ---- Volume & Audio settings ----
 
     public void SetVolume(int percent) => _host.SetVolumeFromWeb(percent);
     public void SetHomeVolume(int percent) => _host.SetHomeVolumeFromWeb(percent);
     public void SetAwayVolume(int percent) => _host.SetAwayVolumeFromWeb(percent);
     public int GetHomeVolume() => _host.GetHomeVolumeFromWeb();
     public int GetAwayVolume() => _host.GetAwayVolumeFromWeb();
+    public void SetPaVolume(int percent) => _host.SetPaVolumeFromWeb(percent);
+    public int GetPaVolume() => _host.GetPaVolumeFromWeb();
+    public bool GetLeadInWhistleAvailable() => !string.IsNullOrWhiteSpace(AudioPlayer.LeadInClipPath) && File.Exists(AudioPlayer.LeadInClipPath);
+    public bool GetLeadInWhistleEnabled() => AudioPlayer.LeadInEnabled;
+    public void SetLeadInWhistleEnabled(bool enabled)
+    {
+        AudioPlayer.LeadInEnabled = enabled;
+        ConfigStore.SaveLeadInWhistleEnabled(enabled);
+    }
     public void SetFadeDelay(int seconds) => _host.SetFadeDelayFromWeb(seconds);
     public void SetReverb(string key) => AudioPlayer.CurrentReverb = key switch
     {
@@ -124,6 +150,8 @@ public sealed class MacWebBridge
 
     public async Task<bool> DownloadAndSetTeamBackground(string team, string url) =>
         await _host.DownloadAndSetTeamBackgroundFromWeb(team, url);
+
+    public bool SetTeamBackgroundFromDownload(string downloadId) => _host.SetTeamBackgroundFromDownloadFromWeb(downloadId);
 
     public async Task<string> DownloadMarketplaceItem(string type, string name, string school, string url)
     {
@@ -191,17 +219,129 @@ public sealed class MacWebBridge
         catch { return JsonSerializer.Serialize(new { success = false, error = "Upload failed." }); }
     }
 
-    public void RecordMarketplaceUpload()
+    public async Task<string> ImportAndUploadSongToMarketplace(string school)
     {
-        var current = ConfigStore.LoadUserProfile();
-        ConfigStore.SaveUserProfile(current with { MarketplaceUploads = current.MarketplaceUploads + 1 });
+        if (string.IsNullOrWhiteSpace(school))
+            return JsonSerializer.Serialize(new { success = false, error = "No team selected." });
+
+        var raw = _host.ImportLocalSongFromWeb();
+        using var import = JsonDocument.Parse(raw);
+        var root = import.RootElement;
+        if (!root.TryGetProperty("success", out var successEl) || !successEl.GetBoolean())
+            return raw;
+
+        var path = root.GetProperty("path").GetString();
+        var entry = ConfigStore.LoadLocalTracks().FirstOrDefault(e => e.Path == path);
+        if (entry == null)
+            return JsonSerializer.Serialize(new { success = false, error = "Track was trimmed but couldn't be found for upload." });
+
+        return await ShareLocalTrackToMarketplace(entry.Id, school);
     }
 
-    public void RecordMarketplaceDownload()
+    // ---- Profile sharing ----
+
+    public async Task<string> ShareCurrentProfileToMarketplace()
     {
-        var current = ConfigStore.LoadUserProfile();
-        ConfigStore.SaveUserProfile(current with { MarketplaceDownloads = current.MarketplaceDownloads + 1 });
+        var team = Theme.ActiveTeam.Name;
+        var entries = _host.GetEvents(null)
+            .Where(e => !string.IsNullOrWhiteSpace(e.AudioFile))
+            .Select(e => new { trigger = e.Trigger, eventName = e.Event, fileName = Path.GetFileName(e.AudioFile) })
+            .ToList();
+        if (entries.Count == 0)
+            return JsonSerializer.Serialize(new { success = false, error = "No songs are assigned yet -- assign at least one before sharing this team's profile." });
+
+        try
+        {
+            var json = JsonSerializer.Serialize(new { team, assignments = entries });
+            using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+            using var form = new System.Net.Http.MultipartFormDataContent();
+            form.Add(new System.Net.Http.StringContent("profile"), "type");
+            form.Add(new System.Net.Http.StringContent($"{team} profile ({entries.Count} songs)"), "name");
+            form.Add(new System.Net.Http.StringContent(team), "school");
+            var fileContent = new System.Net.Http.ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(json));
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            form.Add(fileContent, "file", $"{team}-profile.json");
+
+            using var response = await http.PostAsync("https://bandroom-marketplace.bandroom.workers.dev/upload", form);
+            if (!response.IsSuccessStatusCode)
+                return JsonSerializer.Serialize(new { success = false, error = "Upload failed -- check your connection and try again." });
+
+            return JsonSerializer.Serialize(new { success = true, count = entries.Count });
+        }
+        catch
+        {
+            return JsonSerializer.Serialize(new { success = false, error = "Upload failed -- check your connection and try again." });
+        }
     }
+
+    public async Task<string> GetMarketplaceProfiles(string school)
+    {
+        try
+        {
+            using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            using var response = await http.GetAsync(
+                $"https://bandroom-marketplace.bandroom.workers.dev/list?type=profile&school={Uri.EscapeDataString(school)}&sort=newest");
+            if (!response.IsSuccessStatusCode) return "{\"items\":[]}";
+            return await response.Content.ReadAsStringAsync();
+        }
+        catch { return "{\"items\":[]}"; }
+    }
+
+    public async Task<string> ApplyMarketplaceProfile(string fileUrl)
+    {
+        try
+        {
+            using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            using var response = await http.GetAsync(fileUrl);
+            if (!response.IsSuccessStatusCode)
+                return JsonSerializer.Serialize(new { success = false, error = "Couldn't download that profile -- try again." });
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            var assignments = doc.RootElement.GetProperty("assignments");
+
+            var library = new List<string>();
+            if (Directory.Exists(ConfigStore.SongsFolder))
+                library.AddRange(Directory.GetFiles(ConfigStore.SongsFolder, "*", SearchOption.AllDirectories));
+            var byFileName = library
+                .GroupBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            int applied = 0, total = 0;
+            var unmatched = new List<string>();
+            foreach (var a in assignments.EnumerateArray())
+            {
+                total++;
+                var trigger = a.GetProperty("trigger").GetString() ?? "";
+                var eventName = a.GetProperty("eventName").GetString() ?? trigger;
+                var fileName = a.GetProperty("fileName").GetString() ?? "";
+                if (byFileName.TryGetValue(fileName, out var localPath))
+                {
+                    _host.AssignTrackFileFromWeb(trigger, isPa: false, localPath);
+                    applied++;
+                }
+                else
+                {
+                    unmatched.Add(eventName);
+                }
+            }
+
+            return JsonSerializer.Serialize(new { success = true, applied, total, unmatched });
+        }
+        catch
+        {
+            return JsonSerializer.Serialize(new { success = false, error = "Couldn't apply that profile -- try again." });
+        }
+    }
+
+    // ---- Admin (no-op on Mac since admin token path is Windows-only) ----
+
+    public bool IsAdminMode() => false;
+
+    public async Task<string> AdminDeleteMarketplaceItem(string type, string id) =>
+        JsonSerializer.Serialize(new { success = false, error = "Admin mode is not active." });
+
+    public async Task<string> AdminEditMarketplaceItem(string type, string id, string newName, string newSchool) =>
+        JsonSerializer.Serialize(new { success = false, error = "Admin mode is not active." });
 
     // ---- Profile & Auth ----
 
@@ -241,7 +381,7 @@ public sealed class MacWebBridge
                 Picture = profile.Picture, SessionToken = sessionToken,
             });
 
-            // Merge cloud profile with local (same logic as Windows WebBridge)
+            // Merge cloud profile with local
             var localProfile = ConfigStore.LoadUserProfile();
             var cloudProfile = await ProfileSyncService.PullAsync(sessionToken);
             var merged = cloudProfile == null ? localProfile : new ConfigStore.UserProfile
@@ -281,22 +421,159 @@ public sealed class MacWebBridge
         int totalActivity = p.GamesWatched * 5 + p.SongsTriggered + p.MarketplaceUploads * 10 + p.MarketplaceDownloads * 2;
         int level = 1 + totalActivity / 50;
 
+        var achievements = new List<object>
+        {
+            new { id = "favorite_team_set", label = "Picked a Favorite Team", unlocked = p.FavoriteTeam != null },
+            new { id = "first_upload", label = "First Upload", unlocked = p.MarketplaceUploads >= 1 },
+            new { id = "first_download", label = "First Download", unlocked = p.MarketplaceDownloads >= 1 },
+            new { id = "ten_games", label = "10 Games Watched", unlocked = p.GamesWatched >= 10 },
+            new { id = "hundred_games", label = "100 Games Watched", unlocked = p.GamesWatched >= 100 },
+            new { id = "hundred_songs", label = "100 Songs Triggered", unlocked = p.SongsTriggered >= 100 },
+            new { id = "thousand_songs", label = "1,000 Songs Triggered", unlocked = p.SongsTriggered >= 1000 },
+            new { id = "week_streak", label = "7-Day Streak", unlocked = p.StreakCurrentDays >= 7 },
+        };
+
         return JsonSerializer.Serialize(new
         {
             favoriteTeam = p.FavoriteTeam, rivalTeam = p.RivalTeam, bio = p.Bio,
             gamesWatched = p.GamesWatched, songsTriggered = p.SongsTriggered,
             marketplaceUploads = p.MarketplaceUploads, marketplaceDownloads = p.MarketplaceDownloads,
+            gamesWatchedByTeam = p.GamesWatchedByTeam,
             mostTriggeredEvent = topEvent, mostTriggeredCount = topEventCount,
             streakCurrentDays = p.StreakCurrentDays, favoriteTeamWins = p.FavoriteTeamWins,
             favoriteTeamLosses = p.FavoriteTeamLosses, createdAt = p.CreatedAt.ToString("O"),
-            toastsEnabled = p.ToastsEnabled, level,
+            toastsEnabled = p.ToastsEnabled,
+            avatarUrl = p.AvatarFileName != null ? "https://avatar/" + Uri.EscapeDataString(p.AvatarFileName) : null,
+            level, achievements,
         });
     }
 
-    public void SetFavoriteTeam(string team) { var u = ConfigStore.LoadUserProfile() with { FavoriteTeam = string.IsNullOrWhiteSpace(team) ? null : team }; ConfigStore.SaveUserProfile(u); }
-    public void SetRivalTeam(string team) { var u = ConfigStore.LoadUserProfile() with { RivalTeam = string.IsNullOrWhiteSpace(team) ? null : team }; ConfigStore.SaveUserProfile(u); }
+    public void SetFavoriteTeam(string team) { var u = ConfigStore.LoadUserProfile() with { FavoriteTeam = string.IsNullOrWhiteSpace(team) ? null : team }; ConfigStore.SaveUserProfile(u); _ = ProfileSyncService.PushAsync(u); }
+    public void SetRivalTeam(string team) { var u = ConfigStore.LoadUserProfile() with { RivalTeam = string.IsNullOrWhiteSpace(team) ? null : team }; ConfigStore.SaveUserProfile(u); _ = ProfileSyncService.PushAsync(u); }
     public void SetBio(string bio) { var trimmed = (bio ?? "").Trim(); if (trimmed.Length > 140) trimmed = trimmed[..140]; ConfigStore.SaveUserProfile(ConfigStore.LoadUserProfile() with { Bio = trimmed.Length == 0 ? null : trimmed }); }
     public void SetToastsEnabled(bool enabled) { ConfigStore.SaveUserProfile(ConfigStore.LoadUserProfile() with { ToastsEnabled = enabled }); }
+
+    public void RecordFavoriteTeamResult(bool win)
+    {
+        var current = ConfigStore.LoadUserProfile();
+        var updated = win
+            ? current with { FavoriteTeamWins = current.FavoriteTeamWins + 1 }
+            : current with { FavoriteTeamLosses = current.FavoriteTeamLosses + 1 };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    public void ResetUserProfileStats()
+    {
+        var current = ConfigStore.LoadUserProfile();
+        var updated = current with
+        {
+            GamesWatched = 0, SongsTriggered = 0, MarketplaceUploads = 0, MarketplaceDownloads = 0,
+            EventCounts = new(), GamesWatchedByTeam = new(),
+            StreakCurrentDays = 0, StreakLastActiveDate = null,
+            FavoriteTeamWins = 0, FavoriteTeamLosses = 0,
+        };
+        ConfigStore.SaveUserProfile(updated);
+        _ = ProfileSyncService.PushAsync(updated);
+    }
+
+    public bool UploadAvatar(string base64Png)
+    {
+        if (string.IsNullOrWhiteSpace(base64Png)) return false;
+        try
+        {
+            byte[] bytes = Convert.FromBase64String(base64Png);
+            if (bytes.Length == 0 || bytes.Length > 10 * 1024 * 1024) return false;
+
+            Directory.CreateDirectory(ConfigStore.AvatarFolder);
+            const string fileName = "avatar.png";
+            File.WriteAllBytes(Path.Combine(ConfigStore.AvatarFolder, fileName), bytes);
+
+            var updated = ConfigStore.LoadUserProfile() with { AvatarFileName = fileName };
+            ConfigStore.SaveUserProfile(updated);
+            _ = ProfileSyncService.PushAsync(updated);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    public bool SaveCustomTeamBackground(string team, string base64Png)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(team) || string.IsNullOrWhiteSpace(base64Png)) return false;
+            if (TeamColors.All.All(t => t.Name != team)) return false;
+
+            byte[] bytes = Convert.FromBase64String(base64Png);
+            if (bytes.Length == 0 || bytes.Length > 10 * 1024 * 1024) return false;
+
+            Directory.CreateDirectory(ConfigStore.TeamBackgroundsFolder);
+            string safeTeam = System.Text.RegularExpressions.Regex.Replace(team, @"[^\w\s&-]", "").Trim();
+            if (safeTeam.Length == 0) return false;
+
+            foreach (var ext in new[] { ".jpg", ".jpeg", ".png", ".bmp" })
+            {
+                string oldPath = Path.Combine(ConfigStore.TeamBackgroundsFolder, safeTeam + ext);
+                if (File.Exists(oldPath)) { try { File.Delete(oldPath); } catch { } }
+            }
+
+            File.WriteAllBytes(Path.Combine(ConfigStore.TeamBackgroundsFolder, safeTeam + ".png"), bytes);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    public async Task<string> SaveCustomTeamLogo(string team, string base64Png)
+    {
+        bool ok = false;
+        bool pushFailed = false;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(team) || string.IsNullOrWhiteSpace(base64Png))
+                return JsonSerializer.Serialize(new { ok, pushFailed });
+            if (TeamColors.All.All(t => t.Name != team))
+                return JsonSerializer.Serialize(new { ok, pushFailed });
+
+            byte[] bytes = Convert.FromBase64String(base64Png);
+            if (bytes.Length == 0 || bytes.Length > 10 * 1024 * 1024)
+                return JsonSerializer.Serialize(new { ok, pushFailed });
+
+            Directory.CreateDirectory(ConfigStore.TeamLogosFolder);
+            string safeTeam = System.Text.RegularExpressions.Regex.Replace(team, @"[^\w\s&-]", "").Trim();
+            if (safeTeam.Length == 0) return JsonSerializer.Serialize(new { ok, pushFailed });
+
+            foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".webp" })
+            {
+                string oldPath = Path.Combine(ConfigStore.TeamLogosFolder, safeTeam + ext);
+                if (File.Exists(oldPath)) { try { File.Delete(oldPath); } catch { } }
+            }
+
+            File.WriteAllBytes(Path.Combine(ConfigStore.TeamLogosFolder, safeTeam + ".png"), bytes);
+            ok = true;
+
+            var updatedAt = DateTime.UtcNow;
+            var current = ConfigStore.LoadUserProfile();
+            var newLogos = new Dictionary<string, ConfigStore.TeamLogoEntry>(current.CustomTeamLogos)
+            {
+                [team] = new ConfigStore.TeamLogoEntry { Base64Png = base64Png, UpdatedAtUtc = updatedAt },
+            };
+            var updated = current with { CustomTeamLogos = newLogos };
+            ConfigStore.SaveUserProfile(updated);
+
+            var manifest = ConfigStore.LoadTeamLogoSyncManifest();
+            var appliedAt = new Dictionary<string, DateTime>(manifest.AppliedAtUtc) { [team] = updatedAt };
+            ConfigStore.SaveTeamLogoSyncManifest(manifest with { AppliedAtUtc = appliedAt });
+
+            if (ConfigStore.LoadAuthSession() != null)
+                pushFailed = !await ProfileSyncService.PushAsync(updated);
+
+            return JsonSerializer.Serialize(new { ok, pushFailed });
+        }
+        catch { return JsonSerializer.Serialize(new { ok, pushFailed }); }
+    }
+
+    public void ExportUserProfile() => _host.ExportUserProfileFromWeb();
+    public void ImportUserProfile() => _host.ImportUserProfileFromWeb();
 
     // ---- Matchup / Profiles / Changelog ----
 
@@ -307,10 +584,37 @@ public sealed class MacWebBridge
     public string? GetGameTeams() => _host.GetGameTeamsFromWeb();
     public void ConfirmGametime(string home, string away) => _host.ConfirmGametimeFromWeb(home, away);
     public bool IsMatchupLocked() => _host.IsMatchupLockedFromWeb();
+    public void UnlockMatchup() => _host.UnlockMatchupFromWeb();
     public void CopyCurrentToAllTeams() => _host.CopyCurrentToAllTeamsFromWeb();
     public void DeleteCurrentProfile() => _host.DeleteCurrentProfileFromWeb();
     public void ExportProfile() => _host.ExportProfileFromWeb();
     public void ImportProfile() => _host.ImportProfileFromWeb();
+
+    // ---- Test hooks ----
+
+    public string GetAllEventKeys() => _host.GetAllEventKeysFromWeb();
+    public string FireTestEvent(string side, string eventKey) => _host.FireTestEventFromWeb(side, eventKey);
+
+    // ---- Default song pack ----
+
+    public bool HasDefaultSongPack() => ConfigStore.HasDefaultSongPack;
+    public void DownloadDefaultSongPack() => _host.DownloadDefaultSongPackFromWeb();
+    public string? BrowseForSongPackZip() => _host.BrowseForSongPackZipFromWeb();
+    public void ImportDefaultSongPackZip(string zipPath) => _host.ImportDefaultSongPackZipFromWeb(zipPath);
+
+    // ---- Counters ----
+
+    public void RecordMarketplaceUpload()
+    {
+        var current = ConfigStore.LoadUserProfile();
+        ConfigStore.SaveUserProfile(current with { MarketplaceUploads = current.MarketplaceUploads + 1 });
+    }
+
+    public void RecordMarketplaceDownload()
+    {
+        var current = ConfigStore.LoadUserProfile();
+        ConfigStore.SaveUserProfile(current with { MarketplaceDownloads = current.MarketplaceDownloads + 1 });
+    }
 
     public async Task<string> GetChangelog()
     {

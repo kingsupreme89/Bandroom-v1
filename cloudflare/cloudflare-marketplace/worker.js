@@ -687,6 +687,60 @@ export default {
       return jsonResponse({ sessionToken, profile });
     }
 
+    // Public team logo -- distinct from the per-user customTeamLogos on /profile (private,
+    // account-only, cross-YOUR-devices). This is the "everyone sees it" version: whoever pushes
+    // here becomes the new default logo for that team for every user who hasn't set their own
+    // custom logo (that check happens client-side in Bandroom.exe -- the worker just stores
+    // "latest write wins" per team, same as everything else here has no moderation queue).
+    // Single canonical file per team (overwrite in place), not a voted community gallery like
+    // /upload's song/image/pa/profile types, so it gets its own small key scheme instead of
+    // reusing /upload.
+    const TEAMLOGO_INDEX_KEY = "teamlogo-index";
+    if (url.pathname.startsWith("/teamlogo/") && request.method === "PUT") {
+      const authHeader = request.headers.get("authorization") ?? "";
+      const sessionToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      if (!sessionToken) return new Response("missing session token", { status: 401, headers: cors() });
+      const sub = await env.MARKETPLACE_META.get(`session:${sessionToken}`);
+      if (!sub) return new Response("invalid or expired session", { status: 401, headers: cors() });
+
+      const team = sanitizeSegment(decodeURIComponent(url.pathname.slice("/teamlogo/".length)));
+      if (!team) return new Response("team name required", { status: 400, headers: cors() });
+
+      const contentLength = Number(request.headers.get("content-length") ?? "0");
+      if (contentLength > 3 * 1024 * 1024) {
+        return new Response("logo too large (3MB max)", { status: 413, headers: cors() });
+      }
+      const allowed = await checkRateLimit(env, request, "teamlogo", RATE_LIMIT_MAX_UPLOADS);
+      if (!allowed) return new Response("too many uploads -- try again in a few minutes", { status: 429, headers: cors() });
+
+      const bytes = await request.arrayBuffer();
+      if (bytes.byteLength === 0) return new Response("empty file", { status: 400, headers: cors() });
+
+      const r2Key = `teamlogo/${team}.png`;
+      await env.MARKETPLACE_FILES.put(r2Key, bytes, { httpMetadata: { contentType: "image/png" } });
+
+      const updatedAt = new Date().toISOString();
+      const indexRaw = await env.MARKETPLACE_META.get(TEAMLOGO_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : {};
+      index[team] = { updatedAt, uploaderSub: sub };
+      await env.MARKETPLACE_META.put(TEAMLOGO_INDEX_KEY, JSON.stringify(index));
+
+      return jsonResponse({ team, updatedAt, url: `${url.origin}/file/${encodeURIComponent(r2Key)}` });
+    }
+
+    if (url.pathname === "/teamlogos" && request.method === "GET") {
+      const indexRaw = await env.MARKETPLACE_META.get(TEAMLOGO_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : {};
+      const items = {};
+      for (const [team, entry] of Object.entries(index)) {
+        items[team] = {
+          updatedAt: entry.updatedAt,
+          url: `${url.origin}/file/${encodeURIComponent(`teamlogo/${team}.png`)}`,
+        };
+      }
+      return jsonResponse({ items });
+    }
+
     if (url.pathname.startsWith("/file/") && request.method === "GET") {
       const key = decodeURIComponent(url.pathname.slice("/file/".length));
       const obj = await env.MARKETPLACE_FILES.get(key);

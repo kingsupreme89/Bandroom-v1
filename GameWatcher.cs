@@ -94,6 +94,14 @@ internal sealed class GameWatcher
     /// compared against these. Added 2026-08-07 alongside penalty-side OCR calibration.</summary>
     public string? HomeTeamName { get; set; }
     public string? AwayTeamName { get; set; }
+
+    /// <summary>Optional OCR-matching aliases for TeamBuilder custom schools -- the school picker
+    /// shows the institution name (e.g. "Idaho State"), but the game's own penalty banner may
+    /// render the mascot instead (e.g. "Bengals"). Checked alongside HomeTeamName/AwayTeamName
+    /// below so custom schools without a name-for-name scoreboard match still resolve. Blank/null
+    /// for built-in roster teams (their canonical Name already matches what the game shows).</summary>
+    public string? HomeTeamMascot { get; set; }
+    public string? AwayTeamMascot { get; set; }
     static readonly Regex DistancePattern = new(@"&\s*(-?\d+)", RegexOptions.IgnoreCase);
     string? _lastDistanceRaw;
     DateTime _lossCooldownUntil;
@@ -110,6 +118,15 @@ internal sealed class GameWatcher
     EventRouter? _eventRouter;
     PlaySnapshot _snapshotPrevious = new();
     PlaySnapshot _snapshotCurrent = new();
+    // FIXED 2026-08-09: RouteEngineTick used to infer "is this the very first tick" from
+    // `_snapshotPrevious.Down == 0 && _snapshotPrevious.Quarter == 0`, but Down/Quarter both
+    // legitimately stay 0 for the ENTIRE pregame period (before kickoff, no down/quarter is on
+    // screen yet), not just tick #1. So that guard kept skipping evaluators on every pregame
+    // tick -- including the exact tick where Quarter flips 0->1 and Down flips 0->something,
+    // which is precisely the transition GameStateEventHelper's "Other: Pregame Take the Field"
+    // needs to see. On that tick Previous was STILL 0/0, so the guard swallowed it and pregame
+    // could never fire. Track the real first-tick with its own flag instead.
+    bool _isFirstEngineTick = true;
 
     /// <summary>Minimum time between fires for the SAME region, guarding against a
     /// flickery OCR read (e.g. "2nd" -&gt; blank -&gt; "2nd" within one second) spam-firing
@@ -295,7 +312,19 @@ internal sealed class GameWatcher
     public void Start()
     {
         _cts = new CancellationTokenSource();
-        _eventRouter ??= CreateEventRouter();
+        // FIXED: was `??=`, so only the FIRST Start() call in the process's lifetime built fresh
+        // evaluators -- every subsequent GAMETIME (Stop Watching, then start a new game) reused
+        // the SAME evaluator instances, carrying over per-game state like KickoffHelper's
+        // opening/second-half-kickoff-already-fired flags into the next game. Now every Start()
+        // gets a clean set, matching "Stop Watching... unlock and start a new one" being a real
+        // new-game boundary. Same reasoning for resetting the snapshots and first-tick flag --
+        // without this, a 2nd+ game's Previous.Quarter starts at whatever the last game ended on
+        // instead of 0, so pregame ("Previous.Quarter == 0 && Current.Quarter == 1") could only
+        // ever fire once per app launch, not once per game.
+        _eventRouter = CreateEventRouter();
+        _snapshotPrevious = new();
+        _snapshotCurrent = new();
+        _isFirstEngineTick = true;
         _ = RunAsync(_cts.Token);
     }
 
@@ -633,12 +662,24 @@ internal sealed class GameWatcher
 
         if (side != _lastPossession)
         {
-            _lastPossession = side;
+            // FIXED: this used to set _lastPossession = side unconditionally, THEN check the
+            // cooldown and bail before firing PossessionChanged -- so a flip during the cooldown
+            // window updated the snapshot's PossessionAway (which evaluators read fresh every
+            // tick) while WebMainForm._possession (which only updates via the PossessionChanged
+            // event, and is what routes "Defense:"/"Offense:" cues to home vs away) silently kept
+            // the STALE side. That desync meant an evaluator could correctly detect "user is on
+            // defense" and fire "Defense: Second Down", but the routing layer still thought the
+            // OLD team had the ball and sent it to that team's wrong (often Offense) audio slot --
+            // exactly the "home offense sound plays on defense" / "home first down always fires"
+            // reports. Now a flip within the cooldown window is ignored entirely (neither
+            // _lastPossession nor the event updates), so the two stay in lockstep -- the next real
+            // flip after cooldown expires updates both together.
             if (DateTime.UtcNow < _possessionCooldownUntil)
             {
                 Log?.Invoke($"[possession] suppressed re-fire of \"{side}\" (cooldown)");
                 return;
             }
+            _lastPossession = side;
             _possessionCooldownUntil = DateTime.UtcNow + Cooldown;
             Log?.Invoke($"[possession] now: {side} (underline brightness away={awayBrightness:F0} home={homeBrightness:F0})");
             PossessionChanged?.Invoke(side);
@@ -689,21 +730,22 @@ internal sealed class GameWatcher
 
         string? side = ResolveTeamColor(avg);
 
-        if (side != _lastPossession)
+        // FIXED: same desync as SamplePossessionByUnderline -- see its comment. _lastPossession
+        // must only update together with the PossessionChanged event, or the snapshot
+        // (PossessionAway) and WebMainForm's routing side (_possession) drift apart during the
+        // cooldown window.
+        if (side != null && side != _lastPossession)
         {
-            _lastPossession = side;
-            if (side != null)
+            if (DateTime.UtcNow < _possessionCooldownUntil)
             {
-                if (DateTime.UtcNow < _possessionCooldownUntil)
-                {
-                    Log?.Invoke($"[possession] suppressed re-fire of \"{side}\" (cooldown)");
-                }
-                else
-                {
-                    _possessionCooldownUntil = DateTime.UtcNow + Cooldown;
-                    Log?.Invoke($"[possession] now: {side}");
-                    PossessionChanged?.Invoke(side);
-                }
+                Log?.Invoke($"[possession] suppressed re-fire of \"{side}\" (cooldown)");
+            }
+            else
+            {
+                _lastPossession = side;
+                _possessionCooldownUntil = DateTime.UtcNow + Cooldown;
+                Log?.Invoke($"[possession] now: {side}");
+                PossessionChanged?.Invoke(side);
             }
         }
     }
@@ -825,13 +867,18 @@ internal sealed class GameWatcher
         // boost simply never fired. There's no OCR'd team-ranking or rivalry-schedule signal
         // anywhere in this codebase to detect "big game" from (checked TeamColors.cs and
         // scripts/team_registry.json -- neither has rankings or rivalry data), so this uses the
-        // one real, already-OCR'd signal that's actually reliable: a close 4th-quarter score.
-        // "One-score game" = 8 points or fewer (touchdown + 2-point conversion), the standard
-        // definition broadcasters use. Quarter is only ever 1-4 here (ParseOrdinal has no
-        // overtime case -- see its own comment), so this intentionally doesn't try to detect OT
-        // specifically; a tied/close OT game still reads as "4th quarter, close score" from the
-        // scorebug's perspective anyway since the quarter indicator doesn't change.
-        bool isBigGame = quarter == 4 && Math.Abs(homeScore - awayScore) <= 8;
+        // one real, already-OCR'd signal that's actually reliable: a close-score late quarter.
+        // Now user-editable (ConfigStore.LoadBigGameSettings / the "Big Game Rules" panel in
+        // Adjust) instead of the hardcoded "quarter 4, within 8" constant -- defaults are
+        // unchanged (quarter 4 = the standard broadcaster "one-score game" definition). Quarter
+        // is only ever 1-4 here (ParseOrdinal has no overtime case -- see its own comment), so
+        // this intentionally doesn't try to detect OT specifically; a tied/close OT game still
+        // reads as "4th quarter, close score" from the scorebug's perspective anyway since the
+        // quarter indicator doesn't change.
+        var bigGameSettings = ConfigStore.LoadBigGameSettings();
+        bool isBigGame = bigGameSettings.Enabled
+            && quarter >= bigGameSettings.QuarterThreshold
+            && Math.Abs(homeScore - awayScore) <= bigGameSettings.ScoreMargin;
 
         // "penaltyagainst" holds "Against <Team Name>" text while the penalty decision overlay
         // is up (null otherwise -- see EnsureAllEvents/the region's own comment for why this is
@@ -853,6 +900,10 @@ internal sealed class GameWatcher
             if (!string.IsNullOrEmpty(HomeTeamName) && penaltyText.Contains(HomeTeamName, StringComparison.OrdinalIgnoreCase))
                 penalizedIsHome = true;
             else if (!string.IsNullOrEmpty(AwayTeamName) && penaltyText.Contains(AwayTeamName, StringComparison.OrdinalIgnoreCase))
+                penalizedIsHome = false;
+            else if (!string.IsNullOrEmpty(HomeTeamMascot) && penaltyText.Contains(HomeTeamMascot, StringComparison.OrdinalIgnoreCase))
+                penalizedIsHome = true;
+            else if (!string.IsNullOrEmpty(AwayTeamMascot) && penaltyText.Contains(AwayTeamMascot, StringComparison.OrdinalIgnoreCase))
                 penalizedIsHome = false;
         }
         bool isPenaltyOnOffense = penalizedIsHome.HasValue && possessionIsHomeNow.HasValue && penalizedIsHome.Value == possessionIsHomeNow.Value;
@@ -888,9 +939,15 @@ internal sealed class GameWatcher
         _snapshotPrevious = _snapshotCurrent;
         _snapshotCurrent = snapshot;
 
-        // Skip first tick — Previous is all zeros, would fire every evaluator simultaneously.
-        if (_snapshotPrevious.Down == 0 && _snapshotPrevious.Quarter == 0)
+        // Skip only the true first tick of the game -- Previous is a placeholder `new()` with
+        // no real prior read, so comparing it against Current would fire every evaluator
+        // simultaneously. See _isFirstEngineTick's declaration for why this can't be inferred
+        // from Previous.Down/Quarter == 0 (that's also true, correctly, throughout pregame).
+        if (_isFirstEngineTick)
+        {
+            _isFirstEngineTick = false;
             return;
+        }
 
         var state = new GameState
         {
@@ -936,13 +993,64 @@ internal sealed class GameWatcher
     // grab whichever window enumerates first -- silently OCR'ing the wrong window's screen
     // region instead of ever finding the real game. "CollegeFB27" is the actual game's process
     // name, confirmed live via Get-Process.
+    // "CollegeFB27" is the PC game's own process. Console/Remote Play testers never run that --
+    // they run Sony's PS Remote Play client (process "RemotePlay"), which shows the exact same
+    // in-game UI inside its own window. Without this, FindGameWindow() always returned
+    // IntPtr.Zero for a console tester regardless of which ScorebugPreset was selected in
+    // Settings -- the OCR regions were calibrated for Remote Play captures (see
+    // ScorebugPreset.ConsoleScorebugV1) but the watcher could never even find a window to read
+    // them from. Chrome Remote Desktop/other capture tools aren't matched here since the owner's
+    // testers use PS Remote Play specifically; add more names here if that changes.
+    static readonly string[] GameProcessNames = { "CollegeFB27", "RemotePlay" };
+
+    // Xbox app streaming (Remote Play from an Xbox console) is a UWP/MSIX package, not a plain
+    // Win32 exe like RemotePlay.exe -- its actual top-level window is owned by the shared
+    // "ApplicationFrameHost.exe" host process, not by Xbox.exe itself, so Xbox.exe's own
+    // MainWindowHandle is reliably IntPtr.Zero and the same Process.GetProcessesByName +
+    // MainWindowHandle check that works for RemotePlay/CollegeFB27 would silently find nothing --
+    // the exact class of bug the PS Remote Play fix above closed, just for a different reason.
+    // Matched by window TITLE on ApplicationFrameHost instead, since every UWP app's host window
+    // is titled after the app itself.
+    const string XboxHostProcessName = "ApplicationFrameHost";
+    const string XboxWindowTitleContains = "Xbox";
+
     static IntPtr FindGameWindow()
     {
-        foreach (var proc in System.Diagnostics.Process.GetProcessesByName("CollegeFB27"))
+        foreach (var name in GameProcessNames)
         {
-            IntPtr hWnd = proc.MainWindowHandle;
-            if (hWnd != IntPtr.Zero && Native.IsWindowVisible(hWnd)) return hWnd;
+            foreach (var proc in System.Diagnostics.Process.GetProcessesByName(name))
+            {
+                IntPtr hWnd = proc.MainWindowHandle;
+                if (hWnd != IntPtr.Zero && Native.IsWindowVisible(hWnd)) return hWnd;
+            }
         }
+
+        IntPtr xboxHwnd = FindXboxAppWindow();
+        if (xboxHwnd != IntPtr.Zero) return xboxHwnd;
+
         return IntPtr.Zero;
+    }
+
+    static IntPtr FindXboxAppWindow()
+    {
+        if (System.Diagnostics.Process.GetProcessesByName(XboxHostProcessName).Length == 0)
+            return IntPtr.Zero;
+
+        IntPtr found = IntPtr.Zero;
+        Native.EnumWindows((hWnd, _) =>
+        {
+            if (!Native.IsWindowVisible(hWnd)) return true;
+            int len = Native.GetWindowTextLength(hWnd);
+            if (len == 0) return true;
+            var sb = new System.Text.StringBuilder(len + 1);
+            Native.GetWindowText(hWnd, sb, sb.Capacity);
+            if (sb.ToString().Contains(XboxWindowTitleContains, StringComparison.OrdinalIgnoreCase))
+            {
+                found = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
     }
 }

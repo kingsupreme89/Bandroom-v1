@@ -54,5 +54,6 @@
     <Content Include="..\..\google_client_secret.local.txt" Condition="Exists('..\..\google_client_secret.local.txt')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="bandroom_ocr_bridge.py" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

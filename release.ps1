@@ -1,13 +1,22 @@
-# Bandroom release script — bumps patch version, builds, packs with Squirrel (delta+full),
-# and publishes to GitHub. Squirrel handles delta generation automatically.
+# Bandroom release script — commits + pushes any pending work, bumps patch version, builds,
+# packs with Squirrel (delta+full), and publishes to GitHub. Squirrel handles delta generation
+# automatically. This is the owner's "ppup" trigger: every step, all the way live to git.
 #
 # Pass -Notes with real bullet points for what changed (shows up in the in-app Updates panel
 # verbatim -- see ChangelogService.cs). Passed via a temp file to `gh`, not inline on the
 # command line -- embedding multi-line/quoted text directly in a native-exe argument list is
 # exactly what broke this script once already (PowerShell mangled the quoting, `gh` failed,
 # and the script kept going and printed "Done!" anyway since nothing checked its exit code).
+#
+# Pass -CommitMessage to control what any pending uncommitted work gets committed as (step 0
+# below) -- defaults to a generic message if omitted. Without this step, the release used to tag
+# and push whatever commit HEAD happened to be, while the actual built/shipped binary came from
+# whatever was on disk (including any uncommitted changes) -- the git tag and the shipped code
+# could silently diverge, so a later `git checkout <tag>` wouldn't reproduce what was released.
 param(
-    [string]$Notes = "See the full changelog at https://github.com/kingsupreme89/Bandroom-v1/releases"
+    [string]$Notes = "See the full changelog at https://github.com/kingsupreme89/Bandroom-v1/releases",
+    [string]$CommitMessage = "Session updates",
+    [string]$Branch = "master"
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -16,6 +25,30 @@ $ProjectDir  = $PSScriptRoot
 $ProjectFile = Join-Path $ProjectDir "BandAudioHook.csproj"
 $PublishDir  = Join-Path $ProjectDir "publish_temp"
 $ReleaseDir  = Join-Path $ProjectDir "squirrel_releases"
+
+# ── 0. Commit + push pending work ────────────────────────────────────────────
+# Everything from here through the GitHub release below reads from git (the tag points at
+# whatever HEAD is when we tag it) -- so any uncommitted work AND any commits sitting ahead of
+# origin need to land first, or the release ships code that git history doesn't actually have.
+Write-Host "  Checking for pending git work..." -ForegroundColor Yellow
+$dirty = git -C $ProjectDir status --porcelain
+if ($dirty) {
+    Write-Host "  Committing pending changes..." -ForegroundColor Yellow
+    git -C $ProjectDir add -A
+    git -C $ProjectDir commit -m $CommitMessage
+    if ($LASTEXITCODE -ne 0) { Write-Host "git commit failed." -ForegroundColor Red; exit 1 }
+} else {
+    Write-Host "  Working tree already clean." -ForegroundColor Green
+}
+
+$ahead = git -C $ProjectDir rev-list --count "origin/$Branch..$Branch" 2>$null
+if ($LASTEXITCODE -ne 0 -or $ahead -gt 0) {
+    Write-Host "  Pushing $Branch to origin..." -ForegroundColor Yellow
+    git -C $ProjectDir push origin $Branch
+    if ($LASTEXITCODE -ne 0) { Write-Host "git push failed." -ForegroundColor Red; exit 1 }
+} else {
+    Write-Host "  $Branch already up to date with origin." -ForegroundColor Green
+}
 
 # Squirrel CLI bundled with the NuGet package — no separate install needed.
 $SquirrelExe = "C:\Users\$env:USERNAME\.nuget\packages\clowd.squirrel\2.11.1\tools\Squirrel.exe"

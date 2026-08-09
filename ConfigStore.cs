@@ -14,6 +14,12 @@ internal static class ConfigStore
 
     public static readonly string ConfigPath = Path.Combine(UserDataRoot, "triggers.json");
     public static readonly string SongsFolder = Path.Combine(UserDataRoot, "Songs");
+    /// <summary>Single-slot scratch folder the embedded web trimmer copies whatever's being
+    /// trimmed into (see WebMainForm.PrepareTrimFromWeb) -- exists so the WebView2 page has a
+    /// virtual-host-mappable URL to fetch/decode for its waveform, since there's no mapping for
+    /// arbitrary local paths (SongsFolder/SongsTrimmedFolder/etc aren't safe to expose wholesale).
+    /// Cleared and re-filled on every trim-panel open; never holds more than one file.</summary>
+    public static readonly string TrimSourceFolder = Path.Combine(UserDataRoot, "TrimSource");
     /// <summary>Trimmed clips (from TrimmerForm's "Save & Name") land here, not loose in
     /// SongsFolder -- keeps user-trimmed cues visually separate from raw uploaded files.</summary>
     public static readonly string SongsTrimmedFolder = Path.Combine(SongsFolder, "trimmed");
@@ -58,6 +64,7 @@ internal static class ConfigStore
         public string Name { get; init; } = "";
         public string PrimaryHex { get; init; } = "#22d3ee";
         public string SecondaryHex { get; init; } = "#22d3ee";
+        public string Mascot { get; init; } = "";
     }
 
     public static List<CustomTeamEntry> LoadCustomTeams()
@@ -77,7 +84,7 @@ internal static class ConfigStore
     /// <summary>Adds (or replaces, by case-insensitive name) one custom team and persists the
     /// whole manifest. Caller (TeamColors.AddCustomTeam) is responsible for keeping its in-memory
     /// list in sync -- this only owns the on-disk copy.</summary>
-    public static void SaveCustomTeam(string name, string primaryHex, string secondaryHex)
+    public static void SaveCustomTeam(string name, string primaryHex, string secondaryHex, string mascot = "")
     {
         lock (CustomTeamsLock)
         {
@@ -90,13 +97,48 @@ internal static class ConfigStore
             else entries = new List<CustomTeamEntry>();
 
             entries.RemoveAll(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase));
-            entries.Add(new CustomTeamEntry { Name = name, PrimaryHex = primaryHex, SecondaryHex = secondaryHex });
+            entries.Add(new CustomTeamEntry { Name = name, PrimaryHex = primaryHex, SecondaryHex = secondaryHex, Mascot = mascot });
 
             Directory.CreateDirectory(UserDataRoot);
             File.WriteAllText(CustomTeamsPath, JsonSerializer.Serialize(entries, JsonOptions));
         }
     }
     static readonly string LeadInWhistleEnabledPath = Path.Combine(UserDataRoot, "leadin_whistle_enabled.txt");
+
+    /// <summary>User-editable Big Game trigger rule (see GameWatcher.cs's isBigGame computation,
+    /// which used to be a hardcoded "quarter 4 and score within 8" constant). Persisted as JSON
+    /// since it's more than one scalar, same file-under-UserDataRoot pattern as everything else
+    /// here.</summary>
+    static readonly string BigGameSettingsPath = Path.Combine(UserDataRoot, "big_game_settings.json");
+
+    public record BigGameSettings(bool Enabled, int QuarterThreshold, int ScoreMargin);
+
+    // Cached in memory -- GameWatcher's OCR loop re-checks this every frame during a live game,
+    // and re-reading a JSON file off disk that often is wasteful for a value that only ever
+    // changes when the user hits Save in the Big Game Rules panel.
+    static BigGameSettings? _bigGameSettingsCache;
+
+    public static BigGameSettings LoadBigGameSettings()
+    {
+        if (_bigGameSettingsCache != null) return _bigGameSettingsCache;
+        if (!File.Exists(BigGameSettingsPath)) return _bigGameSettingsCache = new BigGameSettings(true, 4, 8);
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<BigGameSettings>(File.ReadAllText(BigGameSettingsPath), JsonOptions);
+            return _bigGameSettingsCache = loaded ?? new BigGameSettings(true, 4, 8);
+        }
+        catch
+        {
+            return _bigGameSettingsCache = new BigGameSettings(true, 4, 8);
+        }
+    }
+
+    public static void SaveBigGameSettings(BigGameSettings settings)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(BigGameSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        _bigGameSettingsCache = settings;
+    }
 
     /// <summary>Where the installer would have bundled the default song pack, if this build
     /// includes it (dev builds and any future full build still do -- see BundleDefaultSongs in
@@ -280,7 +322,128 @@ internal static class ConfigStore
         return null;
     }
 
-    public static int ImportDefaultPackForTeam(string teamName, List<TriggerEntry> profile)
+    /// <summary>overwrite=false (default) preserves the original "only fills empty slots" safety
+    /// net every silent/automatic caller (SetGameTeamsFromWeb, the old fill-only Auto-Assign)
+    /// relies on. overwrite=true backs the explicit Auto-Assign "overwrite" confirm flow only --
+    /// the caller must have already gotten the user's yes/no on wiping their current arrangement,
+    /// this method itself has no such gate.</summary>
+    /// <summary>Same traversal-guard pattern as FindDefaultPackTeamFolder, but returns the
+    /// CONFERENCE folder itself (e.g. Songs\Default\SEC\) instead of the team's subfolder inside
+    /// it -- for conference-wide files (chants/hype cues not specific to any one school) sitting
+    /// directly in that folder rather than under a team name. Resolves by finding which
+    /// conference folder actually contains a subfolder for this team, same lookup
+    /// FindDefaultPackTeamFolder does, just returning one level up.</summary>
+    public static string? FindDefaultPackConferenceFolder(string teamName)
+    {
+        string safeTeamName = string.Join("_", teamName.Split(Path.GetInvalidFileNameChars()));
+        if (!Directory.Exists(DefaultSongsFolder)) return null;
+
+        string defaultSongsRoot = Path.GetFullPath(DefaultSongsFolder);
+        foreach (var confDir in Directory.GetDirectories(DefaultSongsFolder))
+        {
+            string candidate = Path.Combine(confDir, safeTeamName);
+            string resolvedCandidate = Path.GetFullPath(candidate);
+            if (!resolvedCandidate.StartsWith(defaultSongsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (Directory.Exists(candidate)) return confDir;
+        }
+        return null;
+    }
+
+    /// <summary>Filename -> EventKey convention shared by every default-pack importer (team,
+    /// conference, generic): "Offense_ Earned First Down.mp3" -> "Offense: Earned First Down",
+    /// with a trailing "_2"/"_3" variant-index suffix stripped so duplicate-source files
+    /// (multiple candidates for the same event) all resolve to the one real EventKey.</summary>
+    static string EventKeyFromFileName(string file)
+    {
+        string name = Path.GetFileNameWithoutExtension(file);
+        string eventKey = name.Replace("_", ": ").Replace("  ", " ");
+        return System.Text.RegularExpressions.Regex.Replace(eventKey, @"_\d+$", "");
+    }
+
+    public sealed record ConferencePackPreviewItem(string EventKey, string FileName, string FilePath, string? CurrentFile);
+
+    /// <summary>Preview of what "Load Conference Pack" WOULD do, without touching the profile --
+    /// one row per event the conference folder has a file for, including whatever the team
+    /// already has assigned (if anything) so the caller can decide per-event whether to overwrite
+    /// instead of the old silent "only fill empty slots" behavior. Owner feedback: most users
+    /// already have SOME songs assigned, so a backfill-only pass quietly did nothing for them --
+    /// they need to be asked, event by event, whether to replace what's there.</summary>
+    public static List<ConferencePackPreviewItem> PreviewConferencePackForTeam(string teamName, List<TriggerEntry> profile)
+    {
+        var result = new List<ConferencePackPreviewItem>();
+        string? confFolder = FindDefaultPackConferenceFolder(teamName);
+        if (confFolder == null) return result;
+
+        foreach (var file in Directory.GetFiles(confFolder, "*.*", SearchOption.TopDirectoryOnly))
+        {
+            string ext = Path.GetExtension(file).ToLowerInvariant();
+            if (!AudioExtensions.Contains(ext)) continue;
+            string eventKey = EventKeyFromFileName(file);
+            var entry = profile.FirstOrDefault(e => e.Event.Equals(eventKey, StringComparison.OrdinalIgnoreCase));
+            if (entry == null) continue; // no matching event in this profile at all
+            result.Add(new ConferencePackPreviewItem(eventKey, Path.GetFileName(file), file,
+                string.IsNullOrWhiteSpace(entry.AudioFile) ? null : entry.AudioFile));
+        }
+        return result;
+    }
+
+    /// <summary>Applies the conference pack for exactly the EventKeys the caller confirmed (empty
+    /// slots the JS side decided didn't need asking about, plus any already-assigned ones the user
+    /// explicitly said yes to overwriting) -- everything else from PreviewConferencePackForTeam
+    /// that isn't in this set is left untouched. Returns the count actually changed.</summary>
+    public static int ApplyConferencePackSelections(string teamName, List<TriggerEntry> profile, IEnumerable<string> eventKeysToAssign)
+    {
+        string? confFolder = FindDefaultPackConferenceFolder(teamName);
+        if (confFolder == null) return 0;
+        var wanted = new HashSet<string>(eventKeysToAssign, StringComparer.OrdinalIgnoreCase);
+        int assigned = 0;
+        foreach (var file in Directory.GetFiles(confFolder, "*.*", SearchOption.TopDirectoryOnly))
+        {
+            string ext = Path.GetExtension(file).ToLowerInvariant();
+            if (!AudioExtensions.Contains(ext)) continue;
+            string eventKey = EventKeyFromFileName(file);
+            if (!wanted.Contains(eventKey)) continue;
+            var entry = profile.FirstOrDefault(e => e.Event.Equals(eventKey, StringComparison.OrdinalIgnoreCase));
+            if (entry == null) continue;
+            entry.AudioFile = file;
+            assigned++;
+        }
+        return assigned;
+    }
+
+    /// <summary>Conference-wide counterpart to ImportDefaultPackForTeam -- fills from files sitting
+    /// directly in the team's conference folder (TopDirectoryOnly, so team subfolders inside it are
+    /// never recursed into) instead of the team's own subfolder. Meant as a second pass AFTER a
+    /// team-specific import: run team-specific first (more accurate), then this to backfill
+    /// whatever the team doesn't have its own song for using shared conference-wide cues.
+    /// overwrite=false only fills empty slots, matching ImportDefaultPackForTeam's own default.</summary>
+    public static int ImportConferencePackForTeam(string teamName, List<TriggerEntry> profile, bool overwrite = false)
+    {
+        string? confFolder = FindDefaultPackConferenceFolder(teamName);
+        if (confFolder == null) return 0;
+
+        int before = profile.Count(e => !string.IsNullOrWhiteSpace(e.AudioFile));
+        if (overwrite)
+        {
+            foreach (var file in Directory.GetFiles(confFolder, "*.*", SearchOption.TopDirectoryOnly))
+            {
+                string ext = Path.GetExtension(file).ToLowerInvariant();
+                if (!AudioExtensions.Contains(ext)) continue;
+                string name = Path.GetFileNameWithoutExtension(file);
+                string eventKey = System.Text.RegularExpressions.Regex.Replace(
+                    name.Replace("_", ": ").Replace("  ", " "), @"_\d+$", "");
+                var entry = profile.FirstOrDefault(e => e.Event.Equals(eventKey, StringComparison.OrdinalIgnoreCase));
+                if (entry != null) entry.AudioFile = file;
+            }
+            return profile.Count(e => !string.IsNullOrWhiteSpace(e.AudioFile)) - before;
+        }
+
+        ImportDefaultPackFromFolder(confFolder, profile);
+        return profile.Count(e => !string.IsNullOrWhiteSpace(e.AudioFile)) - before;
+    }
+
+    public static int ImportDefaultPackForTeam(string teamName, List<TriggerEntry> profile, bool overwrite = false)
     {
         int assigned = 0;
         string? teamFolder = FindDefaultPackTeamFolder(teamName);
@@ -299,7 +462,7 @@ internal static class ConfigStore
 
             var entry = profile.FirstOrDefault(e =>
                 e.Event.Equals(eventKey, StringComparison.OrdinalIgnoreCase));
-            if (entry != null && string.IsNullOrWhiteSpace(entry.AudioFile))
+            if (entry != null && (overwrite || string.IsNullOrWhiteSpace(entry.AudioFile)))
             {
                 entry.AudioFile = file;
                 assigned++;
@@ -765,6 +928,34 @@ internal static class ConfigStore
         File.WriteAllText(TeamLogoSyncManifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
     }
 
+    /// <summary>Tracks, per team, the updatedAt of the PUBLIC (everyone-sees-it) logo this device
+    /// has already applied from the marketplace worker's /teamlogos index -- distinct from
+    /// TeamLogoSyncManifest above, which is about YOUR OWN account's private cross-device sync.
+    /// This one gates PublicTeamLogoSyncService so it doesn't re-download/re-write a team's public
+    /// logo file on every app launch once it's already been applied, and (more importantly) so a
+    /// team a user has customized for THEMSELVES never gets silently clobbered by someone else's
+    /// public push -- see PublicTeamLogoSyncService.SyncAsync's "skip if team is in CustomTeamLogos"
+    /// check, which is the actual owner-requested guarantee this whole feature hinges on.</summary>
+    public sealed record PublicTeamLogoSyncManifest
+    {
+        public Dictionary<string, DateTime> AppliedAtUtc { get; init; } = new();
+    }
+
+    static readonly string PublicTeamLogoSyncManifestPath = Path.Combine(UserDataRoot, "public_team_logo_sync.json");
+
+    public static PublicTeamLogoSyncManifest LoadPublicTeamLogoSyncManifest()
+    {
+        if (!File.Exists(PublicTeamLogoSyncManifestPath)) return new PublicTeamLogoSyncManifest();
+        try { return JsonSerializer.Deserialize<PublicTeamLogoSyncManifest>(File.ReadAllText(PublicTeamLogoSyncManifestPath), JsonOptions) ?? new PublicTeamLogoSyncManifest(); }
+        catch { return new PublicTeamLogoSyncManifest(); }
+    }
+
+    public static void SavePublicTeamLogoSyncManifest(PublicTeamLogoSyncManifest manifest)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(PublicTeamLogoSyncManifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
+    }
+
     public static readonly string AvatarFolder = Path.Combine(UserDataRoot, "Avatar");
 
     public static UserProfile LoadUserProfile()
@@ -969,11 +1160,57 @@ internal static class ConfigStore
         "Defense: No Punt Return",
     };
 
+    /// <summary>Pre-engine profiles keyed their down slots as bare "1st/2nd/3rd/4th Down"
+    /// (Trigger down:1st/2nd/3rd/4th). WebMainForm.FireEventForSide still silently falls back to
+    /// these via LegacyDownEventAlias when the canonical "Offense: Nth Down" slot is empty --
+    /// which meant a song assigned back before the engine rewrite kept firing on every matching
+    /// down with zero way to see, edit, or clear it from the current UI (the "Assign / Edit" tile
+    /// only ever reads/writes the canonical Event name). Reported 2026-08-09: user had nothing
+    /// set for "Offense: Second Down" in the UI, but a song played anyway -- this was the legacy
+    /// down:2nd slot playing invisibly underneath it. One-time migration on load: promote any
+    /// legacy AudioFile into the canonical slot (only if the canonical slot is still empty, so a
+    /// deliberate new assignment is never clobbered) and blank the legacy slot so it stops being
+    /// a hidden zombie trigger.</summary>
+    static readonly Dictionary<string, string> LegacyDownEventMigration = new()
+    {
+        ["1st Down"] = "Offense: Earned First Down",
+        ["2nd Down"] = "Offense: Second Down",
+        ["3rd Down"] = "Offense: Third Down",
+        ["4th Down"] = "Offense: Fourth Down",
+    };
+
+    static void MigrateLegacyDownEvents(List<TriggerEntry> entries)
+    {
+        // ToList() snapshot: the loop below calls entries.Add() when a canonical slot doesn't
+        // exist yet, which would throw "Collection was modified" if iterating `entries` directly.
+        foreach (var legacy in entries.ToList())
+        {
+            if (string.IsNullOrWhiteSpace(legacy.AudioFile)) continue;
+            if (!LegacyDownEventMigration.TryGetValue(legacy.Event, out var canonicalKey)) continue;
+
+            var canonical = entries.FirstOrDefault(e => e.Event == canonicalKey);
+            if (canonical == null)
+            {
+                entries.Add(new TriggerEntry { Trigger = $"auto:{canonicalKey}", Event = canonicalKey, AudioFile = legacy.AudioFile, PaAudioFile = legacy.PaAudioFile, Volume = legacy.Volume });
+            }
+            else if (string.IsNullOrWhiteSpace(canonical.AudioFile))
+            {
+                canonical.AudioFile = legacy.AudioFile;
+                if (string.IsNullOrWhiteSpace(canonical.PaAudioFile)) canonical.PaAudioFile = legacy.PaAudioFile;
+            }
+
+            legacy.AudioFile = "";
+            legacy.PaAudioFile = "";
+        }
+    }
+
     /// <summary>Appends a slot for any engine EventKey missing from `entries`, so every event the
     /// engine can detect is assignable in the UI -- without touching entries that already exist, so
     /// saved song assignments are never disturbed. Called from every load/build path.</summary>
     public static List<TriggerEntry> EnsureAllEvents(List<TriggerEntry> entries)
     {
+        MigrateLegacyDownEvents(entries);
+
         // Prune already-persisted rows for retired duplicate events -- only when nothing was
         // ever assigned to them, so no existing user song assignment is ever silently dropped.
         entries.RemoveAll(e => (RetiredEventKeys.Contains(e.Event) || BlockedEventKeys.Contains(e.Event)) && string.IsNullOrWhiteSpace(e.AudioFile));

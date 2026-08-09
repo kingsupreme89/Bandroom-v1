@@ -8,12 +8,32 @@ internal static class TeamLogo
 {
     static readonly string[] Extensions = { ".png", ".jpg", ".jpeg", ".webp" };
 
+    /// <summary>Must exactly match WebBridge.WriteTeamLogoFile's own sanitization -- BUG FIX:
+    /// custom-uploaded logos (SaveCustomTeamLogo) are written under this sanitized name (strips
+    /// apostrophes/periods/etc, e.g. "Hawai'i" -> "Hawaii"), but this lookup used to search for
+    /// the raw, unsanitized teamName + ext. Any team whose name contained a stripped character
+    /// saved its logo successfully to disk but could never find it again on the next lookup --
+    /// silently falling back to the old logo/initials, which is exactly the "logo editor didn't
+    /// retain info after saving" report. Checking BOTH the sanitized and raw names below so
+    /// existing manually-dropped files with punctuation in their filename still work too.</summary>
+    static string Sanitize(string teamName) =>
+        System.Text.RegularExpressions.Regex.Replace(teamName, @"[^\w\s&-]", "").Trim();
+
     public static string? FindImagePath(string teamName)
     {
+        string sanitized = Sanitize(teamName);
         foreach (var ext in Extensions)
         {
-            string candidate = Path.Combine(ConfigStore.TeamLogosFolder, teamName + ext);
+            string candidate = Path.Combine(ConfigStore.TeamLogosFolder, sanitized + ext);
             if (File.Exists(candidate)) return candidate;
+        }
+        if (sanitized != teamName)
+        {
+            foreach (var ext in Extensions)
+            {
+                string candidate = Path.Combine(ConfigStore.TeamLogosFolder, teamName + ext);
+                if (File.Exists(candidate)) return candidate;
+            }
         }
         return null;
     }

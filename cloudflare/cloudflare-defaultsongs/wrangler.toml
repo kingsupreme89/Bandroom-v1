@@ -1,0 +1,9 @@
+name = "bandroom-defaultsongs"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Created by `wrangler r2 bucket create bandroom-default-songs` -- bucket_name must match
+# exactly what you named it.
+r2_buckets = [
+  { binding = "DEFAULT_SONGS", bucket_name = "bandroom-default-songs" }
+]

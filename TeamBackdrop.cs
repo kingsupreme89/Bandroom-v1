@@ -28,12 +28,28 @@ internal sealed class TeamBackdrop : Panel
         BackColor = Color.Transparent;
     }
 
+    /// <summary>Must exactly match WebBridge.SaveCustomTeamBackground's own sanitization --
+    /// same bug/fix as TeamLogo.Sanitize: a custom-uploaded background for a team name with a
+    /// stripped character (apostrophe, period, etc) saved fine but could never be found again
+    /// on the next lookup, silently falling back to no background/a generic one.</summary>
+    static string Sanitize(string teamName) =>
+        System.Text.RegularExpressions.Regex.Replace(teamName, @"[^\w\s&-]", "").Trim();
+
     public static string? FindImagePath(string teamName)
     {
+        string sanitized = Sanitize(teamName);
         foreach (var ext in Extensions)
         {
-            string candidate = Path.Combine(ConfigStore.TeamBackgroundsFolder, teamName + ext);
+            string candidate = Path.Combine(ConfigStore.TeamBackgroundsFolder, sanitized + ext);
             if (File.Exists(candidate)) return candidate;
+        }
+        if (sanitized != teamName)
+        {
+            foreach (var ext in Extensions)
+            {
+                string candidate = Path.Combine(ConfigStore.TeamBackgroundsFolder, teamName + ext);
+                if (File.Exists(candidate)) return candidate;
+            }
         }
         return FindGenericImagePath(teamName);
     }

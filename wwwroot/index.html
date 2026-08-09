@@ -42,7 +42,7 @@
       <div class="header-center" id="drag-handle">
         <span id="team-name">General</span>
         <span class="header-sep">·</span>
-        <button id="btn-matchup" class="matchup-btn" title="Pick who's home and away for this game">Set Matchup</button>
+        <button id="btn-matchup" class="matchup-btn" title="Pick who's home and away for this game">LOCK IN?</button>
         <button id="btn-unlock-matchup" class="icon-btn" title="Unlock matchup without stopping watching" hidden>&#128275;</button>
       </div>
       <div class="header-right">
@@ -55,6 +55,28 @@
           <span class="watch-dot"></span>
           <span id="watch-label">Not watching</span>
         </div>
+        <!-- Former left icon rail (Teams/Save/Help) -- moved into the toolbar as pills so the
+             rail could be removed entirely; same rail-item click wiring (runRailAction) still
+             applies via data-action, just reused on pill-shaped buttons instead of the old
+             vertical rail-item buttons. -->
+        <button class="pill pill-marketplace" data-action="focus-teams" title="Choose a team">Teams</button>
+        <button class="pill pill-marketplace" data-action="save-profile" title="Save this team's profile">Save</button>
+        <!-- Dummies-guide entry point for profile sharing, requested to sit right by Save since
+             that's where users look for "how do I send my setup to someone" -- opens Help & Guide
+             pre-scrolled to the Share Profile / Load Profile from Others section instead of a new
+             overlay, see openProfileShareGuide() in app.js. -->
+        <button id="btn-share-guide" class="help-pill" title="How does sharing a profile work?">
+          <span class="help-pill-icon">?</span>
+          <span>Sharing Guide</span>
+        </button>
+        <button class="pill pill-marketplace" data-action="help" title="Keyboard shortcuts">Shortcuts</button>
+        <!-- Help & Guide pill (task queue item 2, Session 11; relocated here Session 16 out of
+             the left sidebar, which was blocking the team grid) -- subtle team-color glow via
+             the existing .help-pill border rule, opens #help-guide-overlay. -->
+        <button id="btn-help-pill" class="help-pill" title="Help &amp; Guide">
+          <span class="help-pill-icon">?</span>
+          <span>Help &amp; Guide</span>
+        </button>
         <button id="btn-stop-watching" class="btn-ghost" title="End this game and unlock the matchup" hidden>Stop Watching</button>
         <!-- Marketplace island tabs -- "The Bandroom" opens the full team-browser; Sound Bank
              jumps straight into the ACTIVE team's album (songs + background images together,
@@ -68,6 +90,11 @@
           <button id="btn-my-downloads" class="pill pill-marketplace" title="Songs and images you've downloaded">My Downloads</button>
           <button id="btn-discord-chat" class="pill pill-marketplace" title="Live Discord chat feed">Discord</button>
         </div>
+        <!-- Header-level Auto-Assign -- same handleAutoAssignClick() flow as the matchup-side-bar
+             button, just reachable from any landing page (Sound Bank/My Downloads/etc.) instead
+             of only after a full home/away matchup is set. Operates on whichever team is
+             currently active (state.activeTeam). -->
+        <button id="btn-auto-assign-header" class="pill pill-auto-assign" title="Auto-assign songs for the active team">Auto-Assign</button>
         <!-- Favorite-team badge -- shows the currently active team at a glance, click opens
              the full team picker. Sits right next to the update button on purpose. -->
         <div id="header-team-badge" class="team-swatch header-team-badge" title="Switch which team's sound profile you're editing (use Set Matchup to pick home/away)"></div>
@@ -88,19 +115,12 @@
     </div>
 
     <div id="body">
-      <!-- Left icon rail -->
-      <div class="rail" id="rail-left">
-        <button class="rail-item active" data-action="focus-teams"><span class="rail-icon">&#9978;</span><span class="rail-label">Teams</span></button>
-        <button class="rail-item" data-action="save-profile"><span class="rail-icon">&#128190;</span><span class="rail-label">Save</span></button>
-        <button class="rail-item" data-action="help"><span class="rail-icon">?</span><span class="rail-label">Help</span></button>
-      </div>
-
       <!-- Left panel: team grid + profiles -->
       <div class="side-panel glass" id="left-panel">
         <div class="panel-section">
           <div class="panel-title-row">
             <div class="panel-title">Team</div>
-            <button class="icon-btn" id="btn-add-school" title="Add a custom TeamBuilder school (name, colors, logo -- not matched to in-game data)">+</button>
+            <button class="icon-btn" id="btn-add-school" title="Add a custom TeamBuilder school (name, colors, logo, and optional mascot for scoreboard matching)">+</button>
           </div>
           <div class="team-grid" id="team-grid"><!-- populated by app.js --></div>
         </div>
@@ -124,16 +144,6 @@
             </div>
           </div>
         </div>
-        <!-- Help pill (task queue item 2, Session 11) -- anchored to the bottom of the sidebar,
-             pulses in the active team's color via the standing neon-pulse keyframe (same one
-             #header-bar/.side-panel already use), opens #help-guide-overlay: a glass-panel
-             dashboard with ~40 tips and a full ELI7 walkthrough. This is deliberately separate
-             from the rail's "?" button above (bridge.ShowHelp -> native ShortcutsForm, keyboard
-             shortcuts only) -- that one stays as-is, this is the new comprehensive in-app guide. -->
-        <button id="btn-help-pill" class="help-pill" title="Help &amp; Guide">
-          <span class="help-pill-icon">?</span>
-          <span>Help &amp; Guide</span>
-        </button>
       </div>
 
       <!-- Help & Guide dashboard (task queue item 2) -- glass island, same shape as the
@@ -191,6 +201,9 @@
           <div class="add-school-body">
             <label class="add-school-label" for="add-school-name">School name</label>
             <input type="text" id="add-school-name" placeholder="e.g. Montana" class="team-picker-search" maxlength="40" />
+            <label class="add-school-label" for="add-school-mascot">Mascot (optional)</label>
+            <input type="text" id="add-school-mascot" placeholder="e.g. Bengals" class="team-picker-search" maxlength="40" />
+            <div class="add-school-hint">If your scoreboard shows the mascot instead of the school name (e.g. "Bengals" instead of "Idaho State"), add it here so penalty calls match to the right team.</div>
             <div class="add-school-colors">
               <div class="add-school-color-field">
                 <label class="add-school-label" for="add-school-primary">Primary color</label>
@@ -203,6 +216,48 @@
             </div>
             <div id="add-school-error" class="add-school-error" hidden></div>
             <button id="btn-add-school-confirm" class="btn-ghost btn-block">Add School</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Auto-Assign overwrite confirmation -- Auto-Assign now overwrites EVERY slot with the
+           default pack (not just empty ones), so this confirm/cancel step guards against
+           silently wiping a hand-tuned arrangement. If the default pack isn't downloaded at all,
+           app.js shows #songpack-prompt-overlay instead of this dialog (same prompt as every
+           other "need the pack" entry point). -->
+      <div id="auto-assign-confirm-overlay" hidden>
+        <div id="auto-assign-confirm-dialog" class="glass">
+          <div class="clipper-header">
+            <span class="clipper-title">Overwrite current arrangement?</span>
+          </div>
+          <p id="auto-assign-confirm-text" class="auto-assign-confirm-text"></p>
+          <div class="auto-assign-confirm-actions">
+            <button class="btn-ghost" id="btn-auto-assign-cancel">Cancel</button>
+            <!-- Conference Pack -- fills whatever the team-specific default pack doesn't cover
+                 using shared conference-wide cues (Songs\Default\{Conference}\ files, not that
+                 team's own subfolder). Backfill-only (never overwrites a real assignment) so it's
+                 safe to run any time, including on top of an already-customized profile -- see
+                 handleAutoAssignConferenceClick in app.js. -->
+            <button class="btn-ghost" id="btn-auto-assign-conference" title="Fill any events this team doesn't have its own song for using shared conference-wide cues">Load Conference Pack</button>
+            <button class="btn-ghost" id="btn-auto-assign-guided" title="Step through every event one at a time, choosing/confirming each song yourself">Guided Assign...</button>
+            <button class="pill pill-auto-assign" id="btn-auto-assign-confirm-yes">Overwrite</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Guided Auto-Assign completion summary -- lists exactly which event on which team got
+           which song (or was skipped/cleared), instead of just a toast, so it's clear at a glance
+           what changed after stepping through a whole team ("assigned Touchdown -> Fight Song for
+           Michigan", etc). Shown by finishAutoAssignWizard in app.js. -->
+      <div id="auto-assign-summary-overlay" hidden>
+        <div id="auto-assign-summary-dialog" class="glass">
+          <div class="clipper-header">
+            <span class="clipper-title" id="auto-assign-summary-title">Guided Assign Complete</span>
+            <button id="btn-close-auto-assign-summary" class="icon-btn">&times;</button>
+          </div>
+          <div id="auto-assign-summary-list" class="clipper-assign-list"></div>
+          <div class="auto-assign-confirm-actions">
+            <button class="pill pill-auto-assign" id="btn-auto-assign-summary-done">Got it</button>
           </div>
         </div>
       </div>
@@ -229,10 +284,41 @@
           <span class="matchup-side-label">Assigning songs for:</span>
           <button class="matchup-side-btn" id="btn-side-away" data-side="away"></button>
           <button class="matchup-side-btn" id="btn-side-home" data-side="home"></button>
-          <!-- Auto-Assign (task queue): same ApplyDefaultProfileForTeam bridge call the GAMETIME
-               "Use Starter Profile" prompt uses -- only fills empty slots, never overwrites
-               existing assignments, so it's safe to click any time, not just first-run. -->
-          <button class="pill pill-auto-assign" id="btn-auto-assign" title="Fill any empty song slots for this team with the starter profile">Auto-Assign</button>
+          <!-- Auto-Assign -- confirms, then overwrites every slot for this team with the default
+               pack (ApplyDefaultProfileForTeamOverwrite). Prompts to download/import the pack
+               first if it isn't present yet (see handleAutoAssignClick). -->
+          <button class="pill pill-auto-assign" id="btn-auto-assign" title="Overwrite this team's song assignments with the default pack">Auto-Assign</button>
+          <!-- Quick-load-by-abbreviation: type a team's abbreviation/initials or partial name,
+               get a live best-match hint, confirm before actually switching the active profile
+               (same switch selectTeam() already does from the sidebar tile grid). -->
+          <span class="quick-load-wrap">
+            <input type="text" id="quick-load-input" class="team-picker-search quick-load-input" placeholder="Load profile: type abbrv (e.g. LSU)" maxlength="30" autocomplete="off" />
+            <span id="quick-load-hint" class="quick-load-hint"></span>
+          </span>
+          <button class="pill" id="btn-quick-load">Load</button>
+        </div>
+
+        <div id="quick-load-confirm-overlay" hidden>
+          <div id="quick-load-confirm-dialog" class="glass">
+            <div class="clipper-header">
+              <span class="clipper-title">Confirm Team</span>
+            </div>
+            <div id="quick-load-confirm-text" class="add-school-hint" style="font-size: 16px;"></div>
+            <div class="add-school-colors" style="margin-top: 10px;">
+              <button class="btn-ghost btn-block" id="btn-quick-load-no">No, keep typing</button>
+              <button class="btn-ghost btn-block" id="btn-quick-load-yes">Yes, load it</button>
+            </div>
+          </div>
+        </div>
+        <!-- Guided Auto-Assign wizard progress bar -- shown while startAutoAssignWizard() is
+             stepping through a team's events one at a time via the existing #clipper-assign panel
+             (see openWizardEventPicker/advanceAutoAssignWizard in app.js). Skip moves to the next
+             event without assigning; Cancel Wizard stops the whole run (events already confirmed
+             stay assigned). -->
+        <div id="auto-assign-wizard-bar" class="glass" hidden>
+          <span id="auto-assign-wizard-progress"></span>
+          <button class="btn-ghost" id="btn-auto-assign-wizard-skip">Skip Event</button>
+          <button class="btn-ghost btn-danger" id="btn-auto-assign-wizard-cancel">Cancel Wizard</button>
         </div>
         <div id="category-bar" class="glass">
           <div class="category-list" id="category-list"><!-- populated by app.js --></div>
@@ -291,14 +377,35 @@
                   <input type="text" id="clipper-assign-search" class="team-picker-search" placeholder="Search songs..." />
                 </div>
                 <div id="clipper-assign-list" class="clipper-assign-list"></div>
+
+                <!-- Embedded waveform trimmer -- replaces the native TrimmerForm popup. Swaps in
+                     for clipper-assign-list (same slot in .clipper-assign-main) when "Trim..." is
+                     clicked; clipper-assign-actions below swaps its own buttons the same way, so
+                     the same pill row keeps driving both modes instead of a second action bar. -->
+                <div id="clipper-trim-panel" class="clipper-trim-panel" hidden>
+                  <div class="clipper-trim-meta">
+                    <span id="clipper-trim-filename"></span>
+                    <span id="clipper-trim-times"><span id="clipper-trim-start-label">0:00.0</span> &ndash; <span id="clipper-trim-end-label">0:00.0</span></span>
+                  </div>
+                  <div id="clipper-trim-viewport">
+                    <canvas id="clipper-trim-canvas" width="900" height="120"></canvas>
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="clipper-assign-actions">
+            <div class="clipper-assign-actions" id="clipper-assign-actions-default">
               <button id="btn-clipper-assign-select" class="btn-primary" disabled>Assign Selected</button>
               <button id="btn-clipper-assign-browse" class="btn-ghost">Browse for file...</button>
               <button id="btn-clipper-assign-trim" class="btn-ghost">Trim...</button>
               <button id="btn-clipper-assign-import-pack" class="btn-ghost" title="Import the default song pack from a .zip or folder">Import Song Pack</button>
               <button id="btn-clipper-assign-clear" class="btn-ghost btn-danger">Clear Assignment</button>
+            </div>
+            <div class="clipper-assign-actions" id="clipper-trim-actions" hidden>
+              <button id="btn-trim-preview" class="btn-ghost">▶ Preview</button>
+              <button id="btn-trim-stop" class="btn-ghost">⏹ Stop</button>
+              <button id="btn-trim-save" class="btn-primary">Save Trim</button>
+              <button id="btn-trim-whistle" class="btn-ghost">Set as Lead-In Whistle</button>
+              <button id="btn-trim-cancel" class="btn-ghost">Cancel</button>
             </div>
           </div>
         </div>
@@ -350,6 +457,39 @@
           <div class="panel-title">Fire Sensitivity (Delay)</div>
           <input type="range" id="slider-sensitivity" min="0" max="30" value="10" step="1" class="slider" />
           <div class="slider-value"><span id="sensitivity-value">10</span>s until fade-out &mdash; no fade-in</div>
+        </div>
+        <!-- Big Game Rules editor -- was a hardcoded "quarter 4, score within 8 points" constant
+             in GameWatcher.cs with no UI at all; now user-editable and persisted (ConfigStore.
+             BigGameSettings / WebBridge.GetBigGameSettings/SaveBigGameSettings). When a live game
+             matches this rule, cue volume boosts to 100 (see BigEventHelper.cs). The "Show banner
+             on matchup screen" toggle controls #matchup-vs-badge's Big Game badge (see
+             updateMatchupSideBar/loadMatchup in app.js), independent of the live in-game rule
+             itself. -->
+        <div class="panel-section" id="big-game-section">
+          <div class="panel-title">Big Game Rules</div>
+          <label class="toggle-row">
+            <input type="checkbox" id="toggle-big-game-enabled" checked />
+            <span>Boost cue volume during a Big Game</span>
+          </label>
+          <div class="big-game-rule-row">
+            <span>Quarter</span>
+            <select id="big-game-quarter">
+              <option value="1">1st or later</option>
+              <option value="2">2nd or later</option>
+              <option value="3">3rd or later</option>
+              <option value="4" selected>4th only</option>
+            </select>
+          </div>
+          <div class="big-game-rule-row">
+            <span>Score within</span>
+            <input type="number" id="big-game-margin" min="0" max="99" value="8" class="big-game-margin-input" />
+            <span>points</span>
+          </div>
+          <label class="toggle-row">
+            <input type="checkbox" id="toggle-big-game-banner" />
+            <span>Show Big Game badge on the matchup screen</span>
+          </label>
+          <button id="btn-big-game-save" class="btn-ghost btn-block">Save Big Game Rules</button>
         </div>
         <div class="panel-section">
           <div class="panel-title">Reverb</div>
@@ -422,7 +562,10 @@
     <div id="bandroom-picker" class="glass">
       <div class="team-picker-header">
         <span>The Bandroom</span>
-        <button id="btn-close-bandroom" class="icon-btn">&times;</button>
+        <div class="team-picker-header-actions">
+          <button id="btn-forward-bandroom-album" class="icon-btn" title="Forward to last team" hidden>&rarr;</button>
+          <button id="btn-close-bandroom" class="icon-btn">&times;</button>
+        </div>
       </div>
       <div class="bandroom-sidebar">
         <div class="bandroom-hub-section-label">Your Library</div>
@@ -466,7 +609,8 @@
     <div id="bandroom-album" class="glass">
       <div class="team-picker-header">
         <div class="bandroom-album-title">
-          <span class="team-swatch bandroom-album-icon" id="bandroom-album-icon"></span>
+          <button id="btn-back-bandroom-album" class="icon-btn" title="Back to team select">&larr;</button>
+          <span class="team-swatch bandroom-album-icon" id="bandroom-album-icon" title="Back to team select"></span>
           <span id="bandroom-album-name">Team</span>
         </div>
         <button id="btn-close-bandroom-album" class="icon-btn">&times;</button>
@@ -477,7 +621,24 @@
         <button id="btn-bandroom-album-import-pack" class="btn-ghost" title="Import the default song pack from a .zip or folder">Import Song Pack</button>
         <button id="btn-bandroom-album-download-all" class="btn-ghost" title="Download every item in this album">Download All</button>
       </div>
-      <div class="bandroom-album-grid" id="bandroom-songs-grid"><!-- populated by app.js: songs + background images together --></div>
+      <!-- Type filter pills -- All/Songs/Backgrounds, same "All Genre / Sound Effect / Hip Hop"
+           row shape as the marketplace-layout reference image, adapted to Bandroom's actual two
+           content types (there's no genre metadata on uploads, just song vs. background image).
+           Wired in app.js (see bandroomAlbumTypeFilter). -->
+      <div class="bandroom-album-filters" id="bandroom-album-filters">
+        <button class="pill bandroom-album-filter active" data-type="all">All</button>
+        <button class="pill bandroom-album-filter" data-type="song">Songs</button>
+        <button class="pill bandroom-album-filter" data-type="image">Backgrounds</button>
+      </div>
+      <!-- Column header row for the list below -- Title/Type/Uploaded/Actions, same idea as the
+           reference image's Title/Genre/Mood/Duration/License header over its track table. -->
+      <div class="bandroom-album-list-header">
+        <span class="bandroom-album-col-title">Title</span>
+        <span class="bandroom-album-col-type">Type</span>
+        <span class="bandroom-album-col-meta">Uploaded</span>
+        <span class="bandroom-album-col-actions">Actions</span>
+      </div>
+      <div class="bandroom-album-grid bandroom-album-grid-list" id="bandroom-songs-grid"><!-- populated by app.js: songs + background images together --></div>
     </div>
   </div>
 
@@ -612,7 +773,7 @@
       </div>
       <div id="logo-crop-controls">
         <button id="btn-logo-crop-choose" class="btn-ghost">Choose Image...</button>
-        <input type="range" id="logo-crop-zoom" min="100" max="900" value="100" disabled />
+        <input type="range" id="logo-crop-zoom" min="50" max="900" value="100" disabled />
       </div>
       <div class="save-profile-actions">
         <button id="btn-logo-crop-cancel" class="btn-ghost">Cancel</button>
@@ -644,7 +805,7 @@
       </div>
       <div id="bg-crop-controls">
         <button id="btn-bg-crop-choose" class="btn-ghost">Choose Image...</button>
-        <input type="range" id="bg-crop-zoom" min="100" max="900" value="100" disabled />
+        <input type="range" id="bg-crop-zoom" min="50" max="900" value="100" disabled />
       </div>
       <div class="save-profile-actions">
         <button id="btn-bg-crop-cancel" class="btn-ghost">Cancel</button>
@@ -659,7 +820,11 @@
   <div id="my-downloads-overlay" hidden>
     <div id="my-downloads" class="glass">
       <div class="team-picker-header">
-        <span>My Downloads</span>
+        <div class="bandroom-album-title">
+          <button id="btn-back-my-downloads" class="icon-btn" title="Back to The Bandroom">&larr;</button>
+          <span>My Downloads</span>
+          <span id="my-downloads-count" class="my-downloads-count"></span>
+        </div>
         <button id="btn-close-my-downloads" class="icon-btn">&times;</button>
       </div>
       <p class="bandroom-instructions">
@@ -667,11 +832,38 @@
         list them right away). Images are saved for later -- open a downloaded background from
         here if you want to set it as that team's live background.
       </p>
+      <div class="my-downloads-toolbar">
+        <input type="text" id="my-downloads-search" class="team-picker-search" placeholder="Search your downloads..." />
+        <div class="my-downloads-filters" id="my-downloads-filters">
+          <button class="pill my-downloads-filter active" data-filter="all">All</button>
+          <button class="pill my-downloads-filter" data-filter="song">Songs</button>
+          <button class="pill my-downloads-filter" data-filter="image">Backgrounds</button>
+          <button class="pill my-downloads-filter" data-filter="local">Your Uploads</button>
+          <button class="pill my-downloads-filter" data-filter="missing">Missing</button>
+        </div>
+        <select id="my-downloads-sort" class="bandroom-hub-sort" title="Sort">
+          <option value="newest">Newest</option>
+          <option value="name">Name A-Z</option>
+          <option value="school">By School</option>
+        </select>
+        <label class="toggle-row my-downloads-group-toggle">
+          <input type="checkbox" id="my-downloads-group-by-school" />
+          Group by school
+        </label>
+      </div>
       <!-- End-user "import my own song" pipeline (item 21) -- picks a local file, names it,
            trims/normalizes it through the same tool a marketplace track uses, and it lands
            right here alongside real downloads. -->
       <button id="btn-import-local-song" class="btn-ghost bandroom-import-song-btn">+ Import Your Own Song</button>
-      <div class="bandroom-album-grid" id="my-downloads-grid"><!-- populated by app.js --></div>
+      <!-- Same column-header treatment as Sound Bank (#bandroom-songs-grid) -- group headers
+           (per-school when "Group by school" is on) still span the full row above these labels. -->
+      <div class="bandroom-album-list-header">
+        <span class="bandroom-album-col-title">Title</span>
+        <span class="bandroom-album-col-type">Type</span>
+        <span class="bandroom-album-col-meta">Downloaded</span>
+        <span class="bandroom-album-col-actions">Actions</span>
+      </div>
+      <div id="my-downloads-list" class="bandroom-album-grid-list"><!-- populated by app.js --></div>
     </div>
   </div>
 
@@ -697,6 +889,15 @@
     <div id="matchup-dialog" class="glass">
       <div class="matchup-header">
         <span>Start a Game</span>
+        <!-- Scorebug switcher -- pill + arrows (owner-requested), lets you pick which scorebug
+             layout Bandroom watches for (PC CBS skins vs. Console/Remote Play) right from the
+             matchup screen instead of only via the gear-icon Settings dialog. Cycles through
+             ScorebugPreset.AllPresets, see initScorebugSwitcher/cycleScorebugPreset in app.js. -->
+        <div class="scorebug-switcher" id="scorebug-switcher" title="Which scorebug layout Bandroom watches for">
+          <button class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-prev" data-dir="-1" title="Previous scorebug layout">&#8249;</button>
+          <span class="pill scorebug-switcher-pill" id="scorebug-switcher-name">...</span>
+          <button class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-next" data-dir="1" title="Next scorebug layout">&#8250;</button>
+        </div>
         <button id="btn-close-matchup" class="icon-btn">&times;</button>
       </div>
       <p class="matchup-instructions">
@@ -727,7 +928,14 @@
           </div>
           <div class="coverflow-name" id="matchup-away-name"></div>
         </div>
-        <div class="matchup-vs-badge" id="matchup-vs-badge"><span>VS</span></div>
+        <!-- Gameday logo replaces the old plain "VS" text badge AND the separate "BIG GAME" pill
+             underneath it (see updateMatchupBigGameBadge in app.js) -- the logo is now the
+             centerpiece mark itself rather than disappearing/reappearing, so the "Show Big Game
+             badge" setting instead adds a .big-game-active class for an intensified glow-pulse,
+             same --away-badge-color/--home-badge-color mechanism as before. -->
+        <div class="matchup-vs-badge" id="matchup-vs-badge">
+          <img src="https://appassets/assets/gameday-logo.png" alt="Gameday" class="matchup-gameday-logo" id="matchup-gameday-logo">
+        </div>
         <div class="matchup-column matchup-column-home">
           <div class="matchup-column-title">Home</div>
           <input type="text" id="matchup-home-search" placeholder="Search teams..." class="team-picker-search" />

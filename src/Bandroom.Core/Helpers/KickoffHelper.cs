@@ -16,6 +16,17 @@ public sealed class KickoffHelper : IRuleEvaluator
 {
     bool _didFire;
 
+    // FIXED 2026-08-09: Quarter == 1/3 alone doesn't mean "the FIRST kickoff of that quarter" --
+    // e.g. a Q1 pick-six followed by the ensuing kickoff is still Quarter == 1, so every kickoff
+    // for the rest of the opening quarter kept re-firing "Other: Opening Kickoff", and likewise
+    // any later Q3 kickoff re-fired "Other: Second-Half Kickoff". These now gate on "haven't
+    // fired this variant yet THIS GAME" (see GameWatcher.Start(), which now rebuilds evaluators
+    // fresh per game so this doesn't leak into the next one either) so only the true first
+    // kickoff of each half gets the special cue; every kickoff after that falls through to the
+    // ordinary kicking/receiving branches below.
+    bool _openingKickoffFired;
+    bool _secondHalfKickoffFired;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         if (!state.Current.IsKickoff)
@@ -29,9 +40,10 @@ public sealed class KickoffHelper : IRuleEvaluator
 
         _didFire = true;
 
-        // Opening kickoff: 1st quarter, first time kickoff is seen
-        if (state.Current.Quarter == 1)
+        // Opening kickoff: 1st quarter, first time kickoff is seen this game
+        if (state.Current.Quarter == 1 && !_openingKickoffFired)
         {
+            _openingKickoffFired = true;
             return new TriggerEvent
             {
                 EventKey = "Other: Opening Kickoff",
@@ -40,9 +52,10 @@ public sealed class KickoffHelper : IRuleEvaluator
             };
         }
 
-        // Second-half kickoff: 3rd quarter
-        if (state.Current.Quarter == 3)
+        // Second-half kickoff: 3rd quarter, first time kickoff is seen this half
+        if (state.Current.Quarter == 3 && !_secondHalfKickoffFired)
         {
+            _secondHalfKickoffFired = true;
             return new TriggerEvent
             {
                 EventKey = "Other: Second-Half Kickoff",

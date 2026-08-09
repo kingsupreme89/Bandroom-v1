@@ -1,0 +1,562 @@
+================================================================================
+  BANDROOM — COMPLETE FEATURE ROADMAP & STATE OF THE APP
+  College Football Stadium Sound Command Center
+  Generated: August 8, 2026
+================================================================================
+
+================================================================================
+  SECTION A: WHAT ALREADY EXISTS (DO NOT REBUILD)
+================================================================================
+
+ENGINE:
+  - 17 event evaluators (Touchdown, FirstDown, Turnover, FG/PAT, Safety, Penalty,
+    TFL, Kickoff, Timeout, BigEvent, Defense, OffenseDown, DownFieldPosition,
+    DriveStarter, GameStateEvent, FieldGoalMissed, NoPuntReturn)
+  - 42 EventKeys across 6 categories (Downs, Scoring, Turnovers, Special Teams,
+    Penalties, Hype) — see docs/EVENT_KEY_MAP.md
+  - EventRouter with GameState (Previous/Current snapshot) → Route() → TriggerEvent[]
+  - PlaySnapshot: Down, YardsToGo, Quarter, PossessionAway, IsKickoff, IsPAT,
+    IsTouchdown, IsTurnover, YardLine, HomeScore, AwayScore, TimeRemainingSeconds
+  - GameWatcher (Windows): WinRT OCR + GDI CopyFromScreen + ScorebugPreset
+  - GameWatcher (Mac): Python subprocess bridge + Vision/Tesseract OCR + screencapture
+
+AUDIO:
+  - AudioPlayer (Windows): NAudio WaveOutEvent, full volume control, smooth fade-out,
+    PaVolume, LeadIn whistle, Reverb presets (Stadium/Dome/NightGame), per-path
+    20s cooldown, isPreview fast path, ClearCooldown, Warmup, StopAll
+  - AudioPlayer (Mac): afplay + -v volume, per-path cooldown, StopAll via Process
+    tracking, isPreview, PaVolume, hard-stop fade
+
+CONFIG & PROFILES:
+  - ConfigStore: triggers.json, per-team profiles, Generic fallback profile,
+    marketplace downloads manifest, local tracks manifest, auth sessions,
+    user profile (stats, streak, achievements), first-run detection,
+    scorebug preset, lead-in whistle enabled flag
+  - TeamColors: 134 FBS teams with Primary/Secondary/Accent colors
+  - TeamLogo: PNG image finder
+  - TeamBackdrop: background image finder (user + bundled)
+  - CategoryMap: trigger → category (Downs/Scoring/Turnovers/Special Teams/Penalties/Hype)
+  - TriggerEntry: Trigger, Event, AudioFile, PaAudioFile, Volume
+  - ConfigProfileManager: save/load/delete/list profiles
+  - ProfileSyncService: cloud push/pull via marketplace worker
+  - GoogleAuthService: browser-based OAuth sign-in
+  - UserCountService: live user counter heartbeat
+  - VersionGuard: downgrade detection
+  - VolumeProfilePreset: volume configuration presets
+  - ScorebugPreset: OCR calibration profiles
+  - DefaultSongPackService: download + extract default song pack
+
+UI:
+  - WebView2 (Windows): embedded Chromium with virtual host mappings
+  - HTTP Server (Mac): localhost:18765 serving wwwroot/
+  - Glassmorphism design: backdrop-filter blur, team-adaptive colors
+  - Category drawers: Offense, Defense, Situations (collapsible)
+  - Event assignment cards with file picker
+  - Clipping island: inline waveform trimmer, song picker, volume per event
+  - Matchup picker: Home/Away team select → GAMETIME lock
+  - Mixer panel: Master/Home/Away/PA volume sliders, reverb, lead-in whistle
+  - Marketplace: browse, download, My Downloads, upload, profile sharing
+  - Profile tab: favorite team, rival, bio, stats, achievements, avatar
+  - Updates panel: GitHub changelog
+  - KeyboardHook (Windows): numpad hotkeys
+  - KeyboardHook (Mac): Carbon Event Tap numpad hotkeys
+
+MARKETPLACE:
+  - Cloudflare Worker: upload/download/list/auth/verify/admin
+  - marketplace_downloads.json manifest
+  - local_tracks.json manifest
+  - Import local song → trim/normalize → share to marketplace
+
+MAC BUILD:
+  - Avalonia window shell
+  - Shared Bandroom.Core (all 17 evaluators)
+  - Shared 13 root .cs files
+  - Shared wwwroot/ (HTML/CSS/JS)
+  - Shared Assets/, TeamLogos/, TeamBackgrounds/, Fonts/, Songs/Default/
+  - PlatformStubs: CrashLog, Theme, TeamBackdrop, TeamBackgroundDownloadService
+
+================================================================================
+  SECTION B: 100 FEATURE ROADMAP — CATEGORIZED BY PRIORITY
+  P0 = NOW (this sprint, 0-2 days)
+  P1 = SOON (this week)
+  P2 = NEXT (this month)
+  P3 = SOMEDAY (quarter+)
+================================================================================
+
+----------------------------------------------------------------------
+CATEGORY 1: ATMOSPHERE, REVERB & DSP TUNING (Features 1-10)
+----------------------------------------------------------------------
+
+[P2]  1. Dynamic Stadium Size Reverb
+       Reverb scales based on real stadium capacity (Michigan 107k = massive
+       decay, Boise State 36k = tight). Add StadiumCapacity to TeamColors,
+       calculate ReverbProvider params from capacity.
+
+[P2]  2. "Upper Deck vs Field Level" EQ Profiles
+       Preset switches: student section, press box, sideline, tailgate lot.
+       Different EQ curves per listening position.
+
+[P3]  3. P.A. Echo & Slapback Delay
+       Micro-delay slider for Stadium Announcer voices emulating sound
+       bouncing off upper decks. Separate audio chain for PA clips.
+
+[P1]  4. Crowd Audio Ducking Percentage
+       Slider 0-100% to auto-lower game crowd noise when custom band track
+       fires. New DuckingLevel float in AudioPlayer. Store previous volume,
+       apply ducked level, restore after clip. BIGGEST AUDIO QUALITY WIN.
+
+[P3]  5. Weather Acoustic Modifiers
+       Cold/rain presets auto-damp high frequencies (wet grass acoustics)
+       vs Dome/Acoustic Clear modes. Needs weather detection or manual toggle.
+
+[P3]  6. 3D Spatial Panning
+       Pan brass instruments left/right to simulate visiting/home band
+       position in stadium. Requires stereo channel manipulation.
+
+[P2]  7. Master Bass Shaker / Subwoofer Boost
+       Low-end EQ punch for stadium bass drums, tubas, touchdown cannons.
+       BassBoost float 0.0-1.0. NAudio: low-shelf filter. Mac: limited.
+
+[P1]  8. Pre-Roll Fade-In Curve (EXCLUDED PER OWNER REQUEST)
+       SKIP — owner does not want fade-in.
+
+[P1]  9. Post-Event Smart Crossfade
+       Hard-cut crossfade out of fight song back into game audio at clip end.
+       Already have FadeStartSeconds/FadeOutDuration. Tune values per clip.
+
+[P3] 10. Headset vs Home Theater Equalizer
+       Quick toggles: SteelSeries/Astro headsets vs 5.1 surround. Flat,
+       Headset (+3dB treble, -2dB bass), HomeTheater (flat), Bass (+6dB low).
+
+----------------------------------------------------------------------
+CATEGORY 2: SITUATION & TRIGGER GRANULARITY (Features 11-20)
+----------------------------------------------------------------------
+
+[P1] 11. Rivalry "Big Game" Multiplier
+       Flag rivalry matchups (Iron Bowl, The Game) → auto-boost volume +3dB,
+       activate aggressive crowd chants. Hardcode rival pairs in TeamColors.
+
+[P1] 12. 3rd & Short vs 3rd & Long Differentiation
+       Separate cards for 3rd & 1-3 (tense drumline) vs 3rd & 8+
+       (full hype horn). DefenseHelper checks YardsToGo, emits different
+       EventKeys. Needs OCR yards-to-go.
+
+[P1] 13. "Red Zone" Suspense Loops
+       Background tension loop auto-triggers when offense enters 20-yard
+       line. New RedZoneHelper evaluator. Needs OCR yardline.
+
+[P1] 14. 4th Quarter Clutch Mode
+       Auto audio override if score within 7 points under 2:00 remaining.
+       New ClutchModeHelper. Needs OCR score + time.
+
+[P0] 15. Targeted TFL / Sack Audio Stings
+       Unique audio slots for tackles for loss, sacks, forced fumbles.
+       TflHelper already exists — add granularity to EventKeys.
+
+[P1] 16. Interception / Pick-Six Specific Banks
+       Split TurnoverHelper EventKeys: regular INT vs pick-six.
+       Check IsTouchdown on same snapshot.
+
+[P2] 17. Opponent Timeout "Surrender Cobra" Stings
+       Play taunting band riffs when opposing coach burns timeout while
+       losing. TimeoutHelper already fires — add score-check logic.
+
+[P2] 18. First Down Chain Gang Stings
+       Quick 3-second brass stings firing the exact frame 1st down gained.
+       FirstDownHelper variant for short gains (≤3 yards).
+
+[P1] 19. Field Goal Miss / Blocked Kick Disappointment Stings
+       Sad brass / crowd groan on missed/blocked kicks. Split
+       FieldGoalMissedHelper into Missed and Blocked keys.
+
+[P3] 20. Coaching Challenge Pending Loop
+       Jeopardy-style suspense drum cadence while referee reviews play.
+       Needs OCR detection of review screen.
+
+----------------------------------------------------------------------
+CATEGORY 3: VISUAL GLASSMORPHISM & UI AESTHETICS (Features 21-30)
+----------------------------------------------------------------------
+
+[P1] 21. Team-Adaptive RGB Glow Borders
+       Active cards and headers glow with primary & secondary hex colors
+       of loaded team. CSS custom properties from TeamColors.
+
+[P2] 22. Dynamic Live Waveform Visualizer
+       Real-time glass canvas showing audio waveforms in active trigger slot.
+       Web Audio API AnalyserNode on local file playback.
+
+[P1] 23. Blur Depth Adjustment Slider
+       Tune backdrop-filter: blur() from crisp dark mode to heavy frosted
+       glass. CSS variable controlled by range input.
+
+[P0] 24. Scorebug Status LED
+       Top-corner indicator: GREEN=Live Scanning, YELLOW=Calibrating,
+       RED=Scorebug Hidden. CSS pulse animation + JS watchstate listener.
+
+[P3] 25. Animated Team Mascot / Crest Watermark
+       Faded glass watermark of active school logo in background pane.
+       Opacity 0.05 logo positioned fixed.
+
+[P1] 26. Compact Overlay "HUD Mode"
+       Shrink app to floating glass bar over secondary monitors or streams.
+       CSS class toggle, hotkey Ctrl+H. Window resize to ~400x80.
+
+[P2] 27. Hover Card Magnification
+       Subtle 3D lift and edge-light glow on card hover. CSS transform:
+       scale(1.02) + box-shadow transition.
+
+[P1] 28. High-Contrast Streamer High-Vis Theme
+       High-visibility mode for OBS/Twitch capture. Increased contrast,
+       thicker borders, larger text. CSS theme toggle.
+
+[P3] 29. Audio Peak Meters on Every Category Header
+       Live audio level meters for Offense, Defense, Special Events rows.
+       Web Audio API per-category AnalyserNode.
+
+[P3] 30. Drag-and-Drop Card Reordering
+       Reorder situation cards by personal preference. HTML5 drag-and-drop
+       on the card grid, persist order in config.
+
+----------------------------------------------------------------------
+CATEGORY 4: SPEED & WORKFLOW AMENITIES (Features 31-40)
+----------------------------------------------------------------------
+
+[P0] 31. One-Click Team Auto-Populate
+       Single button fetches and fills every situation with top-rated
+       community tracks from marketplace. API call → assign by EventKey.
+
+[P1] 32. Batch MP3 Drag-and-Drop with Auto-Assign
+       Drag 10 files → IntakeEngine parses filenames → auto-map to
+       TD, 3rd Down, Kickoff etc. WebMainForm OnSongDragDrop extended.
+
+[P0] 33. Built-In Waveform Trimmer with Auto-Normalize
+       Trim start/end inside card with volume leveling. CLIPPER ISLAND
+       EXISTS — needs polish. Auto-normalize post-trim.
+
+[P1] 34. Global Mute / Panic Button
+       Big red [STOP ALL AUDIO] button. Hotkey Escape. AudioPlayer.StopAll()
+       already exists. UI button + keyboard listener.
+
+[P1] 35. Multi-Track Randomizer Pool
+       Assign 3 songs to "Touchdown" (Track A, B, C) and rotate.
+       TriggerEntry.AlternateFiles list. FireEvent picks random, avoids
+       immediate repeat.
+
+[P1] 36. Quick Test / Fire Preview Button on Hover
+       Hover card = "Test Fire" button with live volume/reverb. CSS :hover
+       reveals play button. PreviewEventFromWeb already wired.
+
+[P2] 37. Undo / Redo Mapping History
+       Ctrl+Z for accidentally cleared triggers. Simple undo stack per session.
+
+[P1] 38. Profile Cloning (Home → Away)
+       One-click: copy Home team setup to Away team. ConfigStore.SaveProfile
+       then reload config. Trivial — 5 lines of code.
+
+[P1] 39. Export / Import .BAND File Packs
+       One-click bundle sharing: export team config as .band (zip: JSON +
+       optional audio refs). Import matches by filename/checksum.
+
+[P2] 40. Search & Filter Everything
+       Ctrl+K command bar to instantly find any trigger or setting.
+       Simple JS fuzzy search over event list + settings keys.
+
+----------------------------------------------------------------------
+CATEGORY 5: COMMUNITY, MARKETPLACE & CREATOR FEATURES (Features 41-50)
+----------------------------------------------------------------------
+
+[P1] 41. Community "Pack Creator" Profile Badges
+       Creator avatar, download count, 5-star ratings next to uploaded
+       team packs. Marketplace worker returns creator metadata.
+
+[P3] 42. Verified Band Director Tags
+       Official badges for real college marching band members/arrangers.
+       Manual verification by admin.
+
+[P2] 43. One-Tap "Apply Community Skin"
+       Loading team pack auto-applies custom background + logo artwork
+       uploaded by creator. SetTeamBackground on profile load.
+
+[P1] 44. Trending Sounds Row
+       "Most Used This Weekend" row in marketplace. Worker returns items
+       by download count in last 72 hours. Horizontal scroll UI row.
+
+[P1] 45. DMCA-Safe Filter Toggle
+       Hide copyrighted commercial audio, show only royalty-free marching
+       band for Twitch streamers. Marketplace contentType field.
+
+[P3] 46. Creator Tip Jar Link Integration
+       BuyMeACoffee / Ko-fi links on creator profiles. Store in worker DB.
+
+[P2] 47. Community Comment & Rating Drawer
+       Click assigned pack → reviews and feedback. Worker stores ratings.
+
+[P3] 48. Audio Stem Separator Integration
+       Built-in AI tool isolating brass/drums from uploaded stadium
+       recordings. Demucs or Spleeter integration — heavy compute.
+
+[P2] 49. "Request a Team" Voting Hub
+       Community upvotes missing FCS or historical teams. Simple upvote
+       counter on worker.
+
+[P1] 50. Auto-Sync Marketplace Updates
+       Prompt when creator updates a sound pack with higher-quality audio.
+       Version field on packs, compare on launch, badge in My Downloads.
+
+----------------------------------------------------------------------
+CATEGORY 6: NOSTALGIA, NCAA 14 & SETTINGS (Features 51-60)
+----------------------------------------------------------------------
+
+[P3] 51. "NCAA 14 Retro Mode" UI Theme
+       Optional skin mimicking dark-blue/silver tab interface of 2013
+       Dynasty menus. Alternate CSS stylesheet.
+
+[P2] 52. Legacy Menu Sound FX Toggle
+       Authentic blips, clicks, whistle UI sounds when navigating tabs.
+       PlayUiClickSoundFromWeb already exists — swap samples.
+
+[P1] 53. Super Sim Auto-Mute Logic
+       Detects Super Sim in Dynasty → silences triggers until user
+       resumes control. OCR pattern "Super Sim" or rapid-score-change
+       detection.
+
+[P3] 54. Classic Stadium Announcer Voice Simulator
+       Built-in phrase generator for old-school call-outs: "Tackled by
+       number 55, loss of 2 on the play." Template engine with TTS.
+
+[P2] 55. Custom Trophy Room Integration
+       Unlockable achievements: "Assigned 100 Fight Songs", "Hosted 10
+       Stream Sessions". Already have achievements in GetUserProfile —
+       add more + trophy UI.
+
+[P3] 56. Dynasty Mode Era Presets
+       Audio profiles: 1990s analog stadium setups vs modern LED/DJ
+       stadium atmospheres. Different reverb/EQ presets.
+
+[P3] 57. Pipe & Drumline Solo Toggle
+       Force all 3rd down triggers to raw drum cadences instead of full
+       brass. Audio routing flag.
+
+[P3] 58. Halftime Show Audio Player
+       Dedicated 15-minute scheduled band medley during halftime breaks.
+       Timer-based playlist.
+
+[P2] 59. Authentic Cannon / Firework Trigger
+       Dedicated sub-bass firework impact layered under Touchdown music.
+       PaAudioFile concurrent play already supports this.
+
+[P3] 60. Post-Game Alma Mater Sing-Along
+       Auto-trigger school alma mater when victory screen appears.
+       OCR "Final" or "Game Over" detection.
+
+----------------------------------------------------------------------
+CATEGORY 7: TECHNICAL ENGINE, OCR & DIAGNOSTICS (Features 61-70)
+----------------------------------------------------------------------
+
+[P2] 61. Screen Scan FPS Tuner
+       Adjustable slider (2 FPS to 30 FPS) to balance CPU/GPU load vs
+       detection speed. Modify GameWatcher polling interval.
+
+[P1] 62. OCR Calibration Magnifier Panel
+       Interactive preview showing live screen capture pixels over
+       scorebug area. HTML canvas rendering OCR region.
+
+[P1] 63. OCR False-Positive Flicker Guard
+       Smart debounce timer preventing double-firing if graphic blinks
+       mid-play. Already have 20s per-path cooldown — add millisecond
+       dedup window for identical OCR reads.
+
+[P3] 64. WASAPI / ASIO Low-Latency Audio Routing (Windows)
+       Native low-latency engine option. NAudio WasapiOut instead of
+       WaveOutEvent. ~10ms vs ~100ms latency. Windows only.
+
+[P2] 65. Virtual Audio Cable Output Routing
+       Route Bandroom audio straight to OBS/Discord Virtual Cables
+       without doubling in headphones. Selectable output device.
+
+[P2] 66. System Tray Minimization
+       Minimize to tray with background execution. WinForms NotifyIcon,
+       Avalonia TrayIcon. "Show Bandroom" + "Exit" context menu.
+
+[P3] 67. Hardware Acceleration Engine Toggle
+       GPU-accelerated blur/rendering options for budget PCs. WebView2
+       GPU flags.
+
+[P2] 68. Real-Time Performance Diagnostic Bar
+       Mini meters: CPU, RAM, Audio Latency at bottom of screen.
+       Process.GetCurrentProcess() stats.
+
+[P1] 69. Auto-Detect Game Launch
+       Auto-wakes and loads team profile when College Football .exe or
+       Remote Play launches. Process monitoring.
+
+[P1] 70. Local Log File Exporter
+       One-click diagnostic log export for Discord bug resolution.
+       ocr_debug.log + crash.log → zip download.
+
+----------------------------------------------------------------------
+CATEGORY 8: AI COMMENTARY & VOICE CUSTOMIZATION (Features 71-80)
+----------------------------------------------------------------------
+
+[P2] 71. Live AI Play-by-Play Voice Clone Selector
+       Choose between announcer voice personas: Energetic Hype, Deep South
+       Radio Legend, Press Box PA. Voice reference clips per persona.
+
+[P2] 72. Commentary Ducking Engine
+       Auto-ducks fight songs down 40% when AI commentator speaks.
+       DuckingLevel applied during PaVolume playback.
+
+[P3] 73. Custom School/Player Pronunciation Dictionary
+       User-editable phonetic guide so AI never mispronounces local
+       school names. JSON dictionary fed to TTS.
+
+[P3] 74. Radio Broadcast Filter DSP
+       Apply subtle AM Radio / Telecommunication filter to commentary
+       for retro realism. Bandpass EQ + light distortion.
+
+[P2] 75. User Voice Clone Trainer Link
+       Simple 60-second voice recorder allowing players to clone their
+       OWN voice into the commentator. F5-TTS zero-shot cloning.
+
+[P2] 76. In-Game Momentum Commentary Prompts
+       AI comments on dynamic momentum swings: "That's 21 unanswered
+       points!" Score-change tracking triggers.
+
+[P3] 77. Press Box Stadium Announcer Preset
+       Voice style tuned to emulate high-altitude stadium PA speakers.
+       EQ + reverb preset.
+
+[P3] 78. Language / Accent Modifiers
+       Custom commentary accents for regional immersion. TTS voice
+       selection.
+
+[P3] 79. AI Commentary Frequency Slider
+       Control how often commentary speaks: Off, Rare, Selective,
+       Non-Stop. Event-type gating.
+
+[P2] 80. One-Touch Script Editing
+       Edit AI phrase templates directly from settings drawer.
+       Editable textarea → commentary_templates.json.
+
+----------------------------------------------------------------------
+CATEGORY 9: MULTI-SCREEN & MOBILE INTEGRATION (Features 81-90)
+----------------------------------------------------------------------
+
+[P2] 81. Mobile Remote Controller Web App
+       QR code opens mobile web app to trigger hotkey sounds from phone.
+       Serve mobile.html from localhost, show QR code in main UI.
+
+[P2] 82. Elgato Stream Deck Plugin
+       Native integration: manifest.json + JS HTTP to localhost API.
+       Add /api/trigger/{eventKey} endpoint to HTTP server.
+
+[P2] 83. Discord Rich Presence
+       Live status: "Playing as LSU vs Alabama — Q3 14-10".
+       Discord Game SDK or named pipe IPC.
+
+[P1] 84. Multi-Monitor Window Pinning
+       Keep Bandroom always-on-top on secondary displays. TopMost =
+       true already in Settings. Expose toggle in web UI.
+
+[P2] 85. Discord Voice Channel Bot Relay
+       Stream stadium music directly into Discord voice channel for
+       Dynasty league buddies. Virtual cable routing or bot process.
+
+[P3] 86. Twitch Chat Trigger Integration
+       Channel point rewards or chat commands (!td, !neck) fire stings.
+       Twitch IRC connection + OAuth.
+
+[P2] 87. Cross-Device Cloud Profile Sync
+       Auto-sync all custom profiles across multiple PCs. Extend
+       ProfileSyncService to sync team profiles, not just user stats.
+
+[P3] 88. Hotkey Overlay HUD for Dual Controllers
+       Assign hotkeys to unused Xbox/PlayStation controller button
+       combos. Windows.Gaming.Input or SDL2.
+
+[P2] 89. OBS Studio Dock Panel
+       Embedded browser dock at http://localhost:18765/obs-dock.html.
+       Compact view: current song + trigger log + mute.
+
+[P3] 90. Gamepad Vibration Feedback Sync
+       Controller vibrates on stadium bass hits or touchdown triggers.
+       Windows.Gaming.Input / CoreHaptics.
+
+----------------------------------------------------------------------
+CATEGORY 10: GROWTH, ONBOARDING & USER RETENTION (Features 91-100)
+----------------------------------------------------------------------
+
+[P1] 91. "First-Time Setup" 60-Second Wizard
+       Guided wizard: auto-detect resolution, capture scorebug region,
+       map primary school in 3 clicks. Walkthrough overlay in JS.
+
+[P1] 92. Instant Audio Demo Mode
+       "Play Sample Game Drive" button simulates OCR triggers without
+       needing a live console running. Pre-recorded sequence of events.
+
+[P2] 93. Community Leaderboard
+       Display top downloaded team creators on app home screen.
+       Worker /leaderboard endpoint.
+
+[P2] 94. Daily Featured School Showcase
+       Daily spotlight on specific university band history and community
+       audio pack. 365-school roster, day-of-year rotation.
+
+[P3] 95. Share to TikTok / X (Twitter) Clip Generator
+       One-click: last 15s gameplay + Bandroom audio overlay → video.
+       Screen recorder ring buffer + ffmpeg render.
+
+[P2] 96. In-App Discord Community Widget
+       Live view of active creators in Discord server. Discord widget
+       embed in web UI.
+
+[P1] 97. Version Auto-Update Notification Banner
+       Silent background updates with "What's New in v1.1" changelog
+       modal. Already have Squirrel (Windows) + changelog service.
+
+[P3] 98. Custom Team Badge Uploader
+       Upload custom high-res PNG logos for Teambuilder / creation
+       schools. SaveCustomTeamLogo already exists — needs crop UI.
+
+[P1] 99. Interactive Onboarding Tooltips
+       Glowing pulse animations walking new users through first track
+       assignment. CSS animation + JS tutorial steps.
+
+[P3] 100. "Built by Gamers, for Gamers" Footer
+        Subtle brand signature linking to release notes, patent info,
+        and community roadmap. HTML footer element.
+
+================================================================================
+  SECTION C: MAC BUILD STATUS (Current as of 2026-08-08)
+================================================================================
+
+COMPLETE (7 files, ~2,000 lines new/rewritten):
+  AudioPlayer.Mac.cs       — afplay + -v volume, full API parity
+  MacWebBridge.cs          — 58+ JS-callable methods
+  MainWindow.axaml.cs      — Full event pipeline, Generic fallback, PA layer
+  GameWatcher.Mac.cs       — Python subprocess OCR bridge
+  bandroom_ocr_bridge.py   — Vision/Tesseract OCR script (280 lines)
+  PlatformStubs.Mac.cs     — SetFromLocalFile, CrashLog, Theme, TeamBackdrop
+  Bandroom.Mac.csproj      — OCR script in build output
+
+STILL STUBBED (future work):
+  - Smooth audio fade-out (afplay limitation)
+  - Gapless lead-in whistle (sequential afplay processes)
+  - Embedded WebView (currently external browser)
+  - Auto-updater (Sparkle needed for Mac)
+  - Native Settings/Trimmer/AssignTrack dialogs (web UI handles these)
+  - Color-based possession detection (OCR text-based only)
+  - Scorebug preset support (no calibration data for Mac)
+
+================================================================================
+  SECTION D: QUICK START — HOW TO BUILD & RUN ON MAC
+================================================================================
+
+1. Copy c:\Bandroom to your Mac (USB, AirDrop, Google Drive)
+2. Install .NET: /bin/bash -c "$(curl -fsSL https://dot.net/v1/dotnet-install.sh)"
+3. Install OCR: pip3 install pyobjc-framework-Vision
+4. Terminal: cd Bandroom/src/Bandroom.Mac && dotnet run
+5. Open browser to http://localhost:18765
+6. Grant Screen Recording permission when prompted
+
+================================================================================

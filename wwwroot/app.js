@@ -62,7 +62,7 @@ const categoryColors = {
 // individual click handler above. Capture phase so it fires before the element's own handler
 // runs, matching the instant "physical press" feel of the CSS :active flash it accompanies.
 document.addEventListener("click", (e) => {
-  if (e.target.closest("button, .team-swatch, .rail-item, .category-row")) bridge?.PlayClickSound();
+  if (e.target.closest("button, .team-swatch, .category-row")) bridge?.PlayClickSound();
 }, true);
 
 /// Hover magnify: only the exact tile under the cursor scales up (2x), no neighbor falloff --
@@ -148,6 +148,10 @@ async function init() {
       const userProfile = JSON.parse(await bridge.GetUserProfile());
       state.toastsEnabled = userProfile.toastsEnabled !== false;
       updateFavoriteTeamJumpButton(userProfile.favoriteTeam);
+      // Auto-load the user's favorite team on launch if nothing was already active (e.g. first
+      // run, or GetActiveTeam came back empty) -- previously favoriteTeam only drove the jump
+      // star/profile label and never actually selected anything on startup.
+      if (!state.activeTeam && userProfile.favoriteTeam) state.activeTeam = userProfile.favoriteTeam;
     } catch (err) { console.error("GetUserProfile (startup) failed", err); }
     try {
       // Admin marketplace override (owner-only) -- see WebBridge.cs's IsAdminMode. Cached once
@@ -158,6 +162,9 @@ async function init() {
     try {
       await refreshLeadInWhistleSection();
     } catch (err) { console.error("GetLeadInWhistleAvailable/Enabled failed", err); }
+    try {
+      await refreshBigGameSection();
+    } catch (err) { console.error("refreshBigGameSection failed", err); }
   } else {
     state.teams = [{ name: "General", primary: "#22d3ee", secondary: "#22d3ee" }];
     state.categories = [
@@ -363,11 +370,20 @@ async function pollUserCount() {
 /// Shared fill for any team tile/badge: shows the real logo when TeamLogos\ has one for this
 /// team, otherwise falls back to the color-gradient + initials monogram. The gradient is always
 /// set (even with a logo) so it still shows through logos that have transparent backgrounds.
-function fillTeamSwatch(el, t) {
+// BUG FIX 2026-08-09: the matchup coverflow (renderMatchupCoverflow) tears down and rebuilds its
+// 5 tiles on every single arrow-click/search keystroke, and positions them via CSS transform
+// classes (cf-l2/cf-l1/cf-center/cf-r1/cf-r2). native `loading="lazy"` combined with that churn
+// meant an <img> could get destroyed and replaced by the next render before the browser ever
+// resolved its intersection check, so the logo never painted -- looked like "matchup logos don't
+// work" even though the exact same helper works fine for grids that render once and stay put.
+// `eager=true` (used by the matchup coverflow specifically) skips lazy-loading for that case;
+// every other caller (100+ team grids/pickers) keeps the lazy default.
+function fillTeamSwatch(el, t, eager = false) {
   el.style.background = `linear-gradient(135deg, ${t.primary}, ${t.secondary})`;
   el.style.setProperty("--tile-color", t.primary); // press glow + dock-hover ring use the team's own color
   if (t.logoUrl) {
-    el.innerHTML = `<img src="${t.logoUrl}" alt="${t.name}" class="team-logo-img" draggable="false">`;
+    const loadingAttr = eager ? "" : ' loading="lazy"';
+    el.innerHTML = `<img src="${t.logoUrl}" alt="${t.name}" class="team-logo-img" draggable="false"${loadingAttr} decoding="async">`;
   } else {
     el.textContent = t.initials ?? "";
   }
@@ -551,6 +567,63 @@ async function selectTeam(name) {
   await refreshCategories();
 }
 
+/// Best-effort abbreviation/name match for the quick-load-by-abbreviation input on the assign
+/// page: exact initials match wins, then initials-starts-with, then name-starts-with, then name
+/// contains -- in that priority order, first hit wins. Returns null if the query is empty or
+/// nothing matches at all (caller shows "no match" instead of guessing).
+function findTeamByAbbreviation(query) {
+  const q = (query || "").trim().toLowerCase();
+  if (!q) return null;
+  const teams = (state.teams || []).filter((t) => t.name !== "General");
+  return (
+    teams.find((t) => (t.initials || "").toLowerCase() === q) ||
+    teams.find((t) => (t.initials || "").toLowerCase().startsWith(q)) ||
+    teams.find((t) => t.name.toLowerCase().startsWith(q)) ||
+    teams.find((t) => t.name.toLowerCase().includes(q)) ||
+    null
+  );
+}
+
+/// Quick-load-by-abbreviation control on the assign page's matchup side bar: type a team's
+/// abbreviation/initials or partial name, see a live best-match hint, confirm before it actually
+/// switches the active profile (reuses the exact same selectTeam() the sidebar tile grid uses).
+function setupQuickLoadProfile() {
+  const input = document.getElementById("quick-load-input");
+  const hint = document.getElementById("quick-load-hint");
+  const loadBtn = document.getElementById("btn-quick-load");
+  const confirmOverlay = document.getElementById("quick-load-confirm-overlay");
+  const confirmText = document.getElementById("quick-load-confirm-text");
+  const yesBtn = document.getElementById("btn-quick-load-yes");
+  const noBtn = document.getElementById("btn-quick-load-no");
+  if (!input || !loadBtn) return;
+
+  const updateHint = () => {
+    const match = findTeamByAbbreviation(input.value);
+    hint.textContent = match ? `→ ${match.name}` : (input.value.trim() ? "No match" : "");
+  };
+  input.addEventListener("input", updateHint);
+
+  const tryConfirm = () => {
+    const match = findTeamByAbbreviation(input.value);
+    if (!match) { showToast("No team matches that yet -- keep typing."); return; }
+    confirmText.textContent = `Is "${match.name}" the team you found -- the right team?`;
+    confirmOverlay.hidden = false;
+    yesBtn.onclick = () => {
+      confirmOverlay.hidden = true;
+      selectTeam(match.name);
+      input.value = "";
+      hint.textContent = "";
+    };
+    noBtn.onclick = () => {
+      confirmOverlay.hidden = true;
+      input.focus();
+    };
+  };
+  loadBtn.addEventListener("click", tryConfirm);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") tryConfirm(); });
+  confirmOverlay?.addEventListener("click", (e) => { if (e.target === e.currentTarget) confirmOverlay.hidden = true; });
+}
+
 /// Picks the most legible ink color for text sitting on a `bg` swatch, preferring the team's
 /// OTHER color (primary on secondary, or vice versa) over plain black/white when it actually
 /// reads well -- so a pill reads as "team colors" rather than a generic dark-on-light chip.
@@ -589,18 +662,44 @@ function isNearBlack(hex) {
   return r < 20 && g < 20 && b < 20;
 }
 
+// Shared perceived-brightness check (same WCAG relative-luminance formula pickContrastInk uses
+// locally) -- used by applyTeamGlowVars to pick whichever of primary/secondary is the lighter
+// color for --team-glow. Design rule: LED/glow pulses must always read as light-on-dark, never
+// use the team's dark color for a glow (illegible against the dark glass background).
+function relativeLuminance(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
+  if (!m) return 0;
+  const [r, g, b] = [m[1], m[2], m[3]].map((h) => {
+    const c = parseInt(h, 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
 /// Sets the four --team-* CSS custom properties (primary/secondary + their contrast inks) that
 /// drive the app-wide background tint and glow pulse. Split out of setActiveTeam so a coverflow
 /// can call it live while just browsing (previewTeamGlow below) without triggering
 /// setActiveTeam's other side effects (header text, background image swap, bridge calls).
 function applyTeamGlowVars(team) {
-  const secondary = team?.secondary ?? "#22d3ee";
+  const rawSecondary = team?.secondary ?? "#22d3ee";
   const rawPrimary = team?.primary ?? "#0f766e";
-  const primary = isNearBlack(rawPrimary) ? secondary : rawPrimary;
+  const primary = isNearBlack(rawPrimary) ? rawSecondary : rawPrimary;
+  // --team-secondary drives nearly every glow/border/badge/text-accent color in the theme (see
+  // the color-mix(...var(--team-secondary)...) rules throughout style.css), not just decorative
+  // glow -- so a team whose authentic secondary color is literal black (several FCS schools:
+  // North Dakota, Illinois State, Youngstown State, Wofford, Stony Brook, ...) made the ENTIRE
+  // accent system go invisible-on-dark for that team: black glow borders, black badge text, etc.
+  // Same isNearBlack fallback --team-primary already gets, applied here too -- falls back to
+  // primary (if that one isn't ALSO near-black) or the app's default accent as a last resort.
+  const secondary = isNearBlack(rawSecondary) ? (isNearBlack(primary) ? "#22d3ee" : primary) : rawSecondary;
   document.documentElement.style.setProperty("--team-secondary", secondary);
   document.documentElement.style.setProperty("--team-primary", primary);
   document.documentElement.style.setProperty("--team-secondary-ink", pickContrastInk(secondary, primary));
   document.documentElement.style.setProperty("--team-primary-ink", pickContrastInk(primary, secondary));
+  // Design rule (2026-08-09): every LED/glow pulse uses whichever of primary/secondary is
+  // lighter -- never the dark one, regardless of which is "the" primary color.
+  const glow = relativeLuminance(primary) >= relativeLuminance(secondary) ? primary : secondary;
+  document.documentElement.style.setProperty("--team-glow", glow);
 }
 
 /// Live-updates the background tint/glow to whichever team is centered in a coverflow or
@@ -649,26 +748,363 @@ function updateMatchupSideBar() {
   homeBtn.classList.toggle("active", state.activeTeam === state.matchupHome);
 }
 
-/// Manual trigger for the same ApplyDefaultProfileForTeam bridge call the GAMETIME "Use Starter
-/// Profile" prompt uses (see confirmUseStarterProfile-style flow) -- fills only this team's empty
-/// slots, never overwrites existing assignments, so re-clicking after tweaking a few songs is
-/// harmless. Lives on matchup-side-bar so it always targets state.activeTeam, matching that bar's
-/// own "assigning songs for" framing.
+/// Events-page Auto-Assign (matchup-side-bar): overwrites EVERY slot for state.activeTeam with
+/// the default pack, after an explicit overwrite confirm -- previously this only filled empty
+/// slots silently; the owner wants a real "replace what I've got" action instead, gated behind a
+/// confirm since it's destructive to any hand-tuned assignments. If the default pack isn't
+/// downloaded/imported at all, this shows the SAME #songpack-prompt-overlay every other "need the
+/// pack" entry point uses (Download/Skip -> Locate & Import zip or folder) rather than a dead-end
+/// error, then re-runs itself once the pack finishes importing.
 async function handleAutoAssignClick() {
-  const btn = document.getElementById("btn-auto-assign");
   if (!state.activeTeam || !bridge) return;
+  let hasPack = false;
+  try { hasPack = await bridge.HasDefaultSongPack(); } catch (err) { console.error("HasDefaultSongPack failed", err); }
+  if (!hasPack) {
+    document.getElementById("songpack-prompt-overlay").hidden = false;
+    window.addEventListener("bandroom:songpackready", () => handleAutoAssignClick(), { once: true });
+    return;
+  }
+  const team = state.activeTeam;
+  document.getElementById("auto-assign-confirm-text").textContent =
+    `Quick-overwrite replaces every assigned song for ${team} with the default pack (anything customized is lost). ` +
+    `Guided Assign instead walks through each event one at a time so you can confirm or pick from candidates yourself.`;
+  document.getElementById("auto-assign-confirm-overlay").hidden = false;
+  const cancelBtn = document.getElementById("btn-auto-assign-cancel");
+  const yesBtn = document.getElementById("btn-auto-assign-confirm-yes");
+  const guidedBtn = document.getElementById("btn-auto-assign-guided");
+  const conferenceBtn = document.getElementById("btn-auto-assign-conference");
+  await new Promise((resolve) => {
+    const cleanup = () => {
+      cancelBtn.removeEventListener("click", onCancel);
+      yesBtn.removeEventListener("click", onYes);
+      guidedBtn.removeEventListener("click", onGuided);
+      conferenceBtn?.removeEventListener("click", onConference);
+      document.getElementById("auto-assign-confirm-overlay").hidden = true;
+    };
+    const onCancel = () => { cleanup(); resolve(); };
+    const onYes = async () => {
+      cleanup();
+      await runAutoAssignOverwrite(team);
+      resolve();
+    };
+    const onGuided = async () => {
+      cleanup();
+      await startAutoAssignWizard(team);
+      resolve();
+    };
+    const onConference = async () => {
+      cleanup();
+      await runAutoAssignConference(team);
+      resolve();
+    };
+    cancelBtn.addEventListener("click", onCancel);
+    yesBtn.addEventListener("click", onYes);
+    guidedBtn.addEventListener("click", onGuided);
+    conferenceBtn?.addEventListener("click", onConference);
+  });
+}
+
+/// "Load Conference Pack" -- previews what the conference folder would fill (see
+/// PreviewConferencePackForTeam), applies empty slots immediately (nothing to lose there), then
+/// asks per already-assigned event whether to overwrite it -- most users already have SOME songs
+/// assigned, so silently skipping those (the old backfill-only behavior) often did nothing
+/// visible. Reuses the same #auto-assign-confirm-overlay Yes/Skip pattern the guided wizard's
+/// "already has X assigned" step already uses, one event at a time, then applies the confirmed
+/// set in one call.
+async function runAutoAssignConference(team) {
+  const btn = document.getElementById("btn-auto-assign");
+  btn.disabled = true;
+  const prevLabel = btn.textContent;
+  btn.textContent = "Checking...";
+  let preview = [];
+  try {
+    preview = JSON.parse(await bridge.PreviewConferencePackForTeam(team)) || [];
+  } catch (err) {
+    console.error("PreviewConferencePackForTeam failed", err);
+    showToast("Couldn't load the conference pack -- try again.");
+    btn.disabled = false;
+    btn.textContent = prevLabel;
+    return;
+  }
+  if (!preview.length) {
+    showToast(`No conference-wide songs found for ${team}'s conference.`);
+    btn.disabled = false;
+    btn.textContent = prevLabel;
+    return;
+  }
+
+  const toAssign = preview.filter((p) => !p.currentFile).map((p) => p.eventKey);
+  const alreadySet = preview.filter((p) => p.currentFile);
+
+  btn.textContent = "Assigning...";
+  const overlay = document.getElementById("auto-assign-confirm-overlay");
+  const cancelBtn = document.getElementById("btn-auto-assign-cancel");
+  const yesBtn = document.getElementById("btn-auto-assign-confirm-yes");
+  const guidedBtn = document.getElementById("btn-auto-assign-guided");
+  const conferenceBtn = document.getElementById("btn-auto-assign-conference");
+  guidedBtn.hidden = true;
+  conferenceBtn.hidden = true;
+  let yesToAll = false;
+  for (const item of alreadySet) {
+    if (yesToAll) { toAssign.push(item.eventKey); continue; }
+    document.getElementById("auto-assign-confirm-text").textContent =
+      `"${friendlyEventName(item.eventKey)}" already has a song assigned. Overwrite it with the conference pack's "${item.fileName}"?`;
+    overlay.hidden = false;
+    const choice = await new Promise((resolve) => {
+      const cleanup = () => {
+        cancelBtn.removeEventListener("click", onSkip);
+        yesBtn.removeEventListener("click", onYes);
+        overlay.hidden = true;
+      };
+      const onSkip = () => { cleanup(); resolve("skip"); };
+      const onYes = () => { cleanup(); resolve("yes"); };
+      cancelBtn.addEventListener("click", onSkip);
+      yesBtn.addEventListener("click", onYes);
+    });
+    if (choice === "yes") toAssign.push(item.eventKey);
+  }
+  guidedBtn.hidden = false;
+  conferenceBtn.hidden = false;
+
+  try {
+    const filled = await bridge.ApplyConferencePackSelections(team, JSON.stringify(toAssign));
+    showToast(filled > 0
+      ? `Filled ${filled} slot${filled === 1 ? "" : "s"} for ${team} from the conference pack.`
+      : `No changes made -- everything you said no to overwriting kept its current song.`);
+    if (filled > 0 && !document.getElementById("situations-panel").hidden && state.currentSituationsCategory)
+      await openSituations(state.currentSituationsCategory);
+  } catch (err) {
+    console.error("ApplyConferencePackSelections failed", err);
+    showToast("Couldn't load the conference pack -- try again.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prevLabel;
+  }
+}
+
+/// Reusable "keyword overlap" matcher shared by the guided wizard: strips filler words out of an
+/// event's display name and scores library entries by how many of the remaining significant words
+/// appear in the entry's filename. Not fuzzy/AI matching -- just enough to auto-pick an obvious
+/// single hit and narrow the list when there's more than one plausible candidate, same spirit as
+/// the substring search box already used everywhere else in this file.
+const AUTO_ASSIGN_STOPWORDS = new Set([
+  "the", "and", "for", "with", "from", "your", "team", "event", "situation", "pa", "announcer",
+]);
+function matchCandidatesForEvent(eventName, library) {
+  const words = friendlyEventName(eventName)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 3 && !AUTO_ASSIGN_STOPWORDS.has(w));
+  if (!words.length) return [];
+  return library
+    .map((item) => {
+      const name = (item.name || "").toLowerCase();
+      const score = words.reduce((n, w) => n + (name.includes(w) ? 1 : 0), 0);
+      return { item, score };
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((s) => s.item);
+}
+
+/// Guided Auto-Assign wizard: unlike runAutoAssignOverwrite (one confirm, replaces every slot from
+/// the default pack silently), this walks every event for `team` one at a time, reusing the same
+/// #clipper-assign panel every "Assign / Edit" button already opens -- so the user always sees the
+/// real search/play/browse UI, just pre-seeded with a best-guess match. Library = local Songs
+/// library (GetTrackLibrary, already includes past marketplace downloads) merged with this team's
+/// default-pack songs (GetDefaultPackSongsForTeam) -- searching "local and market at once" per the
+/// owner's request, without needing a live remote catalog call per event.
+let _autoAssignWizard = null;
+
+async function startAutoAssignWizard(team) {
+  showToast(`Scanning ${team}'s events...`);
+  let queue = [];
+  try {
+    for (const cat of state.categories) {
+      if (cat.name === "All") continue;
+      const evs = JSON.parse(await bridge.GetEventsForCategory(cat.name));
+      for (const ev of evs) queue.push(ev);
+    }
+  } catch (err) {
+    console.error("GetEventsForCategory (wizard) failed", err);
+  }
+  if (!queue.length) {
+    showToast(`No events found for ${team}.`);
+    return;
+  }
+
+  let library = [];
+  try {
+    const [localJson, packJson, conferenceJson] = await Promise.all([
+      bridge.GetTrackLibrary(),
+      bridge.GetDefaultPackSongsForTeam(team),
+      bridge.GetConferencePackSongsForTeam(team),
+    ]);
+    const local = JSON.parse(localJson) || [];
+    const pack = (JSON.parse(packJson) || []).map((s) => ({ ...s, source: s.source || "local" }));
+    // Conference-wide cues go last -- same team-specific-beats-generic priority as the backend's
+    // "run team pack first, conference pack only backfills" order, just reflected here so a
+    // team's own song wins ties in matchCandidatesForEvent when both exist for the same event.
+    const conference = (JSON.parse(conferenceJson) || []).map((s) => ({ ...s, source: s.source || "local" }));
+    const seenPaths = new Set(local.map((it) => it.path));
+    const packAndConference = [...pack, ...conference].filter((it) => !seenPaths.has(it.path));
+    for (const it of packAndConference) seenPaths.add(it.path);
+    library = [...local, ...packAndConference];
+  } catch (err) {
+    console.error("auto-assign wizard library load failed", err);
+  }
+
+  _autoAssignWizard = { team, queue, index: 0, library, assigned: 0, skipped: 0, cancelled: false, log: [] };
+  document.getElementById("auto-assign-wizard-bar").hidden = false;
+  await advanceAutoAssignWizard();
+}
+
+async function advanceAutoAssignWizard() {
+  const wiz = _autoAssignWizard;
+  if (!wiz || wiz.cancelled) return;
+  if (wiz.index >= wiz.queue.length) {
+    finishAutoAssignWizard(false);
+    return;
+  }
+  const ev = wiz.queue[wiz.index];
+  document.getElementById("auto-assign-wizard-progress").textContent =
+    `Guided Auto-Assign -- ${wiz.team}: event ${wiz.index + 1} of ${wiz.queue.length} (${friendlyEventName(ev.eventName)})`;
+
+  if (ev.fileName) {
+    document.getElementById("auto-assign-confirm-text").textContent =
+      `"${friendlyEventName(ev.eventName)}" already has "${ev.fileName}" assigned. Overwrite it?`;
+    const overlay = document.getElementById("auto-assign-confirm-overlay");
+    const cancelBtn = document.getElementById("btn-auto-assign-cancel");
+    const yesBtn = document.getElementById("btn-auto-assign-confirm-yes");
+    const guidedBtn = document.getElementById("btn-auto-assign-guided");
+    guidedBtn.hidden = true;
+    overlay.hidden = false;
+    const proceed = await new Promise((resolve) => {
+      const cleanup = () => {
+        cancelBtn.removeEventListener("click", onSkip);
+        yesBtn.removeEventListener("click", onYes);
+        overlay.hidden = true;
+        guidedBtn.hidden = false;
+      };
+      const onSkip = () => { cleanup(); resolve(false); };
+      const onYes = () => { cleanup(); resolve(true); };
+      cancelBtn.addEventListener("click", onSkip);
+      yesBtn.addEventListener("click", onYes);
+    });
+    if (!_autoAssignWizard || _autoAssignWizard.cancelled) return;
+    if (!proceed) {
+      wiz.skipped++;
+      wiz.index++;
+      await advanceAutoAssignWizard();
+      return;
+    }
+  }
+
+  await openWizardEventPicker(ev);
+}
+
+/// Opens the shared clipper-assign panel for one wizard event, pre-seeding it with the best
+/// keyword match (see matchCandidatesForEvent): a single strong match is auto-selected so the
+/// user just has to hit "Assign Selected" to confirm it; multiple matches narrow the visible list
+/// via the existing search box instead of forcing a pick; zero matches leaves the full library
+/// visible so the user can search manually or hit Skip.
+async function openWizardEventPicker(ev) {
+  const wiz = _autoAssignWizard;
+  if (!wiz) return;
+  _clipperAssignLibrary = wiz.library;
+  await openClipperAssign(ev.trigger, ev.eventName, false, ev.fileName);
+  const candidates = matchCandidatesForEvent(ev.eventName, wiz.library);
+  const searchInput = document.getElementById("clipper-assign-search");
+  if (candidates.length === 1) {
+    searchInput.value = "";
+    renderClipperAssignList("");
+    const list = document.getElementById("clipper-assign-list");
+    const row = [...list.querySelectorAll(".clipper-assign-row")].find((r) => r.title === candidates[0].path);
+    row?.click();
+  } else if (candidates.length > 1) {
+    const words = friendlyEventName(ev.eventName).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !AUTO_ASSIGN_STOPWORDS.has(w));
+    searchInput.value = words[0] || "";
+    renderClipperAssignList(searchInput.value);
+  } else {
+    searchInput.value = "";
+    renderClipperAssignList("");
+  }
+}
+
+/// Called instead of a bare closeClipperAssign() by the panel's Assign/Browse/Clear buttons
+/// whenever the wizard is the one driving the panel, so choosing a song there advances to the
+/// next event instead of just closing. Falls through to a normal close otherwise.
+async function afterClipperAssignAction(trigger, assignedThisEvent, songName) {
+  const wiz = _autoAssignWizard;
+  if (wiz && !wiz.cancelled && wiz.queue[wiz.index]?.trigger === trigger) {
+    const ev = wiz.queue[wiz.index];
+    if (assignedThisEvent) wiz.assigned++; else wiz.skipped++;
+    wiz.log.push({ eventName: friendlyEventName(ev.eventName), songName: assignedThisEvent ? (songName || null) : null, skipped: !assignedThisEvent });
+    wiz.index++;
+    closeClipperAssign();
+    await advanceAutoAssignWizard();
+  } else {
+    closeClipperAssign();
+  }
+}
+
+function finishAutoAssignWizard(cancelledEarly) {
+  const wiz = _autoAssignWizard;
+  document.getElementById("auto-assign-wizard-bar").hidden = true;
+  document.getElementById("auto-assign-confirm-overlay").hidden = true;
+  _autoAssignWizard = null;
+  if (!wiz) return;
+  refreshCategories();
+  if (state.currentSituationsCategory) openSituations(state.currentSituationsCategory);
+  showAutoAssignSummary(wiz, cancelledEarly);
+}
+
+/// Popup (not just a toast) confirming exactly what the guided wizard changed for `team` --
+/// which event got which song, and which were skipped -- so it's clear at a glance instead of
+/// having to re-open every event to check.
+function showAutoAssignSummary(wiz, cancelledEarly) {
+  const overlay = document.getElementById("auto-assign-summary-overlay");
+  const title = document.getElementById("auto-assign-summary-title");
+  const list = document.getElementById("auto-assign-summary-list");
+  if (!overlay || !title || !list) {
+    showToast(cancelledEarly
+      ? `Guided Assign cancelled -- ${wiz.assigned} event${wiz.assigned === 1 ? "" : "s"} assigned before stopping.`
+      : `Guided Assign complete for ${wiz.team}: ${wiz.assigned} assigned, ${wiz.skipped} skipped.`);
+    return;
+  }
+  title.textContent = cancelledEarly
+    ? `Guided Assign Cancelled -- ${wiz.team}`
+    : `Guided Assign Complete -- ${wiz.team}`;
+  list.innerHTML = "";
+  if (!wiz.log.length) {
+    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">Nothing was changed.</div>`;
+  } else {
+    for (const entry of wiz.log) {
+      const row = document.createElement("div");
+      row.className = "auto-assign-summary-row" + (entry.skipped ? " skipped" : "");
+      row.innerHTML = `
+        <span class="auto-assign-summary-row-event">${entry.eventName}</span>
+        <span class="auto-assign-summary-row-song">${entry.skipped ? "Skipped" : entry.songName}</span>`;
+      list.appendChild(row);
+    }
+  }
+  overlay.hidden = false;
+}
+
+async function runAutoAssignOverwrite(team) {
+  const btn = document.getElementById("btn-auto-assign");
   btn.disabled = true;
   const prevLabel = btn.textContent;
   btn.textContent = "Assigning...";
   try {
-    const filled = await bridge.ApplyDefaultProfileForTeam(state.activeTeam);
+    const filled = await bridge.ApplyDefaultProfileForTeamOverwrite(team);
     showToast(filled > 0
-      ? `Auto-assigned ${filled} empty slot${filled === 1 ? "" : "s"} for ${state.activeTeam}.`
-      : `${state.activeTeam} already has every slot filled.`);
+      ? `Auto-assigned ${filled} slot${filled === 1 ? "" : "s"} for ${team} from the default pack.`
+      : `No default-pack songs found for ${team}.`);
     if (filled > 0 && !document.getElementById("situations-panel").hidden && state.currentSituationsCategory)
       await openSituations(state.currentSituationsCategory);
   } catch (err) {
-    console.error("ApplyDefaultProfileForTeam failed", err);
+    console.error("ApplyDefaultProfileForTeamOverwrite failed", err);
     showToast("Couldn't auto-assign -- try again.");
   } finally {
     btn.disabled = false;
@@ -718,10 +1154,33 @@ function setWatching(mode) {
   const status = document.getElementById("watch-status");
   const label = document.getElementById("watch-label");
   const stopBtn = document.getElementById("btn-stop-watching");
-  status.classList.remove("pill-off", "pill-waiting", "pill-watching");
-  if (mode === "watching") { status.classList.add("pill-watching"); label.textContent = "Watching"; }
-  else if (mode === "waiting") { status.classList.add("pill-waiting"); label.textContent = "Waiting for window…"; }
-  else { status.classList.add("pill-off"); label.textContent = "Not watching"; }
+  const wasLive = status.classList.contains("pill-watching") || status.classList.contains("pill-waiting");
+  status.classList.remove("pill-off", "pill-waiting", "pill-watching", "watch-live-flash", "watch-live-glow");
+  // "LIVE" covers both watching (window found) and waiting (locked in, window not found yet) --
+  // once the matchup is locked, this pill stays lit until Stop Watching is pressed, it never
+  // reverts to "Not watching" just because the game window blinked out mid-session (see the
+  // toast a few lines up, same "waiting" transition).
+  if (mode === "watching" || mode === "waiting") {
+    status.classList.add(mode === "watching" ? "pill-watching" : "pill-waiting");
+    label.textContent = "LIVE";
+    // Flash twice on the OFF -> LIVE transition only, then settle into a steady glow -- re-adding
+    // the flash class every tick (e.g. watching <-> waiting toggling) would restart the flash
+    // instead of just holding the glow.
+    if (!wasLive) {
+      status.classList.add("watch-live-flash");
+      status.addEventListener("animationend", function onFlashEnd(e) {
+        if (e.animationName !== "watch-live-flash") return;
+        status.removeEventListener("animationend", onFlashEnd);
+        status.classList.remove("watch-live-flash");
+        status.classList.add("watch-live-glow");
+      });
+    } else {
+      status.classList.add("watch-live-glow");
+    }
+  } else {
+    status.classList.add("pill-off");
+    label.textContent = "Not watching";
+  }
   if (stopBtn) stopBtn.hidden = mode === "off";
 }
 
@@ -984,6 +1443,30 @@ function initHelpGuide() {
       document.getElementById("help-guide-full").hidden = tab.dataset.tab !== "guide";
     });
   });
+
+  const shareGuideBtn = document.getElementById("btn-share-guide");
+  if (shareGuideBtn) shareGuideBtn.addEventListener("click", openProfileShareGuide);
+}
+
+// Opens the Help & Guide overlay straight to the "Share Profile / Load Profile from Others"
+// section (rather than making the user hunt through the Full Guide tab) -- the pill lives right
+// next to Save since that's where users go looking for "how do I share my setup with someone".
+function openProfileShareGuide() {
+  const overlay = document.getElementById("help-guide-overlay");
+  if (!overlay) return;
+  overlay.hidden = false;
+  if (!_helpGuideRendered) {
+    _helpGuideRendered = true;
+    renderHelpTips();
+    document.getElementById("help-guide-full").innerHTML = HELP_GUIDE_HTML;
+  }
+  document.querySelectorAll(".help-guide-tab").forEach((t) => t.classList.remove("active"));
+  document.querySelector('.help-guide-tab[data-tab="guide"]')?.classList.add("active");
+  document.getElementById("help-guide-tips").hidden = true;
+  document.getElementById("help-guide-full").hidden = false;
+  requestAnimationFrame(() => {
+    document.getElementById("help-section-profile-sharing")?.scrollIntoView({ block: "start" });
+  });
 }
 
 function renderHelpTips() {
@@ -1051,7 +1534,7 @@ const HELP_GUIDE_HTML = `
   (no real-world team roster data). You still assign its songs the normal way, and it works with
   Set Matchup and everything else just like any other team.</p>
 </div>
-<div class="help-guide-section">
+<div class="help-guide-section" id="help-section-profile-sharing">
   <h3>The Sound Bank and The Bandroom marketplace</h3>
   <p>Every team has its own <strong>Sound Bank</strong> -- a folder of that team's songs and
   background pictures. <strong>The Bandroom</strong> is the shared marketplace where every
@@ -1220,10 +1703,59 @@ async function refreshLeadInWhistleSection() {
     document.getElementById("toggle-leadin-whistle").checked = await bridge.GetLeadInWhistleEnabled();
 }
 
+// Big Game Rules panel (Adjust sidebar) -- editable trigger rule that used to be a hardcoded
+// "quarter 4, score within 8" constant in GameWatcher.cs (see ConfigStore.BigGameSettings /
+// WebBridge.GetBigGameSettings/SaveBigGameSettings). _bigGameBannerEnabled is a separate,
+// purely-cosmetic flag (also persisted server-side, piggybacking on the same settings object via
+// a local-only field since the badge is a client-side display concern) controlling whether
+// #matchup-big-game-badge shows on the matchup screen.
+let _bigGameBannerEnabled = false;
+
+async function refreshBigGameSection() {
+  if (!bridge) return;
+  try {
+    const s = JSON.parse(await bridge.GetBigGameSettings());
+    document.getElementById("toggle-big-game-enabled").checked = s.Enabled !== false;
+    document.getElementById("big-game-quarter").value = String(s.QuarterThreshold ?? 4);
+    document.getElementById("big-game-margin").value = String(s.ScoreMargin ?? 8);
+  } catch (err) { console.error("GetBigGameSettings failed", err); }
+  try {
+    _bigGameBannerEnabled = localStorage.getItem("bandroom-biggame-banner") === "true";
+  } catch (_) { _bigGameBannerEnabled = false; }
+  document.getElementById("toggle-big-game-banner").checked = _bigGameBannerEnabled;
+  updateMatchupBigGameBadge();
+}
+
+function updateMatchupBigGameBadge() {
+  const badge = document.getElementById("matchup-vs-badge");
+  if (badge) badge.classList.toggle("big-game-active", _bigGameBannerEnabled);
+}
+
+function wireBigGameSection() {
+  document.getElementById("toggle-big-game-banner").addEventListener("change", (e) => {
+    _bigGameBannerEnabled = e.target.checked;
+    try { localStorage.setItem("bandroom-biggame-banner", _bigGameBannerEnabled ? "true" : "false"); } catch (_) {}
+    updateMatchupBigGameBadge();
+  });
+  document.getElementById("btn-big-game-save").addEventListener("click", async () => {
+    const enabled = document.getElementById("toggle-big-game-enabled").checked;
+    const quarterThreshold = Number(document.getElementById("big-game-quarter").value) || 4;
+    const scoreMargin = Math.max(0, Number(document.getElementById("big-game-margin").value) || 0);
+    try {
+      await bridge?.SaveBigGameSettings(enabled, quarterThreshold, scoreMargin);
+      showToast("Big Game rules saved.");
+    } catch (err) {
+      console.error("SaveBigGameSettings failed", err);
+      showToast("Couldn't save Big Game rules -- try again.");
+    }
+  });
+}
+
 function wireControls() {
   wireLogoCropTool();
   wireBgCropTool();
   initHelpGuide();
+  wireBigGameSection();
   document.getElementById("btn-profile").addEventListener("click", openProfile);
   document.getElementById("btn-close-profile").addEventListener("click", closeProfile);
   document.getElementById("btn-close-profile-top").addEventListener("click", closeProfile);
@@ -1343,11 +1875,17 @@ function wireControls() {
   document.getElementById("btn-maximize").addEventListener("click", () => bridge?.MaximizeWindow());
   document.getElementById("btn-close").addEventListener("click", () => bridge?.CloseWindow());
 
-  document.getElementById("btn-copy-all").addEventListener("click", () => bridge?.CopyCurrentToAllTeams());
+  document.getElementById("btn-copy-all").addEventListener("click", () => {
+    if (!confirm(`Copy ${state.activeTeam}'s current song setup to every other team? This overwrites each team's own assignments.`)) return;
+    bridge?.CopyCurrentToAllTeams();
+  });
   document.getElementById("btn-export-profile").addEventListener("click", () => bridge?.ExportProfile());
   document.getElementById("btn-import-profile").addEventListener("click", openImportTargetTeamDialog);
   document.getElementById("btn-add-school").addEventListener("click", openAddSchoolDialog);
-  document.getElementById("btn-delete-profile").addEventListener("click", () => bridge?.DeleteCurrentProfile());
+  document.getElementById("btn-delete-profile").addEventListener("click", () => {
+    if (!confirm(`Delete ${state.activeTeam}'s entire song setup and reset it back to defaults? This can't be undone.`)) return;
+    bridge?.DeleteCurrentProfile();
+  });
   document.getElementById("btn-share-profile").addEventListener("click", shareCurrentProfile);
   document.getElementById("btn-load-profile").addEventListener("click", openLoadProfileDialog);
   document.getElementById("btn-close-load-profile").addEventListener("click", closeLoadProfileDialog);
@@ -1366,6 +1904,7 @@ function wireControls() {
   document.getElementById("btn-sound-bank").addEventListener("click", () => openTeamAlbum(state.activeTeam));
   document.getElementById("btn-my-downloads").addEventListener("click", openMyDownloads);
   document.getElementById("btn-close-my-downloads").addEventListener("click", closeMyDownloads);
+  document.getElementById("btn-back-my-downloads").addEventListener("click", backFromMyDownloads);
   document.getElementById("btn-discord-chat").addEventListener("click", openDiscordChat);
   document.getElementById("btn-close-discord-chat").addEventListener("click", closeDiscordChat);
   document.getElementById("btn-import-local-song")?.addEventListener("click", importLocalSong);
@@ -1380,6 +1919,17 @@ function wireControls() {
   document.getElementById("btn-close-bandroom-album").addEventListener("click", closeTeamAlbum);
   document.getElementById("bandroom-album-overlay").addEventListener("click", (e) => {
     if (e.target.id === "bandroom-album-overlay") closeTeamAlbum();
+  });
+  // Owner report: team logos in the market/Sound Bank had no way back to team select -- clicking
+  // this logo now returns to wherever the album was opened from (see backFromTeamAlbum).
+  document.getElementById("bandroom-album-icon").addEventListener("click", backFromTeamAlbum);
+  // Owner report: "Bandroom market has no back button or forwards" -- explicit chevron button
+  // alongside the logo-click shortcut above (some users won't realize the logo itself is
+  // clickable), plus a Forward button on the hub that reappears once you've gone back, to jump
+  // straight into the album you just left instead of re-searching for the same team.
+  document.getElementById("btn-back-bandroom-album").addEventListener("click", backFromTeamAlbum);
+  document.getElementById("btn-forward-bandroom-album").addEventListener("click", () => {
+    if (_lastAlbumTeam) openTeamAlbum(_lastAlbumTeam);
   });
   document.getElementById("bandroom-album-search").addEventListener("input", onAlbumSearchInput);
   document.getElementById("btn-bandroom-album-download-all").addEventListener("click", downloadAlbumAll);
@@ -1456,13 +2006,8 @@ function wireControls() {
     });
   });
 
-  document.querySelectorAll(".rail-item").forEach((item) => {
-    item.addEventListener("click", () => {
-      const rail = item.parentElement;
-      rail.querySelectorAll(".rail-item").forEach((i) => i.classList.remove("active"));
-      item.classList.add("active");
-      runRailAction(item.dataset.action);
-    });
+  document.querySelectorAll("[data-action]").forEach((item) => {
+    item.addEventListener("click", () => runRailAction(item.dataset.action));
   });
 
   document.getElementById("btn-close-situations").addEventListener("click", () => {
@@ -1471,10 +2016,18 @@ function wireControls() {
   });
 
   window.addEventListener("bandroom:refresh", refreshCategories);
+  // Fired by WebMainForm.SyncPublicTeamLogosAsync when the startup public-logo sync actually
+  // changed something -- reuses the same repaint path a local logo save already uses so a
+  // publicly-pushed logo shows up live without needing a restart.
+  window.addEventListener("bandroom:publiclogosupdated", refreshTeamsAfterLogoChange);
   window.addEventListener("bandroom:watchstate", (e) => setWatching(e.detail));
   // Names exactly which trigger OCR just read and played a sound for -- lets a user verify live
   // that Bandroom read the right thing off the scoreboard, without checking logs.
   window.addEventListener("bandroom:triggerfired", (e) => showToast(`Trigger fired: ${e.detail}`));
+  // Right Ctrl "band cutoff" -- global hotkey, fires even when Bandroom isn't focused (see
+  // KeyboardHook.Cutoff / WebMainForm.OnCutoff). Just a confirmation toast; the actual
+  // AudioPlayer.StopAll() already happened on the C# side before this event is even dispatched.
+  window.addEventListener("bandroom:cutoff", () => showToast("Cutoff — all audio stopped."));
   window.addEventListener("bandroom:profileschanged", async () => {
     if (bridge) state.savedProfiles = JSON.parse(await bridge.GetSavedProfiles());
     renderTeamGrid();
@@ -1533,6 +2086,7 @@ function wireControls() {
   initDefaultSongPackPrompt();
   wirePreviewBar();
   initClipperAssign();
+  wireInlineTrimmer();
 
   document.getElementById("header-team-badge").addEventListener("click", openTeamPicker);
   // Files dropped anywhere on the window get copied into Songs\ (normalized name) by the
@@ -1582,6 +2136,14 @@ function wireControls() {
   document.getElementById("btn-side-away").addEventListener("click", () => selectTeam(state.matchupAway));
   document.getElementById("btn-side-home").addEventListener("click", () => selectTeam(state.matchupHome));
   document.getElementById("btn-auto-assign").addEventListener("click", handleAutoAssignClick);
+  document.getElementById("btn-auto-assign-header")?.addEventListener("click", handleAutoAssignClick);
+  setupQuickLoadProfile();
+  document.getElementById("btn-close-auto-assign-summary")?.addEventListener("click", () => {
+    document.getElementById("auto-assign-summary-overlay").hidden = true;
+  });
+  document.getElementById("btn-auto-assign-summary-done")?.addEventListener("click", () => {
+    document.getElementById("auto-assign-summary-overlay").hidden = true;
+  });
 
   document.getElementById("btn-save-profile-cancel").addEventListener("click", closeSaveProfileDialog);
   document.getElementById("btn-save-profile-confirm").addEventListener("click", confirmSaveProfile);
@@ -1738,7 +2300,7 @@ function renderTeamPickerCoverflow(filter) {
     const tile = document.createElement("div");
     tile.className = "team-swatch " + cls;
     tile.title = t.name;
-    fillTeamSwatch(tile, t);
+    fillTeamSwatch(tile, t, true);
     if (cls === "cf-center") {
       tile.addEventListener("click", () => { selectTeam(t.name); closeTeamPicker(); });
       if (t.name !== "General") {
@@ -1792,14 +2354,17 @@ function renderImportTargetTeamGrid(filter) {
   });
 }
 
-/// TeamBuilder "Add School" v1 -- name + primary/secondary color only (custom schools are never
-/// matched against in-game OCR data, purely a naming/branding feature). The 50 most popular FCS
+/// TeamBuilder "Add School" v2 -- name + primary/secondary color + optional mascot. The mascot is
+/// an OCR-matching alias only (GameWatcher.HomeTeamMascot/AwayTeamMascot): the game's penalty
+/// banner sometimes shows the mascot instead of the school name, so a custom school with no
+/// mascot set just won't match penalty-attribution text, same as v1. The 50 most popular FCS
 /// programs now ship as real roster entries (TeamColors.cs FcsTeams) and already show up in the
 /// main Team picker, so this dialog stays a fully custom entry point for anything not in either
 /// list. Logo isn't set here -- once added, the new school shows up in the full Team picker like
 /// any other, where the existing per-tile pencil icon (openLogoCropTool) already works for it.
 function openAddSchoolDialog() {
   document.getElementById("add-school-name").value = "";
+  document.getElementById("add-school-mascot").value = "";
   document.getElementById("add-school-primary").value = "#22d3ee";
   document.getElementById("add-school-secondary").value = "#ffffff";
   const err = document.getElementById("add-school-error");
@@ -1827,6 +2392,7 @@ async function submitAddSchool() {
   if (confirmBtn.disabled) return;
 
   const name = document.getElementById("add-school-name").value.trim();
+  const mascot = document.getElementById("add-school-mascot").value.trim();
   const primary = document.getElementById("add-school-primary").value;
   const secondary = document.getElementById("add-school-secondary").value;
   if (!name) {
@@ -1837,7 +2403,7 @@ async function submitAddSchool() {
 
   confirmBtn.disabled = true;
   try {
-    const result = JSON.parse(await bridge.AddCustomTeam(name, primary, secondary));
+    const result = JSON.parse(await bridge.AddCustomTeam(name, primary, secondary, mascot));
     if (!result.success) {
       err.textContent = result.error || "Couldn't add that school.";
       err.hidden = false;
@@ -2148,7 +2714,8 @@ function openMyDownloads() {
     document.getElementById("bandroom-overlay").hidden = true;
     document.getElementById("bandroom-album-overlay").hidden = true;
     document.getElementById("my-downloads-overlay").hidden = false;
-    renderMyDownloadsGrid();
+    initMyDownloadsToolbar();
+    loadMyDownloads();
   }, "openMyDownloads");
 }
 
@@ -2157,24 +2724,114 @@ function closeMyDownloads() {
   _previewAudio?.pause();
 }
 
-async function renderMyDownloadsGrid() {
-  const grid = document.getElementById("my-downloads-grid");
-  grid.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
-  let items;
+// Owner report: My Downloads had no way back to The Bandroom except closing everything and
+// reopening -- same "easy way back to things" gap as the team-album logo (see backFromTeamAlbum).
+function backFromMyDownloads() {
+  closeMyDownloads();
+  openBandroomMarketplace();
+}
+
+// ---- My Downloads: search / filter / sort / group toolbar --------------------------------
+// Redesigned (owner-supplied reference: a table/list music-library layout, adapted to this app's
+// own tile/pill/glass conventions rather than copied verbatim) from a plain unsorted grid into a
+// searchable, filterable, sortable, optionally school-grouped list -- the same shape as every
+// other "browse a lot of items" surface in the app (Bandroom hub, team album) already has, which
+// My Downloads was oddly missing.
+let _myDownloadsItems = [];
+let _myDownloadsFilter = "all";
+let _myDownloadsSort = "newest";
+let _myDownloadsGroupBySchool = false;
+let _myDownloadsToolbarBound = false;
+
+function initMyDownloadsToolbar() {
+  if (_myDownloadsToolbarBound) return;
+  _myDownloadsToolbarBound = true;
+
+  document.getElementById("my-downloads-search").addEventListener("input", () => renderMyDownloadsList());
+
+  document.getElementById("my-downloads-filters").addEventListener("click", (e) => {
+    const btn = e.target.closest(".my-downloads-filter");
+    if (!btn) return;
+    document.querySelectorAll(".my-downloads-filter").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    _myDownloadsFilter = btn.dataset.filter;
+    renderMyDownloadsList();
+  });
+
+  document.getElementById("my-downloads-sort").addEventListener("change", (e) => {
+    _myDownloadsSort = e.target.value;
+    renderMyDownloadsList();
+  });
+
+  document.getElementById("my-downloads-group-by-school").addEventListener("change", (e) => {
+    _myDownloadsGroupBySchool = e.target.checked;
+    renderMyDownloadsList();
+  });
+}
+
+async function loadMyDownloads() {
+  const list = document.getElementById("my-downloads-list");
+  list.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
   try {
-    items = JSON.parse(await bridge.GetMyDownloads());
+    _myDownloadsItems = JSON.parse(await bridge.GetMyDownloads());
   } catch (err) {
     console.error("GetMyDownloads failed", err);
-    items = [];
+    _myDownloadsItems = [];
   }
   if (document.getElementById("my-downloads-overlay").hidden) return; // closed while awaiting
+  renderMyDownloadsList();
+}
 
-  grid.innerHTML = "";
-  if (items.length === 0) {
-    grid.innerHTML = `<div class="bandroom-empty-state">Nothing downloaded yet -- open a team's Sound Bank and hit the ⬇ button on anything you like.</div>`;
+function renderMyDownloadsList() {
+  const list = document.getElementById("my-downloads-list");
+  const countEl = document.getElementById("my-downloads-count");
+  countEl.textContent = _myDownloadsItems.length > 0
+    ? `${_myDownloadsItems.length} download${_myDownloadsItems.length === 1 ? "" : "s"}`
+    : "";
+
+  const q = (document.getElementById("my-downloads-search").value || "").trim().toLowerCase();
+  let items = _myDownloadsItems.filter((item) => {
+    if (_myDownloadsFilter === "song" && item.type !== "song") return false;
+    if (_myDownloadsFilter === "image" && item.type !== "image") return false;
+    if (_myDownloadsFilter === "local" && item.source !== "local") return false;
+    if (_myDownloadsFilter === "missing" && item.fileExists !== false) return false;
+    if (!q) return true;
+    return item.name?.toLowerCase().includes(q) || item.school?.toLowerCase().includes(q);
+  });
+
+  items = items.slice().sort((a, b) => {
+    if (_myDownloadsSort === "name") return (a.name || "").localeCompare(b.name || "");
+    if (_myDownloadsSort === "school") return (a.school || "Your library").localeCompare(b.school || "Your library");
+    return new Date(b.downloadedAt) - new Date(a.downloadedAt); // newest
+  });
+
+  list.innerHTML = "";
+  if (_myDownloadsItems.length === 0) {
+    list.innerHTML = `<div class="bandroom-empty-state">Nothing downloaded yet -- open a team's Sound Bank and hit the ⬇ button on anything you like.</div>`;
     return;
   }
-  for (const item of items) grid.appendChild(buildMyDownloadTile(item));
+  if (items.length === 0) {
+    list.innerHTML = `<div class="bandroom-empty-state">Nothing matches that search/filter.</div>`;
+    return;
+  }
+
+  if (_myDownloadsGroupBySchool) {
+    const groups = new Map();
+    for (const item of items) {
+      const key = item.source === "local" ? "Your library" : (item.school || "Unknown");
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    }
+    for (const [school, groupItems] of groups) {
+      const header = document.createElement("div");
+      header.className = "my-downloads-group-header";
+      header.textContent = `${school} (${groupItems.length})`;
+      list.appendChild(header);
+      for (const item of groupItems) list.appendChild(buildMyDownloadRow(item));
+    }
+  } else {
+    for (const item of items) list.appendChild(buildMyDownloadRow(item));
+  }
 }
 
 // Discord Chat panel -- read-only relay feed, polled from the usercount worker while the panel
@@ -2276,7 +2933,7 @@ async function importLocalSong() {
     const result = JSON.parse(raw);
     if (result.success) {
       showToast(`Imported "${result.name}" -- it's ready to assign to any trigger.`);
-      renderMyDownloadsGrid();
+      loadMyDownloads();
     }
     // cancelled: true just means the user backed out of one of the dialogs -- not an error,
     // nothing to show.
@@ -2288,31 +2945,22 @@ async function importLocalSong() {
   }
 }
 
-function buildMyDownloadTile(item) {
+// Nexus-Mods-style card, same DOM shape as buildItemTile's marketplace-card branch (see its
+// comment for the XSS-sanitization reasoning -- name/school/fileUrl here trace back to whatever
+// was typed when the item was uploaded/shared, same as any other marketplace-sourced string).
+function buildMyDownloadRow(item) {
   const tile = document.createElement("div");
-  tile.className = "bandroom-item-tile";
+  tile.className = "marketplace-card my-downloads-card";
   const thumb = document.createElement("div");
-  thumb.className = "bandroom-item-thumb";
-  // name/school/fileUrl/schoolLogoUrl all ultimately trace back to whatever an uploader typed
-  // when sharing to the marketplace (any user, not just the current one) -- sanitizeHTML() here
-  // matches the treatment marketplace tiles already get elsewhere (sanitizeMarketplaceItem), so a
-  // crafted upload name can't break out of the alt="..." attribute and inject a script.
+  thumb.className = "marketplace-card-thumb";
   if (item.type === "image") {
     thumb.innerHTML = `<img src="${sanitizeHTML(item.fileUrl)}" alt="${sanitizeHTML(item.name)}" loading="lazy">`;
   } else {
     thumb.innerHTML = item.schoolLogoUrl
-      ? `<img src="${sanitizeHTML(item.schoolLogoUrl)}" alt="${sanitizeHTML(item.school)}" class="bandroom-item-thumb-logo" loading="lazy">`
+      ? `<img src="${sanitizeHTML(item.schoolLogoUrl)}" alt="${sanitizeHTML(item.school)}" loading="lazy">`
       : `<span>\u{1F3B5}</span>`;
   }
-  const name = document.createElement("div");
-  name.className = "bandroom-item-name";
-  name.textContent = item.name;
-  const school = document.createElement("div");
-  school.className = "bandroom-item-school";
-  // Locally-imported tracks (item 21) have no school -- label them instead of showing a blank line.
-  school.textContent = item.source === "local" ? "Your library" : item.school;
-  tile.append(thumb, name, school);
-  tile.title = item.source === "local" ? item.name : `${item.school} — ${item.name}`;
+  thumb.innerHTML += `<span class="card-type-badge">${item.type === "image" ? "Background" : "Song"}</span>`;
 
   // Self-healing "My Downloads" (Music Library UX Brief v2 §2.3): the manifest can drift from
   // disk (file deleted outside the app), and GetMyDownloads now reports fileExists per entry
@@ -2321,12 +2969,39 @@ function buildMyDownloadTile(item) {
   // marked and can't be previewed, since the underlying file is gone.
   if (item.fileExists === false) {
     tile.classList.add("bandroom-item-missing");
-    const missingBadge = document.createElement("div");
-    missingBadge.className = "bandroom-item-missing-badge";
-    missingBadge.textContent = "\u{26A0}\u{FE0F} File missing";
+    const missingBadge = document.createElement("span");
+    missingBadge.className = "card-type-badge my-downloads-missing-badge";
+    missingBadge.textContent = "\u{26A0}\u{FE0F} Missing";
     missingBadge.title = "This file is no longer on disk -- remove it below.";
-    tile.appendChild(missingBadge);
+    thumb.appendChild(missingBadge);
   }
+
+  const body = document.createElement("div");
+  body.className = "marketplace-card-body";
+  const title = document.createElement("div");
+  title.className = "marketplace-card-title";
+  title.textContent = item.name;
+  const schoolRow = document.createElement("div");
+  schoolRow.className = "marketplace-card-school";
+  // Locally-imported tracks (item 21) have no school -- label them instead of showing a blank line.
+  if (item.source === "local") {
+    schoolRow.textContent = "Your library";
+  } else {
+    const team = state.teams?.find((t) => t.name === item.school);
+    const dot = document.createElement("span");
+    dot.className = "marketplace-card-school-dot";
+    dot.style.background = team?.primary ?? "var(--text-muted)";
+    schoolRow.append(dot, document.createTextNode(item.school));
+    applySchoolGlow(schoolRow, item.school);
+  }
+  const dateEl = document.createElement("div");
+  dateEl.className = "marketplace-card-uploader";
+  try {
+    dateEl.textContent = `Downloaded ${new Date(item.downloadedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+  } catch { dateEl.textContent = ""; }
+  body.append(title, schoolRow, dateEl);
+  tile.append(thumb, body);
+  tile.title = item.source === "local" ? item.name : `${item.school} — ${item.name}`;
 
   tile.addEventListener("click", (e) => {
     if (e.target.closest(".bandroom-item-action")) return;
@@ -2334,8 +3009,13 @@ function buildMyDownloadTile(item) {
     if (item.type === "song") previewSong({ url: item.fileUrl });
   });
 
+  // Not reusing .bandroom-item-actions here -- that class is an absolute-positioned hover-reveal
+  // overlay meant for hub tiles (see .bandroom-item-tile:hover), which would misplace these
+  // buttons inside a marketplace-card-body's normal flow. This card can have up to 3 actions
+  // (Share/Set Background/Remove) vs. marketplace's fixed 2 (Preview/Get), so it needs its own
+  // always-visible wrapping row instead of the 2-button .marketplace-card-actions flex.
   const actions = document.createElement("div");
-  actions.className = "bandroom-item-actions";
+  actions.className = "my-downloads-card-actions";
 
   // Share to Marketplace (item 21) -- ONLY for tracks that came through the local-import
   // pipeline (item.source === "local") and haven't already been shared. Explicit opt-in per
@@ -2419,11 +3099,18 @@ function buildMyDownloadTile(item) {
     e.stopPropagation();
     removeBtn.disabled = true;
     const ok = bridge ? await bridge.RemoveMyDownload(item.id) : false;
-    if (ok) { showToast(`Removed "${item.name}".`); tile.remove(); }
-    else { showToast("Couldn't remove that -- try again."); removeBtn.disabled = false; }
+    if (ok) {
+      showToast(`Removed "${item.name}".`);
+      tile.remove();
+      _myDownloadsItems = _myDownloadsItems.filter((i) => i.id !== item.id);
+      const countEl = document.getElementById("my-downloads-count");
+      if (countEl) countEl.textContent = _myDownloadsItems.length > 0
+        ? `${_myDownloadsItems.length} download${_myDownloadsItems.length === 1 ? "" : "s"}`
+        : "";
+    } else { showToast("Couldn't remove that -- try again."); removeBtn.disabled = false; }
   });
   actions.appendChild(removeBtn);
-  tile.appendChild(actions);
+  body.appendChild(actions);
   return tile;
 }
 
@@ -2556,7 +3243,8 @@ function teamLogoUrl(schoolName) {
 function applySchoolGlow(el, schoolName) {
   const team = state.teams?.find((t) => t.name === schoolName);
   if (!team) return;
-  const glow = isNearBlack(team.primary) ? (team.secondary ?? team.primary) : team.primary;
+  const fallback = isNearBlack(team.secondary) ? "#22d3ee" : team.secondary;
+  const glow = isNearBlack(team.primary) ? (fallback ?? team.primary) : team.primary;
   if (!glow) return;
   el.style.setProperty("--school-glow", glow);
   el.setAttribute("data-glow", "");
@@ -2788,7 +3476,7 @@ function buildItemTile(item, inHub) {
         // ROOT CAUSE FIX (Music Library UX Brief v2 §1/§2.2 team-key mismatch): this used to send
         // whatever free text was typed here straight to the worker's PATCH /item with zero
         // validation against the actual team roster -- unlike the "Share to Marketplace" flow
-        // (buildMyDownloadTile's shareBtn handler), which already resolves the typed name against
+        // (buildMyDownloadRow's shareBtn handler), which already resolves the typed name against
         // state.teams before using it. A typo/abbreviation/stray-whitespace school here (e.g.
         // "UGA" or "Georgia " instead of "Georgia") would still PATCH successfully, silently
         // detaching the item from its team: fetchUploadList("school","Georgia") does an exact
@@ -2930,7 +3618,7 @@ function previewSong(item) {
     _previewAudio.crossOrigin = "anonymous";
     _previewAudio.play().catch((err) => console.error("Song preview failed", err));
     // Only marketplace items carry an id (My Downloads tiles pass a bare {url} -- see
-    // buildMyDownloadTile -- which have no server-side item to increment).
+    // buildMyDownloadRow -- which have no server-side item to increment).
     if (item.id && item.type) recordItemView(item);
     showPreviewBar(item);
     loadPreviewWaveform(item.url);
@@ -3085,11 +3773,18 @@ let _clipperAssignTrigger = null;
 let _clipperAssignIsPa = false;
 let _clipperAssignLibrary = null; // cached [{name, path}], same list for every trigger
 let _clipperAssignSelectedPath = null;
+let _clipperAssignSelectedName = null;
 
 async function openClipperAssign(trigger, eventName, isPa, currentFileName) {
+  // Switching events while the inline trimmer was left open for a PREVIOUS event otherwise
+  // left its waveform/trim state on screen (clipper-assign-list stays hidden, clipper-trim-panel
+  // stays visible) instead of resetting to the newly clicked event's song list.
+  if (_trimTrigger) closeInlineTrimmer();
+
   _clipperAssignTrigger = trigger;
   _clipperAssignIsPa = isPa;
   _clipperAssignSelectedPath = null;
+  _clipperAssignSelectedName = null;
 
   stopPreview();
   document.getElementById("clipper-empty").hidden = true;
@@ -3115,6 +3810,7 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName) {
 
 function closeClipperAssign() {
   bridge?.StopPreview();
+  if (_trimTrigger) closeInlineTrimmer();
   document.getElementById("clipper-assign").hidden = true;
   document.getElementById("btn-clipper-close-assign").hidden = true;
   document.getElementById("clipper-title-text").textContent = "Clip Preview";
@@ -3191,6 +3887,7 @@ function buildClipperAssignRow(item, list) {
     list.querySelectorAll(".clipper-assign-row.selected").forEach((r) => r.classList.remove("selected"));
     row.classList.add("selected");
     _clipperAssignSelectedPath = item.path;
+    _clipperAssignSelectedName = item.name;
     document.getElementById("btn-clipper-assign-select").disabled = false;
   });
   return row;
@@ -3233,8 +3930,249 @@ function renderClipperAssignList(filter) {
   }
 }
 
+// ---- Embedded waveform trimmer (round of item: replaces the native TrimmerForm popup) --------
+// Lives inline in .clipper-assign-main, swapping in for clipper-assign-list (see index.html
+// #clipper-trim-panel) when "Trim..." is clicked, instead of popping a separate WinForms dialog.
+// Mirrors TrimmerForm's own behavior (draggable start/end handles, end-tail preview on release,
+// same RMS-normalize-and-limit save path via AudioNormalizer on the C# side) but drawn on a
+// <canvas> with the same waveform-decode approach as loadPreviewWaveform above.
+let _trimTrigger = null;
+let _trimIsPa = false;
+let _trimUrl = null;
+let _trimDurationSec = 0;
+let _trimPeaks = null;
+let _trimDecodeFailed = false; // true once loadTrimWaveform's decodeAudioData rejects, so drawTrimCanvas
+                                 // can show an explicit "no preview" flat line instead of looking like real audio
+let _trimStartSec = 0;
+let _trimEndSec = 0;
+let _trimAudio = null;
+let _trimAudioCtx = null;
+let _trimDragHandle = null; // "start" | "end" | null
+
+async function openInlineTrimmer(trigger, isPa) {
+  if (!bridge) return;
+  const result = JSON.parse(await bridge.PrepareTrim(trigger, isPa));
+  if (!result.ok) {
+    showToast(result.error || "Couldn't open the trimmer.");
+    return;
+  }
+  _trimTrigger = trigger;
+  _trimIsPa = isPa;
+  _trimUrl = result.url;
+  _trimDurationSec = result.durationSec;
+  _trimStartSec = 0;
+  _trimEndSec = Math.min(result.durationSec, 15);
+  _trimPeaks = null;
+  _trimDecodeFailed = false;
+
+  document.getElementById("clipper-assign-list").hidden = true;
+  document.getElementById("clipper-trim-panel").hidden = false;
+  document.getElementById("clipper-assign-actions-default").hidden = true;
+  document.getElementById("clipper-trim-actions").hidden = false;
+  document.getElementById("clipper-trim-filename").textContent = result.fileName;
+  updateTrimLabels();
+  drawTrimCanvas();
+
+  loadTrimWaveform(result.url);
+}
+
+function closeInlineTrimmer() {
+  stopTrimPreview();
+  _trimTrigger = null;
+  _trimUrl = null;
+  _trimPeaks = null;
+  _trimDecodeFailed = false;
+  document.getElementById("clipper-assign-list").hidden = false;
+  document.getElementById("clipper-trim-panel").hidden = true;
+  document.getElementById("clipper-assign-actions-default").hidden = false;
+  document.getElementById("clipper-trim-actions").hidden = true;
+}
+
+/// Same decode-for-peaks approach as loadPreviewWaveform, just against the trimsrc:// copy and
+/// with more buckets (this canvas is wider/the only thing on screen, vs. sharing the preview bar).
+async function loadTrimWaveform(url) {
+  try {
+    _trimAudioCtx ??= new (window.AudioContext || window.webkitAudioContext)();
+    const resp = await fetch(url);
+    const arrayBuf = await resp.arrayBuffer();
+    const audioBuf = await _trimAudioCtx.decodeAudioData(arrayBuf);
+    const channel = audioBuf.getChannelData(0);
+    const buckets = 300;
+    const peaks = new Float32Array(buckets);
+    const bucketSize = Math.max(1, Math.floor(channel.length / buckets));
+    for (let b = 0; b < buckets; b++) {
+      let max = 0;
+      const start = b * bucketSize;
+      const end = Math.min(channel.length, start + bucketSize);
+      for (let i = start; i < end; i++) max = Math.max(max, Math.abs(channel[i]));
+      peaks[b] = max;
+    }
+    _trimPeaks = peaks;
+    _trimDecodeFailed = false;
+    drawTrimCanvas();
+  } catch (err) {
+    console.error("loadTrimWaveform failed", err);
+    _trimPeaks = null;
+    _trimDecodeFailed = true;
+    drawTrimCanvas();
+    showToast("Couldn't draw a waveform for this file -- you can still trim it by time.");
+  }
+}
+
+function formatTrimTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = (sec % 60).toFixed(1).padStart(4, "0");
+  return `${m}:${s}`;
+}
+
+function updateTrimLabels() {
+  document.getElementById("clipper-trim-start-label").textContent = formatTrimTime(_trimStartSec);
+  document.getElementById("clipper-trim-end-label").textContent = formatTrimTime(_trimEndSec);
+}
+
+function drawTrimCanvas() {
+  const canvas = document.getElementById("clipper-trim-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  const bars = _trimPeaks && _trimPeaks.length ? _trimPeaks.length : 80;
+  const gap = 1;
+  const barW = w / bars - gap;
+  const mid = h / 2;
+  const startFrac = _trimDurationSec > 0 ? _trimStartSec / _trimDurationSec : 0;
+  const endFrac = _trimDurationSec > 0 ? _trimEndSec / _trimDurationSec : 1;
+  // Decode failed outright (vs. still-loading, which looks the same otherwise) -- draw a thin
+  // flat line instead of uniform full-height bars so it doesn't read as a real (broken) waveform.
+  // The trim range/start/end markers below still work fine off duration alone.
+  const placeholderAmp = _trimDecodeFailed ? 0.03 : 0.15;
+  for (let i = 0; i < bars; i++) {
+    const amp = _trimPeaks && _trimPeaks.length ? _trimPeaks[i] : placeholderAmp;
+    const barH = Math.max(2, amp * (h - 8));
+    const x = i * (barW + gap);
+    const frac = i / bars;
+    const inRange = frac >= startFrac && frac <= endFrac;
+    ctx.fillStyle = inRange ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.22)";
+    ctx.fillRect(x, mid - barH / 2, barW, barH);
+  }
+  if (_trimDecodeFailed) {
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No waveform preview -- trim by time below", w / 2, mid + 4);
+  }
+  const startX = startFrac * w;
+  const endX = endFrac * w;
+  ctx.fillStyle = "rgba(61, 220, 132, 0.9)"; // matches --success-ish green, same as TrimmerForm's start marker
+  ctx.fillRect(Math.max(0, startX - 1), 0, 2, h);
+  ctx.fillStyle = "rgba(245, 165, 36, 0.9)"; // matches TrimmerForm's warning-orange end marker
+  ctx.fillRect(Math.min(w - 2, endX - 1), 0, 2, h);
+}
+
+function trimHandleAt(canvas, clientX) {
+  const rect = canvas.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const w = rect.width;
+  const startFrac = _trimDurationSec > 0 ? _trimStartSec / _trimDurationSec : 0;
+  const endFrac = _trimDurationSec > 0 ? _trimEndSec / _trimDurationSec : 1;
+  const startX = startFrac * w, endX = endFrac * w;
+  if (Math.abs(x - startX) < 10) return "start";
+  if (Math.abs(x - endX) < 10) return "end";
+  return null;
+}
+
+function trimSecAt(canvas, clientX) {
+  const rect = canvas.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  return ratio * _trimDurationSec;
+}
+
+function playTrimRange(startSec, endSec) {
+  stopTrimPreview();
+  if (!_trimUrl) return;
+  const audio = new Audio(_trimUrl);
+  _trimAudio = audio;
+  audio.addEventListener("timeupdate", () => {
+    if (_trimAudio === audio && audio.currentTime >= endSec) stopTrimPreview();
+  });
+  const start = () => { audio.currentTime = startSec; audio.play().catch(() => {}); };
+  if (audio.readyState >= 1) start(); else audio.addEventListener("loadedmetadata", start, { once: true });
+}
+
+/// Owner request carried over from TrimmerForm: releasing the End handle immediately plays the
+/// last few seconds up to the new end point, so you can hear exactly where the clip cuts off
+/// without a separate Preview click.
+const TRIM_END_TAIL_SECONDS = 4;
+function previewTrimEndTail() {
+  const tailStart = Math.max(_trimStartSec, _trimEndSec - TRIM_END_TAIL_SECONDS);
+  playTrimRange(tailStart, _trimEndSec);
+}
+
+function stopTrimPreview() {
+  if (_trimAudio) { _trimAudio.pause(); _trimAudio = null; }
+}
+
+function wireInlineTrimmer() {
+  const canvas = document.getElementById("clipper-trim-canvas");
+  if (!canvas) return;
+
+  const startDrag = (clientX) => { _trimDragHandle = trimHandleAt(canvas, clientX); };
+  const moveDrag = (clientX) => {
+    if (!_trimDragHandle) return;
+    const sec = trimSecAt(canvas, clientX);
+    if (_trimDragHandle === "start") _trimStartSec = Math.max(0, Math.min(sec, _trimEndSec - 0.1));
+    else _trimEndSec = Math.min(_trimDurationSec, Math.max(sec, _trimStartSec + 0.1));
+    updateTrimLabels();
+    drawTrimCanvas();
+  };
+  const endDrag = () => {
+    const wasEnd = _trimDragHandle === "end";
+    _trimDragHandle = null;
+    if (wasEnd) previewTrimEndTail();
+  };
+
+  canvas.addEventListener("mousedown", (e) => startDrag(e.clientX));
+  window.addEventListener("mousemove", (e) => moveDrag(e.clientX));
+  window.addEventListener("mouseup", endDrag);
+  canvas.addEventListener("touchstart", (e) => { if (e.touches[0]) startDrag(e.touches[0].clientX); }, { passive: true });
+  canvas.addEventListener("touchmove", (e) => { if (e.touches[0]) moveDrag(e.touches[0].clientX); }, { passive: true });
+  canvas.addEventListener("touchend", endDrag);
+
+  document.getElementById("btn-trim-preview").addEventListener("click", () => playTrimRange(_trimStartSec, _trimEndSec));
+  document.getElementById("btn-trim-stop").addEventListener("click", stopTrimPreview);
+
+  document.getElementById("btn-trim-save").addEventListener("click", async () => {
+    if (!_trimTrigger || !bridge) return;
+    const trigger = _trimTrigger, isPa = _trimIsPa;
+    const result = JSON.parse(await bridge.SaveTrim(trigger, isPa, _trimStartSec, _trimEndSec));
+    if (!result.ok) { showToast(result.error || "Couldn't save the trimmed clip."); return; }
+    showToast(`Saved trimmed clip: ${result.fileName}`);
+    closeInlineTrimmer();
+    await refreshCategories();
+    if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
+    await afterClipperAssignAction(trigger, true);
+  });
+
+  document.getElementById("btn-trim-whistle").addEventListener("click", async () => {
+    if (!bridge) return;
+    const result = JSON.parse(await bridge.SaveTrimAsLeadInWhistle(_trimStartSec, _trimEndSec));
+    if (!result.ok) { showToast(result.error || "Couldn't save the whistle clip."); return; }
+    showToast("Lead-in whistle set -- it'll play before every real triggered clip until you turn it off in the Mixer panel.");
+  });
+
+  document.getElementById("btn-trim-cancel").addEventListener("click", closeInlineTrimmer);
+}
+
 function initClipperAssign() {
-  document.getElementById("btn-clipper-close-assign").addEventListener("click", closeClipperAssign);
+  document.getElementById("btn-clipper-close-assign").addEventListener("click", () => {
+    if (_autoAssignWizard) {
+      _autoAssignWizard.cancelled = true;
+      closeClipperAssign();
+      finishAutoAssignWizard(true);
+      return;
+    }
+    closeClipperAssign();
+  });
   document.getElementById("clipper-assign-search").addEventListener("input", (e) => renderClipperAssignList(e.target.value));
 
   document.getElementById("btn-clipper-assign-play").addEventListener("click", () => {
@@ -3246,28 +4184,29 @@ function initClipperAssign() {
 
   document.getElementById("btn-clipper-assign-select").addEventListener("click", async () => {
     if (!_clipperAssignTrigger || !_clipperAssignSelectedPath) return;
-    await bridge?.AssignTrackFile(_clipperAssignTrigger, _clipperAssignIsPa, _clipperAssignSelectedPath);
+    const trigger = _clipperAssignTrigger;
+    const songName = _clipperAssignSelectedName || _clipperAssignSelectedPath;
+    await bridge?.AssignTrackFile(trigger, _clipperAssignIsPa, _clipperAssignSelectedPath);
     await refreshCategories();
     if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
-    closeClipperAssign();
+    await afterClipperAssignAction(trigger, true, songName);
   });
 
   document.getElementById("btn-clipper-assign-browse").addEventListener("click", async () => {
     if (!_clipperAssignTrigger) return;
+    const trigger = _clipperAssignTrigger;
     const path = await bridge?.BrowseForAudioFile();
     if (!path) return;
-    await bridge?.AssignTrackFile(_clipperAssignTrigger, _clipperAssignIsPa, path);
+    const songName = path.split(/[\\/]/).pop();
+    await bridge?.AssignTrackFile(trigger, _clipperAssignIsPa, path);
     await refreshCategories();
     if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
-    closeClipperAssign();
+    await afterClipperAssignAction(trigger, true, songName);
   });
 
   document.getElementById("btn-clipper-assign-trim").addEventListener("click", async () => {
     if (!_clipperAssignTrigger) return;
-    await bridge?.OpenTrimmer(_clipperAssignTrigger, _clipperAssignIsPa);
-    await refreshCategories();
-    if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
-    closeClipperAssign();
+    await openInlineTrimmer(_clipperAssignTrigger, _clipperAssignIsPa);
   });
 
   document.getElementById("btn-clipper-assign-import-pack").addEventListener("click", () => {
@@ -3276,10 +4215,29 @@ function initClipperAssign() {
 
   document.getElementById("btn-clipper-assign-clear").addEventListener("click", async () => {
     if (!_clipperAssignTrigger) return;
-    await bridge?.ClearTrackAssignment(_clipperAssignTrigger, _clipperAssignIsPa);
+    const trigger = _clipperAssignTrigger;
+    await bridge?.ClearTrackAssignment(trigger, _clipperAssignIsPa);
     await refreshCategories();
     if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
+    await afterClipperAssignAction(trigger, false);
+  });
+
+  document.getElementById("btn-auto-assign-wizard-skip").addEventListener("click", async () => {
+    const wiz = _autoAssignWizard;
+    if (!wiz) return;
+    const ev = wiz.queue[wiz.index];
+    wiz.skipped++;
+    wiz.log.push({ eventName: friendlyEventName(ev.eventName), songName: null, skipped: true });
+    wiz.index++;
     closeClipperAssign();
+    await advanceAutoAssignWizard();
+  });
+
+  document.getElementById("btn-auto-assign-wizard-cancel").addEventListener("click", () => {
+    if (!_autoAssignWizard) return;
+    _autoAssignWizard.cancelled = true;
+    closeClipperAssign();
+    finishAutoAssignWizard(true);
   });
 }
 
@@ -3432,6 +4390,8 @@ function initDefaultSongPackPrompt() {
 
 function closeBandroomMarketplace() {
   document.getElementById("bandroom-overlay").hidden = true;
+  _lastAlbumTeam = null;
+  document.getElementById("btn-forward-bandroom-album").hidden = true;
 }
 
 function renderBandroomTeamGrid(filter) {
@@ -3439,12 +4399,24 @@ function renderBandroomTeamGrid(filter) {
 }
 
 let albumTeam = null;
+// Where the currently-open album was opened from, so its logo can go "back" to the right place
+// instead of just closing: "bandroom" if it replaced the hub's team grid (The Bandroom -> pick a
+// team), "soundbank" if it jumped straight in (Sound Bank button, skips the picker per its own
+// design) -- in that case "back" opens the full team-picker/coverflow instead, since there's no
+// hub view underneath to return to.
+let _albumOpenedFrom = null;
+// Last team whose album was open, so the hub's Forward button can jump straight back into it
+// after backFromTeamAlbum() returns to the hub -- cleared once you pick a DIFFERENT team so
+// Forward never points at something stale.
+let _lastAlbumTeam = null;
 
 function openTeamAlbum(name) {
   marketplaceGuard(() => {
     const team = state.teams.find((t) => t.name === name);
     if (!team) return;
     albumTeam = team;
+    _albumOpenedFrom = document.getElementById("bandroom-overlay").hidden ? "soundbank" : "bandroom";
+    document.getElementById("btn-forward-bandroom-album").hidden = true;
     document.getElementById("bandroom-overlay").hidden = true;
     document.getElementById("bandroom-album-overlay").hidden = false;
     fillTeamSwatch(document.getElementById("bandroom-album-icon"), team);
@@ -3454,6 +4426,7 @@ function openTeamAlbum(name) {
       + "-- songs are trimmed/normalized automatically, images resized to a consistent size.";
     const albumSearch = document.getElementById("bandroom-album-search");
     if (albumSearch) albumSearch.value = "";
+    initAlbumFilters();
     renderTeamAlbumGrid();
   }, "openTeamAlbum");
 }
@@ -3462,6 +4435,23 @@ function closeTeamAlbum() {
   document.getElementById("bandroom-album-overlay").hidden = true;
   _previewAudio?.pause();
   albumTeam = null;
+}
+
+/// Clicking the team logo in the album header (bandroom-album-icon) -- goes back to team select
+/// instead of closing everything: the hub's team grid if that's where this album came from,
+/// otherwise the full team-picker coverflow (Sound Bank's direct-entry path has no hub to return
+/// to underneath it).
+function backFromTeamAlbum() {
+  document.getElementById("bandroom-album-overlay").hidden = true;
+  _previewAudio?.pause();
+  _lastAlbumTeam = albumTeam?.name ?? null;
+  albumTeam = null;
+  if (_albumOpenedFrom === "bandroom") {
+    document.getElementById("bandroom-overlay").hidden = false;
+    document.getElementById("btn-forward-bandroom-album").hidden = !_lastAlbumTeam;
+  } else {
+    openTeamPicker();
+  }
 }
 
 // Cache of the currently-open album's items (both types together, songs + background images --
@@ -3501,6 +4491,23 @@ function getAlbumSearchFilter() {
   return (document.getElementById("bandroom-album-search")?.value ?? "").trim().toLowerCase();
 }
 
+// Sound Bank type filter pills (All/Songs/Backgrounds) -- same pattern as My Downloads'
+// _myDownloadsFilter/initMyDownloadsToolbar above, just for the album view's two content types.
+let _albumTypeFilter = "all";
+let _albumFiltersBound = false;
+function initAlbumFilters() {
+  if (_albumFiltersBound) return;
+  _albumFiltersBound = true;
+  document.getElementById("bandroom-album-filters")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".bandroom-album-filter");
+    if (!btn) return;
+    document.querySelectorAll(".bandroom-album-filter").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    _albumTypeFilter = btn.dataset.type;
+    paintAlbumGrid(getAlbumSearchFilter());
+  });
+}
+
 /// Renders the combined songs+images list from the cached item lists, filtered by the in-album
 /// search box -- called both after a fresh fetch and on every search keystroke, so searching
 /// never re-hits the network.
@@ -3509,13 +4516,16 @@ function paintAlbumGrid(filter) {
   const grid = document.getElementById("bandroom-songs-grid");
   const team = albumTeam;
   const all = [..._albumItemsCache.songs, ..._albumItemsCache.images];
-  const items = filter ? all.filter((it) => it.name.toLowerCase().includes(filter)) : all;
+  let items = filter ? all.filter((it) => it.name.toLowerCase().includes(filter)) : all;
+  if (_albumTypeFilter !== "all") items = items.filter((it) => it.type === _albumTypeFilter);
 
   grid.innerHTML = "";
 
-  const packSongs = filter
+  // Default Song Pack section is song-only content -- hide it under the "Backgrounds" filter,
+  // same as the marketplace items above respect _albumTypeFilter.
+  const packSongs = _albumTypeFilter === "image" ? [] : (filter
     ? _albumDefaultPackCache.filter((s) => s.name.toLowerCase().includes(filter))
-    : _albumDefaultPackCache;
+    : _albumDefaultPackCache);
   if (packSongs.length > 0) {
     const section = document.createElement("div");
     section.className = "bandroom-defaultpack-section";
@@ -3950,7 +4960,7 @@ function renderOnboardingCoverflow(filter) {
     const tile = document.createElement("div");
     tile.className = "team-swatch " + cls;
     tile.title = t.name;
-    fillTeamSwatch(tile, t);
+    fillTeamSwatch(tile, t, true);
     tile.addEventListener("click", () => {
       _onboardingPicked = t.name;
       renderOnboardingCoverflow(filter);
@@ -4052,7 +5062,7 @@ function renderFavoriteCoverflow(filter) {
     const tile = document.createElement("div");
     tile.className = "team-swatch " + cls;
     tile.title = t.name;
-    fillTeamSwatch(tile, t);
+    fillTeamSwatch(tile, t, true);
     tile.addEventListener("click", () => {
       _favoriteCoverflowPicked = t.name;
       renderFavoriteCoverflow(filter);
@@ -4138,7 +5148,7 @@ function updateMatchupLabel() {
   } else {
     btn.textContent = state.matchupHome && state.matchupAway
       ? `${state.matchupAway} @ ${state.matchupHome}`
-      : "Set Matchup";
+      : "LOCK IN?";
     // Clicking this again (whether or not a matchup is already picked) reopens the dialog --
     // openMatchupDialog() only refuses while state.matchupLocked (mid-game), so this is already
     // the "change matchup teams" entry point, not just the first-time picker.
@@ -4193,6 +5203,52 @@ function openMatchupDialog() {
   renderMatchupCoverflow("home", "");
   renderMatchupCoverflow("away", "");
   updateMatchupSubtext();
+  loadScorebugSwitcher();
+}
+
+// ---- Scorebug switcher (matchup screen pill + arrows) -----------------------------------
+// Which scorebug layout GameWatcher watches for (PC CBS skins vs. Console/Remote Play) --
+// previously only reachable via the gear-icon Settings dialog; owner asked for a pill+arrows
+// switcher on the matchup screen itself, same visual language as the coverflow's own arrows.
+let _scorebugPresetNames = [];
+let _scorebugPresetActive = "";
+let _scorebugSwitcherBound = false;
+
+async function loadScorebugSwitcher() {
+  if (!bridge) return;
+  try {
+    const data = JSON.parse(await bridge.GetScorebugPresets());
+    _scorebugPresetNames = data.names || [];
+    _scorebugPresetActive = data.active || _scorebugPresetNames[0] || "";
+  } catch (err) {
+    console.error("GetScorebugPresets failed", err);
+    return;
+  }
+  renderScorebugSwitcher();
+  initScorebugSwitcher();
+}
+
+function renderScorebugSwitcher() {
+  const el = document.getElementById("scorebug-switcher-name");
+  if (el) el.textContent = _scorebugPresetActive || "Scorebug";
+}
+
+function initScorebugSwitcher() {
+  if (_scorebugSwitcherBound) return;
+  _scorebugSwitcherBound = true;
+  document.getElementById("btn-scorebug-prev")?.addEventListener("click", () => cycleScorebugPreset(-1));
+  document.getElementById("btn-scorebug-next")?.addEventListener("click", () => cycleScorebugPreset(1));
+}
+
+async function cycleScorebugPreset(dir) {
+  if (!_scorebugPresetNames.length || !bridge) return;
+  let idx = _scorebugPresetNames.indexOf(_scorebugPresetActive);
+  if (idx === -1) idx = 0;
+  idx = ((idx + dir) % _scorebugPresetNames.length + _scorebugPresetNames.length) % _scorebugPresetNames.length;
+  _scorebugPresetActive = _scorebugPresetNames[idx];
+  renderScorebugSwitcher();
+  try { await bridge.SetScorebugPreset(_scorebugPresetActive); }
+  catch (err) { console.error("SetScorebugPreset failed", err); }
 }
 
 // ---- Custom team logo crop tool ---------------------------------------------------------
@@ -4703,7 +5759,7 @@ function renderMatchupCoverflow(side, filter) {
     const tile = document.createElement("div");
     tile.className = "team-swatch " + cls;
     tile.title = t.name;
-    fillTeamSwatch(tile, t);
+    fillTeamSwatch(tile, t, true);
     tile.addEventListener("click", () => {
       if (side === "home") state.matchupHome = t.name; else state.matchupAway = t.name;
       renderMatchupCoverflow(side, filter);
@@ -4992,36 +6048,44 @@ function runRailAction(action) {
 }
 
 // --- What's New popup ---
-const WHATS_NEW_VERSION = "v1.0.49";
-const WHATS_NEW_CHANGELOG = [
-  {
-    version: "v1.0.49",
-    text: "Fixed a big problem where sounds stopped playing during games. The engine is now always on, and it won't drop events just because the camera hasn't figured out who has the ball yet. Both home and away teams get their cues now. Also added No Punt Return detection — your defense gets a sound when they stop a punt return."
-  },
-  {
-    version: "v1.0.48",
-    text: "PA Announcer clips! You can now assign a second voice clip to play alongside any song. Penalty detection now tells which team actually got flagged. Timeout tracking shows how many the opponent has left. The default song pack is now a separate download so updates stay under GitHub's size limit."
-  },
-  {
-    version: "v1.0.47",
-    text: "Both teams' profiles load at once when you set a matchup. The VS split-screen backdrop shows each team's stadium and logo. Score, clock, and quarter OCR regions are now calibrated from live screenshots. The penalty overlay reads \"Against <Team>\" text to figure out which side got flagged."
-  },
-  {
-    version: "v1.0.46",
-    text: "The Bandroom marketplace is live — browse Sound Banks and Trophy Rooms for every team, download songs and backgrounds, and upload your own. Google sign-in keeps your profile in sync across devices. The new default song pack auto-fills every team with real cues."
-  },
-];
+// Used to be a hardcoded WHATS_NEW_CHANGELOG array + a manually-bumped WHATS_NEW_VERSION
+// constant -- whoever cut a release had to remember to edit both here, completely separate from
+// the real release notes the sidebar "What's New" panel already pulls live (see loadChangelog/
+// GetChangelog above). Forgetting either one meant this popup either kept showing old text
+// forever or silently stopped showing up for real new releases. Now sourced from the same live
+// GetChangelog() feed, gated on the actual latest release title instead of a hand-maintained
+// version string.
+let _whatsNewEntries = [];
+
+async function maybeShowWhatsNew() {
+  if (!bridge) return;
+  let entries = [];
+  try {
+    const raw = JSON.parse(await bridge.GetChangelog());
+    entries = raw
+      .map((e) => ({ ...e, notes: e.notes.filter((n) => !CHANGELOG_FILLER_PATTERN.test(n)) }))
+      .filter((e) => e.notes.length > 0);
+  } catch (err) { console.error("GetChangelog (What's New) failed", err); }
+  if (!entries.length) return;
+
+  let seen = null;
+  try { seen = localStorage.getItem("bandroom-whatsnew-seen"); } catch (_) {}
+  if (seen === entries[0].title) return;
+
+  _whatsNewEntries = entries;
+  setTimeout(showWhatsNew, 600);
+}
 
 function showWhatsNew() {
   const overlay = document.getElementById("whats-new-overlay");
   const changelog = document.getElementById("whats-new-changelog");
-  if (!overlay || !changelog) return;
+  if (!overlay || !changelog || !_whatsNewEntries.length) return;
 
   let html = "";
-  for (const entry of WHATS_NEW_CHANGELOG) {
+  for (const entry of _whatsNewEntries.slice(0, 4)) {
     html += `<div class="whats-new-card">
-      <div class="whats-new-card-version">${entry.version}</div>
-      <div class="whats-new-card-text">${entry.text}</div>
+      <div class="whats-new-card-version">${entry.title}</div>
+      <div class="whats-new-card-text">${entry.notes.join(" ")}</div>
     </div>`;
   }
   changelog.innerHTML = html;
@@ -5030,7 +6094,9 @@ function showWhatsNew() {
 
 function dismissWhatsNew() {
   document.getElementById("whats-new-overlay").hidden = true;
-  try { localStorage.setItem("bandroom-whatsnew-seen", WHATS_NEW_VERSION); } catch (_) {}
+  try {
+    if (_whatsNewEntries.length) localStorage.setItem("bandroom-whatsnew-seen", _whatsNewEntries[0].title);
+  } catch (_) {}
 }
 
 document.getElementById("btn-whats-new-gotit")?.addEventListener("click", dismissWhatsNew);
@@ -5147,25 +6213,6 @@ function debounce(fn, delay) {
   if (bandroomAlbumSearch) bandroomAlbumSearch.addEventListener("input", debounce(() => filterAlbumSearch(bandroomAlbumSearch.value), 200));
   if (cmdInput) cmdInput.addEventListener("input", debounce(() => filterCommandPalette(cmdInput.value), 100));
 })();
-
-// ================================================================
-// LAZY LOADING — IntersectionObserver for team logos
-// ================================================================
-const _lazyImageObserver = new IntersectionObserver((entries) => {
-  entries.forEach((entry) => {
-    if (entry.isIntersecting) {
-      const img = entry.target;
-      if (img.dataset.src) {
-        img.src = img.dataset.src;
-        img.removeAttribute("data-src");
-      }
-      _lazyImageObserver.unobserve(img);
-    }
-  });
-}, { rootMargin: "200px" });
-function lazyLoadImages(container) {
-  container.querySelectorAll("img[data-src]").forEach((img) => _lazyImageObserver.observe(img));
-}
 
 // ================================================================
 // TEAM DATA VALIDATION FALLBACK
@@ -5811,7 +6858,8 @@ document.addEventListener("keydown", (e) => {
       "team-picker-overlay", "bandroom-overlay", "bandroom-album-overlay",
       "matchup-overlay", "profile-overlay", "profile-dashboard-overlay",
       "hotkey-panel", "discord-chat-overlay", "my-downloads-overlay",
-      "load-profile-overlay", "situations-panel"
+      "load-profile-overlay", "situations-panel", "quick-load-confirm-overlay",
+      "add-school-overlay"
     ];
     for (const id of overlays) {
       const el = document.getElementById(id);
@@ -6061,7 +7109,7 @@ const _safeSetInnerHTML = {
 };
 // This guard was written but never actually installed -- the descriptor object above existed
 // with no corresponding Object.defineProperty call, so every innerHTML assignment in the app
-// (including the one in buildMyDownloadTile that let an unsanitized marketplace upload name
+// (including the one in buildMyDownloadRow that let an unsanitized marketplace upload name
 // break out of an alt="..." attribute) went through the plain, unguarded setter the whole time.
 // Installing it here makes it a real last-resort net for any call site that forgets
 // sanitizeHTML(), on top of (not instead of) fixing individual call sites directly.
@@ -6186,36 +7234,19 @@ window.addEventListener("bandroom:killfeed", (e) => {
 });
 
 // ================================================================
-// ITEM 8: LAZY LOADING FOR TEAM LOGOS (IntersectionObserver)
+// ITEM 8: EXPLICIT IMG WIDTH/HEIGHT to prevent layout shift
 // ================================================================
-let _logoObserver = null;
-function enableLazyLogos() {
-  if (_logoObserver || !("IntersectionObserver" in window)) return;
-  _logoObserver = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (entry.isIntersecting) {
-        const img = entry.target;
-        if (img.dataset.src && !img.src) { img.src = img.dataset.src; img.removeAttribute("data-src"); }
-      }
-    });
-  }, { rootMargin: "200px" });
-}
-function observeLogos(container) {
-  if (!_logoObserver) enableLazyLogos();
-  container.querySelectorAll("img.team-logo-img[data-src]").forEach((img) => _logoObserver?.observe(img));
-}
-// Modify fillTeamSwatch to use data-src for lazy loading
-const _originalFillTeamSwatch = fillTeamSwatch;
-fillTeamSwatch = function (el, t) {
-  _originalFillTeamSwatch(el, t);
-  // If a logo was set (innerHTML contains img), convert to lazy
-  const img = el.querySelector("img.team-logo-img");
-  if (img && img.src) {
-    img.dataset.src = img.src;
-    img.removeAttribute("src");
-  }
-};
-
+// (A lazy-loading pass used to live here, monkey-patching fillTeamSwatch to strip every logo
+// <img>'s src into data-src for an IntersectionObserver to fill in later. REMOVED -- the
+// observer-attaching half (observeLogos()) was never actually called from any render path
+// (renderTeamPickerCoverflow, renderMatchupCoverflow, the header badge, etc. all just render
+// fillTeamSwatch's output and never hooked it up), so every team logo everywhere in the app had
+// its src silently deleted and nothing ever set it back. This was the real cause behind repeated
+// "saved logo doesn't show up" reports -- it wasn't a save-path bug at all, EVERY team's logo was
+// broken this way, not just newly-saved ones. Simplest correct fix: don't lazy-load these at all
+// -- there are at most a handful of logo tiles visible at once (coverflow shows 5, grids maybe a
+// few dozen), and they're served from a local virtual host, so the "network cost" this was meant
+// to avoid doesn't really exist here.
 // ================================================================
 // ITEM 8: EXPLICIT IMG WIDTH/HEIGHT to prevent layout shift
 // ================================================================
@@ -6312,14 +7343,7 @@ if (document.getElementById("btn-matchup-confirm")) {
   });
 }
 
-// Show on first launch after this update
-try {
-  const seen = localStorage.getItem("bandroom-whatsnew-seen");
-  if (seen !== WHATS_NEW_VERSION) {
-    setTimeout(showWhatsNew, 600);
-  }
-} catch (_) {
-  setTimeout(showWhatsNew, 600);
-}
+// Show on first launch after a real new release (see maybeShowWhatsNew) -- runs after init()
+// so bridge/GetChangelog are ready.
 
-init();
+init().then(maybeShowWhatsNew);

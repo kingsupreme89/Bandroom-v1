@@ -6,6 +6,13 @@ internal sealed class KeyboardHook
 {
     public event Action<string>? KeyCombo;
 
+    /// <summary>Fires on Right Ctrl alone, global (works even when Bandroom isn't focused) --
+    /// the "band cutoff" gesture: an instant, unconditional stop of all playing audio, with no
+    /// config lookup involved (unlike KeyCombo above, which only fires whatever's bound to that
+    /// combo). Debounced the same way as the numpad combos via _pressed so holding the key down
+    /// doesn't repeat-fire on every WM_KEYDOWN auto-repeat.</summary>
+    public event Action? Cutoff;
+
     IntPtr _hookHandle = IntPtr.Zero;
     Native.LowLevelKeyboardProc? _proc;
     Thread? _thread;
@@ -65,6 +72,13 @@ internal sealed class KeyboardHook
                 {
                     _pressed.Remove(vk);
                 }
+            }
+            else if (vk == Native.VK_RCONTROL)
+            {
+                if (isDown && _pressed.Add(vk))
+                    Cutoff?.Invoke();
+                else if (isUp)
+                    _pressed.Remove(vk);
             }
         }
         return Native.CallNextHookEx(_hookHandle, nCode, wParam, lParam);

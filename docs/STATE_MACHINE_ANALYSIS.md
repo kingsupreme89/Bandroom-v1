@@ -768,4 +768,4 @@ In `OnEngineEventsDetected` (line 992): `string side = _possession ?? "home"`. W
 
 ---
 
-*End of State-Machine Analysis. No code modifications were made during this audit.*
+
