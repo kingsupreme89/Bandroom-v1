@@ -3301,12 +3301,17 @@ function initDefaultSongPackPrompt() {
   const fileLog = document.getElementById("songpack-progress-filelog");
   const doneActions = document.getElementById("songpack-progress-done-actions");
   const skipFutureCheckbox = document.getElementById("songpack-progress-skip-future");
-  let popupsSkipped = localStorage.getItem(SONGPACK_POPUP_SKIP_KEY) === "1";
+  // try/catch, not a bare call -- every other localStorage usage in this file is guarded the same
+  // way (WebView2's storage can throw depending on profile/permissions setup), and this one sits
+  // directly in initDefaultSongPackPrompt's top-level scope: an uncaught throw here would abort
+  // the whole function before any of its event listeners get wired.
+  let popupsSkipped = false;
+  try { popupsSkipped = localStorage.getItem(SONGPACK_POPUP_SKIP_KEY) === "1"; } catch (err) { console.error("localStorage read failed", err); }
 
   document.getElementById("btn-songpack-progress-done").addEventListener("click", () => {
     progressOverlay.hidden = true;
-    localStorage.setItem(SONGPACK_POPUP_SKIP_KEY, skipFutureCheckbox.checked ? "1" : "0");
     popupsSkipped = skipFutureCheckbox.checked;
+    try { localStorage.setItem(SONGPACK_POPUP_SKIP_KEY, popupsSkipped ? "1" : "0"); } catch (err) { console.error("localStorage write failed", err); }
   });
 
   (async () => {
@@ -3907,11 +3912,16 @@ async function maybeShowOnboarding() {
   });
   document.getElementById("btn-onboarding-confirm").addEventListener("click", async () => {
     if (!_onboardingPicked) return;
-    await bridge.CompleteFirstRun(_onboardingPicked);
-    state.activeTeam = _onboardingPicked;
-    setActiveTeam(_onboardingPicked);
-    overlay.hidden = true;
-    pointOutTheBandroom();
+    try {
+      await bridge.CompleteFirstRun(_onboardingPicked);
+      state.activeTeam = _onboardingPicked;
+      setActiveTeam(_onboardingPicked); // also resets the glow off whatever was just browsed
+      overlay.hidden = true;
+      pointOutTheBandroom();
+    } catch (err) {
+      console.error("CompleteFirstRun failed", err);
+      showToast("Couldn't save that pick -- try again.");
+    }
   });
 }
 
@@ -4010,6 +4020,10 @@ function openFavoriteTeamCoverflow() {
       } catch (err) {
         console.error("SetFavoriteTeam failed", err);
         showToast("Couldn't save favorite team -- try again.");
+        // Error path skips the selectTeam() call above, which is what would have otherwise reset
+        // the glow to the real active team -- without this it stays stuck on whatever team was
+        // last browsed/previewed, not the team that's actually still active.
+        restoreActiveTeamGlow();
       }
       overlay.hidden = true;
     });
