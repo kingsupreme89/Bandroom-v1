@@ -1715,6 +1715,13 @@ input, select, textarea, [contenteditable] {
   text-overflow: ellipsis;
   max-width: 100%;
 }
+/* Team-color glow on the school name (matches the header wordmark's --team-primary drop-shadow
+   pattern) -- color/shadow set inline per-item via style.setProperty("--school-glow", ...) in
+   buildItemTile() since each tile can belong to a different school, not just the active team. */
+.bandroom-item-school[data-glow] {
+  color: var(--school-glow, var(--text-muted));
+  text-shadow: 0 0 8px color-mix(in srgb, var(--school-glow, transparent) 55%, transparent);
+}
 
 /* Self-healing "My Downloads" missing-file state (Music Library UX Brief v2 §2.3/§4/§5) -- an
    entry whose file has been deleted outside the app stays visible (never silently absent) but is
@@ -1841,6 +1848,10 @@ input, select, textarea, [contenteditable] {
   font-size: 11.5px; font-weight: 600;
   color: var(--text-muted-2);
   display: flex; align-items: center; gap: 6px;
+}
+.marketplace-card-school[data-glow] {
+  color: var(--school-glow, var(--text-muted-2));
+  text-shadow: 0 0 8px color-mix(in srgb, var(--school-glow, transparent) 55%, transparent);
 }
 .marketplace-card-school-dot {
   width: 8px; height: 8px; border-radius: 50%; flex: none;
@@ -2575,6 +2586,19 @@ input, select, textarea, [contenteditable] {
 }
 .pill:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); }
 .pill-marketplace { border-color: rgba(34, 211, 238, 0.3); color: var(--accent-2); }
+/* Auto-Assign pill (matchup-side-bar) -- glows the active team's color, same --team-secondary
+   token the wordmark/side-bar active state already use, so it visually belongs to "the team
+   you're currently assigning for" rather than reading as a generic action button. */
+.pill-auto-assign {
+  margin-left: auto;
+  border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 45%, var(--glass-border));
+  color: var(--team-secondary, var(--accent));
+}
+.pill-auto-assign:hover {
+  background: color-mix(in srgb, var(--team-secondary, var(--accent)) 16%, transparent);
+  box-shadow: 0 0 14px 1px color-mix(in srgb, var(--team-secondary, var(--accent)) 35%, transparent);
+}
+.pill-auto-assign:disabled { opacity: 0.55; cursor: default; box-shadow: none; }
 .pill-rainbow { border-color: color-mix(in srgb, #ffd700 40%, #ff69b4 40%); color: #ffd700; }
 .pill-off .watch-dot { background: var(--text-muted); }
 .pill-on .watch-dot { background: #3ddc84; box-shadow: 0 0 5px #3ddc84; }

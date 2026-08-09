@@ -229,6 +229,10 @@
           <span class="matchup-side-label">Assigning songs for:</span>
           <button class="matchup-side-btn" id="btn-side-away" data-side="away"></button>
           <button class="matchup-side-btn" id="btn-side-home" data-side="home"></button>
+          <!-- Auto-Assign (task queue): same ApplyDefaultProfileForTeam bridge call the GAMETIME
+               "Use Starter Profile" prompt uses -- only fills empty slots, never overwrites
+               existing assignments, so it's safe to click any time, not just first-run. -->
+          <button class="pill pill-auto-assign" id="btn-auto-assign" title="Fill any empty song slots for this team with the starter profile">Auto-Assign</button>
         </div>
         <div id="category-bar" class="glass">
           <div class="category-list" id="category-list"><!-- populated by app.js --></div>

@@ -625,6 +625,33 @@ function updateMatchupSideBar() {
   homeBtn.classList.toggle("active", state.activeTeam === state.matchupHome);
 }
 
+/// Manual trigger for the same ApplyDefaultProfileForTeam bridge call the GAMETIME "Use Starter
+/// Profile" prompt uses (see confirmUseStarterProfile-style flow) -- fills only this team's empty
+/// slots, never overwrites existing assignments, so re-clicking after tweaking a few songs is
+/// harmless. Lives on matchup-side-bar so it always targets state.activeTeam, matching that bar's
+/// own "assigning songs for" framing.
+async function handleAutoAssignClick() {
+  const btn = document.getElementById("btn-auto-assign");
+  if (!state.activeTeam || !bridge) return;
+  btn.disabled = true;
+  const prevLabel = btn.textContent;
+  btn.textContent = "Assigning...";
+  try {
+    const filled = await bridge.ApplyDefaultProfileForTeam(state.activeTeam);
+    showToast(filled > 0
+      ? `Auto-assigned ${filled} empty slot${filled === 1 ? "" : "s"} for ${state.activeTeam}.`
+      : `${state.activeTeam} already has every slot filled.`);
+    if (filled > 0 && !document.getElementById("situations-panel").hidden && state.currentSituationsCategory)
+      await openSituations(state.currentSituationsCategory);
+  } catch (err) {
+    console.error("ApplyDefaultProfileForTeam failed", err);
+    showToast("Couldn't auto-assign -- try again.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prevLabel;
+  }
+}
+
 function updateHeaderTeamBadge(team) {
   const badge = document.getElementById("header-team-badge");
   if (!badge) return;
@@ -1527,6 +1554,7 @@ function wireControls() {
   });
   document.getElementById("btn-side-away").addEventListener("click", () => selectTeam(state.matchupAway));
   document.getElementById("btn-side-home").addEventListener("click", () => selectTeam(state.matchupHome));
+  document.getElementById("btn-auto-assign").addEventListener("click", handleAutoAssignClick);
 
   document.getElementById("btn-save-profile-cancel").addEventListener("click", closeSaveProfileDialog);
   document.getElementById("btn-save-profile-confirm").addEventListener("click", confirmSaveProfile);
@@ -2418,6 +2446,26 @@ function teamLogoUrl(schoolName) {
   return team?.logoUrl ?? null;
 }
 
+/// Sets the school-name text to glow in that team's color (--school-glow, consumed by
+/// .bandroom-item-school[data-glow]/.marketplace-card-school[data-glow] in style.css). Per-item,
+/// not the active team's --team-primary, since a tile grid can mix schools. Same near-black
+/// fallback as setActiveTeam's isNearBlack check -- a few teams' primary is literal black, which
+/// glows invisibly, so fall back to secondary for those.
+function applySchoolGlow(el, schoolName) {
+  const team = state.teams?.find((t) => t.name === schoolName);
+  if (!team) return;
+  const isNearBlack = (hex) => {
+    const h = (hex || "").replace("#", "");
+    if (h.length !== 6) return false;
+    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return r < 20 && g < 20 && b < 20;
+  };
+  const glow = isNearBlack(team.primary) ? (team.secondary ?? team.primary) : team.primary;
+  if (!glow) return;
+  el.style.setProperty("--school-glow", glow);
+  el.setAttribute("data-glow", "");
+}
+
 function buildItemTile(item, inHub) {
   const tile = document.createElement("div");
   tile.className = inHub ? "bandroom-item-tile" : "marketplace-card";
@@ -2445,6 +2493,7 @@ function buildItemTile(item, inHub) {
     const school = document.createElement("div");
     school.className = "bandroom-item-school";
     school.textContent = item.school;
+    applySchoolGlow(school, item.school);
     tile.append(thumb, name, school);
 
     // Per-item Play/Stop/Download transport on hub song tiles (Popular Songs shelf) -- reuses
@@ -2503,6 +2552,7 @@ function buildItemTile(item, inHub) {
     dot.className = "marketplace-card-school-dot";
     dot.style.background = team?.primary ?? "var(--text-muted)";
     schoolRow.append(dot, document.createTextNode(item.school));
+    applySchoolGlow(schoolRow, item.school);
     const meta = document.createElement("div");
     meta.className = "marketplace-card-meta";
     meta.innerHTML = `<span>\u{2B07} ${(item.downloads ?? 0).toLocaleString()}</span><span>\u{2661} ${(item.likes ?? 0).toLocaleString()}</span>`;
