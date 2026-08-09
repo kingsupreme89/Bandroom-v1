@@ -483,9 +483,11 @@ async function openSituations(category) {
       <span class="situation-actions" style="position: relative;">
         <button class="situation-btn" data-act="assign">Assign / Edit</button>
         <button class="situation-btn situation-btn-pa" data-act="assign-pa" title="Assign a PA Announcer clip that plays alongside the main song for this situation">Assign PA</button>
-        <button class="situation-btn" data-act="preview" ${ev.fileName ? "" : "disabled"}>Preview</button>
-        <button class="situation-btn" data-act="stop">Stop</button>
-        <button class="situation-btn situation-btn-volume" data-act="volume" title="Adjust this event's own volume">&#128266;</button>
+        <span class="situation-transport">
+          <button class="bandroom-item-action" data-act="preview" title="Play" ${ev.fileName ? "" : "disabled"}>&#9654;</button>
+          <button class="bandroom-item-action" data-act="stop" title="Stop">&#9209;</button>
+          <button class="bandroom-item-action" data-act="volume" title="Adjust this event's own volume">&#128266;</button>
+        </span>
         <div class="situation-volume-popover" hidden>
           <input type="range" min="0" max="100" value="100" class="slider situation-volume-slider" />
           <span class="situation-volume-value">100%</span>
@@ -4813,6 +4815,27 @@ window.addEventListener("resize", resizePreviewWaveform);
 // ================================================================
 // XSS SANITIZATION helper for marketplace innerHTML
 // ================================================================
+// Called by buildItemTile's uploader line ("Uploaded by X · 3h ago") but had no definition
+// anywhere in this file -- a genuine ReferenceError on any marketplace item whose uploadedAt is
+// set (i.e. any real upload), which crashed the whole tile-rendering loop for that team's album
+// and left the grid blank (caught by the global JS error guard's toast, with no per-tile
+// fallback -- one bad item took the entire render down instead of just that tile).
+function relativeTime(isoString) {
+  const then = new Date(isoString).getTime();
+  if (Number.isNaN(then)) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
+
 function sanitizeHTML(str) {
   const div = document.createElement("div");
   div.textContent = str;

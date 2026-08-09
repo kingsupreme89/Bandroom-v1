@@ -2119,6 +2119,12 @@ input, select, textarea, [contenteditable] {
   min-height: 0;
   border-radius: var(--radius-panel);
   padding: 4px;
+  /* padding-bottom: 44px -- #bandroom-ticker is position: fixed; bottom: 0; height: 44px,
+     painted on top of everything (z-index: 50) rather than reserving its own layout space, so
+     without this the last ~44px of whatever's scrolled to the bottom of the center column
+     (situations cards, clipper island controls) sits physically behind the ticker bar. Same fix
+     in spirit as .help-pill's bottom: 44px offset above. */
+  padding-bottom: 44px;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -2234,8 +2240,37 @@ input, select, textarea, [contenteditable] {
 }
 .situation-file { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .situation-file-pa { opacity: 0.7; }
+/* .situation-btn had NO base rule anywhere in this file -- every Assign/Preview/Stop button on
+   every trigger card (the whole Offense/Defense/Situations assign screen) was falling back to
+   raw native OS button chrome instead of the app's pill language used everywhere else
+   (.pill/.pill-marketplace/.help-pill), which is what made this screen look untouched by the
+   glassmorphism redesign. Same shape as .pill, just sized to fit multiple buttons per card. */
+.situation-btn {
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-muted-2);
+  white-space: nowrap;
+}
+.situation-btn:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); }
+.situation-btn:disabled { opacity: 0.4; cursor: default; }
 .situation-btn-pa { border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 40%, var(--glass-border)); color: var(--team-secondary, var(--accent)); }
-.situation-btn-volume { padding-left: 8px; padding-right: 8px; }
+/* Preview/Stop/Volume are transport controls, not labeled actions -- reuses the same
+   .bandroom-item-action icon-button look already established on the Suggested-for-You row's
+   Play/Stop/Download buttons, instead of inventing a third button style on this one screen. */
+.situation-transport { display: flex; gap: 6px; }
+.situation-transport .bandroom-item-action {
+  width: 26px; height: 26px;
+  border-radius: 999px;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px;
+}
+.situation-transport .bandroom-item-action:disabled { opacity: 0.4; cursor: default; }
 .situation-volume-popover {
   position: absolute;
   bottom: calc(100% + 6px);
@@ -2269,6 +2304,11 @@ input, select, textarea, [contenteditable] {
   flex-direction: column;
   gap: 6px;
   padding: 10px;
+  /* padding-bottom: 54px (10px base + 44px ticker height) -- same reasoning as #center-column
+     and .help-pill's bottom: 44px above: #bandroom-ticker is fixed/painted-on-top, not
+     layout-reserved, so both side panels (#left-panel and #adjust-panel) need their own bottom
+     padding or their last row (e.g. the Adjust panel's "What's New" section) sits behind it. */
+  padding-bottom: 54px;
   overflow-y: auto;
 }
 
