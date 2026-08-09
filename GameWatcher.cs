@@ -190,7 +190,13 @@ internal sealed class GameWatcher
         {
             Name = "situation",
             FxX = 0, FxY = 0.83, FxW = 1.0, FxH = 0.14,
-            Pattern = new Regex(@"\b(KICKOFF|PAT\s*GOOD|TOUCHDOWN|INTERCEPTED|FUMBLE|TURNOVER|FAIR\s*CATCH|NO\s*RETURN)\b", RegexOptions.IgnoreCase),
+            // FIXED: every other multi-word phrase here defensively allows \s* for OCR
+            // word-splitting (PAT\s*GOOD, FAIR\s*CATCH, NO\s*RETURN) -- KICKOFF was the one
+            // exception, requiring an exact unbroken match. A wide-tracked/stylized "KICKOFF"
+            // graphic OCR-splitting into "KICK OFF" would silently fail this pattern entirely
+            // (no match, situation stays whatever it was before) -- see NormalizeMatch's new
+            // "kick off" => "kickoff" case below for the other half of this fix.
+            Pattern = new Regex(@"\b(KICK\s*OFF|PAT\s*GOOD|TOUCHDOWN|INTERCEPTED|FUMBLE|TURNOVER|FAIR\s*CATCH|NO\s*RETURN)\b", RegexOptions.IgnoreCase),
         },
         // Quarter indicator -- reads the HUD's quarter number (sits between the score and the
         // game clock in the bottom scorebug, e.g. "1st | 5:11 | -- | KICKOFF") so we can
@@ -397,7 +403,16 @@ internal sealed class GameWatcher
                         // fine here (this "down" region processes before "flag" is re-read the
                         // same tick, but polls every 250ms).
                         bool flagActive = _regions.FirstOrDefault(r => r.Name == "flag")?.Last != null;
-                        if (!flagActive) SamplePossessionFromWindow(fullBmp, winW, winH);
+                        // FIXED: the same full-width band also repaints to non-team-color states
+                        // for KICKOFF/TOUCHDOWN/TURNOVER/PAT GOOD/etc (see the "situation" region
+                        // right below "down"), not just FLAG -- but only FLAG had a guard here.
+                        // Sampling possession color during e.g. a TOUCHDOWN celebration frame can
+                        // feed a bogus color into ResolveTeamColor and flip _lastPossession right
+                        // when TouchdownHelper checks state.Delta.NewPossession, attributing the
+                        // score to the wrong team. Generalizing the existing FLAG guard to also
+                        // cover "situation" being active closes that gap.
+                        bool situationActive = _regions.FirstOrDefault(r => r.Name == "situation")?.Last != null;
+                        if (!flagActive && !situationActive) SamplePossessionFromWindow(fullBmp, winW, winH);
                         CheckForLossOfYards(text);
                     }
 
@@ -712,6 +727,7 @@ internal sealed class GameWatcher
             "intercepted" or "fumble" or "turnover" => "turnover",
             "field goal" => "fieldgoal",
             "fair catch" or "no return" => "nopuntreturn",
+            "kick off" => "kickoff", // pairs with the KICK\s*OFF pattern fix above
             _ => collapsed.Replace(" ", "_"),
         };
     }

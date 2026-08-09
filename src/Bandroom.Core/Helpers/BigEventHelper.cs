@@ -14,7 +14,10 @@ public sealed class BigEventHelper : IRuleEvaluator
             };
         }
 
-        if (state.Current.Down == 4 && state.Delta.LostYards)
+        // FIXED: was `state.Delta.LostYards`, always false -- see TflHelper.cs for the root
+        // cause (PlaySnapshot.YardLine hardcoded to 0). Down == 4 plus YardsToGo increasing from
+        // the previous down is the same real, OCR'd signal used there.
+        if (state.Current.Down == 4 && state.Current.YardsToGo > state.Previous.YardsToGo)
         {
             return new TriggerEvent
             {

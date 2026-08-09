@@ -23,7 +23,12 @@ public sealed class DefenseHelper : IRuleEvaluator
         if (state.Delta.NewPossession)
             return null;
 
-        if (state.Current.Down == 3 && state.Delta.LostYards)
+        // FIXED: was `state.Delta.LostYards`, which is always false -- see TflHelper.cs for the
+        // root cause (PlaySnapshot.YardLine is hardcoded to 0, so LostYards can never be true).
+        // Down having just changed (guaranteed by the guards above: unchanged-down and
+        // new-possession are both already excluded) to 3 plus YardsToGo increasing is the same
+        // real signal TflHelper now uses.
+        if (state.Current.Down == 3 && state.Current.YardsToGo > state.Previous.YardsToGo)
         {
             return new TriggerEvent
             {
@@ -50,7 +55,8 @@ public sealed class DefenseHelper : IRuleEvaluator
             };
         }
 
-        if (state.Current.Down == 2 && state.Delta.LostYards)
+        // FIXED: same dead-signal bug as the Down == 3 branch above -- see its comment.
+        if (state.Current.Down == 2 && state.Current.YardsToGo > state.Previous.YardsToGo)
         {
             return new TriggerEvent
             {
