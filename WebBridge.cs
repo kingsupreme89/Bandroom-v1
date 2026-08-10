@@ -186,6 +186,28 @@ public sealed class WebBridge
         return http;
     }
 
+    /// <summary>Root-caused 2026-08-10 by capturing the exact bytes .NET sent (via a local echo
+    /// server standing in for the real worker) and replaying that exact payload against the real
+    /// worker with curl -- confirmed byte-for-byte reproducible 400 "bad form data". The only
+    /// difference from a working curl -F request: MultipartFormDataContent's default
+    /// Content-Disposition header does NOT quote the `name=`/`filename=` parameter values for
+    /// simple alphanumeric field names (`name=type` instead of `name="type"`), which RFC 7578
+    /// requires as a quoted-string and this worker's multipart parser enforces strictly. curl
+    /// always quotes; .NET only quotes when the value contains characters that require it.
+    /// Re-quoting the same captured payload by hand and replaying it got a clean 200, isolating
+    /// this as the sole cause (boundary quoting, tried first, made no difference on its own).
+    /// Every ShareHttp form part must be added through this instead of MultipartFormDataContent's
+    /// own .Add(content, name[, fileName]) overloads.</summary>
+    static void AddFormPart(System.Net.Http.MultipartFormDataContent form, System.Net.Http.HttpContent content, string name, string? fileName = null)
+    {
+        form.Add(content);
+        content.Headers.Remove("Content-Disposition");
+        var disposition = fileName == null
+            ? $"form-data; name=\"{name}\""
+            : $"form-data; name=\"{name}\"; filename=\"{fileName}\"";
+        content.Headers.TryAddWithoutValidation("Content-Disposition", disposition);
+    }
+
     /// <summary>Uploads a locally-imported track (item 21) to the marketplace worker, using the
     /// exact same request shape (multipart: type/name/school/file) a normal in-album upload
     /// sends from app.js's confirmUpload -- so it shows up in that school's Sound Bank exactly
@@ -212,13 +234,13 @@ public sealed class WebBridge
             // sent, not a rejected upload. entry.Type is only ever "song" or "pa" (see its own
             // doc comment) so this is safe without extra validation here.
             using var form = new System.Net.Http.MultipartFormDataContent();
-            form.Add(new System.Net.Http.StringContent(entry.Type), "type");
-            form.Add(new System.Net.Http.StringContent(entry.Name), "name");
-            form.Add(new System.Net.Http.StringContent(school), "school");
+            AddFormPart(form, new System.Net.Http.StringContent(entry.Type), "type");
+            AddFormPart(form, new System.Net.Http.StringContent(entry.Name), "name");
+            AddFormPart(form, new System.Net.Http.StringContent(school), "school");
             var bytes = await File.ReadAllBytesAsync(entry.Path);
             var fileContent = new System.Net.Http.ByteArrayContent(bytes);
             fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
-            form.Add(fileContent, "file", Path.GetFileName(entry.Path));
+            AddFormPart(form, fileContent, "file", Path.GetFileName(entry.Path));
 
             using var response = await ShareHttp.PostAsync(
                 "https://bandroom-marketplace.bandroom.workers.dev/upload", form);
@@ -349,17 +371,27 @@ public sealed class WebBridge
         {
             var json = JsonSerializer.Serialize(new { team, assignments = entries });
             using var form = new System.Net.Http.MultipartFormDataContent();
-            form.Add(new System.Net.Http.StringContent("profile"), "type");
-            form.Add(new System.Net.Http.StringContent($"{team} profile ({entries.Count} songs)"), "name");
-            form.Add(new System.Net.Http.StringContent(team), "school");
+            AddFormPart(form, new System.Net.Http.StringContent("profile"), "type");
+            AddFormPart(form, new System.Net.Http.StringContent($"{team} profile ({entries.Count} songs)"), "name");
+            AddFormPart(form, new System.Net.Http.StringContent(team), "school");
             var fileContent = new System.Net.Http.ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(json));
             fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
-            form.Add(fileContent, "file", $"{team}-profile.json");
+            AddFormPart(form, fileContent, "file", $"{team}-profile.json");
 
             using var response = await ShareHttp.PostAsync(
                 "https://bandroom-marketplace.bandroom.workers.dev/upload", form);
             if (!response.IsSuccessStatusCode)
+            {
+                // Previously silent -- a non-2xx response (as opposed to a thrown exception,
+                // handled below) never got logged anywhere, so "Upload failed -- check your
+                // connection" was shown even when the worker was reachable and responding, just
+                // rejecting the request for a reason we couldn't see (bad request shape, rate
+                // limit, size limit, etc). Log the actual status + body so the next failure is
+                // diagnosable instead of indistinguishable from a real network outage.
+                var body = await response.Content.ReadAsStringAsync();
+                CrashLog.Write($"ShareCurrentProfileToMarketplace failed for \"{team}\": HTTP {(int)response.StatusCode} {response.ReasonPhrase} -- {body}", new Exception("non-success status"));
                 return JsonSerializer.Serialize(new { success = false, error = "Upload failed -- check your connection and try again." });
+            }
 
             return JsonSerializer.Serialize(new { success = true, count = entries.Count });
         }
