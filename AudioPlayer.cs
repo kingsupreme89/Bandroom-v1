@@ -46,6 +46,9 @@ internal static class AudioPlayer
         get => AudioDuckingController.Enabled;
         set => AudioDuckingController.Enabled = value;
     }
+    // Off by default -- see SubBassEnhancerProvider's doc comment: ships opt-in until it's
+    // been confirmed to actually sound smooth, not forced on for everyone.
+    public static SubBassIntensity SubBassLevel = SubBassIntensity.Off;
 
     /// <summary>Owner request: a short cue (e.g. a band whistle) prepended immediately before
     /// every real triggered clip AND every manual preview, with zero gap -- like a drum major's
@@ -148,7 +151,12 @@ internal static class AudioPlayer
     /// <param name="isHighPriorityEvent">True for Touchdown/Turnover/Safety-class triggers --
     /// when DuckingEnabled is on, every OTHER currently-playing clip is ducked to 40% for a
     /// couple seconds so this one (and any PA layer playing alongside it) cuts through clearly.</param>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false)
+    /// <param name="isBigHitEvent">True for Tackle-for-Loss-class triggers -- when SubBassLevel
+    /// isn't Off, blends a low-end "thump" under this clip specifically.</param>
+    /// <param name="isPregameEvent">True for the pregame walkout trigger ("Other: Pregame
+    /// Ready") -- applies the Tunnel bandpass/reverb/saturation treatment instead of the
+    /// normal reverb preset for this one clip.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
@@ -192,11 +200,21 @@ internal static class AudioPlayer
 
                     if (!bypass)
                     {
-                        var preset = CurrentReverb;
-                        if (preset != ReverbPreset.Off)
+                        if (isPregameEvent)
                         {
-                            var (roomSize, damp, wet, width) = ReverbPresets.Get(preset);
-                            source = new ReverbProvider(source, roomSize, damp, wet, width);
+                            // Tunnel treatment replaces the normal reverb preset for this one
+                            // clip -- it already includes its own reverb stage, stacking the
+                            // user's chosen preset on top would just be mud.
+                            source = new TunnelFilterProvider(source);
+                        }
+                        else
+                        {
+                            var preset = CurrentReverb;
+                            if (preset != ReverbPreset.Off)
+                            {
+                                var (roomSize, damp, wet, width) = ReverbPresets.Get(preset);
+                                source = new ReverbProvider(source, roomSize, damp, wet, width);
+                            }
                         }
 
                         source = CurrentEq switch
@@ -208,6 +226,7 @@ internal static class AudioPlayer
 
                         if (TransientShaperEnabled) source = new TransientShaperProvider(source);
                         if (StereoWidenerEnabled) source = new StereoWidenerProvider(source, StereoWidenerAmount);
+                        if (isBigHitEvent && SubBassLevel != SubBassIntensity.Off) source = new SubBassEnhancerProvider(source, SubBassLevel);
                     }
 
                     // Lead-in whistle: built from the main clip's post-mono/pre-reverb WaveFormat

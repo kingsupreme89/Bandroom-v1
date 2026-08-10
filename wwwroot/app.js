@@ -1957,6 +1957,9 @@ const SB_INFO_TEXT = {
   "transient-shaper": "Makes drum and cymbal hits punch harder without turning up the whole song -- like giving the snare a little extra crack right when it hits.",
   "stereo-widener": "Takes a recording that sounds narrow or one-note (like it's coming from one spot) and spreads it out so it sounds bigger and fuller through two speakers.",
   "ducking": "When something big happens like a touchdown, this quietly turns the music down for a second so the crowd sound and announcer can be heard clearly, then brings the music back up on its own.",
+  "controller-rumble": "If you have an Xbox or PlayStation-style controller plugged in, this gives it a light buzz when the game is close and the clock is running out -- the last 2 minutes of the 4th quarter or overtime, with the score within a touchdown either way. Needs a controller connected to do anything.",
+  "sub-bass": "Adds a low rumbly 'thump' under the sound on big tackle-for-loss plays -- like feeling a hit in your chest, not just hearing it. Off by default since it's a newer effect; try Subtle first.",
+  "crowd-bus": "Plays a looping crowd-noise sound in the background that gets louder automatically when the game is close, it's the 4th quarter, or time is running out -- and stays quieter the rest of the time. You have to pick your own crowd-noise sound file first (Set Crowd Clip button) since Bandroom doesn't come with one built in.",
 };
 
 function refreshSoundBoothInfoPopover(key) {
@@ -1984,9 +1987,31 @@ async function refreshSoundBoothSection() {
     document.getElementById("toggle-ducking").checked = await bridge.GetDuckingEnabled();
   } catch (err) { console.error("GetDuckingEnabled failed", err); }
   try {
+    document.getElementById("toggle-controller-rumble").checked = await bridge.GetControllerRumbleEnabled();
+  } catch (err) { console.error("GetControllerRumbleEnabled failed", err); }
+  try {
+    const subBassLevel = await bridge.GetSubBassLevel();
+    document.querySelectorAll("#soundbooth-subbass-tiles .sb-tile").forEach((t) => {
+      t.classList.toggle("active", t.dataset.subbass === subBassLevel);
+    });
+  } catch (err) { console.error("GetSubBassLevel failed", err); }
+  try {
     const bypassed = await bridge.GetNoEffectsBypass();
     document.getElementById("btn-soundbooth-no-effects").classList.toggle("active", bypassed);
   } catch (err) { console.error("GetNoEffectsBypass failed", err); }
+  try {
+    await refreshCrowdBusSection();
+  } catch (err) { console.error("refreshCrowdBusSection failed", err); }
+}
+
+async function refreshCrowdBusSection() {
+  if (!bridge) return;
+  const clipAvailable = await bridge.GetCrowdBusClipAvailable();
+  document.getElementById("crowdbus-label").textContent = clipAvailable
+    ? "Crowd Gets Louder in Close Games"
+    : "Crowd Gets Louder in Close Games (needs a clip first)";
+  document.getElementById("toggle-crowd-bus").checked = clipAvailable && await bridge.GetCrowdBusEnabled();
+  document.getElementById("toggle-crowd-bus").disabled = !clipAvailable;
 }
 
 // Big Game Rules panel (Adjust sidebar) -- editable trigger rule that used to be a hardcoded
@@ -2309,6 +2334,34 @@ function wireControls() {
   });
   document.getElementById("toggle-ducking").addEventListener("change", (e) => {
     bridge?.SetDuckingEnabled(e.target.checked);
+  });
+  document.getElementById("toggle-controller-rumble").addEventListener("change", (e) => {
+    bridge?.SetControllerRumbleEnabled(e.target.checked);
+  });
+  document.querySelectorAll("#soundbooth-subbass-tiles .sb-tile").forEach((tile) => {
+    tile.addEventListener("click", () => {
+      document.querySelectorAll("#soundbooth-subbass-tiles .sb-tile").forEach((t) => t.classList.remove("active"));
+      tile.classList.add("active");
+      bridge?.SetSubBassLevel(tile.dataset.subbass);
+    });
+  });
+  document.getElementById("toggle-crowd-bus").addEventListener("change", (e) => {
+    bridge?.SetCrowdBusEnabled(e.target.checked);
+  });
+  document.getElementById("btn-crowdbus-upload").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-crowdbus-upload");
+    btn.disabled = true;
+    try {
+      const ok = bridge ? await bridge.BrowseAndSetCrowdBusClip() : false;
+      if (ok) {
+        showToast("Crowd ambience clip set.");
+        await refreshCrowdBusSection();
+      }
+    } catch (err) {
+      console.error("BrowseAndSetCrowdBusClip failed", err);
+      showToast("Couldn't set that crowd clip -- try again.");
+    }
+    btn.disabled = false;
   });
   document.getElementById("btn-soundbooth-no-effects").addEventListener("click", async () => {
     const btn = document.getElementById("btn-soundbooth-no-effects");

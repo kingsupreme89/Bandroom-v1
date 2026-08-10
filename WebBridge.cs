@@ -1175,6 +1175,14 @@ public sealed class WebBridge
     public bool GetNoEffectsBypass() => _host.GetNoEffectsBypassFromWeb();
     public void SetNoEffectsBypass(bool enabled) => _host.SetNoEffectsBypassFromWeb(enabled);
     public string GetSystemVolumeInfo() => _host.GetSystemVolumeInfoFromWeb();
+    public bool GetControllerRumbleEnabled() => _host.GetControllerRumbleEnabledFromWeb();
+    public void SetControllerRumbleEnabled(bool enabled) => _host.SetControllerRumbleEnabledFromWeb(enabled);
+    public string GetSubBassLevel() => _host.GetSubBassLevelFromWeb();
+    public void SetSubBassLevel(string level) => _host.SetSubBassLevelFromWeb(level);
+    public bool GetCrowdBusEnabled() => _host.GetCrowdBusEnabledFromWeb();
+    public void SetCrowdBusEnabled(bool enabled) => _host.SetCrowdBusEnabledFromWeb(enabled);
+    public bool GetCrowdBusClipAvailable() => _host.GetCrowdBusClipAvailableFromWeb();
+    public bool BrowseAndSetCrowdBusClip() => _host.BrowseAndSetCrowdBusClipFromWeb();
 
     /// <summary>Real changelog -- Bandroom's own GitHub Releases (version, title, bullet
     /// notes, published date). Powers the "Updates" panel (formerly a Live Feed of in-session

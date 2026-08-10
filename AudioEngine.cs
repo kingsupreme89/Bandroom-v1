@@ -563,6 +563,116 @@ internal static class LoudnessNormalizationService
         Path.Combine(NormalizedFolder, Path.GetFileNameWithoutExtension(sourcePath) + ".loudness.json");
 }
 
+/// <summary>Sound Booth item #12 -- Off/Subtle/Stadium/Earthquake sub-bass "thump" for big
+/// hits (currently wired to Tackle for Loss only -- this codebase has no Field Goal Block
+/// detection to hook the other spec'd trigger to). Built from a wavefolder (generates lower
+/// harmonic content without the harsh edge of hard digital clipping) feeding a ~60Hz
+/// lowpass, blended UNDER the original signal rather than replacing it. Off by default --
+/// per an explicit owner note, this one should only ship default-on once it's been listened
+/// to and confirmed smooth; until then it's an opt-in toggle, not a surprise.</summary>
+internal enum SubBassIntensity { Off, Subtle, Stadium, Earthquake }
+
+internal sealed class SubBassEnhancerProvider : ISampleProvider
+{
+    readonly ISampleProvider _source;
+    readonly BiQuadFilter _lpL, _lpR;
+    readonly float _mix, _foldThreshold;
+    public WaveFormat WaveFormat => _source.WaveFormat;
+
+    public SubBassEnhancerProvider(ISampleProvider source, SubBassIntensity intensity)
+    {
+        _source = source;
+        int sr = source.WaveFormat.SampleRate;
+        _lpL = BiQuadFilter.LowPass(sr, 60f, 0.7f);
+        _lpR = BiQuadFilter.LowPass(sr, 60f, 0.7f);
+        (_mix, _foldThreshold) = intensity switch
+        {
+            SubBassIntensity.Subtle => (0.15f, 0.6f),
+            SubBassIntensity.Stadium => (0.30f, 0.45f),
+            SubBassIntensity.Earthquake => (0.45f, 0.3f),
+            _ => (0f, 1f),
+        };
+    }
+
+    public int Read(float[] buffer, int offset, int count)
+    {
+        int read = _source.Read(buffer, offset, count);
+        if (_mix <= 0f) return read;
+        for (int i = 0; i < read; i += 2)
+        {
+            buffer[offset + i] = Blend(buffer[offset + i], _lpL);
+            if (i + 1 < read) buffer[offset + i + 1] = Blend(buffer[offset + i + 1], _lpR);
+        }
+        return read;
+    }
+
+    float Blend(float x, BiQuadFilter lp)
+    {
+        float sub = lp.Process(Fold(x));
+        return Math.Clamp(x + sub * _mix, -1f, 1f);
+    }
+
+    float Fold(float x)
+    {
+        float t = _foldThreshold;
+        while (x > t || x < -t)
+        {
+            if (x > t) x = 2 * t - x;
+            else if (x < -t) x = -2 * t - x;
+        }
+        return x;
+    }
+}
+
+/// <summary>Sound Booth item #14: the "bursting out of the tunnel into the stadium" sound
+/// for the pregame walkout (fires on the "Other: Pregame Ready" event). Bandpass (300Hz-
+/// 4kHz, same idea as the Megaphone EQ but tuned wider/boomier) + a long, tight reverb tail +
+/// a touch of soft-clip saturation for that enclosed-concrete-tunnel character. No crossfade
+/// to a separate "open stadium" sound -- per an explicit owner note (no fade-ins anywhere in
+/// this app, matching the existing fade-OUT-only design), this treatment is just applied to
+/// the whole pregame clip; there's no second track it fades into.</summary>
+internal sealed class TunnelFilterProvider : ISampleProvider
+{
+    readonly ISampleProvider _reverbStage;
+    readonly BiQuadFilter _hpL, _hpR, _lpL, _lpR;
+    const float SaturationDrive = 1.6f;
+    public WaveFormat WaveFormat => _reverbStage.WaveFormat;
+
+    public TunnelFilterProvider(ISampleProvider stereoSource)
+    {
+        int sr = stereoSource.WaveFormat.SampleRate;
+        _hpL = BiQuadFilter.HighPass(sr, 300f, 0.8f);
+        _hpR = BiQuadFilter.HighPass(sr, 300f, 0.8f);
+        _lpL = BiQuadFilter.LowPass(sr, 4000f, 0.8f);
+        _lpR = BiQuadFilter.LowPass(sr, 4000f, 0.8f);
+        // Tunnel reverb character: long tight tail, minimal damping (hard concrete surfaces).
+        _reverbStage = new ReverbProvider(new BandpassPassthrough(this, stereoSource), roomSize: 0.80f, damp: 0.20f, wet: 0.35f, width: 0.80f);
+    }
+
+    // ReverbProvider needs a real ISampleProvider to wrap; this tiny adapter runs the
+    // bandpass+saturation stage first, then hands the result to ReverbProvider's Read().
+    sealed class BandpassPassthrough : ISampleProvider
+    {
+        readonly TunnelFilterProvider _owner;
+        readonly ISampleProvider _source;
+        public BandpassPassthrough(TunnelFilterProvider owner, ISampleProvider source) { _owner = owner; _source = source; }
+        public WaveFormat WaveFormat => _source.WaveFormat;
+        public int Read(float[] buffer, int offset, int count)
+        {
+            int read = _source.Read(buffer, offset, count);
+            for (int i = 0; i < read; i += 2)
+            {
+                buffer[offset + i] = Saturate(_owner._lpL.Process(_owner._hpL.Process(buffer[offset + i])));
+                if (i + 1 < read) buffer[offset + i + 1] = Saturate(_owner._lpR.Process(_owner._hpR.Process(buffer[offset + i + 1])));
+            }
+            return read;
+        }
+        static float Saturate(float x) => (float)Math.Tanh(x * SaturationDrive) / SaturationDrive;
+    }
+
+    public int Read(float[] buffer, int offset, int count) => _reverbStage.Read(buffer, offset, count);
+}
+
 /// <summary>Reads the current Windows system (default output device) volume/mute state --
 /// read-only, never adjusts it. Sound Booth item #3: Bandroom's own LUFS normalization sets
 /// each clip's loudness RELATIVE to the others; this exists so the app can tell the

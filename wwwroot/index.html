@@ -612,6 +612,31 @@
             <span>Duck Music on Big Plays</span>
             <button class="sb-info" data-info="ducking" aria-label="What does this do?">i</button>
           </label>
+          <label class="toggle-row soundbooth-row">
+            <input type="checkbox" id="toggle-controller-rumble" />
+            <span>Controller Rumble in Close Games</span>
+            <button class="sb-info" data-info="controller-rumble" aria-label="What does this do?">i</button>
+          </label>
+          <div class="soundbooth-row">
+            <div class="soundbooth-label">
+              Sub-Bass Thump on Big Hits
+              <button class="sb-info" data-info="sub-bass" aria-label="What does this do?">i</button>
+            </div>
+            <div class="soundbooth-eq-tiles" id="soundbooth-subbass-tiles">
+              <button class="sb-tile" data-subbass="off">Off</button>
+              <button class="sb-tile" data-subbass="subtle">Subtle</button>
+              <button class="sb-tile" data-subbass="stadium">Stadium</button>
+              <button class="sb-tile" data-subbass="earthquake">Earthquake</button>
+            </div>
+          </div>
+          <div class="soundbooth-row" id="crowdbus-section">
+            <label class="toggle-row" style="flex: 1 1 auto;">
+              <input type="checkbox" id="toggle-crowd-bus" />
+              <span id="crowdbus-label">Crowd Gets Louder in Close Games</span>
+              <button class="sb-info" data-info="crowd-bus" aria-label="What does this do?">i</button>
+            </label>
+            <button id="btn-crowdbus-upload" class="btn-ghost">Set Crowd Clip...</button>
+          </div>
           <div class="soundbooth-info-popover" id="soundbooth-info-popover" hidden>
             <div class="soundbooth-info-text" id="soundbooth-info-text"></div>
             <button class="soundbooth-info-close" id="soundbooth-info-close">Got it</button>

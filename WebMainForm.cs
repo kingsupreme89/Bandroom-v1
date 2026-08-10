@@ -684,6 +684,7 @@ public sealed class WebMainForm : Form
         {
             _hook.Stop();
             _watcher.Stop();
+            CrowdBusService.Stop();
             _watching = false;
             _windowFound = false;
             // Stop Watching is the one explicit "this game is over" signal (see _matchupLocked) --
@@ -721,6 +722,9 @@ public sealed class WebMainForm : Form
             .SelectMany(e => new[] { e.AudioFile, e.PaAudioFile })
             .Append(AudioPlayer.LeadInClipPath);
         AudioCache.Preload(toCache);
+
+        ControllerRumbleService.Start(_watcher);
+        CrowdBusService.Start(_watcher);
 
         _hook.Start();
         _watcher.Start();
@@ -1505,6 +1509,45 @@ public sealed class WebMainForm : Form
     public bool GetNoEffectsBypassFromWeb() => AudioPlayer.NoEffectsBypass;
     public void SetNoEffectsBypassFromWeb(bool enabled) => AudioPlayer.NoEffectsBypass = enabled;
 
+    public bool GetControllerRumbleEnabledFromWeb() => ControllerRumbleService.Enabled;
+    public void SetControllerRumbleEnabledFromWeb(bool enabled) => ControllerRumbleService.Enabled = enabled;
+
+    public string GetSubBassLevelFromWeb() => AudioPlayer.SubBassLevel.ToString().ToLowerInvariant();
+    public void SetSubBassLevelFromWeb(string level) => AudioPlayer.SubBassLevel = level switch
+    {
+        "subtle" => SubBassIntensity.Subtle,
+        "stadium" => SubBassIntensity.Stadium,
+        "earthquake" => SubBassIntensity.Earthquake,
+        _ => SubBassIntensity.Off,
+    };
+
+    public bool GetCrowdBusEnabledFromWeb() => CrowdBusService.Enabled;
+    public void SetCrowdBusEnabledFromWeb(bool enabled) => CrowdBusService.Enabled = enabled;
+    public bool GetCrowdBusClipAvailableFromWeb() => !string.IsNullOrWhiteSpace(CrowdBusService.ClipPath) && File.Exists(CrowdBusService.ClipPath);
+
+    /// <summary>Same native-file-picker pattern as BrowseAndSetLeadInWhistleFromWeb -- there's
+    /// no bundled crowd-ambience loop in this repo, so the user supplies their own.</summary>
+    public bool BrowseAndSetCrowdBusClipFromWeb()
+    {
+        using var dlg = new OpenFileDialog { Filter = "Audio Files|*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac|All Files|*.*", Title = "Choose Crowd Ambience Loop" };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return false;
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.SongsFolder);
+            string dest = Path.Combine(ConfigStore.SongsFolder, "crowd-ambience" + Path.GetExtension(dlg.FileName));
+            File.Copy(dlg.FileName, dest, overwrite: true);
+            CrowdBusService.ClipPath = dest;
+            CrowdBusService.Enabled = true;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("BrowseAndSetCrowdBusClipFromWeb failed to copy file", ex);
+            return false;
+        }
+    }
+
     /// <summary>Read-only: Windows' own system output volume/mute, alongside Bandroom's own
     /// LUFS-normalized levels (item #3) -- so the Sound Booth can tell a user "your songs are
     /// balanced, but Windows itself is muted/turned down" instead of that looking like a
@@ -1835,7 +1878,9 @@ public sealed class WebMainForm : Form
             bool isHighPriority = entry.Event.Contains("Touchdown", StringComparison.OrdinalIgnoreCase)
                 || entry.Event.Contains("Turnover", StringComparison.OrdinalIgnoreCase)
                 || entry.Event.Contains("Safety", StringComparison.OrdinalIgnoreCase);
-            AudioPlayer.Play(entry.AudioFile, mainVolume, interruptPrevious: true, isHighPriorityEvent: isHighPriority);
+            bool isBigHit = entry.Event.Contains("Tackle for Loss", StringComparison.OrdinalIgnoreCase);
+            bool isPregame = entry.Event.Contains("Pregame Ready", StringComparison.OrdinalIgnoreCase);
+            AudioPlayer.Play(entry.AudioFile, mainVolume, interruptPrevious: true, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame);
             RecordSongTriggered(entry.Event);
 
             // PA Announcer layer: plays concurrently with the main cue above, not instead of it,

@@ -118,6 +118,13 @@ internal sealed class GameWatcher
     EventRouter? _eventRouter;
     PlaySnapshot _snapshotPrevious = new();
     PlaySnapshot _snapshotCurrent = new();
+
+    /// <summary>Read-only view of the most recent OCR tick's game state -- unlike
+    /// EventsDetected (which only fires on a state TRANSITION), this updates every tick, so
+    /// anything that needs to continuously watch score/clock/quarter (crowd intensity,
+    /// controller rumble for a close 4th-quarter/OT game) can just poll it instead of the
+    /// watcher needing a dedicated event for every such consumer.</summary>
+    public PlaySnapshot LastSnapshot => _snapshotCurrent;
     // FIXED 2026-08-09: RouteEngineTick used to infer "is this the very first tick" from
     // `_snapshotPrevious.Down == 0 && _snapshotPrevious.Quarter == 0`, but Down/Quarter both
     // legitimately stay 0 for the ENTIRE pregame period (before kickoff, no down/quarter is on
