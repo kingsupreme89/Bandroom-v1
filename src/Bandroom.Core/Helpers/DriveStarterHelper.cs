@@ -15,6 +15,19 @@ public sealed class DriveStarterHelper : IRuleEvaluator
         if (state.Current.IsKickoff || state.Current.IsTurnover)
             return null;
 
+        // Skip if this tick also looks like a mid-drive first-down conversion
+        // (Delta.WasFirstDown: Current.Down==1 && Previous.Down>1). A real change of
+        // possession and an earned first down should never both be true on the same
+        // tick, but NewPossession comes from a separate OCR color sample than Down and
+        // can misread true for one tick right as the "1ST DOWN" banner covers the
+        // possession-indicator region (STATE_MACHINE_ANALYSIS.md Race #1). Reported live
+        // as "away team got 1st down is also linking to [Drive Starter]" -- the earned
+        // first down cue was correct, this evaluator's false-positive was the second one
+        // riding along on the same noisy tick. WasFirstDown is the more specific signal
+        // (it also requires a real prior down > 1), so it wins the tie.
+        if (state.Delta.WasFirstDown)
+            return null;
+
         // Skipping opening snap (Previous.Down == 0 means no prior state)
         if (state.Previous.Down == 0)
             return null;

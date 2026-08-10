@@ -1132,7 +1132,7 @@ public sealed class WebBridge
     public void OpenTrimmer(string trigger, bool isPa) => _host.OpenTrimmerFromWeb(trigger, isPa);
     public string PrepareTrim(string trigger, bool isPa) => _host.PrepareTrimFromWeb(trigger, isPa);
     public string PrepareTrimForWhistle(string path) => _host.PrepareTrimForWhistleFromWeb(path);
-    public string SaveTrim(string trigger, bool isPa, double startSec, double endSec) => _host.SaveTrimFromWeb(trigger, isPa, startSec, endSec);
+    public string SaveTrim(string trigger, bool isPa, double startSec, double endSec, string? sourceName = null) => _host.SaveTrimFromWeb(trigger, isPa, startSec, endSec, sourceName);
     public string SaveTrimAsLeadInWhistle(double startSec, double endSec) => _host.SaveTrimAsLeadInWhistleFromWeb(startSec, endSec);
     public int GetEventVolume(string trigger) => _host.GetEventVolumeFromWeb(trigger);
     public void SetEventVolume(string trigger, int percent) => _host.SetEventVolumeFromWeb(trigger, percent);

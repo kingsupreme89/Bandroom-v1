@@ -464,7 +464,7 @@ function renderCategories() {
   const all = [{ name: "All", assigned: totalAssigned, total: totalAll }, ...state.categories];
   for (const c of all) {
     const row = document.createElement("div");
-    row.className = "category-row";
+    row.className = "category-row" + (c.name === state.currentSituationsCategory ? " selected" : "");
     row.innerHTML = `
       <span class="category-dot" style="background:${categoryColors[c.name] ?? "#8b95a1"}"></span>
       <span class="category-text">
@@ -486,6 +486,14 @@ async function openSituations(category) {
   // panel is open left it showing whichever team's data happened to be fetched last (looked
   // like both sides shared identical assignments, since the DOM was simply never refreshed).
   state.currentSituationsCategory = category;
+  // Mark which tab is active -- previously nothing did this, so switching Offense/Defense/etc.
+  // tabs gave no visual sign of which one was actually open (see .category-row.selected in
+  // style.css). renderCategories() only runs on data refresh, not on every tab click, so this
+  // needs its own toggle here rather than relying on the next re-render to catch up.
+  document.querySelectorAll("#category-list .category-row").forEach((row) => {
+    const name = row.querySelector(".category-name")?.textContent;
+    row.classList.toggle("selected", name === category);
+  });
 
   const events = bridge ? JSON.parse(await bridge.GetEventsForCategory(category)) : [];
   list.innerHTML = "";
@@ -560,6 +568,7 @@ function wireSituationVolumePopover(row, trigger) {
 async function selectTeam(name) {
   if (name === state.activeTeam) return;
   state.activeTeam = name;
+  _clipperAssignLibrary = null; // team-scoped default/conference pack songs are merged in per-team, see openClipperAssign
   if (bridge) await bridge.SelectTeam(name);
   setActiveTeam(name);
   renderTeamGrid();
@@ -630,7 +639,7 @@ function setupQuickLoadProfile() {
   };
   loadBtn.addEventListener("click", tryConfirm);
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") tryConfirm(); });
-  confirmOverlay?.addEventListener("click", (e) => { if (e.target === e.currentTarget) confirmOverlay.hidden = true; });
+  // No backdrop-click-to-close -- Yes/No/X only, matching every other popup in this app.
 }
 
 /// Picks the most legible ink color for text sitting on a `bg` swatch, preferring the team's
@@ -781,13 +790,11 @@ async function handleAutoAssignClick() {
   const cancelBtn = document.getElementById("btn-auto-assign-cancel");
   const yesBtn = document.getElementById("btn-auto-assign-confirm-yes");
   const guidedBtn = document.getElementById("btn-auto-assign-guided");
-  const conferenceBtn = document.getElementById("btn-auto-assign-conference");
   await new Promise((resolve) => {
     const cleanup = () => {
       cancelBtn.removeEventListener("click", onCancel);
       yesBtn.removeEventListener("click", onYes);
       guidedBtn.removeEventListener("click", onGuided);
-      conferenceBtn?.removeEventListener("click", onConference);
       document.getElementById("auto-assign-confirm-overlay").hidden = true;
     };
     const onCancel = () => { cleanup(); resolve(); };
@@ -801,94 +808,10 @@ async function handleAutoAssignClick() {
       await startAutoAssignWizard(team);
       resolve();
     };
-    const onConference = async () => {
-      cleanup();
-      await runAutoAssignConference(team);
-      resolve();
-    };
     cancelBtn.addEventListener("click", onCancel);
     yesBtn.addEventListener("click", onYes);
     guidedBtn.addEventListener("click", onGuided);
-    conferenceBtn?.addEventListener("click", onConference);
   });
-}
-
-/// "Load Conference Pack" -- previews what the conference folder would fill (see
-/// PreviewConferencePackForTeam), applies empty slots immediately (nothing to lose there), then
-/// asks per already-assigned event whether to overwrite it -- most users already have SOME songs
-/// assigned, so silently skipping those (the old backfill-only behavior) often did nothing
-/// visible. Reuses the same #auto-assign-confirm-overlay Yes/Skip pattern the guided wizard's
-/// "already has X assigned" step already uses, one event at a time, then applies the confirmed
-/// set in one call.
-async function runAutoAssignConference(team) {
-  const btn = document.getElementById("btn-auto-assign");
-  btn.disabled = true;
-  const prevLabel = btn.textContent;
-  btn.textContent = "Checking...";
-  let preview = [];
-  try {
-    preview = JSON.parse(await bridge.PreviewConferencePackForTeam(team)) || [];
-  } catch (err) {
-    console.error("PreviewConferencePackForTeam failed", err);
-    showToast("Couldn't load the conference pack -- try again.");
-    btn.disabled = false;
-    btn.textContent = prevLabel;
-    return;
-  }
-  if (!preview.length) {
-    showToast(`No conference-wide songs found for ${team}'s conference.`);
-    btn.disabled = false;
-    btn.textContent = prevLabel;
-    return;
-  }
-
-  const toAssign = preview.filter((p) => !p.currentFile).map((p) => p.eventKey);
-  const alreadySet = preview.filter((p) => p.currentFile);
-
-  btn.textContent = "Assigning...";
-  const overlay = document.getElementById("auto-assign-confirm-overlay");
-  const cancelBtn = document.getElementById("btn-auto-assign-cancel");
-  const yesBtn = document.getElementById("btn-auto-assign-confirm-yes");
-  const guidedBtn = document.getElementById("btn-auto-assign-guided");
-  const conferenceBtn = document.getElementById("btn-auto-assign-conference");
-  guidedBtn.hidden = true;
-  conferenceBtn.hidden = true;
-  let yesToAll = false;
-  for (const item of alreadySet) {
-    if (yesToAll) { toAssign.push(item.eventKey); continue; }
-    document.getElementById("auto-assign-confirm-text").textContent =
-      `"${friendlyEventName(item.eventKey)}" already has a song assigned. Overwrite it with the conference pack's "${item.fileName}"?`;
-    overlay.hidden = false;
-    const choice = await new Promise((resolve) => {
-      const cleanup = () => {
-        cancelBtn.removeEventListener("click", onSkip);
-        yesBtn.removeEventListener("click", onYes);
-        overlay.hidden = true;
-      };
-      const onSkip = () => { cleanup(); resolve("skip"); };
-      const onYes = () => { cleanup(); resolve("yes"); };
-      cancelBtn.addEventListener("click", onSkip);
-      yesBtn.addEventListener("click", onYes);
-    });
-    if (choice === "yes") toAssign.push(item.eventKey);
-  }
-  guidedBtn.hidden = false;
-  conferenceBtn.hidden = false;
-
-  try {
-    const filled = await bridge.ApplyConferencePackSelections(team, JSON.stringify(toAssign));
-    showToast(filled > 0
-      ? `Filled ${filled} slot${filled === 1 ? "" : "s"} for ${team} from the conference pack.`
-      : `No changes made -- everything you said no to overwriting kept its current song.`);
-    if (filled > 0 && !document.getElementById("situations-panel").hidden && state.currentSituationsCategory)
-      await openSituations(state.currentSituationsCategory);
-  } catch (err) {
-    console.error("ApplyConferencePackSelections failed", err);
-    showToast("Couldn't load the conference pack -- try again.");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = prevLabel;
-  }
 }
 
 /// Reusable "keyword overlap" matcher shared by the guided wizard: strips filler words out of an
@@ -2269,6 +2192,11 @@ function wireControls() {
   document.getElementById("slider-volume").addEventListener("input", (e) => {
     document.getElementById("volume-value").textContent = e.target.value;
     bridge?.SetVolume(Number(e.target.value));
+    // Marketplace/song preview plays through a separate JS <audio> pathway (see previewSong) --
+    // the master volume slider only reached the native player before this, so preview playback
+    // was always stuck at full volume regardless of what the pill showed.
+    if (_previewAudio) _previewAudio.volume = Number(e.target.value) / 100;
+    if (_trimAudio) _trimAudio.volume = Number(e.target.value) / 100;
   });
   document.getElementById("slider-home-volume").addEventListener("input", (e) => {
     document.getElementById("home-volume-value").textContent = e.target.value;
@@ -2777,7 +2705,8 @@ function editUploadDialog(initialName, initialSchool, title) {
       finish({ name, school: schoolInput.value.trim() });
     };
     closeBtn.onclick = () => finish(null);
-    overlay.onclick = (e) => { if (e.target === overlay) finish(null); };
+    // No backdrop-click-to-close: this dialog holds typed input (name/school), and a stray
+    // click outside it while typing silently discarded whatever was entered. Close/Cancel only.
   });
 }
 
@@ -4064,6 +3993,7 @@ function previewSong(item) {
     bridge?.StopPreview(); // stop any native (local-file) preview -- separate audio pathway
     _previewAudio = new Audio(item.url);
     _previewAudio.crossOrigin = "anonymous";
+    _previewAudio.volume = Number(document.getElementById("slider-volume")?.value ?? 72) / 100;
     _previewAudio.play().catch((err) => console.error("Song preview failed", err));
     // Only marketplace items carry an id (My Downloads tiles pass a bare {url} -- see
     // buildMyDownloadRow -- which have no server-side item to increment).
@@ -4255,8 +4185,25 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode
   document.getElementById("clipper-assign").hidden = false;
 
   if (!_clipperAssignLibrary) {
+    // Previously only GetTrackLibrary (SongsFolder) was searched here -- default/conference pack
+    // songs live in a separate folder and are assigned straight into event slots without ever
+    // being copied into SongsFolder, so a team with the default pack loaded had real, currently-
+    // assigned songs that Search could never find. Merge them in the same way the guided
+    // Auto-Assign wizard's own library already does (see startAutoAssignWizard).
     try {
-      _clipperAssignLibrary = bridge ? JSON.parse(await bridge.GetTrackLibrary()) : [];
+      const team = state.activeTeam;
+      const [localJson, packJson, conferenceJson] = await Promise.all([
+        bridge ? bridge.GetTrackLibrary() : Promise.resolve("[]"),
+        bridge && team ? bridge.GetDefaultPackSongsForTeam(team) : Promise.resolve("[]"),
+        bridge && team ? bridge.GetConferencePackSongsForTeam(team) : Promise.resolve("[]"),
+      ]);
+      const local = JSON.parse(localJson) || [];
+      const pack = (JSON.parse(packJson) || []).map((s) => ({ ...s, source: "default" }));
+      const conference = (JSON.parse(conferenceJson) || []).map((s) => ({ ...s, source: "default" }));
+      const seenPaths = new Set(local.map((it) => it.path));
+      const packAndConference = [...pack, ...conference].filter((it) => !seenPaths.has(it.path));
+      for (const it of packAndConference) seenPaths.add(it.path);
+      _clipperAssignLibrary = [...local, ...packAndConference];
     } catch (err) {
       console.error("GetTrackLibrary failed", err);
       _clipperAssignLibrary = [];
@@ -4292,8 +4239,9 @@ const CLIPPER_ASSIGN_SOURCE_LABELS = {
   trimmed: "Trimmed Clips",
   local: "Your Imports",
   uploaded: "Imported Files",
+  default: "Default Song Pack",
 };
-const CLIPPER_ASSIGN_SOURCE_ORDER = ["marketplace", "trimmed", "local", "uploaded"];
+const CLIPPER_ASSIGN_SOURCE_ORDER = ["marketplace", "trimmed", "local", "uploaded", "default"];
 
 /// Builds one song row -- same Play/Stop/DL per-row transport as before, factored out so both
 /// the grouped assign list and any future reuse share one implementation instead of drifting.
@@ -4403,6 +4351,7 @@ function renderClipperAssignList(filter) {
 // <canvas> with the same waveform-decode approach as loadPreviewWaveform above.
 let _trimTrigger = null;
 let _trimForWhistle = false; // true when the trimmer opened via Clipper Island's whistle mode (no trigger to save back to)
+let _trimSourceName = null; // filename actually loaded into the trimmer, for correctly naming the saved clip
 let _trimIsPa = false;
 let _trimUrl = null;
 let _trimDurationSec = 0;
@@ -4415,9 +4364,13 @@ let _trimAudio = null;
 let _trimAudioCtx = null;
 let _trimDragHandle = null; // "start" | "end" | null
 
-async function openInlineTrimmer(trigger, isPa) {
+async function openInlineTrimmer(trigger, isPa, overridePath) {
   if (!bridge) return;
-  const result = JSON.parse(await bridge.PrepareTrim(trigger, isPa));
+  // overridePath is set when the user highlighted a different song in the Clipper list before
+  // hitting Trim... -- previously this always ignored the highlighted row and re-prepped
+  // whatever was already assigned to the trigger, so highlighting a song did nothing and Trim
+  // silently reopened the old file instead of the one just clicked.
+  const result = JSON.parse(overridePath ? await bridge.PrepareTrimForWhistle(overridePath) : await bridge.PrepareTrim(trigger, isPa));
   if (!result.ok) {
     showToast(result.error || "Couldn't open the trimmer.");
     return;
@@ -4437,6 +4390,7 @@ async function openInlineTrimmer(trigger, isPa) {
   document.getElementById("clipper-assign-actions-default").hidden = true;
   document.getElementById("clipper-trim-actions").hidden = false;
   document.getElementById("btn-trim-save").hidden = false;
+  _trimSourceName = result.fileName;
   document.getElementById("clipper-trim-filename").textContent = result.fileName;
   updateTrimLabels();
   drawTrimCanvas();
@@ -4470,6 +4424,7 @@ async function openInlineTrimmerForWhistle(path, fileName) {
   document.getElementById("clipper-assign-actions-default").hidden = true;
   document.getElementById("clipper-trim-actions").hidden = false;
   document.getElementById("btn-trim-save").hidden = true;
+  _trimSourceName = result.fileName || fileName;
   document.getElementById("clipper-trim-filename").textContent = result.fileName || fileName;
   updateTrimLabels();
   drawTrimCanvas();
@@ -4481,6 +4436,7 @@ function closeInlineTrimmer() {
   stopTrimPreview();
   _trimTrigger = null;
   _trimForWhistle = false;
+  _trimSourceName = null;
   _trimUrl = null;
   _trimPeaks = null;
   _trimDecodeFailed = false;
@@ -4594,6 +4550,7 @@ function playTrimRange(startSec, endSec) {
   stopTrimPreview();
   if (!_trimUrl) return;
   const audio = new Audio(_trimUrl);
+  audio.volume = Number(document.getElementById("slider-volume")?.value ?? 72) / 100;
   _trimAudio = audio;
   audio.addEventListener("timeupdate", () => {
     if (_trimAudio === audio && audio.currentTime >= endSec) stopTrimPreview();
@@ -4647,7 +4604,7 @@ function wireInlineTrimmer() {
   document.getElementById("btn-trim-save").addEventListener("click", async () => {
     if (!_trimTrigger || !bridge) return;
     const trigger = _trimTrigger, isPa = _trimIsPa;
-    const result = JSON.parse(await bridge.SaveTrim(trigger, isPa, _trimStartSec, _trimEndSec));
+    const result = JSON.parse(await bridge.SaveTrim(trigger, isPa, _trimStartSec, _trimEndSec, _trimSourceName));
     if (!result.ok) { showToast(result.error || "Couldn't save the trimmed clip."); return; }
     showToast(`Saved trimmed clip: ${result.fileName}`);
     closeInlineTrimmer();
@@ -4729,11 +4686,30 @@ function initClipperAssign() {
       return;
     }
     if (!_clipperAssignTrigger) return;
-    await openInlineTrimmer(_clipperAssignTrigger, _clipperAssignIsPa);
+    await openInlineTrimmer(_clipperAssignTrigger, _clipperAssignIsPa, _clipperAssignSelectedPath);
   });
 
   document.getElementById("btn-clipper-assign-import-pack").addEventListener("click", () => {
     document.getElementById("songpack-import-overlay").hidden = false;
+  });
+
+  // Skip Event -- leaves this event unassigned (no change made, unlike Clear which blanks an
+  // existing assignment) and jumps to the next unassigned event in the same category, so working
+  // through a long list of situations doesn't require closing/reopening the popup for each one
+  // you don't want to touch right now. Owner request: the wizard already had this via "Skip
+  // Event" on the guided-assign bar; the everyday Assign/Edit popup had no equivalent.
+  document.getElementById("btn-clipper-assign-skip").addEventListener("click", async () => {
+    if (_autoAssignWizard) { document.getElementById("btn-auto-assign-wizard-skip").click(); return; }
+    const category = state.currentSituationsCategory;
+    closeClipperAssign();
+    if (!bridge || !category) return;
+    try {
+      const events = JSON.parse(await bridge.GetEventsForCategory(category)) || [];
+      const next = events.find((ev) => !ev.fileName);
+      if (next) openClipperAssign(next.trigger, next.eventName, false, next.fileName);
+    } catch (err) {
+      console.error("Skip Event: GetEventsForCategory failed", err);
+    }
   });
 
   document.getElementById("btn-clipper-assign-clear").addEventListener("click", async () => {
@@ -4832,8 +4808,8 @@ function initDefaultSongPackPrompt() {
   // event slot for every team the folder turns out to contain (see
   // ImportDefaultSongPackFolderFromWeb's overwrite=true path). Destructive, so it reuses the same
   // #auto-assign-confirm-overlay Yes/Cancel pattern every other overwrite action in this file gates
-  // behind an explicit confirm -- just with the Guided/Conference buttons hidden since neither
-  // applies to a folder-wide import.
+  // behind an explicit confirm -- just with the Guided button hidden since it doesn't
+  // apply to a folder-wide import.
   document.getElementById("btn-songpack-import-folder-all").addEventListener("click", async () => {
     const folderPath = await bridge?.BrowseForSongPackFolder();
     if (!folderPath) return;
@@ -4842,11 +4818,9 @@ function initDefaultSongPackPrompt() {
     const cancelBtn = document.getElementById("btn-auto-assign-cancel");
     const yesBtn = document.getElementById("btn-auto-assign-confirm-yes");
     const guidedBtn = document.getElementById("btn-auto-assign-guided");
-    const conferenceBtn = document.getElementById("btn-auto-assign-conference");
     document.getElementById("auto-assign-confirm-text").textContent =
       "This will overwrite any already-imported songs that share a filename, and re-assign every event slot for every team found in this folder. Continue?";
     guidedBtn.hidden = true;
-    conferenceBtn.hidden = true;
     overlay.hidden = false;
     const proceed = await new Promise((resolve) => {
       const cleanup = () => {
@@ -4854,7 +4828,6 @@ function initDefaultSongPackPrompt() {
         yesBtn.removeEventListener("click", onYes);
         overlay.hidden = true;
         guidedBtn.hidden = false;
-        conferenceBtn.hidden = false;
       };
       const onCancel = () => { cleanup(); resolve(false); };
       const onYes = () => { cleanup(); resolve(true); };
@@ -6538,6 +6511,9 @@ function updateSaveProfileSubtext() {
     ? `Overwrites ${state.activeTeam}'s current save.`
     : `Creates a new, separate profile named "${name}" — ${state.activeTeam}'s own save is untouched.`;
 }
+
+document.getElementById("btn-save-profile-done-close")?.addEventListener("click", closeSaveProfileDialog);
+document.getElementById("btn-save-profile-done-export")?.addEventListener("click", () => bridge?.ExportProfile());
 
 function closeSaveProfileDialog() {
   document.getElementById("save-profile-overlay").hidden = true;

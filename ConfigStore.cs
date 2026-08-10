@@ -1296,57 +1296,22 @@ internal static class ConfigStore
         "Defense: No Punt Return",
     };
 
-    /// <summary>Pre-engine profiles keyed their down slots as bare "1st/2nd/3rd/4th Down"
-    /// (Trigger down:1st/2nd/3rd/4th). WebMainForm.FireEventForSide still silently falls back to
-    /// these via LegacyDownEventAlias when the canonical "Offense: Nth Down" slot is empty --
-    /// which meant a song assigned back before the engine rewrite kept firing on every matching
-    /// down with zero way to see, edit, or clear it from the current UI (the "Assign / Edit" tile
-    /// only ever reads/writes the canonical Event name). Reported 2026-08-09: user had nothing
-    /// set for "Offense: Second Down" in the UI, but a song played anyway -- this was the legacy
-    /// down:2nd slot playing invisibly underneath it. One-time migration on load: promote any
-    /// legacy AudioFile into the canonical slot (only if the canonical slot is still empty, so a
-    /// deliberate new assignment is never clobbered) and blank the legacy slot so it stops being
-    /// a hidden zombie trigger.</summary>
-    static readonly Dictionary<string, string> LegacyDownEventMigration = new()
-    {
-        ["1st Down"] = "Offense: Earned First Down",
-        ["2nd Down"] = "Offense: Second Down",
-        ["3rd Down"] = "Offense: Third Down",
-        ["4th Down"] = "Offense: Fourth Down",
-    };
-
-    static void MigrateLegacyDownEvents(List<TriggerEntry> entries)
-    {
-        // ToList() snapshot: the loop below calls entries.Add() when a canonical slot doesn't
-        // exist yet, which would throw "Collection was modified" if iterating `entries` directly.
-        foreach (var legacy in entries.ToList())
-        {
-            if (string.IsNullOrWhiteSpace(legacy.AudioFile)) continue;
-            if (!LegacyDownEventMigration.TryGetValue(legacy.Event, out var canonicalKey)) continue;
-
-            var canonical = entries.FirstOrDefault(e => e.Event == canonicalKey);
-            if (canonical == null)
-            {
-                entries.Add(new TriggerEntry { Trigger = $"auto:{canonicalKey}", Event = canonicalKey, AudioFile = legacy.AudioFile, PaAudioFile = legacy.PaAudioFile, Volume = legacy.Volume });
-            }
-            else if (string.IsNullOrWhiteSpace(canonical.AudioFile))
-            {
-                canonical.AudioFile = legacy.AudioFile;
-                if (string.IsNullOrWhiteSpace(canonical.PaAudioFile)) canonical.PaAudioFile = legacy.PaAudioFile;
-            }
-
-            legacy.AudioFile = "";
-            legacy.PaAudioFile = "";
-        }
-    }
-
     /// <summary>Appends a slot for any engine EventKey missing from `entries`, so every event the
     /// engine can detect is assignable in the UI -- without touching entries that already exist, so
-    /// saved song assignments are never disturbed. Called from every load/build path.</summary>
+    /// saved song assignments are never disturbed. Called from every load/build path.
+    ///
+    /// Pre-engine profiles keyed their down slots as bare "1st/2nd/3rd/4th Down" (Trigger
+    /// down:1st/2nd/3rd/4th). WebMainForm.FireEventForSide already falls back to these via
+    /// LegacyDownEventAlias whenever the canonical "Offense: Nth Down" slot is empty, so a legacy
+    /// assignment fires correctly with no migration needed. A migration step used to run here on
+    /// every load (promote legacy AudioFile into the canonical slot, then blank the legacy one) --
+    /// removed 2026-08-10: since it ran on every launch, not once, it kept re-blanking the user-
+    /// visible legacy card immediately after they'd just assigned a song to it, which looked
+    /// exactly like "assigning a song doesn't save." The fallback already made migration
+    /// functionally unnecessary for firing; it only ever helped the (retired, hidden-by-default)
+    /// canonical card show a value, at the cost of destroying the one the user could actually see.</summary>
     public static List<TriggerEntry> EnsureAllEvents(List<TriggerEntry> entries)
     {
-        MigrateLegacyDownEvents(entries);
-
         // Prune already-persisted rows for retired duplicate events -- only when nothing was
         // ever assigned to them, so no existing user song assignment is ever silently dropped.
         entries.RemoveAll(e => (RetiredEventKeys.Contains(e.Event) || BlockedEventKeys.Contains(e.Event)) && string.IsNullOrWhiteSpace(e.AudioFile));

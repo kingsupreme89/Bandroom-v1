@@ -1342,6 +1342,13 @@ input, select, textarea, [contenteditable] {
   border: 1px solid var(--glass-border);
   padding: 6px;
 }
+/* Without this, setting list.hidden = true (openInlineTrimmer, when the trim panel opens) had
+   no visual effect: the [hidden] attribute and the .clipper-assign-list class rule above have
+   equal CSS specificity, and this class's own `display: flex` -- an author-stylesheet rule --
+   wins the cascade over the browser's UA-stylesheet `[hidden] { display: none }` default. The
+   song list kept rendering (and reserving its 220px) underneath the waveform trimmer instead of
+   collapsing out of the way. #clipper-assign[hidden] above already guards against this same trap. */
+.clipper-assign-list[hidden] { display: none; }
 .clipper-assign-row {
   display: flex;
   align-items: center;
@@ -2456,6 +2463,14 @@ input, select, textarea, [contenteditable] {
   flex: 0 0 auto;
 }
 .category-row:hover { background: color-mix(in srgb, var(--team-primary, var(--accent)) 26%, rgba(255, 255, 255, 0.07)); }
+/* Which category tab is currently open -- previously nothing marked this, so switching between
+   Offense/Defense/etc. tabs gave no visual confirmation of which one's situations list (and the
+   clip previewer state tied to it) was actually showing. */
+.category-row.selected {
+  background: color-mix(in srgb, var(--team-primary, var(--accent)) 55%, rgba(255, 255, 255, 0.1));
+  border-color: var(--team-primary, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--team-primary, var(--accent)) 60%, transparent);
+}
 .category-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .category-text { min-width: 0; overflow: hidden; display: flex; align-items: baseline; gap: 6px; }
 .category-name {
@@ -2751,6 +2766,29 @@ input, select, textarea, [contenteditable] {
   animation: neon-pulse 3.2s ease-in-out infinite;
 }
 .help-pill:hover { background: rgba(255, 255, 255, 0.09); }
+/* Small inline "i" badge for plain-English help next to a specific control -- distinct from
+   .help-pill (a big standalone entry point button). Reuses the app's native title-attribute
+   tooltip convention (hover to read) rather than a bespoke JS tooltip engine, so it's a drop-in
+   <span class="info-i" title="...">i</span> next to any label/button that needs one. */
+.info-i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted-2);
+  font-size: 10px;
+  font-style: italic;
+  font-family: Georgia, "Times New Roman", serif;
+  cursor: help;
+  margin-left: 5px;
+  vertical-align: middle;
+  flex: none;
+}
+.info-i:hover { background: rgba(255, 255, 255, 0.14); color: var(--text-primary); }
+
 .help-pill-icon {
   flex: none;
   width: 20px; height: 20px;
@@ -3346,6 +3384,28 @@ input, select, textarea, [contenteditable] {
   cursor: default;
 }
 .matchup-btn.locked:hover { background: rgba(61, 220, 132, 0.10); border-color: rgba(61, 220, 132, 0.6); }
+
+/* Was a bare 30px .icon-btn (transparent bg, muted-grey glyph) sitting inline in the header --
+   easy to miss entirely next to the locked pill it's meant to control. Given its own glass pill
+   so it reads as a real, clickable control instead of decoration. */
+#btn-unlock-matchup {
+  width: auto;
+  padding: 4px 10px;
+  gap: 4px;
+  border: 1px solid rgba(255, 176, 32, 0.5);
+  background: rgba(255, 176, 32, 0.12);
+  color: #ffb020;
+  font-size: 13px;
+}
+#btn-unlock-matchup:hover {
+  background: rgba(255, 176, 32, 0.2);
+  color: #ffb020;
+}
+#btn-unlock-matchup::after {
+  content: "Unlock";
+  font-size: 11.5px;
+  font-weight: 600;
+}
 
 /* Matchup / Save Profile / Upload dialogs -- these three overlays were shipped with markup but
    no CSS at all, so unhiding them just dropped an unstyled <div> into normal document flow

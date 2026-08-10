@@ -1153,11 +1153,18 @@ public sealed class WebMainForm : Form
     /// <summary>Native OpenFileDialog for "Browse for file..." on the island -- there's no web
     /// equivalent that can hand back a real filesystem path (a web &lt;input type=file&gt; only
     /// exposes a Blob, not a path AudioPlayer can play from), so this stays a native call same as
-    /// AssignTrackForm's own Browse button did.</summary>
+    /// AssignTrackForm's own Browse button did. Was returning the picked file's ORIGINAL path
+    /// as-is -- assigned fine, but the file never actually "landed" anywhere inside Bandroom's own
+    /// library (owner report: "I don't even know where the import from folder songs land"), so it
+    /// never showed up in Clipper search/GetTrackLibrary, broke if the original file was later
+    /// moved/renamed/deleted, and wouldn't survive if the source was on removable media. Now runs
+    /// it through ConfigStore.ImportIntoSongsLibrary first, same as AssignTrackForm's own Browse
+    /// button already does -- copies into Songs\uploaded, returns that copy's path instead.</summary>
     public string? BrowseForAudioFileFromWeb()
     {
         using var dlg = new OpenFileDialog { Filter = "Audio Files|*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac|All Files|*.*", Title = "Choose Audio File" };
-        return dlg.ShowDialog(this) == DialogResult.OK ? dlg.FileName : null;
+        if (dlg.ShowDialog(this) != DialogResult.OK) return null;
+        return ConfigStore.ImportIntoSongsLibrary(dlg.FileName) ?? dlg.FileName;
     }
 
     /// <summary>Native folder picker -- backs WebBridge.RelocateDefaultSongsFolder (task queue
@@ -1398,7 +1405,7 @@ public sealed class WebMainForm : Form
     /// SongsTrimmedFolder, and assigns it back to the trigger -- the embedded-panel equivalent of
     /// TrimmerForm.SaveTrimmed, minus the team/song-name prompts (this is re-trimming an
     /// already-assigned, already-named track, not creating a new library entry from scratch).</summary>
-    public string SaveTrimFromWeb(string trigger, bool isPa, double startSec, double endSec)
+    public string SaveTrimFromWeb(string trigger, bool isPa, double startSec, double endSec, string? sourceName = null)
     {
         var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
         if (entry == null) return JsonSerializer.Serialize(new { ok = false, error = "No such trigger." });
@@ -1410,8 +1417,13 @@ public sealed class WebMainForm : Form
         try
         {
             Directory.CreateDirectory(ConfigStore.SongsTrimmedFolder);
+            // sourceName is the file that was actually loaded into the trimmer (see
+            // PrepareTrimFromWeb/PrepareTrimForWhistleFromWeb) -- pass it explicitly rather than
+            // re-deriving from entry.AudioFile/PaAudioFile, since the trimmer can now be pointed at
+            // a different library song than whatever's currently assigned to this trigger.
             string currentPath = isPa ? entry.PaAudioFile : entry.AudioFile;
-            string baseName = !string.IsNullOrWhiteSpace(currentPath) ? Path.GetFileNameWithoutExtension(currentPath) : trigger;
+            string baseName = !string.IsNullOrWhiteSpace(sourceName) ? Path.GetFileNameWithoutExtension(sourceName)
+                : !string.IsNullOrWhiteSpace(currentPath) ? Path.GetFileNameWithoutExtension(currentPath) : trigger;
             string safeBase = System.Text.RegularExpressions.Regex.Replace(baseName, @"[^\w\s-]", "").Replace(" ", "_");
             string outPath = Path.Combine(ConfigStore.SongsTrimmedFolder, $"{safeBase}.wav");
             int n = 1;
@@ -2068,7 +2080,18 @@ public sealed class WebMainForm : Form
                 // Found 2026-08-07: without this, "Penalty: Offense" silently routed to the
                 // offense's own side instead -- moot until penalty-side OCR detection existed to
                 // ever populate it, but real now that it does.
-                bool routesLikeDefense = evt.EventKey.StartsWith("Defense:") || evt.EventKey == "Penalty: Offense";
+                // "Defense: Touchdown Scored" is the odd one out among "Defense:*" keys: every
+                // other Defense event fires while `side`/_possession still reflects the offense
+                // that's on the field, so flipping to the opposite side reaches the defense. But
+                // TouchdownHelper only returns this key when state.Delta.NewPossession is true --
+                // i.e. a pick-six/fumble-return TD, where GameState's own possession has ALREADY
+                // flipped to the team that just scored by the time this event fires. _possession
+                // is driven by the same real-time possession sampling, so `side` here already IS
+                // the scoring team. Flipping it (like every other "Defense:" key) routed the pick-
+                // six celebration cue to the team that got scored on instead of the team that
+                // scored -- reported live as "home TD linking to away" (or vice versa).
+                bool routesLikeDefense = (evt.EventKey.StartsWith("Defense:") && evt.EventKey != "Defense: Touchdown Scored")
+                    || evt.EventKey == "Penalty: Offense";
                 string routedSide = routesLikeDefense
                     ? (side == "home" ? "away" : "home")
                     : side;

@@ -266,12 +266,6 @@
           <p id="auto-assign-confirm-text" class="auto-assign-confirm-text"></p>
           <div class="auto-assign-confirm-actions">
             <button class="btn-ghost" id="btn-auto-assign-cancel">Cancel</button>
-            <!-- Conference Pack -- fills whatever the team-specific default pack doesn't cover
-                 using shared conference-wide cues (Songs\Default\{Conference}\ files, not that
-                 team's own subfolder). Backfill-only (never overwrites a real assignment) so it's
-                 safe to run any time, including on top of an already-customized profile -- see
-                 handleAutoAssignConferenceClick in app.js. -->
-            <button class="btn-ghost" id="btn-auto-assign-conference" title="Fill any events this team doesn't have its own song for using shared conference-wide cues">Load Conference Pack</button>
             <button class="btn-ghost" id="btn-auto-assign-guided" title="Step through every event one at a time, choosing/confirming each song yourself">Guided Assign...</button>
             <button class="pill pill-auto-assign" id="btn-auto-assign-confirm-yes">Overwrite</button>
           </div>
@@ -448,6 +442,7 @@
                   <button id="btn-clipper-assign-play" class="preview-bar-btn" title="Play selected">▶</button>
                   <button id="btn-clipper-assign-stop" class="preview-bar-btn" title="Stop">⏹</button>
                   <input type="text" id="clipper-assign-search" class="team-picker-search" placeholder="Search songs..." />
+                  <span class="info-i" title="Searches your own uploads/downloads AND this team's Default Song Pack, if loaded.">i</span>
                 </div>
                 <div id="clipper-assign-list" class="clipper-assign-list"></div>
 
@@ -469,8 +464,9 @@
             <div class="clipper-assign-actions" id="clipper-assign-actions-default">
               <button id="btn-clipper-assign-select" class="btn-primary" disabled>Assign Selected</button>
               <button id="btn-clipper-assign-browse" class="btn-ghost">Browse for file...</button>
-              <button id="btn-clipper-assign-trim" class="btn-ghost">Trim...</button>
+              <button id="btn-clipper-assign-trim" class="btn-ghost" title="Opens the highlighted song (or this event's current song, if none highlighted) in the waveform editor so you can cut it down and save it back to this event.">Trim...</button>
               <button id="btn-clipper-assign-import-pack" class="btn-ghost" title="Import the default song pack from a .zip or folder">Import Song Pack</button>
+              <button id="btn-clipper-assign-skip" class="btn-ghost" title="Leave this event unassigned and move to the next unassigned event in this category">Skip Event</button>
               <button id="btn-clipper-assign-clear" class="btn-ghost btn-danger">Clear Assignment</button>
             </div>
             <div class="clipper-assign-actions" id="clipper-trim-actions" hidden>
@@ -487,7 +483,7 @@
       <!-- Right panel: Adjust -->
       <div class="side-panel glass" id="adjust-panel">
         <div class="panel-section">
-          <div class="panel-title">Volume</div>
+          <div class="panel-title">Volume<span class="info-i" title="Controls in-game event songs AND song previews in the Clipper/Marketplace -- drag this while a preview is playing and you'll hear it change immediately.">i</span></div>
           <input type="range" id="slider-volume" min="0" max="100" value="72" class="slider" />
           <div class="slider-value"><span id="volume-value">72</span>%</div>
         </div>
@@ -497,7 +493,7 @@
           <div class="panel-title">Away Volume</div>
           <input type="range" id="slider-away-volume" min="0" max="100" value="100" class="slider" />
           <div class="slider-value"><span id="away-volume-value">100</span>%</div>
-          <div class="panel-title" style="margin-top: 10px;">Home Volume</div>
+          <div class="panel-title" style="margin-top: 10px;">Home Volume<span class="info-i" title="Once you've set a matchup (top of the app), in-game songs use Home/Away volume instead of the master Volume slider above -- adjust the team you want louder or quieter here.">i</span></div>
           <input type="range" id="slider-home-volume" min="0" max="100" value="100" class="slider" />
           <div class="slider-value"><span id="home-volume-value">100</span>%</div>
         </div>

@@ -253,6 +253,14 @@ internal static class AudioPlayer
                     {
                         double elapsed = audio.CurrentTime.TotalSeconds;
                         float duckMul = isHighPriorityEvent ? 1f : AudioDuckingController.GetGainMultiplier();
+                        // Previews always track the live master volume slider instead of the
+                        // value captured when Play() started -- `volume` above is a one-time
+                        // snapshot (PreviewLocalFileFromWeb/PreviewEventFromWeb pass
+                        // AudioPlayer.MasterVolume as volumeOverride at call time), so dragging
+                        // the slider mid-preview had no audible effect until the NEXT preview
+                        // started. Real game fires keep the snapshot -- an event's volume
+                        // shouldn't drift mid-clip just because the slider moved.
+                        float liveVolume = isPreview ? MasterVolume : volume;
 
                         if (elapsed >= FadeStartSeconds)
                         {
@@ -262,12 +270,12 @@ internal static class AudioPlayer
                                 output.Stop();
                                 break;
                             }
-                            audio.Volume = volume * (float)(1.0 - fadeProgress) * duckMul;
+                            audio.Volume = liveVolume * (float)(1.0 - fadeProgress) * duckMul;
                             Thread.Sleep(30); // finer steps during the fade for a smooth ramp
                         }
                         else
                         {
-                            audio.Volume = volume * duckMul;
+                            audio.Volume = liveVolume * duckMul;
                             Thread.Sleep(15); // fast enough to track the ~20ms duck attack smoothly
                         }
                     }
