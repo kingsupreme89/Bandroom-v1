@@ -18,6 +18,7 @@ public sealed class WebMainForm : Form
 {
     static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac" };
     static readonly string[] CategoryOrder = { "Offense", "Defense", "Situations" };
+    const int ResizeMargin = 6; // shared between the Form's Padding and the WM_NCHITTEST edge test
 
     List<TriggerEntry> _config = new();
     readonly KeyboardHook _hook = new();
@@ -68,13 +69,36 @@ public sealed class WebMainForm : Form
 
         Text = "Bandroom";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
-        Width = 1920;
-        Height = 1080;
+
+        // BUG FIX (owner report, 2026-08-10): window was hardcoded to 1920x1080 with
+        // CenterScreen, with nothing anywhere clamping it to the actual monitor. On any display
+        // smaller than 1920x1080 (or a multi-monitor rig where the primary isn't that size), the
+        // window is simply bigger than the screen it opens on, so it visibly spills onto a second
+        // monitor -- and Maximize can't "fix" it because the window itself is still oversized for
+        // one screen's working area, so content gets clipped with no way to reach it. This is also
+        // the likely cause of the "song picker never pops up" report: AssignTrackForm opens with
+        // StartPosition.CenterParent against this window as owner, so if this window's bounds
+        // straddle/exceed the visible desktop, the dialog can center itself into the off-screen
+        // portion -- it *is* opening, just invisible off-screen. Clamp to the working area (not
+        // full bounds -- excludes the taskbar) of whichever screen the app is starting on.
+        var workingArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
+        Width = Math.Min(1920, workingArea.Width);
+        Height = Math.Min(1080, workingArea.Height);
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(1200, 650);
+        MinimumSize = new Size(Math.Min(1200, workingArea.Width), Math.Min(650, workingArea.Height));
         BackColor = Theme.WindowBg;
         FormBorderStyle = FormBorderStyle.None; // chrome bar is drawn in HTML now, no OS titlebar/URL bar
         KeyPreview = true;
+
+        // BUG FIX (owner report, 2026-08-10): edge-drag resize (see the WM_NCHITTEST override
+        // below) never actually worked because WebView2 was Dock.Fill covering every pixel,
+        // including the outer edge -- so the mouse was always over the WebView2 child window at
+        // the border, not the Form, and WM_NCHITTEST (a non-client message resolved per-window by
+        // screen point) went to WebView2 and got swallowed instead of reaching the Form's
+        // override. Give the Form a thin owned strip around the WebView2 matching the hit-test
+        // margin below, so those edge pixels actually belong to the Form and the resize drag can
+        // be grabbed.
+        Padding = new Padding(ResizeMargin);
 
         _webView = new WebView2 { Dock = DockStyle.Fill };
         ((Control)_webView).AllowDrop = true;
@@ -1714,7 +1738,7 @@ public sealed class WebMainForm : Form
     /// back to DefWndProc's normal resize/cursor behavior, without needing WS_THICKFRAME.</summary>
     protected override void WndProc(ref Message m)
     {
-        const int margin = 6;
+        const int margin = ResizeMargin;
         if (m.Msg == Native.WM_NCHITTEST && WindowState == FormWindowState.Normal)
         {
             var cursor = PointToClient(new Point(m.LParam.ToInt32() & 0xFFFF, (m.LParam.ToInt32() >> 16) & 0xFFFF));

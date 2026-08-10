@@ -1130,18 +1130,25 @@ input, select, textarea, [contenteditable] {
    TABBED RIGHT PANEL (Mixer | Effects | Changelog | Help)
    ================================================================ */
 .adjust-tabs {
-  display: flex; gap: 2px;
+  display: flex; flex-wrap: wrap; gap: 2px;
   margin-bottom: 10px;
   border-bottom: 1px solid var(--glass-border);
   padding-bottom: 6px;
 }
+/* BUG FIX (owner report, 2026-08-10): same class of bug as --side-w's clamp() above -- at
+   --side-w's 180px floor, "Mixer" + "Effects" + "Changelog" plus padding don't fit on one line,
+   and this row never wrapped or shrank, so "Changelog" clipped to "Change..." against the panel
+   edge. flex-wrap above lets the third tab drop to its own line instead of clipping; tightening
+   padding here buys back enough width that it usually still fits on one line at the panel's
+   normal width. */
 .adjust-tab {
-  padding: 5px 10px;
+  padding: 5px 8px;
   border-radius: 6px;
   border: none;
   background: transparent;
   color: var(--text-muted);
   font-size: 12.5px; font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
 }
 .adjust-tab:hover { color: var(--text-primary); }
@@ -1285,8 +1292,30 @@ input, select, textarea, [contenteditable] {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
 .header-sep { margin: 0 8px; color: var(--text-muted); flex: none; }
-#btn-matchup, #btn-unlock-matchup { flex: none; }
-.header-right { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+#btn-matchup { flex: 0 1 auto; min-width: 0; }
+#btn-unlock-matchup { flex: none; }
+/* BUG FIX (owner report, 2026-08-10): on a narrower window the pill row (Sharing Guide, Help &
+   Guide, The Bandroom, Sound Bank, My Downloads) is wider than #header-bar has room for. Nothing
+   here ever wrapped or shrank -- flex: 0 0 auto keeps every pill at its natural size -- so once
+   #header-center shrinks to its min-width: 0 floor, the excess pill width has nowhere to go and
+   gets invisibly clipped off the right edge of the window (the "My Dow..." / "Change..." cutoff).
+   Let this row scroll horizontally instead of clipping, so every pill stays reachable regardless
+   of window width -- scrollbar hidden since this is a toolbar, not a content list; a fade mask on
+   the trailing edge hints there's more to scroll to. */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  mask-image: linear-gradient(to right, black calc(100% - 18px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 18px), transparent 100%);
+}
+.header-right::-webkit-scrollbar { display: none; }
 
 /* Subtle "band members online" indicator */
 .presence-dot {
@@ -3433,6 +3462,10 @@ input, select, textarea, [contenteditable] {
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .matchup-btn:hover { background: rgba(255, 255, 255, 0.08); }
 .matchup-btn.locked {
@@ -3899,7 +3932,7 @@ input, select, textarea, [contenteditable] {
    just a team-accent-colored "VS" pill instead of copying their iconography. */
 .matchup-vs-badge {
   position: absolute;
-  left: 50%; top: 40%;
+  left: 50%; top: 22%;
   transform: translate(-50%, -50%);
   z-index: 7;
   width: clamp(120px, 13vw, 190px);
@@ -3962,6 +3995,12 @@ input, select, textarea, [contenteditable] {
   height: 100%;
   overflow-x: hidden;
   overflow-y: visible;
+  /* Off-center tiles were getting hard-clipped by this container's rectangular edge -- a visible
+     straight cut through the l2/r2 tiles instead of the Apple CoverFlow-style fade-to-nothing.
+     Masking the track itself fades tiles to transparent well before they reach that clip edge, so
+     what's left to clip is already invisible. */
+  mask-image: linear-gradient(to right, transparent 0%, black 14%, black 86%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 14%, black 86%, transparent 100%);
 }
 /* iTunes CoverFlow scale + reflection pass (owner request) -- was a compact 96/128px carousel,
    sized up to read as the actual centerpiece of the screen, plus a -webkit-box-reflect mirror
@@ -3975,14 +4014,36 @@ input, select, textarea, [contenteditable] {
   margin: -85px 0 0 -85px;
   transition: transform 0.22s ease, opacity 0.22s ease, filter 0.22s ease;
   cursor: pointer;
+  overflow: visible; /* let .team-swatch-reflection hang below without being clipped */
   /* -webkit-box-reflect REMOVED: this is a legacy WebKit property Chromium has since dropped
      support for. On recent Chromium builds (which WebView2 runs), an element using this property
      combined with a 3D transform (rotateY, used by the l1/r1/l2/r2 tiles below) doesn't just lose
      its reflection -- it can render fully invisible instead, a known symptom of the removal.
      Root cause of "matchup coverflow logos aren't showing" reported repeatedly across sessions:
      the tiles/logos were never broken, the whole tile (border, background, image) was being
-     silently dropped from paint by this one property. */
+     silently dropped from paint by this one property. Real reflection is done below instead, via
+     a genuine flipped child element (.team-swatch-reflection) rather than a paint-time trick --
+     it inherits the tile's own rotateY/scale for free since it's nested inside, with no risk of
+     the box-reflect+3D invisibility bug. */
 }
+.coverflow-track .team-swatch > .team-logo-img,
+.coverflow-track .team-swatch > :not(.team-swatch-reflection) {
+  border-radius: inherit;
+}
+.team-swatch-reflection {
+  position: absolute;
+  left: 0; top: 100%;
+  width: 100%; height: 100%;
+  transform: scaleY(-1);
+  transform-origin: top;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.55;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.5) 0%, transparent 60%);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.5) 0%, transparent 60%);
+}
+.team-swatch-reflection img { width: 100%; height: 100%; object-fit: cover; }
 .coverflow-track .team-swatch.cf-center {
   width: 290px; height: 290px;
   margin: -145px 0 0 -145px;
