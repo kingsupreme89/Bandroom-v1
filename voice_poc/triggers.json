@@ -1,0 +1,57 @@
+{
+  "downs": [
+    "Offense: Earned First Down",
+    "Offense: Earned First Down (Big Gain)",
+    "Offense: Earned First Down (Midfield)",
+    "Offense: Second Down",
+    "Offense: Second Down (Midfield)",
+    "Offense: Third Down",
+    "Defense: Third Down",
+    "Defense: Third Down (Loss)",
+    "Defense: Fourth Down",
+    "Defense: Fourth Down (Loss)",
+    "Defense: Second Down",
+    "Defense: Second Down (Midfield)",
+    "Defense: Second Down (Loss)",
+    "Defense: Tackle for Loss"
+  ],
+  "scoring": [
+    "Offense: Touchdown Scored",
+    "Offense: Field Goal Made",
+    "Offense: 2-Point Conversion Made",
+    "Offense: PAT Made",
+    "Defense: Touchdown Scored",
+    "Defense: Safety"
+  ],
+  "turnovers": [
+    "Defense: Turnover Forced",
+    "Defense: Iced Game by Turnover"
+  ],
+  "special_teams": [
+    "Defense: Field Goal Missed by Opponent",
+    "Other: Opening Kickoff",
+    "Other: Second-Half Kickoff",
+    "Other: Opening Kickoff on Kick",
+    "Other: Kickoff on Kick (Kicking)",
+    "Other: Kickoff on Kick (Receiving)"
+  ],
+  "hype": [
+    "Offense: Drive Starter",
+    "Offense: Iced Game by First Down",
+    "Offense: Victory in Hand",
+    "Defense: Drive Starter",
+    "Other: Pregame Take the Field",
+    "Other: Start of 2nd Quarter",
+    "Other: Start of 4th Quarter"
+  ],
+  "banter": [
+    "Banter: General Dead-Time Filler",
+    "Banter: Crowd/Atmosphere Commentary",
+    "Banter: Self-Aware/Meta Commentary",
+    "Banter: Light Trash Talk on Road Team",
+    "Banter: Building Tension/Suspense",
+    "Banter: Weather/Stadium Commentary",
+    "Banter: Signature Catchphrase Moments",
+    "Banter: Callback/Running Bit Setup"
+  ]
+}
