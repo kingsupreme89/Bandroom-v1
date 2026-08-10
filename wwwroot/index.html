@@ -161,10 +161,22 @@
           <div class="help-guide-tabs">
             <button class="help-guide-tab active" data-tab="tips">Tips &amp; Tricks</button>
             <button class="help-guide-tab" data-tab="guide">Full Guide</button>
+            <button class="help-guide-tab" data-tab="eventlog">Event Log</button>
           </div>
           <div class="help-guide-body">
             <div id="help-guide-tips" class="help-guide-panel"><!-- populated by app.js from HELP_TIPS --></div>
             <div id="help-guide-full" class="help-guide-panel" hidden><!-- populated by app.js from HELP_GUIDE_HTML --></div>
+            <!-- Live "why didn't my song play" feed -- populated/polled by app.js from
+                 bridge.GetEventActivityLog() while this tab is visible. Non-technical, plain-
+                 English entries only (see EventActivityLog.cs); "Save Log File" exports the same
+                 buffer to a text file under UserDataRoot for support requests. -->
+            <div id="help-guide-eventlog" class="help-guide-panel" hidden>
+              <div class="event-log-toolbar">
+                <span class="event-log-hint">Live feed of what Bandroom just played or skipped, and why.</span>
+                <button id="btn-export-event-log" class="btn-ghost">Save Log File</button>
+              </div>
+              <div id="event-log-list" class="event-log-list"><!-- populated by app.js --></div>
+            </div>
           </div>
         </div>
       </div>

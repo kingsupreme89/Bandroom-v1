@@ -2,6 +2,9 @@ namespace Bandroom.Core.Helpers;
 
 public sealed class DefenseHelper : IRuleEvaluator
 {
+    // Cheap early-out: this evaluator only ever fires when the user's team is on defense.
+    public bool CanFire(GameState state) => !state.UserHasPossession;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         // Defense = user's team does NOT have the ball

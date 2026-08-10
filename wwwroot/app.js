@@ -1433,7 +1433,10 @@ function initHelpGuide() {
       document.getElementById("help-guide-full").innerHTML = HELP_GUIDE_HTML;
     }
   });
-  document.getElementById("btn-close-help-guide").addEventListener("click", () => { overlay.hidden = true; });
+  document.getElementById("btn-close-help-guide").addEventListener("click", () => {
+    overlay.hidden = true;
+    stopEventLogPolling();
+  });
 
   document.querySelectorAll(".help-guide-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -1441,11 +1444,63 @@ function initHelpGuide() {
       tab.classList.add("active");
       document.getElementById("help-guide-tips").hidden = tab.dataset.tab !== "tips";
       document.getElementById("help-guide-full").hidden = tab.dataset.tab !== "guide";
+      document.getElementById("help-guide-eventlog").hidden = tab.dataset.tab !== "eventlog";
+      if (tab.dataset.tab === "eventlog") startEventLogPolling();
+      else stopEventLogPolling();
     });
   });
 
   const shareGuideBtn = document.getElementById("btn-share-guide");
   if (shareGuideBtn) shareGuideBtn.addEventListener("click", openProfileShareGuide);
+
+  const exportLogBtn = document.getElementById("btn-export-event-log");
+  if (exportLogBtn) exportLogBtn.addEventListener("click", exportEventActivityLog);
+}
+
+// Live "why didn't my song play" feed inside Help & Guide's Event Log tab. Polls only while
+// that tab is actually visible -- started when the tab is clicked, stopped when the overlay
+// closes or another tab takes over, so this never leaves an interval ticking in the background.
+let _eventLogPollHandle = null;
+function startEventLogPolling() {
+  stopEventLogPolling();
+  refreshEventActivityLog();
+  _eventLogPollHandle = setInterval(refreshEventActivityLog, 2000);
+}
+function stopEventLogPolling() {
+  if (_eventLogPollHandle) {
+    clearInterval(_eventLogPollHandle);
+    _eventLogPollHandle = null;
+  }
+}
+async function refreshEventActivityLog() {
+  const list = document.getElementById("event-log-list");
+  if (!list || !bridge) return;
+  let entries = [];
+  try {
+    entries = JSON.parse(await bridge.GetEventActivityLog()) || [];
+  } catch (err) {
+    console.error("GetEventActivityLog failed", err);
+    return;
+  }
+  if (entries.length === 0) {
+    list.innerHTML = `<div class="event-log-empty">Nothing logged yet -- this fills in as Bandroom plays or skips cues during a game.</div>`;
+    return;
+  }
+  // Newest first, so the most recent "why didn't that play" answer is right at the top.
+  list.innerHTML = entries.slice().reverse().map((e) =>
+    `<div class="event-log-row">${sanitizeHTML(e.text)}</div>`
+  ).join("");
+}
+async function exportEventActivityLog() {
+  if (!bridge) return;
+  try {
+    const path = await bridge.ExportEventActivityLog();
+    if (path) showToast(`Saved to: ${path}`);
+    else showToast("Couldn't save the log file -- try again.");
+  } catch (err) {
+    console.error("ExportEventActivityLog failed", err);
+    showToast("Couldn't save the log file -- try again.");
+  }
 }
 
 // Opens the Help & Guide overlay straight to the "Share Profile / Load Profile from Others"
@@ -1464,6 +1519,8 @@ function openProfileShareGuide() {
   document.querySelector('.help-guide-tab[data-tab="guide"]')?.classList.add("active");
   document.getElementById("help-guide-tips").hidden = true;
   document.getElementById("help-guide-full").hidden = false;
+  document.getElementById("help-guide-eventlog").hidden = true;
+  stopEventLogPolling();
   requestAnimationFrame(() => {
     document.getElementById("help-section-profile-sharing")?.scrollIntoView({ block: "start" });
   });

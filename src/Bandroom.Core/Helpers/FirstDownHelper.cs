@@ -5,6 +5,9 @@ namespace Bandroom.Core.Helpers;
 /// or field position to let users assign different sounds per situation.</summary>
 public sealed class FirstDownHelper : IRuleEvaluator
 {
+    // Cheap early-out: Evaluate's own first guard.
+    public bool CanFire(GameState state) => state.Delta.WasFirstDown && state.Previous.Down != 0;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         // Must be a fresh first down (not the opening snap)

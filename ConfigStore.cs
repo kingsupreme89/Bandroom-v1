@@ -261,7 +261,7 @@ internal static class ConfigStore
     static string DefaultSongsIndexPath => Path.Combine(DefaultSongsFolder, "index.json");
 
     public static string LoadScorebugPresetName() =>
-        File.Exists(ScorebugPresetPath) ? File.ReadAllText(ScorebugPresetPath).Trim() : ScorebugPreset.KamsCbsScorebug.Name;
+        File.Exists(ScorebugPresetPath) ? File.ReadAllText(ScorebugPresetPath).Trim() : ScorebugPreset.KamsCbsScorebugV3.Name;
 
     public static void SaveScorebugPresetName(string name)
     {
@@ -1150,6 +1150,7 @@ internal static class ConfigStore
         "Defense: Timeout (0 Remaining)",
         "Other: Start of 2nd Quarter",
         "Other: Start of 4th Quarter",
+        "Other: Pregame Ready",
         "Other: Pregame Take the Field",
         "Other: Opening Kickoff",
         "Other: Second-Half Kickoff",

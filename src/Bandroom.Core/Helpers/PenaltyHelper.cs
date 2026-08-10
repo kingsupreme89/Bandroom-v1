@@ -4,6 +4,9 @@ namespace Bandroom.Core.Helpers;
 /// Differentiates offense vs defense penalties based on the penalty flag data.</summary>
 public sealed class PenaltyHelper : IRuleEvaluator
 {
+    // Cheap early-out: Evaluate only ever fires off these two flags.
+    public bool CanFire(GameState state) => state.Current.IsPenaltyOnOffense || state.Current.IsPenaltyOnDefense;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         // Offense penalty: fire for the defense side

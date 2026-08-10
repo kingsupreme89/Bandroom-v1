@@ -47,7 +47,7 @@ internal sealed class GameWatcher
     /// to the down/situation/quarter band and the possession-color box. Setting this re-applies
     /// the new preset's fractions to the live regions immediately, so a change takes effect on
     /// the very next poll without needing a restart.</summary>
-    ScorebugPreset _activePreset = ScorebugPreset.KamsCbsScorebug;
+    ScorebugPreset _activePreset = ScorebugPreset.KamsCbsScorebugV3;
     public ScorebugPreset ActivePreset
     {
         get => _activePreset;
@@ -420,8 +420,11 @@ internal sealed class GameWatcher
                 {
                     if (!region.Calibrated) continue;
 
-                    int cropX = (int)(winW * region.FxX);
-                    int cropY = (int)(winH * region.FxY);
+                    // Clamp to >= 0 -- a negative fractional region coordinate would otherwise
+                    // produce a crop rectangle with a negative origin, which can throw or read
+                    // garbage when drawn from fullBmp below.
+                    int cropX = Math.Max(0, (int)(winW * region.FxX));
+                    int cropY = Math.Max(0, (int)(winH * region.FxY));
                     // Clamp to at least 1px -- a tiny/minimized game window (or a preset with a
                     // very small fractional height) can round FxW/FxH down to 0, and a 0x0
                     // Bitmap throws ArgumentException, which would otherwise trip the outer
@@ -574,8 +577,8 @@ internal sealed class GameWatcher
     {
         if (_activePreset.AwayTimeoutFxW <= 0 || _activePreset.AwayTimeoutFxH <= 0) return -1;
 
-        int cropX = (int)(winW * _activePreset.AwayTimeoutFxX);
-        int cropY = (int)(winH * _activePreset.AwayTimeoutFxY);
+        int cropX = Math.Max(0, (int)(winW * _activePreset.AwayTimeoutFxX));
+        int cropY = Math.Max(0, (int)(winH * _activePreset.AwayTimeoutFxY));
         int cropW = Math.Max(3, Math.Min((int)(winW * _activePreset.AwayTimeoutFxW), winW - cropX));
         int cropH = Math.Max(1, Math.Min((int)(winH * _activePreset.AwayTimeoutFxH), winH - cropY));
 
@@ -622,8 +625,8 @@ internal sealed class GameWatcher
             return;
         }
 
-        int cropX = (int)(winW * _activePreset.PossessionFxX);
-        int cropY = (int)(winH * _activePreset.PossessionFxY);
+        int cropX = Math.Max(0, (int)(winW * _activePreset.PossessionFxX));
+        int cropY = Math.Max(0, (int)(winH * _activePreset.PossessionFxY));
         int cropW = Math.Max(1, Math.Min((int)(winW * _activePreset.PossessionFxW), winW - cropX));
         int cropH = Math.Max(1, Math.Min((int)(winH * _activePreset.PossessionFxH), winH - cropY));
 
@@ -688,8 +691,8 @@ internal sealed class GameWatcher
 
     static double SampleCropBrightness(Bitmap fullBmp, int winW, int winH, double fxX, double fxY, double fxW, double fxH)
     {
-        int cropX = (int)(winW * fxX);
-        int cropY = (int)(winH * fxY);
+        int cropX = Math.Max(0, (int)(winW * fxX));
+        int cropY = Math.Max(0, (int)(winH * fxY));
         int cropW = Math.Max(1, Math.Min((int)(winW * fxW), winW - cropX));
         int cropH = Math.Max(1, Math.Min((int)(winH * fxH), winH - cropY));
 
@@ -956,7 +959,12 @@ internal sealed class GameWatcher
             UserIsHome = UserIsHome,
         };
 
-        var results = _eventRouter.Route(state);
+        // The onDuplicateDropped callback fires when two rule evaluators both matched the same
+        // EventKey on this tick and only the first is kept (see EventRouter.Dedupe's own comment) --
+        // logged here in plain English for the user-facing Event Log rather than inside
+        // Bandroom.Core, which has no UI-facing logging of its own.
+        var results = _eventRouter.Route(state, dupe =>
+            EventActivityLog.Record(dupe.EventKey, "n/a", $"{EventActivityLog.FriendlyEventName(dupe.EventKey)} -- skipped: duplicate of an event we just fired this instant"));
         if (results.Count > 0)
             EventsDetected?.Invoke(results);
     }

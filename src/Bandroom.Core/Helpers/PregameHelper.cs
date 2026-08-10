@@ -20,6 +20,9 @@ namespace Bandroom.Core.Helpers;
 /// derived; it only trusts PlaySnapshot.IsPregameReady already being color-independent.</summary>
 public sealed class PregameHelper : IRuleEvaluator
 {
+    // Cheap early-out: the flag itself is the primary Evaluate() condition.
+    public bool CanFire(GameState state) => state.Current.IsPregameReady;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         if (!state.Current.IsPregameReady || state.Previous.IsPregameReady)

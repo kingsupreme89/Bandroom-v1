@@ -6,6 +6,11 @@ namespace Bandroom.Core.Helpers;
 /// Field goal missed: no score change but IsPAT went true→false (detected externally, not here).</summary>
 public sealed class FieldGoalPATHelper : IRuleEvaluator
 {
+    // Cheap early-out: Evaluate's first check is that the combined score changed at all.
+    public bool CanFire(GameState state) =>
+        state.Current.HomeScore + state.Current.AwayScore
+            != state.Previous.HomeScore + state.Previous.AwayScore;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         int scoreDiff = state.Current.HomeScore + state.Current.AwayScore

@@ -111,7 +111,7 @@ public sealed class WebMainForm : Form
             AudioPlayer.LeadInEnabled = ConfigStore.LoadLeadInWhistleEnabled();
         }
 
-        FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); };
+        FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); FlushOcrLog(); };
 
         Load += async (_, _) =>
         {
@@ -627,6 +627,26 @@ public sealed class WebMainForm : Form
         return "fired:" + Path.GetFileName(entry.AudioFile);
     }
 
+    /// <summary>Turns FireEventForSide's terse result code ("fired:x.mp3", "unassigned",
+    /// "no-profile", "file-missing") into the plain-English EventActivityLog entry a user reading
+    /// the Event Log tab actually needs. Kept next to FireEventForSide since it's the only other
+    /// place that needs to understand its return values.</summary>
+    static void RecordFireResult(string eventKey, string side, string result)
+    {
+        string name = EventActivityLog.FriendlyEventName(eventKey);
+        string sideLabel = DisplaySide(side);
+        if (result.StartsWith("fired:"))
+            EventActivityLog.Record(eventKey, side, $"{name} ({sideLabel}) -- played '{result["fired:".Length..]}'");
+        else if (result == "unassigned")
+            EventActivityLog.Record(eventKey, side, $"{name} ({sideLabel}) -- no song assigned, nothing played");
+        else if (result == "file-missing")
+            EventActivityLog.Record(eventKey, side, $"{name} ({sideLabel}) -- skipped: the assigned song file couldn't be found on disk");
+        else if (result == "no-profile")
+            EventActivityLog.Record(eventKey, side, $"{name} ({sideLabel}) -- skipped: no team profile is loaded yet");
+    }
+
+    static string DisplaySide(string side) => side == "home" ? "Home" : side == "away" ? "Away" : side;
+
     void FireTriggerForSide(string side, string trigger)
     {
         var config = side == "home" ? _homeConfig : _awayConfig;
@@ -729,6 +749,40 @@ public sealed class WebMainForm : Form
         names = ScorebugPreset.AllPresets.Select(p => p.Name).ToArray(),
         active = _watcher.ActivePreset.Name,
     });
+
+    /// <summary>Powers the Help &amp; Guide "Event Log" tab -- plain-English feed of what the
+    /// audio engine did/skipped and why, for a user wondering "why didn't my song play" without
+    /// needing to send a developer ocr_debug.log. Same JSON-array-of-objects shape as other
+    /// list-returning bridge methods (see GetChangelog above).</summary>
+    public string GetEventActivityLogFromWeb() => System.Text.Json.JsonSerializer.Serialize(
+        EventActivityLog.GetSnapshot().Select(e => new
+        {
+            text = e.ToDisplayString(),
+            eventKey = e.EventKey,
+            side = e.Side,
+        }));
+
+    /// <summary>Writes the current Event Log buffer to a timestamped text file under
+    /// UserDataRoot (same folder family as everything else the user owns -- see ConfigStore's
+    /// UserDataRoot comment) so it can be attached to a support request. Returns the full path so
+    /// the UI can tell the user exactly where it landed.</summary>
+    public string ExportEventActivityLogFromWeb()
+    {
+        try
+        {
+            string fileName = $"event_log_{DateTime.Now:yyyyMMdd_HHmmss}.txt";
+            string path = Path.Combine(ConfigStore.UserDataRoot, fileName);
+            Directory.CreateDirectory(ConfigStore.UserDataRoot);
+            var lines = EventActivityLog.GetSnapshot().Select(e => e.ToDisplayString());
+            File.WriteAllLines(path, lines);
+            return path;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("ExportEventActivityLogFromWeb failed", ex);
+            return "";
+        }
+    }
 
     public void SetScorebugPresetFromWeb(string name)
     {
@@ -1597,7 +1651,7 @@ public sealed class WebMainForm : Form
                 int sampleRate = 44100;
                 int n = 10 * sampleRate / 1000; // ~10ms
                 var buf = new float[n];
-                var rng = new Random();
+                var rng = Random.Shared;
                 float prev = 0f;
                 for (int i = 0; i < n; i++)
                 {
@@ -1714,6 +1768,15 @@ public sealed class WebMainForm : Form
             // matches that convention rather than being the one place that guesses wrong.
             if (_possession == null)
             {
+                // Side-specific events can't be routed yet -- log each one as skipped so a user
+                // wondering "why didn't my song play" has an answer instead of silence. Only the
+                // side-specific ones are logged here; "Other:*" events below this branch still
+                // fire normally and get their own fired/skipped log entries.
+                foreach (var evt in events.Where(e => !e.EventKey.StartsWith("Other:")))
+                {
+                    EventActivityLog.Record(evt.EventKey, "n/a",
+                        $"{EventActivityLog.FriendlyEventName(evt.EventKey)} -- skipped: we haven't figured out which team has the ball yet");
+                }
                 // Side-agnostic "Other:*" events (kickoff, quarter starts, pregame) aren't tied to
                 // a real team the way Offense:/Defense: cues are, but they CAN legitimately fire
                 // before _possession has ever been read -- possession sampling is itself suppressed
@@ -1727,6 +1790,7 @@ public sealed class WebMainForm : Form
                 {
                     string result = FireEventForSide("home", evt.EventKey);
                     OnLog($"[engine] {evt.EventKey} -> home (no possession read yet): {result}");
+                    RecordFireResult(evt.EventKey, "home", result);
                 }
                 return;
             }
@@ -1752,10 +1816,13 @@ public sealed class WebMainForm : Form
                 {
                     string result = FireEventForSide(routedSide, evt.EventKey);
                     OnLog($"[engine] {evt.EventKey} -> {routedSide}: {result}");
+                    RecordFireResult(evt.EventKey, routedSide, result);
                 }
                 else
                 {
                     OnLog($"[engine] {evt.EventKey} -> {routedSide}: blocked (HomeOnlyEventsForNow)");
+                    EventActivityLog.Record(evt.EventKey, routedSide,
+                        $"{EventActivityLog.FriendlyEventName(evt.EventKey)} ({DisplaySide(routedSide)}) -- skipped: away-team events are turned off right now");
                 }
             }
         });
@@ -1836,18 +1903,42 @@ public sealed class WebMainForm : Form
     static readonly string OcrLogPath = Path.Combine(AppContext.BaseDirectory, "ocr_debug.log");
     static readonly object OcrLogLock = new();
 
+    // In-memory buffer for OnLog below -- see its doc comment for why this exists instead of
+    // a File.AppendAllText + periodic File.ReadAllLines/WriteAllLines rewrite on every call.
+    static readonly List<string> _ocrLogBuffer = new();
+    static DateTime _ocrLogLastFlush = DateTime.MinValue;
+    const int OcrLogFlushEveryNCalls = 20;
+    static readonly TimeSpan OcrLogFlushInterval = TimeSpan.FromSeconds(3);
+
     /// <summary>Was a no-op -- every OCR region read (down/situation/flag/possession/etc, see
     /// GameWatcher's Log?.Invoke call sites) went nowhere, so there was no way to see what text
-    /// actually got read on a tick where a trigger silently failed to fire. Now appends to
-    /// ocr_debug.log next to the exe, capped to the last ~2000 lines so it can't grow unbounded
-    /// over a long game session.</summary>
+    /// actually got read on a tick where a trigger silently failed to fire. Appends to
+    /// ocr_debug.log next to the exe, capped to roughly the last ~2000 lines so it can't grow
+    /// unbounded over a long game session.
+    ///
+    /// This fires ~4x/second during a live game (once per OCR tick). Originally did a
+    /// File.AppendAllText (open/write/close) on every single call, plus periodically a full
+    /// File.ReadAllLines + File.WriteAllLines rewrite of the whole log to enforce the 2MB cap --
+    /// both real disk I/O on the OCR hot path. Now buffers lines in memory and only touches disk
+    /// every OcrLogFlushEveryNCalls calls (or every OcrLogFlushInterval, whichever comes first),
+    /// and the size-cap rewrite only runs at flush time, not on every call.</summary>
     void OnLog(string message)
     {
         lock (OcrLogLock)
         {
+            _ocrLogBuffer.Add($"{DateTime.Now:HH:mm:ss.fff} {message}");
+
+            bool dueByCount = _ocrLogBuffer.Count >= OcrLogFlushEveryNCalls;
+            bool dueByTime = DateTime.UtcNow - _ocrLogLastFlush >= OcrLogFlushInterval;
+            if (!dueByCount && !dueByTime)
+                return;
+
             try
             {
-                File.AppendAllText(OcrLogPath, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
+                File.AppendAllText(OcrLogPath, string.Join(Environment.NewLine, _ocrLogBuffer) + Environment.NewLine);
+                _ocrLogBuffer.Clear();
+                _ocrLogLastFlush = DateTime.UtcNow;
+
                 if (new FileInfo(OcrLogPath).Length > 2_000_000)
                 {
                     var lines = File.ReadAllLines(OcrLogPath);
@@ -1855,6 +1946,24 @@ public sealed class WebMainForm : Form
                 }
             }
             catch (Exception ex) { CrashLog.Write("OCR log write failed", ex); }
+        }
+    }
+
+    /// <summary>Flushes any buffered OnLog lines to disk immediately, bypassing the count/time
+    /// thresholds. Must be called from crash/shutdown paths so the last ~20 lines / ~3 seconds of
+    /// OCR reads aren't silently dropped right when they'd matter most for diagnosis.</summary>
+    internal static void FlushOcrLog()
+    {
+        lock (OcrLogLock)
+        {
+            if (_ocrLogBuffer.Count == 0) return;
+            try
+            {
+                File.AppendAllText(OcrLogPath, string.Join(Environment.NewLine, _ocrLogBuffer) + Environment.NewLine);
+                _ocrLogBuffer.Clear();
+                _ocrLogLastFlush = DateTime.UtcNow;
+            }
+            catch (Exception ex) { CrashLog.Write("OCR log flush failed", ex); }
         }
     }
 

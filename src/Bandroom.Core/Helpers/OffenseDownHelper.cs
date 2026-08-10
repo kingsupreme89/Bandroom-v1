@@ -2,6 +2,9 @@ namespace Bandroom.Core.Helpers;
 
 public sealed class OffenseDownHelper : IRuleEvaluator
 {
+    // Cheap early-out: this evaluator only ever fires when the user's team has possession.
+    public bool CanFire(GameState state) => state.UserHasPossession;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         if (!state.UserHasPossession)

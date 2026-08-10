@@ -13,6 +13,9 @@ namespace Bandroom.Core.Helpers;
 /// region like "situation", may not clear until the next scoring banner appears).</summary>
 public sealed class FieldGoalMissedHelper : IRuleEvaluator
 {
+    // Cheap early-out: Evaluate's first condition, checked before touching Delta.
+    public bool CanFire(GameState state) => state.Current.IsFieldGoalAttempt;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         if (!state.Current.IsFieldGoalAttempt || !state.Delta.NewPossession)

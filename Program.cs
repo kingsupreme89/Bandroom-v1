@@ -75,6 +75,7 @@ internal static class Program
         {
             var ex = e.ExceptionObject as Exception ?? new Exception(e.ExceptionObject?.ToString() ?? "unknown");
             CrashLog.Write("Unhandled exception (process terminating)", ex);
+            WebMainForm.FlushOcrLog();
             // Best-effort only -- the CLR may already be tearing the process down by the time
             // this runs, so there's no guarantee the dialog gets a chance to paint. Still worth
             // trying: if it does show, the user gets a signal instead of a silent vanish.
@@ -83,6 +84,7 @@ internal static class Program
         Application.ThreadException += (_, e) =>
         {
             CrashLog.Write("UI thread exception (recovered)", e.Exception);
+            WebMainForm.FlushOcrLog();
             CrashGuard.TryNotifyUser("Something went wrong, but Bandroom kept running. Details were saved to crash.log.");
         };
         TaskScheduler.UnobservedTaskException += (_, e) =>

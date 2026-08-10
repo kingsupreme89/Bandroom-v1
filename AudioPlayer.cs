@@ -75,7 +75,7 @@ internal static class AudioPlayer
         if (_warmedUp) return;
         _warmedUp = true;
 
-        Task.Run(() =>
+        Task.Run(async () =>
         {
             try
             {
@@ -87,7 +87,10 @@ internal static class AudioPlayer
                 using var output = new WaveOutEvent();
                 output.Init(provider);
                 output.Play();
-                Thread.Sleep(30);
+                // Task.Delay instead of Thread.Sleep -- this callback already runs on a threadpool
+                // thread via Task.Run, and Delay frees that thread back to the pool for the 30ms
+                // wait instead of blocking it.
+                await Task.Delay(30);
                 output.Stop();
             }
             catch (Exception ex)

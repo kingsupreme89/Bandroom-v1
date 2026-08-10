@@ -5,6 +5,9 @@ namespace Bandroom.Core.Helpers;
 /// Only fires on the transition from not-touchdown to touchdown.</summary>
 public sealed class TouchdownHelper : IRuleEvaluator
 {
+    // Cheap early-out: the flag itself is the primary Evaluate() condition.
+    public bool CanFire(GameState state) => state.Current.IsTouchdown;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         if (!state.Current.IsTouchdown || state.Previous.IsTouchdown)

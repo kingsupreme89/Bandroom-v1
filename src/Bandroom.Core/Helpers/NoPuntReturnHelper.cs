@@ -6,6 +6,9 @@ namespace Bandroom.Core.Helpers;
 /// they're the ones who stopped the return.</summary>
 public sealed class NoPuntReturnHelper : IRuleEvaluator
 {
+    // Cheap early-out: the flag itself is the primary Evaluate() condition.
+    public bool CanFire(GameState state) => state.Current.IsNoPuntReturn;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         if (!state.Current.IsNoPuntReturn || state.Previous.IsNoPuntReturn)

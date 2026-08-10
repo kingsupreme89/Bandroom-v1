@@ -953,6 +953,10 @@ public sealed class WebBridge
     /// SetScorebugPresetFromWeb.</summary>
     public string GetScorebugPresets() => _host.GetScorebugPresetsFromWeb();
     public void SetScorebugPreset(string name) => _host.SetScorebugPresetFromWeb(name);
+    /// <summary>Help &amp; Guide "Event Log" tab -- see WebMainForm.GetEventActivityLogFromWeb/
+    /// ExportEventActivityLogFromWeb for the plain-English "why didn't my song play" feed.</summary>
+    public string GetEventActivityLog() => _host.GetEventActivityLogFromWeb();
+    public string ExportEventActivityLog() => _host.ExportEventActivityLogFromWeb();
     public void ShowHelp() => _host.OpenHelpFromWeb();
     public void ShowUpdate() => _host.ShowUpdateDialogFromWeb();
 

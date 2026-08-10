@@ -9,6 +9,9 @@ namespace Bandroom.Core.Helpers;
 /// 2nd/3rd/4th down. DefenseHelper remains the single source for those.</summary>
 public sealed class DownFieldPositionHelper : IRuleEvaluator
 {
+    // Cheap early-out: Evaluate's own first guard, before touching YardLine/UserHasPossession.
+    public bool CanFire(GameState state) => state.Previous.Down != 0 && state.Current.Down != state.Previous.Down;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         if (state.Previous.Down == 0 || state.Current.Down == state.Previous.Down)

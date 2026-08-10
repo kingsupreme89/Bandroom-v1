@@ -5,6 +5,9 @@ namespace Bandroom.Core.Helpers;
 /// with under 2 minutes remaining.</summary>
 public sealed class TurnoverHelper : IRuleEvaluator
 {
+    // Cheap early-out: the flag itself is the primary Evaluate() condition.
+    public bool CanFire(GameState state) => state.Current.IsTurnover;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         if (!state.Current.IsTurnover || state.Previous.IsTurnover)

@@ -737,11 +737,24 @@ input, select, textarea, [contenteditable] {
   position: absolute;
   right: 10px; top: 50%;
   transform: translateY(-50%);
-  width: 12px; height: 12px;
-  border: 2px solid var(--glass-border);
-  border-top-color: var(--accent);
+  width: 16px; height: 16px;
   border-radius: 50%;
-  animation: signin-spin 0.6s linear infinite;
+  background: conic-gradient(from 0deg,
+    var(--accent) 0deg,
+    color-mix(in srgb, var(--accent) 65%, transparent) 25deg,
+    color-mix(in srgb, var(--accent) 35%, transparent) 55deg,
+    color-mix(in srgb, var(--accent) 12%, transparent) 100deg,
+    transparent 170deg,
+    transparent 360deg);
+  -webkit-mask: repeating-conic-gradient(from 0deg,
+    #000 0deg 8deg, transparent 8deg 30deg),
+    radial-gradient(circle, transparent 52%, #000 58%, #000 78%, transparent 84%);
+  -webkit-mask-composite: source-in;
+  mask: repeating-conic-gradient(from 0deg,
+    #000 0deg 8deg, transparent 8deg 30deg),
+    radial-gradient(circle, transparent 52%, #000 58%, #000 78%, transparent 84%);
+  mask-composite: intersect;
+  animation: signin-spin 0.9s linear infinite;
 }
 @keyframes signin-spin { to { transform: translateY(-50%) rotate(360deg); } }
 
@@ -2753,6 +2766,31 @@ input, select, textarea, [contenteditable] {
 }
 .help-guide-section ul { margin: 6px 0; padding-left: 20px; }
 .help-guide-section strong { color: var(--team-secondary, var(--accent)); }
+
+.event-log-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.event-log-hint { font-size: 14px; color: var(--text-muted); }
+.event-log-list { display: flex; flex-direction: column; gap: 6px; }
+.event-log-row {
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.event-log-empty {
+  padding: 16px 4px;
+  font-size: 14px;
+  color: var(--text-muted);
+  text-align: center;
+}
 .panel-section { padding: 0 0 12px; }
 .panel-title {
   font-size: 13.5px;
@@ -3655,7 +3693,13 @@ input, select, textarea, [contenteditable] {
 /* Matchup-only: scale the shared coverflow up to CFB27's "giant logo per half" proportions.
    Scoped to .matchup-columns so the onboarding/favorite-team coverflows (same shared classes)
    are untouched. */
-.matchup-columns .coverflow-stage { height: min(48vh, 420px); flex: 1 1 auto; }
+/* .matchup-column sets align-items:center (for the title/search centering), which switches its
+   flex children from the default cross-axis stretch to shrink-to-fit. .coverflow-track's only
+   content is position:absolute tiles, contributing zero intrinsic width -- without this explicit
+   width, .coverflow-stage collapses toward 0px and overflow-x:hidden on .coverflow-track clips
+   every tile (root cause of "matchup logos don't show" -- team-picker/onboarding don't hit this
+   since their flex-column parents don't override align-items, so they get the stretch default). */
+.matchup-columns .coverflow-stage { height: min(48vh, 420px); flex: 1 1 auto; width: 100%; }
 .matchup-columns .coverflow-track .team-swatch {
   width: clamp(90px, 13vw, 150px);
   height: clamp(90px, 13vw, 150px);

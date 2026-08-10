@@ -3,9 +3,13 @@ namespace SupremeStadiumSoundSelector;
 /// <summary>A named crop-position preset for the score-bug OCR regions in GameWatcher, so a
 /// different broadcast skin (or a completely different game/HUD down the line) can be swapped
 /// in via dropdown instead of re-deriving fractional coordinates from scratch each time.
-/// "Kam's CBS Scorebug" is the CBS Sports skin calibrated this session -- BandFxY/BandFxH cover
-/// the full-width down/situation/quarter capture band, PossessionFx* is the separate tight box
-/// possession-color sampling still needs (see GameWatcher.SamplePossessionFromWindow).</summary>
+/// BandFxY/BandFxH cover the full-width down/situation/quarter capture band, PossessionFx* is
+/// the separate tight box possession-color sampling still needs (see
+/// GameWatcher.SamplePossessionFromWindow) -- only kept by the older presets below; newer ones
+/// use the underline-brightness method instead (see AwayUnderlineFx*/HomeUnderlineFx*).
+/// "Kam's CBS Scorebug" (the original CBS calibration this file started from) was removed
+/// 2026-08-09 at the owner's request -- "Kam's CBSv3" superseded it and is the only CBS-style
+/// preset kept going forward.</summary>
 public sealed class ScorebugPreset
 {
     public string Name { get; init; } = "";
@@ -46,22 +50,6 @@ public sealed class ScorebugPreset
     public double HomeUnderlineFxW { get; init; }
     public double HomeUnderlineFxH { get; init; }
 
-    public static readonly ScorebugPreset KamsCbsScorebug = new()
-    {
-        Name = "Kam's CBS Scorebug",
-        BandFxY = 0.83, BandFxH = 0.14,
-        // RECALIBRATED 2026-08-08 from a live "3rd & 12" screenshot: the old PossessionFx* box
-        // (0.65/0.85/0.14/0.09) landed somewhere in the yardline/down-distance text area, not
-        // reliably on team-colored fill -- and this is the DEFAULT preset (no persisted override
-        // picks V3's underline method instead), so this box was silently deciding possession for
-        // every game using default settings. The rightmost down-and-distance box (e.g. "3rd & 12")
-        // is filled solid with whichever team is currently on offense's color -- far more reliable
-        // than the underline dashes (both teams here are orange-heavy, near-identical hue) or the
-        // old crop's location. Targets the right ~10% of the band, inset from the rounded corners.
-        PossessionFxX = 0.89, PossessionFxY = 0.848, PossessionFxW = 0.095, PossessionFxH = 0.104,
-        AwayTimeoutFxX = 0.15, AwayTimeoutFxY = 0.895, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
-    };
-
     /// <summary>A revised scorebug layout ("v3") the owner identified from a fresh batch of live
     /// screenshots 2026-08-07 -- kept as its own preset rather than overwriting KamsCbsScorebug,
     /// per this file's whole point (swap presets, don't hand-edit coordinates every time the game
@@ -98,8 +86,8 @@ public sealed class ScorebugPreset
         AwayTimeoutFxX = 0.20, AwayTimeoutFxY = 0.905, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
     };
 
-    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebug, KamsCbsScorebugV3, ConsoleScorebugV1 };
+    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebugV3, ConsoleScorebugV1 };
 
     public static ScorebugPreset GetByName(string? name) =>
-        AllPresets.Find(p => p.Name.Equals(name, System.StringComparison.OrdinalIgnoreCase)) ?? KamsCbsScorebug;
+        AllPresets.Find(p => p.Name.Equals(name, System.StringComparison.OrdinalIgnoreCase)) ?? KamsCbsScorebugV3;
 }
