@@ -630,47 +630,52 @@ public sealed class WebBridge
             // side might still hold a stray near-empty profile from a different install reusing
             // this same Google account). Favorite team prefers whichever device set one; local
             // wins ties since it's the device the user is on right now.
-            var localProfile = ConfigStore.LoadUserProfile();
             var cloudProfile = await ProfileSyncService.PullAsync(sessionToken);
-            var merged = cloudProfile == null ? localProfile with { GoogleUserId = profile.Sub } : new ConfigStore.UserProfile
-            {
-                // Identity/preference fields: local wins if set, cloud fills in only if local is
-                // empty -- never let signing in on a second device silently overwrite a choice
-                // already made on this one.
-                FavoriteTeam = localProfile.FavoriteTeam ?? cloudProfile.FavoriteTeam,
-                RivalTeam = localProfile.RivalTeam ?? cloudProfile.RivalTeam,
-                Bio = localProfile.Bio ?? cloudProfile.Bio,
-                // Lifetime counters only ever go up -- max() is always safe, can never discard
-                // real local history.
-                GamesWatched = Math.Max(localProfile.GamesWatched, cloudProfile.GamesWatched),
-                SongsTriggered = Math.Max(localProfile.SongsTriggered, cloudProfile.SongsTriggered),
-                MarketplaceUploads = Math.Max(localProfile.MarketplaceUploads, cloudProfile.MarketplaceUploads),
-                MarketplaceDownloads = Math.Max(localProfile.MarketplaceDownloads, cloudProfile.MarketplaceDownloads),
-                FavoriteTeamWins = Math.Max(localProfile.FavoriteTeamWins, cloudProfile.FavoriteTeamWins),
-                FavoriteTeamLosses = Math.Max(localProfile.FavoriteTeamLosses, cloudProfile.FavoriteTeamLosses),
-                StreakCurrentDays = Math.Max(localProfile.StreakCurrentDays, cloudProfile.StreakCurrentDays),
-                // Per-key dictionaries: union of both sides, max value per key -- same reasoning
-                // as the plain counters above, just applied per-entry instead of to one total.
-                EventCounts = MergeCounts(localProfile.EventCounts, cloudProfile.EventCounts),
-                GamesWatchedByTeam = MergeCounts(localProfile.GamesWatchedByTeam, cloudProfile.GamesWatchedByTeam),
-                // Custom team logos are NOT counters -- a device could legitimately re-crop an
-                // older-looking logo, which would look like "going backwards" to a max-of-value
-                // merge. Newest UpdatedAtUtc per team wins instead (see MergeLatestWins).
-                CustomTeamLogos = MergeLatestWins(localProfile.CustomTeamLogos, cloudProfile.CustomTeamLogos),
-                // Local-only, deliberately not touched by the merge: StreakLastActiveDate,
-                // FavoriteTeam avatar file, ToastsEnabled, CreatedAt (see ProfileSyncService's
-                // class-level comment for why each of these stays per-device).
-                StreakLastActiveDate = localProfile.StreakLastActiveDate,
-                ToastsEnabled = localProfile.ToastsEnabled,
-                AvatarFileName = localProfile.AvatarFileName,
-                CreatedAt = localProfile.CreatedAt,
-                // Now that we're signed in, stamp the stable Google ID (needed for public
-                // profile URLs) -- union the public-opt-in rather than letting either device's
-                // copy silently win.
-                GoogleUserId = profile.Sub,
-                IsPublicProfile = localProfile.IsPublicProfile || cloudProfile.IsPublicProfile,
-            };
-            ConfigStore.SaveUserProfile(merged);
+            // Merge runs inside MutateUserProfile's lock so the read-modify-write is atomic --
+            // `currentLocal` is loaded fresh at lock-acquisition time, not the possibly-stale
+            // snapshot from before the PullAsync await, so a concurrent MutateUserProfile-based
+            // update (SetBio, RecordSongTriggered, etc.) landing during the OAuth/HTTP round trip
+            // above can't be silently clobbered by this save (see ConfigStore.UserProfileLock).
+            var merged = ConfigStore.MutateUserProfile(currentLocal => cloudProfile == null
+                ? currentLocal with { GoogleUserId = profile.Sub }
+                : new ConfigStore.UserProfile
+                {
+                    // Identity/preference fields: local wins if set, cloud fills in only if local is
+                    // empty -- never let signing in on a second device silently overwrite a choice
+                    // already made on this one.
+                    FavoriteTeam = currentLocal.FavoriteTeam ?? cloudProfile.FavoriteTeam,
+                    RivalTeam = currentLocal.RivalTeam ?? cloudProfile.RivalTeam,
+                    Bio = currentLocal.Bio ?? cloudProfile.Bio,
+                    // Lifetime counters only ever go up -- max() is always safe, can never discard
+                    // real local history.
+                    GamesWatched = Math.Max(currentLocal.GamesWatched, cloudProfile.GamesWatched),
+                    SongsTriggered = Math.Max(currentLocal.SongsTriggered, cloudProfile.SongsTriggered),
+                    MarketplaceUploads = Math.Max(currentLocal.MarketplaceUploads, cloudProfile.MarketplaceUploads),
+                    MarketplaceDownloads = Math.Max(currentLocal.MarketplaceDownloads, cloudProfile.MarketplaceDownloads),
+                    FavoriteTeamWins = Math.Max(currentLocal.FavoriteTeamWins, cloudProfile.FavoriteTeamWins),
+                    FavoriteTeamLosses = Math.Max(currentLocal.FavoriteTeamLosses, cloudProfile.FavoriteTeamLosses),
+                    StreakCurrentDays = Math.Max(currentLocal.StreakCurrentDays, cloudProfile.StreakCurrentDays),
+                    // Per-key dictionaries: union of both sides, max value per key -- same reasoning
+                    // as the plain counters above, just applied per-entry instead of to one total.
+                    EventCounts = MergeCounts(currentLocal.EventCounts, cloudProfile.EventCounts),
+                    GamesWatchedByTeam = MergeCounts(currentLocal.GamesWatchedByTeam, cloudProfile.GamesWatchedByTeam),
+                    // Custom team logos are NOT counters -- a device could legitimately re-crop an
+                    // older-looking logo, which would look like "going backwards" to a max-of-value
+                    // merge. Newest UpdatedAtUtc per team wins instead (see MergeLatestWins).
+                    CustomTeamLogos = MergeLatestWins(currentLocal.CustomTeamLogos, cloudProfile.CustomTeamLogos),
+                    // Local-only, deliberately not touched by the merge: StreakLastActiveDate,
+                    // FavoriteTeam avatar file, ToastsEnabled, CreatedAt (see ProfileSyncService's
+                    // class-level comment for why each of these stays per-device).
+                    StreakLastActiveDate = currentLocal.StreakLastActiveDate,
+                    ToastsEnabled = currentLocal.ToastsEnabled,
+                    AvatarFileName = currentLocal.AvatarFileName,
+                    CreatedAt = currentLocal.CreatedAt,
+                    // Now that we're signed in, stamp the stable Google ID (needed for public
+                    // profile URLs) -- union the public-opt-in rather than letting either device's
+                    // copy silently win.
+                    GoogleUserId = profile.Sub,
+                    IsPublicProfile = currentLocal.IsPublicProfile || cloudProfile.IsPublicProfile,
+                });
             _ = ProfileSyncService.PushAsync(merged); // write the merged result back so both sides agree
 
             // Write any team logo the merge picked up that isn't already on disk here yet, and

@@ -86,6 +86,7 @@ internal static class ProfileSyncService
             string? favoriteTeam = GetStr(root, "favoriteTeam");
             string? rivalTeam = GetStr(root, "rivalTeam");
             string? bio = GetStr(root, "bio");
+            bool isPublicProfile = root.TryGetProperty("isPublicProfile", out var pubEl) && pubEl.ValueKind == JsonValueKind.True;
             var stats = root.TryGetProperty("stats", out var st) ? st : default;
 
             int GetInt(string name) =>
@@ -118,6 +119,7 @@ internal static class ProfileSyncService
                 FavoriteTeam = favoriteTeam,
                 RivalTeam = rivalTeam,
                 Bio = bio,
+                IsPublicProfile = isPublicProfile,
                 GamesWatched = GetInt("gamesWatched"),
                 SongsTriggered = GetInt("songsTriggered"),
                 MarketplaceUploads = GetInt("marketplaceUploads"),

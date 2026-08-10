@@ -271,11 +271,13 @@ internal static class AudioPlayer
                                 break;
                             }
                             audio.Volume = liveVolume * (float)(1.0 - fadeProgress) * duckMul;
+                            if (leadInReader != null) leadInReader.Volume = audio.Volume;
                             Thread.Sleep(30); // finer steps during the fade for a smooth ramp
                         }
                         else
                         {
                             audio.Volume = liveVolume * duckMul;
+                            if (leadInReader != null) leadInReader.Volume = audio.Volume;
                             Thread.Sleep(15); // fast enough to track the ~20ms duck attack smoothly
                         }
                     }

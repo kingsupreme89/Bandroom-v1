@@ -7362,7 +7362,7 @@ function renderLeaderboardTable(container, data, type) {
     const row = document.createElement("div");
     row.className = "leaderboard-row";
     const rankClass = i === 0 ? "top1" : i === 1 ? "top2" : i === 2 ? "top3" : "";
-    row.innerHTML = `<span class="leaderboard-rank ${rankClass}">#${i + 1}</span><span class="leaderboard-user">${entry.name || entry.school || "Unknown"}</span><span class="leaderboard-score">${entry.score || entry.count || 0}</span>`;
+    row.innerHTML = `<span class="leaderboard-rank ${rankClass}">#${i + 1}</span><span class="leaderboard-user">${sanitizeHTML(entry.name || entry.school || "Unknown")}</span><span class="leaderboard-score">${entry.score || entry.count || 0}</span>`;
     // Player rows (type "users") carry a `sub` -- clickable through to their public profile.
     // School rows (marketplace upload counts) have no such identity, so stay inert.
     if (type === "users" && entry.sub) {
@@ -7537,7 +7537,7 @@ document.addEventListener("keydown", (e) => {
       "matchup-overlay", "profile-overlay", "profile-dashboard-overlay",
       "hotkey-panel", "discord-chat-overlay", "my-downloads-overlay", "sound-booth-overlay",
       "load-profile-overlay", "situations-panel", "quick-load-confirm-overlay",
-      "add-school-overlay"
+      "add-school-overlay", "public-profile-overlay"
     ];
     for (const id of overlays) {
       const el = document.getElementById(id);
