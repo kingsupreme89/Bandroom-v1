@@ -1,0 +1,10 @@
+1	[excited] Alright, here we go! The ol' drive starter gets his marching orders!
+2	[calm] Smooth as butter, that first down. Keep it movin', man.
+3	[shouting] Oh boy! Look at this energy, it's almost like he's the main character in a hip-hop video!
+4	[excited] Put some respect on it, let's see what these starters can do!
+5	[shouting] No cap, this team just started from the bottom and won't stop climbing!
+6	[excited] Watch out! They're really moving the chains here!
+7	[shouting] Legendary move there, now that's what I call drive starting energy!
+8	[excited] That first down is like a shot of adrenaline! Keep it up!
+9	[calm] They're staying focused, and that's key for driving deep.
+10	[shouting] Look at that run! This is why we love the game – pure energy and excitement!

@@ -1,15 +1,9 @@
-[excited] What a play! The offense just put it in the end zone!
-[shouting] Touchdown! They're going to take this one all the way home!
-[amazed] Pure magic on that drive—they just scored!
-[breathless] That's a game-changer! They're building momentum big time.
-[surprised] Impossible run! They've got a touchdown now!
-[elevated] Look at them go! The offense is unstoppable!
-[delighted] Perfect execution on the play—touchdown!
-[screaming] Over the goal line! No doubt about it, they scored!
-[inspired] That's what we call a touchdown! Amazing!
-[excited] They're putting pressure on their defense—they scored!
-[emphatic] There you go! They just sealed that with a score.
-[enthusiastic] Sweet, sweet victory—touchdown for them now!
-[calm] That's the way to do it—their offense just struck gold.
-[dramatic] In the blink of an eye, they're leading by that much!
-[delighted] Can't believe it! They've got a touchdown in the books!
+1	[excited] Yo, check it out! The offense just dropped a touchdown right on the heads of those defenders. No cap!
+2	[calm] Just like that, they've got themselves a touchdown. Respect.
+3	[excited] Oh yeah, they just turned up the heat and cooked the defense for a big score. Started from the bottom...
+4	[shouting] HEY YEAH! THAT'S HOW IT'S DONE! TOUCHDOWN TIME!
+5	[excited] That offense is on fire, and they just lit up the scoreboard with that touchdown! Feels good, man.
+6	[shouting] YOU GUYS! THAT'S THE MOMENT WE'VE BEEN WAITING FOR! TOUCHDOWN!!!
+7	[shouting] THAT'S HOW YOU PLAY THE GAME! TOUCHDOWN TIME AGAIN!
+8	[excited] Oh man, that's how you make it count on the gridiron! Touchdown!
+9	[shouting] HEY TEAMWORK! THAT'S HOW YOU WIN! TOUCHDOWN!

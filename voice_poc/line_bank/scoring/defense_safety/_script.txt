@@ -1,15 +1,11 @@
-[excited] Look out! The defense just intercepted a pass and it's heading straight for the end zone!
-[shouting] They've got the ball back! It's a safety on the other team!
-[amazed] Can you believe it? They just scored two points without even touching the ball!
-[surprised] Safety! The defense just put their team up by two!
-[excited] Oh no, that's two points right there for the opponents!
-[announced] A safety on the next play—two unearned points to come.
-[shouting] Two quick points for them! That's a huge lead change right now.
-[calm] It's a safety call. The defense just got two unexpected points.
-[excited] Right into the red zone, and they make it count with a safety!
-[announced] Safety awarded on the last play; two unearned points for the other team.
-[shouting] Two quick points! It's a big shift in momentum right now!
-[amazed] That's some slick defense work—they just got a couple of points!
-[excited] The defense just scored without even touching the ball—what a play!
-[surprised] A safety awarded and it’s two more points for the other team.
-[calm] Two unearned points on the board—it's a significant change in score.
+1	[calm] Alright folks, safety on the field. That's a big stop for the offense.
+2	[excited] Oh man! That's two points right there! Started from the bottom!
+3	[shouting] Look at that! The defense just made it count with a safety! Main character energy!
+4	[calm] Solid tackle by the defense to get that turnover. Respect.
+5	[excited] Nice play, nice play! Safety's on! Put some respect on it!
+6	[shouting] That's the second time they've been shut down! No cap!
+7	[calm] The defense is really stepping up and making some plays here.
+8	[excited] Double-digit lead with a safety? That's how you do it, baby!
+9	[shouting] Listen up! Safety for the home team! That's two points right there!
+10	[excited] Two quick points in a row? That's the momentum swing we need!
+11	[shouting] Double-digit lead, double safety! No way we ain't winning this game!

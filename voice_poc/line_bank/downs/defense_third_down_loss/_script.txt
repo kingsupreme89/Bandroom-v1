@@ -1,15 +1,10 @@
-[shouting] Man, that's a critical stop! Third down and they can't convert!
-[excited] Look at that! The defense just snuffed out another third-down attempt!
-[proudly] Great job by the D tonight! They're keeping this game close.
-[analyzing] That's a tough call for the offense to face on third down. Tough road ahead.
-[confident] No way they get it done here. Watch them have to punt now.
-[focused] Third and long – that defense is giving everything right now.
-[surprised] Oh no! The D just forced another turnover on downs!
-[determined] They're playing their hearts out to keep this game in check.
-[analyzing again] Big third down failure for the offense. Time to regroup.
-[reflecting] Defense makes a statement, holds them to field position here.
-[inspired] That's the kind of defense we've been waiting to see all night!
-[calmly] Well that's a key defensive stand – they just forced a punt.
-[thoughtfully] Third and short – what a battle up front! Defense steps up again.
-[enthused] That stop is huge! They're really turning the game around now!
-[reflective] Another crucial third down stop by this unit. Tough night for the offense.
+1	[excited] Oh man, that was a close call! The defense just made a huge stop on third down!
+2	[calm] Third and out, huh? Looks like the offense is in for a long drive now.
+3	[shouting] WHAT?! No way they didn't make it! They're still alive, folks!
+4	[excited] That was a really tough challenge for the defense—good job keeping them from converting!
+5	[calm] Another third down stop, and we're back to square one on this drive.
+6	[shouting] WHOA! DID YOU SEE THAT?! The defense just sealed up that hole and stopped 'em dead in their tracks!
+7	[excited] That's a huge defensive play to keep the game alive—congrats to the defense!
+8	[shouting] YOU GUYS! THAT'S A BLOCK IN THE TACKLE LIKE NO OTHER! THEY STOPPED THEM cold!
+9	[excited] Holy cow, that was a real nail-biter! The defense just made some serious noise on third down!
+10	[shouting] THEY DID IT AGAIN! A DEFENSIVE STOP TO KEEP THE OFFENSE FROM SCORING! BRAVO!

@@ -1,0 +1,12 @@
+1	[excited] And here we go! Let's see if this kick-off has some main character energy!
+2	[shouting] BOOM! What a way to start the game—no cap!
+3	[calm] Ready... set... and off it goes. Classic stuff.
+4	[excited] Started from the bottom, now kicking it up a notch!
+5	[shouting] WHOA-HOA! That kickoff's got some real hustle behind it!
+6	[calm] It's like they're reading the script; smooth as butter.
+7	[excited] Look at that snap and kick—pure perfection!
+8	[shouting] THAT'S THE SPIRIT! This game is gonna be lit!
+9	[excited] And there goes the ball... let's see where it lands!
+10	[shouting] RESPECT! Respect on this kickoff move!
+11	[excited] Whoa, that kick-off speed is bananas! Can't wait to see what happens next.
+12	[shouting] HERE WE GO! Let's make it count this time!

@@ -327,33 +327,9 @@
             </label>
             <label>Instrumentation <input type="text" id="ti-instrumentation" maxlength="140" placeholder="e.g. Heavy Brass, Marching Snare Drums" /></label>
             <label>Recommended Trim <input type="text" id="ti-trim" maxlength="40" placeholder="e.g. 00:05-00:15 (10s)" /></label>
-            <label>Game Trigger Event <input type="text" id="ti-trigger-event" maxlength="80" placeholder="e.g. Offense: Touchdown Scored" /></label>
-            <label>Marketplace Category
-              <input type="text" id="ti-category" maxlength="60" list="ti-category-options" placeholder="e.g. Audio - Fight Song" />
-              <datalist id="ti-category-options">
-                <option value="Audio - Fight Song"></option>
-                <option value="Audio - Hype Sting"></option>
-                <option value="Audio - Chant"></option>
-                <option value="Audio - Cadence"></option>
-                <option value="Audio - Pregame"></option>
-                <option value="Audio - Postgame"></option>
-              </datalist>
-            </label>
-            <label>Recommended Reverb Preset
-              <select id="ti-reverb-preset">
-                <option value="">Not set</option>
-                <option value="Stadium">Stadium</option>
-                <option value="Dome">Dome</option>
-                <option value="NightGame">Night Game</option>
-                <option value="StadiumRain">Stadium Rain</option>
-                <option value="NightGamePrimeTime">Night Game Prime Time</option>
-              </select>
-            </label>
-            <label>Acoustic Fingerprint <input type="text" id="ti-fingerprint" maxlength="200" placeholder="Short description for marketplace search, e.g. punchy brass hit with snare roll build" /></label>
             <div id="track-info-computed">
               <span id="ti-duration"></span>
               <span id="ti-lufs"></span>
-              <span id="ti-truepeak"></span>
             </div>
           </div>
           <div class="save-profile-actions">
@@ -598,72 +574,14 @@
             <button class="reverb-tile" data-reverb="nightgameprimetime">Prime Time</button>
           </div>
         </div>
-        <!-- The Sound Booth: Sound Booth overhaul dashboard. Every toggle below is off by
-             default and has an (i) info button (sb-info) that pops a plain-language
-             explanation via toggleSoundBoothInfo() in app.js -- reuses the existing popover
-             pattern from the per-event volume popover (situation-volume-popover). -->
-        <div class="panel-section soundbooth glass-pulse" id="soundbooth-section">
-          <div class="panel-title soundbooth-title">
+        <!-- The Sound Booth now lives in its own full modal (#sound-booth-overlay, near
+             #my-downloads-overlay) matching the Sound Bank / My Downloads shell instead of being
+             buried as a section inside this side panel. This is just the launcher. -->
+        <div class="panel-section">
+          <button id="btn-open-soundbooth" class="panel-title soundbooth-title soundbooth-launcher glass-pulse" type="button">
             <span class="soundbooth-led"></span> The Sound Booth
-          </div>
-          <button id="btn-soundbooth-no-effects" class="btn-ghost btn-block soundbooth-no-effects">
-            No Effects &mdash; Hear It Raw
+            <span class="soundbooth-launcher-arrow">&rarr;</span>
           </button>
-          <div class="soundbooth-row">
-            <div class="soundbooth-label">
-              Marching Band EQ
-              <button class="sb-info" data-info="eq-marchingband" aria-label="What does this do?">i</button>
-            </div>
-            <div class="soundbooth-eq-tiles" id="soundbooth-eq-tiles">
-              <button class="sb-tile" data-eq="off">Off</button>
-              <button class="sb-tile" data-eq="marchingband">Band</button>
-              <button class="sb-tile" data-eq="megaphone">Megaphone</button>
-            </div>
-          </div>
-          <label class="toggle-row soundbooth-row">
-            <input type="checkbox" id="toggle-transient-shaper" />
-            <span>Punchier Drums</span>
-            <button class="sb-info" data-info="transient-shaper" aria-label="What does this do?">i</button>
-          </label>
-          <label class="toggle-row soundbooth-row">
-            <input type="checkbox" id="toggle-stereo-widener" />
-            <span>Wider Stereo Sound</span>
-            <button class="sb-info" data-info="stereo-widener" aria-label="What does this do?">i</button>
-          </label>
-          <label class="toggle-row soundbooth-row">
-            <input type="checkbox" id="toggle-ducking" />
-            <span>Duck Music on Big Plays</span>
-            <button class="sb-info" data-info="ducking" aria-label="What does this do?">i</button>
-          </label>
-          <label class="toggle-row soundbooth-row">
-            <input type="checkbox" id="toggle-controller-rumble" />
-            <span>Controller Rumble in Close Games</span>
-            <button class="sb-info" data-info="controller-rumble" aria-label="What does this do?">i</button>
-          </label>
-          <div class="soundbooth-row">
-            <div class="soundbooth-label">
-              Sub-Bass Thump on Big Hits
-              <button class="sb-info" data-info="sub-bass" aria-label="What does this do?">i</button>
-            </div>
-            <div class="soundbooth-eq-tiles" id="soundbooth-subbass-tiles">
-              <button class="sb-tile" data-subbass="off">Off</button>
-              <button class="sb-tile" data-subbass="subtle">Subtle</button>
-              <button class="sb-tile" data-subbass="stadium">Stadium</button>
-              <button class="sb-tile" data-subbass="earthquake">Earthquake</button>
-            </div>
-          </div>
-          <div class="soundbooth-row" id="crowdbus-section">
-            <label class="toggle-row" style="flex: 1 1 auto;">
-              <input type="checkbox" id="toggle-crowd-bus" />
-              <span id="crowdbus-label">Crowd Gets Louder in Close Games</span>
-              <button class="sb-info" data-info="crowd-bus" aria-label="What does this do?">i</button>
-            </label>
-            <button id="btn-crowdbus-upload" class="btn-ghost">Set Crowd Clip...</button>
-          </div>
-          <div class="soundbooth-info-popover" id="soundbooth-info-popover" hidden>
-            <div class="soundbooth-info-text" id="soundbooth-info-text"></div>
-            <button class="soundbooth-info-close" id="soundbooth-info-close">Got it</button>
-          </div>
         </div>
         <!-- Top-downloaded songs/images/profiles across the whole marketplace, pulled by
              /list?sort=downloads per type (same worker endpoint the hub grids already use).
@@ -928,22 +846,6 @@
       <div class="save-profile-header" id="profile-activity-header">Recent Activity</div>
       <div id="profile-activity-feed" class="profile-activity-feed"><!-- populated by app.js --></div>
 
-      <div class="save-profile-header" id="profile-public-header">Public Profile<span class="info-i" title="When on, your favorite team, level, achievements, and lifetime stats (never your bio or rival team) can be viewed by others via a share link, and you'll appear on the Marketplace's Players leaderboard. Requires signing in with Google.">i</span></div>
-      <label id="profile-public-toggle-row">
-        <input type="checkbox" id="profile-public-toggle" />
-        Make my profile public
-      </label>
-      <div class="save-profile-actions" id="profile-share-actions" hidden>
-        <button id="btn-share-my-profile" class="btn-ghost">Share Profile</button>
-      </div>
-      <div id="profile-share-panel" hidden>
-        <div id="profile-share-link"></div>
-        <div id="profile-share-qr"></div>
-      </div>
-
-      <div class="save-profile-header" id="profile-leaderboard-header">Players Leaderboard</div>
-      <div id="profile-leaderboard-table" class="leaderboard-table"><!-- populated by app.js --></div>
-
       <label id="profile-toasts-toggle-row">
         <input type="checkbox" id="profile-toasts-toggle" checked />
         Show toast notifications
@@ -957,32 +859,6 @@
 
       <div class="save-profile-actions">
         <button id="btn-close-profile" class="btn-ghost">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Read-only view of ANOTHER player's public profile (server-side only, via the marketplace
-       worker's unauthenticated GET /profile/:sub -- see WebBridge.GetUserProfile's
-       isPublicProfile field and worker.js's /profile/:sub route). Opened from the Players
-       Leaderboard rows in the profile dialog above. Deliberately a
-       separate, much smaller dialog than #profile-overlay -- only the fields the public route
-       actually returns (favoriteTeam/name/picture/a few stats), never bio/rival/uploads, since
-       those were never asked to be public. -->
-  <div id="public-profile-overlay" hidden>
-    <div id="public-profile-dialog" class="glass">
-      <div id="public-profile-header">
-        <img id="public-profile-avatar" alt="" hidden />
-        <div id="public-profile-name"></div>
-        <div id="public-profile-team"></div>
-      </div>
-      <div id="public-profile-stats-grid">
-        <div class="profile-stat"><span id="public-profile-stat-games">0</span><label>Games Watched</label></div>
-        <div class="profile-stat"><span id="public-profile-stat-songs">0</span><label>Songs Triggered</label></div>
-        <div class="profile-stat"><span id="public-profile-stat-streak">0</span><label>Day Streak</label></div>
-      </div>
-      <div id="public-profile-notfound" hidden>This player's profile isn't public.</div>
-      <div class="save-profile-actions">
-        <button id="btn-close-public-profile" class="btn-ghost">Close</button>
       </div>
     </div>
   </div>
@@ -1111,6 +987,91 @@
         <span class="bandroom-album-col-actions">Actions</span>
       </div>
       <div id="my-downloads-list" class="bandroom-album-grid-list"><!-- populated by app.js --></div>
+    </div>
+  </div>
+
+  <!-- The Sound Booth -- its own full modal now, same glass shell (header/close, hero card,
+       content) as Sound Bank / My Downloads instead of a section buried in the Adjust side
+       panel. Every id inside is unchanged from the old inline section so refreshSoundBoothSection
+       / wireSoundBooth in app.js keep working untouched -- only the surrounding shell moved. -->
+  <div id="sound-booth-overlay" hidden>
+    <div id="sound-booth" class="glass">
+      <div class="team-picker-header">
+        <div class="bandroom-album-title">
+          <span class="soundbooth-led"></span>
+          <span>The Sound Booth</span>
+        </div>
+        <button id="btn-close-soundbooth" class="icon-btn">&times;</button>
+      </div>
+      <p class="bandroom-instructions">
+        Every effect below is off by default. Tap the (i) on any row for a plain-language
+        explanation of what it does.
+      </p>
+      <div class="bandroom-album-hero soundbooth-hero">
+        <span class="soundbooth-hero-icon">&#127911;</span>
+        <div>
+          <div class="bandroom-album-hero-title">No Effects &mdash; Hear It Raw</div>
+          <div class="bandroom-album-hero-meta">One tap turns everything below off at once.</div>
+        </div>
+        <button id="btn-soundbooth-no-effects" class="btn-ghost soundbooth-no-effects">Reset All</button>
+      </div>
+      <div class="panel-section soundbooth" id="soundbooth-section">
+        <div class="soundbooth-row">
+          <div class="soundbooth-label">
+            Marching Band EQ
+            <button class="sb-info" data-info="eq-marchingband" aria-label="What does this do?">i</button>
+          </div>
+          <div class="soundbooth-eq-tiles" id="soundbooth-eq-tiles">
+            <button class="sb-tile" data-eq="off">Off</button>
+            <button class="sb-tile" data-eq="marchingband">Band</button>
+            <button class="sb-tile" data-eq="megaphone">Megaphone</button>
+          </div>
+        </div>
+        <label class="toggle-row soundbooth-row">
+          <input type="checkbox" id="toggle-transient-shaper" />
+          <span>Punchier Drums</span>
+          <button class="sb-info" data-info="transient-shaper" aria-label="What does this do?">i</button>
+        </label>
+        <label class="toggle-row soundbooth-row">
+          <input type="checkbox" id="toggle-stereo-widener" />
+          <span>Wider Stereo Sound</span>
+          <button class="sb-info" data-info="stereo-widener" aria-label="What does this do?">i</button>
+        </label>
+        <label class="toggle-row soundbooth-row">
+          <input type="checkbox" id="toggle-ducking" />
+          <span>Duck Music on Big Plays</span>
+          <button class="sb-info" data-info="ducking" aria-label="What does this do?">i</button>
+        </label>
+        <label class="toggle-row soundbooth-row">
+          <input type="checkbox" id="toggle-controller-rumble" />
+          <span>Controller Rumble in Close Games</span>
+          <button class="sb-info" data-info="controller-rumble" aria-label="What does this do?">i</button>
+        </label>
+        <div class="soundbooth-row">
+          <div class="soundbooth-label">
+            Sub-Bass Thump on Big Hits
+            <button class="sb-info" data-info="sub-bass" aria-label="What does this do?">i</button>
+          </div>
+          <div class="soundbooth-eq-tiles" id="soundbooth-subbass-tiles">
+            <button class="sb-tile" data-subbass="off">Off</button>
+            <button class="sb-tile" data-subbass="subtle">Subtle</button>
+            <button class="sb-tile" data-subbass="stadium">Stadium</button>
+            <button class="sb-tile" data-subbass="earthquake">Earthquake</button>
+          </div>
+        </div>
+        <div class="soundbooth-row" id="crowdbus-section">
+          <label class="toggle-row" style="flex: 1 1 auto;">
+            <input type="checkbox" id="toggle-crowd-bus" />
+            <span id="crowdbus-label">Crowd Gets Louder in Close Games</span>
+            <button class="sb-info" data-info="crowd-bus" aria-label="What does this do?">i</button>
+          </label>
+          <button id="btn-crowdbus-upload" class="btn-ghost">Set Crowd Clip...</button>
+        </div>
+        <div class="soundbooth-info-popover" id="soundbooth-info-popover" hidden>
+          <div class="soundbooth-info-text" id="soundbooth-info-text"></div>
+          <button class="soundbooth-info-close" id="soundbooth-info-close">Got it</button>
+        </div>
+      </div>
     </div>
   </div>
 

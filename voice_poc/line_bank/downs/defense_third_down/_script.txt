@@ -1,15 +1,8 @@
-[enthused] Third down! We need a stop here!
-[excited] Defense to the rescue on third down!
-[anticipating] Third and long – can they get it?
-[analyzing] The line of scrimmage is critical now.
-[urgent] They have one chance to make their day!
-[reflective] Every snap gets harder for the offense.
-[optimistic] Just need that big play from the D!
-[dramatic] Third down – do or die moment!
-[analyzing] It’s a critical third-and-x situation.
-[confident] This defense just keeps rising to the occasion.
-[hopeful] A stop could swing the momentum here.
-[tense] Third down – can they hold their ground?
-[inspiring] One last stand for our heroes!
-[predicting] They’re going to need a miracle here.
-[analyzing] Every yard now, every effort matters!
+1	[calm] Alright, third down... let's see if they can keep this train on track!
+2	[excited] Third and short! They've got to make a statement here!
+3	[shouting] COME ON NOW! Third down, they're not going down without a fight!
+4	[excited] Starting from the bottom, can these guys elevate their game?
+5	[shouting] NO CAP! THEY'VE GOT TO MAKE THIS COUNT!
+6	[shouting] PUT SOME RESPECT ON IT! CAN THEY CLIMB THE LADDER?
+7	[shouting] MAIN CHARACTER ENERGY! THEY'RE GOING TO MAKE IT COUNT!
+8	[excited] Come on now, third and inches! Can they do what needs to be done?

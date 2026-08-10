@@ -1,15 +1,10 @@
-[excited] Unbelievable! The defense just scored a touchdown!
-[shouting] Points off the board, points off the scoreboard – that's huge!
-[amazed] Can you believe it? The defense just put their team on top!
-[cheering] Touchdown, defensive unit! They're really stepping up tonight.
-[impressed] That was a gutsy call, and they executed it perfectly!
-[shouting] Over the goal line! The defense takes this one in!
-[excited] How did that happen? A touchdown by the defense – unheard of!
-[amazed] Look at that play, man! They just won this game with a touchdown!
-[cheering] That's what you call clutch! Defense wins big points here.
-[shouting] Unbelievable finish from the back line! Touchdown!
-[excited] No way – the defense are scoring? This changes everything!
-[impressed] What a play! The entire stadium is on its feet now.
-[cheering] You had to see that! Defense scores for the first time ever?
-[shouting] That's unheard of in this league – touchdown by the defense!
-[amazed] I can't believe it… the defense just scored a touchdown, wow!
+1	[excited] Oh man, they finally broke free! Touchdown! It's like they just started from the bottom and rose to the top!
+2	[shouting] Look out world, they just put some respect on it with that touchdown run!
+3	[calm] Nice play by them, breaking through the defense for a score. That's what I call main character energy.
+4	[excited] You heard that? They just slayed the defense with style and skill! Touchdown!
+5	[excited] That's the kind of play that gets you noticed! Big-time stuff from the big leagues, folks.
+6	[shouting] They just went from zero to hero with that score! Touchdown!
+7	[calm] A well-deserved touchdown after all those drives and struggles. Sometimes it just takes one snap to turn things around.
+8	[excited] They did it again! That's what you call a clutch moment, folks – big time!
+9	[shouting] No cap, they just shut the defense up with that touchdown run! Touchdown!
+10	[excited] They're on fire tonight, man! That's the kind of play you can't teach – just gotta feel it and make it happen!

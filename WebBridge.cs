@@ -242,14 +242,6 @@ public sealed class WebBridge
             fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
             AddFormPart(form, fileContent, "file", Path.GetFileName(entry.Path));
 
-            // If this track already has a Track Info sidecar (see AudioTrackMetadata.cs), carry
-            // it along so the marketplace listing gets the same title/artist/energy/category/
-            // trigger info the uploader already filled in locally, instead of the pack landing
-            // with no metadata and needing to be re-described from scratch by a downloader.
-            var trackMeta = AudioTrackMetadataStore.Load(entry.Path);
-            if (trackMeta != null)
-                AddFormPart(form, new System.Net.Http.StringContent(JsonSerializer.Serialize(trackMeta, CamelCaseJsonOptions)), "metadata");
-
             using var response = await ShareHttp.PostAsync(
                 "https://bandroom-marketplace.bandroom.workers.dev/upload", form);
             if (!response.IsSuccessStatusCode)
@@ -632,7 +624,7 @@ public sealed class WebBridge
             // wins ties since it's the device the user is on right now.
             var localProfile = ConfigStore.LoadUserProfile();
             var cloudProfile = await ProfileSyncService.PullAsync(sessionToken);
-            var merged = cloudProfile == null ? localProfile with { GoogleUserId = profile.Sub } : new ConfigStore.UserProfile
+            var merged = cloudProfile == null ? localProfile : new ConfigStore.UserProfile
             {
                 // Identity/preference fields: local wins if set, cloud fills in only if local is
                 // empty -- never let signing in on a second device silently overwrite a choice
@@ -664,11 +656,6 @@ public sealed class WebBridge
                 ToastsEnabled = localProfile.ToastsEnabled,
                 AvatarFileName = localProfile.AvatarFileName,
                 CreatedAt = localProfile.CreatedAt,
-                // Now that we're signed in, stamp the stable Google ID (needed for public
-                // profile URLs) -- union the public-opt-in rather than letting either device's
-                // copy silently win.
-                GoogleUserId = profile.Sub,
-                IsPublicProfile = localProfile.IsPublicProfile || cloudProfile.IsPublicProfile,
             };
             ConfigStore.SaveUserProfile(merged);
             _ = ProfileSyncService.PushAsync(merged); // write the merged result back so both sides agree
@@ -796,13 +783,12 @@ public sealed class WebBridge
         int level = 1 + totalActivity / 50;
 
         // Achievement list is intentionally limited to what UserProfile actually tracks today.
-        // Several ideas floated for this batch -- Full Band (per-team slot completeness), Prime
-        // Time (per-game clock state), 5-Star Rated (marketplace ratings), Dynasty Mode (save-file
-        // detection), Iron Wall (per-game defensive-event count) -- would need new per-game or
-        // per-team-slot tracking that doesn't exist yet, so they're left out rather than backed by
-        // a field that doesn't mean what the badge claims. Rivalry Master and Profile Sharer
-        // (below) ARE backed by real fields (GamesWatchedByTeam+RivalTeam, IsPublicProfile) and
-        // were added once those existed.
+        // Several ideas floated for this batch -- Fight Song Collector (per-team assignment
+        // count), Rivalry Master (per-game opponent), Full Band (per-team slot completeness),
+        // Prime Time (per-game clock state), 5-Star Rated (marketplace ratings), Dynasty Mode
+        // (save-file detection), Iron Wall (per-game defensive-event count) -- would need new
+        // per-game or per-team-slot tracking that doesn't exist yet, so they're left out rather
+        // than backed by a field that doesn't mean what the badge claims.
         var achievements = new List<object>
         {
             new { id = "favorite_team_set", label = "Picked a Favorite Team", unlocked = p.FavoriteTeam != null },
@@ -817,8 +803,6 @@ public sealed class WebBridge
             new { id = "marketplace_creator", label = "Marketplace Creator (10 Uploads)", unlocked = p.MarketplaceUploads >= 10 },
             new { id = "sound_scout", label = "Sound Scout (50 Downloads)", unlocked = p.MarketplaceDownloads >= 50 },
             new { id = "team_loyalist", label = "Team Loyalist (5 Games Logged)", unlocked = p.FavoriteTeamWins + p.FavoriteTeamLosses >= 5 },
-            new { id = "rivalry_master", label = "Rivalry Master", unlocked = !string.IsNullOrWhiteSpace(p.RivalTeam) && p.GamesWatchedByTeam.GetValueOrDefault(p.RivalTeam!) >= 1 },
-            new { id = "profile_sharer", label = "Profile Sharer", unlocked = p.IsPublicProfile },
         };
 
         return JsonSerializer.Serialize(new
@@ -841,24 +825,7 @@ public sealed class WebBridge
             avatarUrl = p.AvatarFileName != null ? "https://avatar/" + Uri.EscapeDataString(p.AvatarFileName) : null,
             level,
             achievements,
-            isPublicProfile = p.IsPublicProfile,
-            googleUserId = p.GoogleUserId,
         });
-    }
-
-    /// <summary>Opt in/out of the public profile page + leaderboard -- only takes effect while
-    /// signed in (no GoogleUserId means no stable key to publish under, see UserProfile.GoogleUserId).
-    /// Pushes to the cloud immediately so the toggle takes effect on the marketplace worker's
-    /// /profile GET without waiting for the next unrelated sync.</summary>
-    public string TogglePublicProfile(bool isPublic)
-    {
-        var current = ConfigStore.LoadUserProfile();
-        if (isPublic && string.IsNullOrWhiteSpace(current.GoogleUserId))
-            return JsonSerializer.Serialize(new { ok = false, error = "Sign in with Google first -- a public profile needs an account to publish under." });
-
-        var updated = ConfigStore.MutateUserProfile(c => c with { IsPublicProfile = isPublic });
-        _ = ProfileSyncService.PushAsync(updated);
-        return JsonSerializer.Serialize(new { ok = true, isPublicProfile = updated.IsPublicProfile });
     }
 
     public void SetFavoriteTeam(string team)

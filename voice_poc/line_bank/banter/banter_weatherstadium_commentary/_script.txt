@@ -1,0 +1,11 @@
+1	[excited] Wow, it's like the clouds are throwing shade on this game!
+2	[shouting] Oh man, those lightning bolts look like they're about to electrify the field!
+3	[excited] Whoa, it's looking stormy out there – maybe the weather's got game face on!
+4	[calm] Looks like a little downpour could be putting some extra moisture in these footballs...
+5	[shouting] Hold up, lightning in the distance? That's serious vibes, man!
+6	[excited] I'm sensing some serious humidity levels out there—let's see if it gets to our guys!
+7	[calm] Better break out those umbrellas, because it looks like a storm is brewing over here.
+8	[excited] Clouds are rolling in thicker than the starting lineup, folks!
+9	[calm] And there's that light drizzle picking up... it could be a factor.
+10	[excited] The temperature's dropping, and so is the action! Let's see who can handle this chill.
+11	[shouting] Rain or shine, today's field is gonna get some real sprinkles!

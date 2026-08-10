@@ -1,0 +1,14 @@
+1	[calm] Hey, folks, we just saw the defense take on the blitz like they were playing Pac-Man!
+2	[excited] Alright, alright! This is where the game was made... and it ain't over yet!
+3	[shouting] Yo, check out that read option! It's like he got a map to the QB's brain!
+4	[calm] Remember when they started from the bottom? Well, they sure climbed up high today.
+5	[excited] Look at the energy on this play – it's main character energy all the way!
+6	[shouting] Put some respect on it! That's how you do a first down in style!
+7	[calm] And there we go... now they're cooking with gas, no cap.
+8	[excited] This is the kind of play that makes you believe in second chances and third downs.
+9	[shouting] Listen up! That was the perfect one-two punch! Now it's their ball game!
+10	[calm] Sweet moves on the quarterback's part – they're outsmarting themselves, but in a good way.
+11	[excited] This is why you love football, right? The unpredictable turns and big plays that keep you guessing!
+12	[shouting] Listen to that crowd roar! It's like they just tipped the table over for their favorite team!
+13	[excited] This is what I call making a statement on the gridiron – they're doing it, and they ain't done yet!
+14	[shouting] And there's that touchdown! If that wasn't a celebration, we'll call it an accident!

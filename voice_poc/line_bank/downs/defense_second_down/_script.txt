@@ -1,15 +1,7 @@
-[excited] The defense steps up on second down! They’ve got to make a stop!
-[anticipating] On second down, they’re going for it! What’s the play call?
-[curious] Second down... can they find another gear now?
-[analyzing] Defensive line adjustments... they’re trying to take out the run.
-[hopeful] If only one more yard... they could be in field goal range!
-[expectant] Two downs and a chance to drive it deep! Watch this one closely.
-[determined] Second down, and they’ve got to make a statement here.
-[analyzing] They’re going for it all - let’s see if they can convert.
-[insistent] Defense has their eyes on the prize... second down!
-[calmly] With two downs left, the game is still very much in the balance.
-[eagerly] Second and short... they’ve got to get this first down!
-[reflecting] On second down, it’s a critical play for both sides.
-[dramatically] Here comes the decisive moment! They’re on second down now.
-[analyzing] Defensive line is set - can they contain the rush?
-[confidently] Second down, and if this works... they could be in business!
+1	[excited] Yo, did y'all feel that? Second down—that's where the story starts!
+2	[calm] Alright, here we go again. Let's see what this defense got in 'em.
+3	[shouting] Oh my God, I ain't never seen second down handled like this! Put some respect on it, guys!
+4	[excited] Starting from the bottom, folks. Can they keep it going? Here we go!
+5	[shouting] No cap, I'm live! Second down—let's make a move here, baby!
+6	[excited] Oh wow, second down and the whole stadium is on edge! What will they do next?
+7	[shouting] No way! Second down and they're already on fire! Main character energy!

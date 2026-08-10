@@ -1,0 +1,12 @@
+1	[excited] Alright, here comes the ball, and that's a kickoff! Let's see if they can hit it out of the park!
+2	[shouting] Yo, watch this, this is like a kickoff to the face! Can't nobody handle that!
+3	[excited] That's some serious kickoff power! Might as well be throwing a cannonball from a fort!
+4	[shouting] You heard that? That was like a rocket launch, man!
+5	[excited] Oh, you ain't seen nothing yet! This kickoff is gonna shake things up big time!
+6	[shouting] This isn't just any kickoff; this is a touchdown on kick-off duty!
+7	[excited] That was a no-huddle kind of kickoff! They're going for broke, baby!
+8	[shouting] Watch out, watch out! Here comes a kickoff with main character energy!
+9	[calm] Time to show some respect on this kickoff. Let's see what they've got.
+10	[excited] That kickoff is like a superhero's leap into action! Can't nobody stop it now!
+11	[shouting] Started from the bottom, now look where that kickoff is taking us!
+12	[calm] Alright folks, let's get ready to rumble... this kickoff could change everything!

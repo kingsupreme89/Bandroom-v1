@@ -1,0 +1,11 @@
+1	[excited] Yo, I'm feeling it! The field's like a canvas for greatness tonight!
+2	[shouting] No cap, this is the moment we've been waiting for!
+3	[calm] Started from the bottom, now he's on his way up.
+4	[excited] Look at that momentum buildin' up, like a snowball rollin' down the hill!
+5	[shouting] Main character energy, pure and simple!
+6	[calm] Respect! This is what it takes to make a difference.
+7	[shouting] This play's got that '90s rap beat, straight fire!
+8	[calm] Smooth moves, man. Just like when you're chillin' with your crew.
+9	[excited] Put some respect on it! This is where the magic happens.
+10	[calm] That's what football is all about—raw talent and passion.
+11	[shouting] Let's do this! It's time to step up and show the world who you are!

@@ -1,15 +1,11 @@
-[excited] Fourth and goal! They're stopped cold!
-[shouting] No way! The defense just snatched it away!
-[determined] With a chance to tie it up, they couldn't get the first down.
-[disappointed] A tough break for them, but now the offense faces fourth and ten.
-[analyzing] That defensive line really put pressure on the quarterback.
-[reflective] What a pivotal moment—just two yards away from perfection.
-[calm] The game continues to tighten with each passing down.
-[urgent] Fourth down! They need to convert, or else!
-[annoyed] That was frustrating for them; now it’s a long field goal try.
-[focused] All eyes on the line of scrimmage as they take their last shot.
-[skeptical] Really? A fourth down stop when they had so much momentum?
-[confident] The defense held firm, and that's all that matters right now.
-[tense] Fourth and short! They’ve got to make this one count!
-[reflective] That play will be crucial as the clock keeps ticking down.
-[analyzing] A tough task for the defense to hold them on fourth down.
+1	[calm] Alright, Fourth Down and out. Looks like our boys are feeling the heat.
+2	[excited] Come on, come on! Fourth down and they're stopping it at the line of scrimmage!
+3	[shouting] No cap, folks! The defense just made a huge play to keep the offense out of the end zone!
+4	[calm] Uh oh, looks like the other team's going for it and... no dice.
+5	[excited] Started from the bottom, now they're making a stand on Fourth Down!
+6	[shouting] Respect! The defense just shut them down on fourth and long!
+7	[excited] Listen up! They're going for it on Fourth Down - hold your breath!
+8	[shouting] Oh man, this is huge! They just stopped the other team's drive cold!
+9	[excited] Main character energy in play! The defense just turned things around on Fourth Down!
+10	[shouting] They did it! Stopped them cold on fourth and short - that was a game-changer!
+11	[shouting] Legendary play! The defense just pulled off a huge stop on fourth and inches!

@@ -599,10 +599,10 @@ public sealed class WebMainForm : Form
     /// <summary>Returns what actually happened so callers that need visible feedback (the test
     /// hook) can tell "fired," "no song assigned," and "no matchup loaded" apart instead of all
     /// three looking identically like silence. Real engine/legacy callers ignore the return.</summary>
-    TriggerEntry? ResolveEntryForEvent(string side, string eventName)
+    string FireEventForSide(string side, string eventName, bool bypassCooldown = false)
     {
         var config = side == "home" ? _homeConfig : _awayConfig;
-        if (config == null) return null;
+        if (config == null) return "no-profile";
 
         // Try the team's own profile first, then fall back to the Generic profile
         var entry = config.FirstOrDefault(e => e.Event == eventName);
@@ -620,13 +620,6 @@ public sealed class WebMainForm : Form
             if (legacyEntry != null && !string.IsNullOrWhiteSpace(legacyEntry.AudioFile))
                 entry = legacyEntry;
         }
-        return entry;
-    }
-
-    string FireEventForSide(string side, string eventName, bool bypassCooldown = false)
-    {
-        if ((side == "home" ? _homeConfig : _awayConfig) == null) return "no-profile";
-        var entry = ResolveEntryForEvent(side, eventName);
 
         if (entry == null || string.IsNullOrWhiteSpace(entry.AudioFile)) return "unassigned";
 
@@ -639,39 +632,13 @@ public sealed class WebMainForm : Form
     /// <summary>Turns FireEventForSide's terse result code ("fired:x.mp3", "unassigned",
     /// "no-profile", "file-missing") into the plain-English EventActivityLog entry a user reading
     /// the Event Log tab actually needs. Kept next to FireEventForSide since it's the only other
-    /// place that needs to understand its return values.
-    ///
-    /// On a real fire, re-resolves the entry (cheap -- same lookup FireEventForSide just did) to
-    /// check for a Track Info sidecar (AudioTrackMetadata) and, if one exists, logs the richer
-    /// "Title (Category, Instrumentation)" form instead of just the raw filename -- e.g. "LSU
-    /// Golden Band -- 'Neck' (Hype Sting, Heavy Brass) fired on 3rd Down" instead of
-    /// "Neck_trimmed.wav". Falls back to the filename-only line when there's no sidecar, same as
-    /// before this existed.</summary>
-    void RecordFireResult(string eventKey, string side, string result)
+    /// place that needs to understand its return values.</summary>
+    static void RecordFireResult(string eventKey, string side, string result)
     {
         string name = EventActivityLog.FriendlyEventName(eventKey);
         string sideLabel = DisplaySide(side);
         if (result.StartsWith("fired:"))
-        {
-            string filename = result["fired:".Length..];
-            string detail = $"played '{filename}'";
-            var entry = ResolveEntryForEvent(side, eventKey);
-            if (entry != null && !string.IsNullOrWhiteSpace(entry.AudioFile))
-            {
-                var meta = AudioTrackMetadataStore.Load(entry.AudioFile);
-                if (meta != null && (!string.IsNullOrWhiteSpace(meta.StandardTitle) || !string.IsNullOrWhiteSpace(meta.StandardArtist)))
-                {
-                    string title = !string.IsNullOrWhiteSpace(meta.StandardTitle) ? meta.StandardTitle! : filename;
-                    string artistPart = !string.IsNullOrWhiteSpace(meta.StandardArtist) ? $"{meta.StandardArtist} -- " : "";
-                    var tags = new List<string>();
-                    if (!string.IsNullOrWhiteSpace(meta.MarketplaceCategory)) tags.Add(meta.MarketplaceCategory!);
-                    if (!string.IsNullOrWhiteSpace(meta.ProminentInstrumentation)) tags.Add(meta.ProminentInstrumentation!);
-                    string tagPart = tags.Count > 0 ? $" ({string.Join(", ", tags)})" : "";
-                    detail = $"played {artistPart}'{title}'{tagPart}";
-                }
-            }
-            EventActivityLog.Record(eventKey, side, $"{name} ({sideLabel}) -- {detail}");
-        }
+            EventActivityLog.Record(eventKey, side, $"{name} ({sideLabel}) -- played '{result["fired:".Length..]}'");
         else if (result == "unassigned")
             EventActivityLog.Record(eventKey, side, $"{name} ({sideLabel}) -- no song assigned, nothing played");
         else if (result == "file-missing")

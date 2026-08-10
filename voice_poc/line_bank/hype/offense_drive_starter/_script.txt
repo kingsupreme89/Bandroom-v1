@@ -1,0 +1,10 @@
+1	[excited] Alright, here we go! We've got a drive starter right outta left field!
+2	[shouting] Starting things up with a bang, y'all!
+3	[calm] Let's see how they set the tone... *crosses fingers*
+4	[excited] Watch 'em take over! This could be a long one!
+5	[shouting] FROM THE BOTTOM! They're starting strong!
+6	[shouting] DRIVING HARD RIGHT NOW! No cap!
+7	[calm] They've got some main character energy here...
+8	[shouting] They're out of the gate like a bat outta hell!
+9	[calm] Let's see if they can capitalize on this opening.
+10	[shouting] Starting things off with a BOOM!

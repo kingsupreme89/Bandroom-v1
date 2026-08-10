@@ -1,15 +1,11 @@
-[excited] And it's on! The offense has got it done with a two-point conversion!
-[shouting] Two points! It's a game-changer right here!
-[enthusiastic] They've seized the opportunity and made it count – touchdown!
-[delighted] Perfect execution, they've doubled their lead with this one!
-[thrilled] Touchdown on the two-point conversion; they're building momentum now.
-[pumped up] It's a big hit! Two points added to the board for them!
-[ecstatic] They've done it again – that two-point conversion was clutch!
-[amazed] The defense couldn't stop them, and now their lead is even bigger!
-[suspenseful] With just seconds left, they're making a big play – touchdown!
-[impressed] What a display of skill! Two points made; they've outscored the other team.
-[overjoyed] It's a thrilling moment as the offense makes it two-for-two!
-[animated] They've got the crowd on their feet with this crucial play – touchdown!
-[gratified] Their strategy paid off big time – they just doubled their points!
-[excitedly] There you go! A decisive moment, and they made it happen.
-[elated] That's the kind of play that keeps everyone on their toes – a two-point conversion!
+1	[excited] Yo, y'all! That's a big ol' Yes! Right on that conversion!
+2	[shouting] LITERALLY! Main character energy in full effect right here!
+3	[calm] Got some respect on it there, folks. Nice play.
+4	[excited] Two points, two more reasons to love this game!
+5	[shouting] No cap, they just put a checkmark next to their name and signed off!
+6	[excited] Started from the bottom, now here we are! Love it!
+7	[shouting] They ain't messing around! That's two in a row for the win!
+8	[excited] That's the kind of play that makes you shout "Yes!" into your TV!
+9	[shouting] They're the real deal, folks! That's two in a row to the top!
+10	[excited] No way, no how! That's a big moment right there!
+11	[shouting] TWO POINTS! Two points make for a happy home run!

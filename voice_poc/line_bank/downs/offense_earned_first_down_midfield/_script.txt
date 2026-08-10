@@ -1,15 +1,10 @@
-[enthusiastic] They did it! First down for the offense right at midfield!
-[excited] The offense has moved the chains and earned their first down!
-[shouting] Midfield and a first down – that was huge!
-[emphatic] Right on the money, they get a first down in prime position!
-[dramatic] First down at midfield! That’s a key play!
-[surprised] Amazing! They’ve just earned their first down right there!
-[announcing] The offense has finally made it to midfield with a crucial first down!
-[proud] What a job by the offense – they’ve got their first down at midfield!
-[confident] That’s right, first down and moving on to midfield!
-[excited] Right into midfield territory, and they just picked up that critical first down!
-[calmly] First down for them, holding steady in the middle of the field.
-[pumped] They’re breathing a sigh of relief with their first down right at midfield!
-[confidently] Right where they wanted to be – first down and heading into midfield!
-[enthusiastically] Look at that run! First down at midfield, setting up for more!
-[emphasizing] A big play for the offense – a first down right in the middle of the field!
+1	[excited] Alright, folks! They just earned that first down with some serious hustle and grit. That's what I call main character energy!
+2	[shouting] No cap, they hit a home run on this play, bringing the chains well past midfield! Keep it up, team!
+3	[excited] Look at them go! That's what I call staying hungry and grinding for that crucial first down!
+4	[shouting] Started from the bottom, now they're building a winning team with this first down! Keep the faith!
+5	[excited] Just snatched that first down like a pro, showing resilience and skill on the gridiron!
+6	[shouting] Put some respect on it, they just earned this vital first down! Don't let up now!
+7	[excited] That's the kind of tough play that gives you a mental edge. Big time first down there!
+8	[shouting] No way, they just made a clutch play for that needed first down! This game is still wide open!
+9	[excited] That's the kind of play that gets you fired up! Just earned another crucial first down there!
+10	[shouting] Main character energy in action here! Just earned a hard-fought first down to keep things moving!

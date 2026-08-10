@@ -1,15 +1,8 @@
-[excited] Look at that! The defense just snatched it away!
-[shouting] They intercepted the ball! Big play by their defense!
-[enthusiastic] That's a turnover forced right there!
-[calm] Defensive stand pays off with an interception.
-[excited] It's all happening now – they just stripped it!
-[announcing] Yes, that's the ball! They've got it back!
-[shouting] Take that, offense! The defense has scored points!
-[calm] Solid play by the defenders to force a fumble.
-[excited] That’s a critical turnover – their team is in business!
-[announcing] Great defensive effort yields an immediate reward!
-[enthusiastic] It's a turnover! What a play from the defense!
-[calm] The defense just changed the momentum of the game.
-[excited] They're right back on offense – big gain for them!
-[shouting] That's the kind of stop you live for in football!
-[announcing] Defensive brilliance! Ball is now on their side!
+1	[excited] Sweet! The defense just made a turnover and the offense is about to take over!
+2	[shouting] No cap, they just stripped that ball right out of their hands! Action time!
+3	[calm] There it goes... the turnover force... nice defensive play.
+4	[shouting] Started from the bottom, now they're cleaning up the mess on top! Game changer!
+5	[shouting] They just blew that play out of the water and forced a turnover! Main character energy!
+6	[excited] Look at them fight to get that ball back! They're on a mission now!
+7	[shouting] Respect on it, man! The defense just snatched that turnover right out of their hands!
+8	[shouting] I can feel it, this turnover is going to change the game! Get ready for the big plays!

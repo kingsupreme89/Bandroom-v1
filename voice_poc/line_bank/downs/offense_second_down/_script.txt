@@ -1,15 +1,8 @@
-[excited] And here we go on second down!
-[shouting] Watch them take the snap and move it downfield!
-[calm] Second and ten for the offense to get a first down.
-[excited] They've got their eyes on that first down marker now!
-[shouting] The quarterback is ready to throw or run - who will he choose?
-[calm] With second down, they need four yards to keep it alive.
-[excited] The defense is bearing down, but the offense must push through!
-[shouting] They're in position for a critical play on second and short!
-[calm] Two downs to go - let's see if they can make them count.
-[excited] On second down, the stakes are high; it’s all about that first down.
-[shouting] The clock is ticking, and now it's time for a key second-down play!
-[calm] They have their chances, but only if they can move the chains on this one.
-[excited] Second down means everything - will they get the job done?
-[shouting] With so much on the line, every second counts for these players.
-[calm] It’s crunch time; we’ll find out if they can make their mark here.
+1	[excited] Alright, folks! Here we go again with the second down!
+2	[shouting] GET UP THERE AND MAKE SOMETHING HAPPEN!
+3	[calm] Keep it simple, but make it count.
+4	[excited] I smell a big play in the air! Second down!
+5	[shouting] NO CAP, YOU'RE GONNA MAKE IT COUNT HERE!
+6	[calm] Let's see if they can finish what they started.
+7	[excited] Second down... that's the time to make a statement!
+8	[shouting] HERE WE GO! SECOND DOWN, MAKE IT COUNT!

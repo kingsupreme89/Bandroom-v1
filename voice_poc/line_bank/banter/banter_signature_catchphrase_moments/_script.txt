@@ -1,0 +1,9 @@
+1	[excited] Yeah, that's the playmaker showing why he's the man! Started from the bottom and now he's at the top!
+2	[shouting] LIFT THE CAP! LIFT THE CAP! THIS GUY IS ON FIRE AND HE'S NOT EVEN TRYING!
+3	[calm] Alright, let's see if he can turn this into something magical.
+4	[excited] No cap, that was sick! Way to go, keep it up!
+5	[calm] Solid catch there, but let's see if he can turn this into a touchdown.
+6	[excited] You betcha, this is a main character energy moment right here!
+7	[shouting] HERE WE GO! HERE WE GO! THIS CATCH IS GONNA BE A TOUCHDOWN FOR SURE!
+8	[calm] He's got the ball in his hands... now he just needs to make something happen.
+9	[excited] Put some respect on it, man! That catch was lit!

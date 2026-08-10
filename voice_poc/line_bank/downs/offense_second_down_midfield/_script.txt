@@ -1,15 +1,10 @@
-[excited] There's still work to be done! Second down in midfield, let’s see if they can move the chains!
-[shouting] They’re on second and ten at midfield—what will they do next?
-[enthusiastic] Two more plays to make it a first down! The offense has got this one in their sights.
-[announcing] We have second and ten from midfield, things are still very much up in the air!
-[dramatic] Second and critical in the middle of the field—what will happen next?
-[commentary] With a long run or a smart pass, they can get that first down right here.
-[analyzing] At midfield on second down, the defense is surely feeling the pressure now.
-[anticipating] Can they make something out of nothing? Second and ten at midfield!
-[inspired] Here we go! Second down in the middle of the field—make it a first down!
-[analyzing] They need to move the chains, second and long in the center of the field.
-[shouting] Look out for that run or pass! Second and ten at midfield, they must convert!
-[focused] Two downs to go, and they’re right where they want to be—midfield on second down.
-[analyzing] What’s their game plan? Second and ten from the 50-yard line.
-[excited] With two chances left, can they find that open receiver or crack the defense?
-[commentary] Midway up the field, second down—time for a big play!
+1	[excited] Alright, we're on second down at midfield! I've got a bad feeling about this!
+2	[shouting] No cap, folks, the offense is staring down destiny right now!
+3	[excited] Midfield, anyone? Let's see if they can string some together!
+4	[shouting] Started from the bottom, now climbing up! This team's got the fire in their eyes!
+5	[excited] They've got a chance to make it a drive! What a moment!
+6	[shouting] Main character energy, baby! Time for the hero's move!
+7	[excited] Halfway house at midfield – can they turn this around?
+8	[shouting] I ain't never seen no respect like this! They're going hard!
+9	[excited] Midfield, and the ball is in their hands – time to make history!
+10	[shouting] Put some respect on it! They're giving it everything they've got!

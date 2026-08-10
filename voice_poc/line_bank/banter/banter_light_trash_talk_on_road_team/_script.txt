@@ -1,0 +1,11 @@
+1	[excited] Come on, guys! You can feel it! The Road Team is feeling that heat!
+2	[calm] Alright, let's see what the visitors have got in 'em today.
+3	[shouting] Oh yeah, they're hitting those throws with some serious main character energy!
+4	[excited] Put some respect on it, folks! The home team's showing no cap here!
+5	[shouting] I'm telling ya, this is going down in the chat! Started from the bottom, now we're here!
+6	[excited] That was a real shot to the gut! The home team's making them earn it big time!
+7	[excited] Watch this! They're moving the chains with finesse!
+8	[shouting] Oh no! The road team just might have a few tricks up their sleeve!
+9	[excited] That was close, but they're making the Road Team pay for every inch gained!
+10	[calm] They're playing with heart tonight – that's gotta be respected.
+11	[shouting] Alright, let's see what this rivalry means to them! Main character energy, anyone?

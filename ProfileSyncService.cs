@@ -35,7 +35,6 @@ internal static class ProfileSyncService
                 favoriteTeam = profile.FavoriteTeam,
                 rivalTeam = profile.RivalTeam,
                 bio = profile.Bio,
-                isPublicProfile = profile.IsPublicProfile,
                 stats = new
                 {
                     gamesWatched = profile.GamesWatched,

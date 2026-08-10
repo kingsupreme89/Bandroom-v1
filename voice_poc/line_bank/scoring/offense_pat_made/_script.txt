@@ -1,15 +1,9 @@
-[enthusiastic] The extra point's good! That wraps up the scoring drive!
-[screaming] We've got a PAT successful! That was huge!
-[exhilarated] Made it, made it! Another one in the books for them.
-[excited] They hit the mark on that PAT! Just another solid play.
-[thunderous] Touchdown follow-up! The extra point is good!
-[celebratory] Right on target with that extra point shot!
-[announcing] Points added to the scoreboard – that extra point's made!
-[satisfied] Nice play by the offense, extra points successful.
-[amazed] They got the PAT in! That was a smooth finish.
-[proud] Good job on the extra point; they're really rolling now.
-[enthusiastic] Perfect placement for that extra point – there it is!
-[excited] The kick's good, the PAT's successful – they keep racking up points!
-[cheering] Another point added to their tally! That extra point's made!
-[confident] They know what they're doing; that extra point's in.
-[gratified] Yes, yes, there it is! The PAT was successful – great play!
+1	[excited] That's got to be the shortest PAT in the history of football, but it just might be the most effective!
+2	[shouting] Yo, that was a straight-up "started from the bottom" moment right there!
+3	[excited] Look at those legs - if they were running downstate, I'd be envious!
+4	[shouting] That's how you put some respect on it, baby! No cap.
+5	[calm] Solid execution, guys. Just like hitting a sweet spot with a mic drop.
+6	[shouting] Main character energy, folks - they just leveled up!
+7	[excited] The defense was saying "no way," but the offense had other plans today.
+8	[shouting] Bam! That's how it's done, no doubt about it!
+9	[calm] They're not called 'the clock watchers' for nothing - they knew when to hit that button.

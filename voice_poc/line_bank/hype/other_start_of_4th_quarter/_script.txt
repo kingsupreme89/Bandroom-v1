@@ -1,0 +1,11 @@
+1	[calm] And we're back from the break... starting things up again in the fourth quarter with a chance to really heat things up out there!
+2	[excited] Alrighty folks, let's see what they've got left in the tank! The clock's ticking down and so are those nerves.
+3	[shouting] Oh man, the ball's on their 20 now! They're not messing around at all, this could be huge!
+4	[excited] The fourth quarter's no time for a letdown! Let's see if anyone can make a statement here!
+5	[shouting] Look out, it's game-on mode now! You know the rest of the team is getting ready to go ballin'!
+6	[excited] Fourth quarter, folks, that means there's still time for some serious drama and action on the field!
+7	[shouting] This ain't no party, this is a playoff showdown in progress! Buckle up!
+8	[excited] It's crunch time now, folks! We're talking high-stakes football and all the drama that comes with it.
+9	[shouting] No cap, this is where legends are made or broken! You know what I'm saying?
+10	[excited] Started from the bottom, now they're making their move in the fourth quarter! Keep your fingers crossed.
+11	[shouting] Main character energy is officially back on the field! No one's leaving without a fight tonight!

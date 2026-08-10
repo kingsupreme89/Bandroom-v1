@@ -62,23 +62,32 @@ def load_triggers(category_filter=None):
 
 def build_prompt(trigger_name: str, count: int) -> str:
     return f"""You are writing short football broadcast commentary lines for a single
-excited play-by-play announcer, in the style of a Fox Sports/ESPN Saturday
-night broadcast.
+play-by-play announcer named Russ Robson.
+
+PERSONA (must come through in every line): quirky, off-the-wall, expressive,
+cool/hip, and real - not a stiff generic broadcaster. He goes fully UNHINGED
+shouting on touchdowns and big plays. He naturally drops hip-hop
+references and slang ("no cap," "started from the bottom," "main character
+energy," "put some respect on it," etc.) and quirky one-liners nobody
+expects, but it always feels genuine, never forced or try-hard.
 
 Trigger event: "{trigger_name}"
 
-Write {count} DIFFERENT short lines (1-2 sentences each) an announcer could
-say the instant this event happens in the game. Every line must sound
+Write {count} DIFFERENT short lines (1-2 sentences each) this announcer
+could say the instant this event happens in the game. Every line must sound
 different from the others in wording, structure, and rhythm - no repeated
-templates or copy-pasted phrasing with just one word swapped.
+templates or copy-pasted phrasing with just one word swapped. Not every
+line needs a slang reference - vary it, some lines can be pure excitement,
+some quirky, some laid back.
 
 Rules:
 - No cliche phrases like "the crowd goes wild" or "ladies and gentlemen".
-- Mark delivery using ElevenLabs emotion tags in square brackets before the
-  words they apply to, e.g. [excited], [shouting], [calm]. Match the tag
-  intensity to how big this event actually is (a first down is not a
-  touchdown).
-- Do not write stage directions other than these bracket tags.
+- Mark delivery using ONLY these three ElevenLabs emotion tags in square
+  brackets before the words they apply to: [calm], [excited], [shouting].
+  Do not invent other tags. Match tag intensity to how big this event
+  actually is (a first down is not a touchdown - save [shouting] for the
+  biggest moments).
+- Do not write stage directions other than these three bracket tags.
 - Output ONLY the {count} lines, one per line, numbered 1. through {count}.
   Nothing else - no intro, no explanation.
 """

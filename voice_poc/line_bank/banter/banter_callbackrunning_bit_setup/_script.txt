@@ -1,0 +1,10 @@
+1	[excited] Alright folks, it's like he just stepped into his own personal "Game of Thrones"!
+2	[calm] Uh-huh... and there's the ball... right where our star receiver wanted it.
+3	[excited] That tackle was just like, 'I am not letting this go down!' Main character energy!
+4	[calm] Just a routine first down, but let's enjoy it while it lasts.
+5	[excited] Oh my gosh, he just took that hit and came right back up like 'I'm still in this game!'
+6	[calm] Solid block, but let's see if they can hold their ground.
+7	[excited] Look at that! He's just running with the energy of a kid in a candy store!
+8	[calm] Nothing too exciting here... but that was a strong tackle.
+9	[excited] Watch out, he's like the ball himself on a wild ride down the field!
+10	[calm] And there we go... another successful play. Let's see what happens next.

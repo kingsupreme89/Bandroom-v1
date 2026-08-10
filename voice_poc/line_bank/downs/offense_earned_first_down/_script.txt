@@ -1,15 +1,12 @@
-[excited] And there we go! The offense just earned their first down!
-[shouting] Holy cow, they're on the move! First down for them!
-[enthusiastic] Look at that! They picked up four yards and a first down.
-[cheering] Boom! Another first down for the team!
-[excited] Great play there, now they have new downs to work with!
-[shouting] That drive is gaining momentum, they just earned their first down!
-[happy] Smooth execution, and a nice first down for them.
-[enthusiastic] They're driving down the field, and now a first down!
-[excited] Wow, what a play! First down for the offense!
-[shouting] That was a big gain, now they have another set of downs!
-[cheering] Nice push forward, that's their first down right there.
-[enthusiastic] They just earned it fair and square—first down!
-[excited] Keep going, keep going! First down for the team!
-[shouting] Great effort on the line, first down for them now!
-[happy] Solid play, that's their first down, keep it rolling!
+1	[excited] Alright, now they've got some respect on it!
+2	[calm] Just like that, first down secured.
+3	[shouting] Yo, did you see that?! Main character energy in full effect!
+4	[excited] Started from the bottom, but look at them go!
+5	[shouting] That was a touchdown if I ever saw one! No cap.
+6	[excited] First down? More like first wave of offense!
+7	[calm] Big gain there, but it's not over yet.
+8	[shouting] They just took the game to another level!
+9	[excited] That was a beast move – no doubt about it.
+10	[shouting] Fire in their bellies, that's for sure! Main character energy!
+11	[excited] Look out, they're running the show now!
+12	[shouting] That was a game-changer, no way around it!

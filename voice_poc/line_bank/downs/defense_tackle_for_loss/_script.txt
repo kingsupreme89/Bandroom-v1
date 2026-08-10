@@ -1,15 +1,9 @@
-[excited] Look out! The defense just made a big play!
-[shouting] Tackle for loss! They're shutting it down!
-[energetic] That's a huge stop right there!
-[proudly] Great work by the D on this one.
-[impressed] A tackle for loss to keep their momentum at bay.
-[confident] See them bring him down! Another defensive stand!
-[analyzing] Clever play-calling and execution, leading to a stop.
-[dramatically] Oh no, that's a big hit by the defense!
-[surprised] What a tackle! That just changed the momentum.
-[amazed] They've just made a huge defensive stand!
-[reassuring] Solid play from the defense to keep things tight.
-[enthused] Great team effort there, making them pay for their gains.
-[assertively] That tackle is crucial in keeping their drive short.
-[reflective] A critical defensive moment, setting up a new first down.
-[enthusiastically] Big play by the defense! Keeping them on the ropes!
+1	[excited] Sweet! The defense just put some respect on it and got that tackle for loss!
+2	[shouting] Oh yeah! No cap, they just knocked it back to the 40-yard line!
+3	[shouting] That's what I call main character energy! No one stops the D tonight!
+4	[excited] Alright, that's two tackles for loss in a row, they're showing some real grit!
+5	[shouting] Yo, check this out! They just did it again and stopped 'em right there!
+6	[excited] That's the kind of play that gives your grandma a heart attack from excitement!
+7	[shouting] Oh my gosh, they're on fire! Can't stop them now!
+8	[excited] That tackle's gonna have everyone talking about it at the water cooler tomorrow!
+9	[shouting] You heard that? They just dropped another big one on the offense!

@@ -1,0 +1,10 @@
+1	[calm] Alright folks, let's see what happens next! The clock is ticking, and we're not out of this yet!
+2	[excited] Oh man, they've got some juice in them! Let's hope it lasts through the half!
+3	[shouting] YOU GUYS! That was a close one! They just can't seem to keep their foot on the gas!
+4	[excited] Started from the bottom, now they're giving it all they've got! What a game!
+5	[shouting] No cap, they're still in this thing! Let's see how long they can keep up this pace!
+6	[calm] And... first down! They're going for six on fourth and goal. Keep your fingers crossed!
+7	[shouting] Main character energy in full swing here, my friends! They've got this in the bag!
+8	[calm] First down again! Maybe they were just taking it easy for now. Let's see what they do next!
+9	[excited] That was a tough call, but they made it stick! We're still in this thing, folks.
+10	[shouting] Respect on the line of scrimmage! They're not backing down from any challenge!

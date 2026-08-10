@@ -1,15 +1,9 @@
-[excited] And here we go! The defense takes to the field on second down at midfield!
-[shouting] Second and ten—midfield tension building big-time right now!
-[calm] Just what the coach had in mind—second down, right there in the middle of the field.
-[excited] Right on time! The defense steps up to face second down with the ball in midfield.
-[shouting] Here comes a crucial play for the defense as they meet at the 50!
-[calm] Another chance for the defense to make an impact—second and ten at midfield.
-[excited] Big game on second down, right there in the heart of the field!
-[shouting] Second and long at the 50—defensive challenge time!
-[calm] The defense is ready for their next assignment: second down with a key play ahead.
-[excited] Here we go! The defense moves to midfield on second down, ready to stop the offense.
-[shouting] Second and eight—defensive moment brewing at midfield!
-[calm] Time for the defensive team to show their mettle—second and ten at midfield.
-[excited] Big play ahead for the defense as they face second down right in the middle of the field!
-[shouting] Second and short at midfield—defensive battle heating up!
-[calm] Second and eight at the 50—key defensive moment to be played out here.
+1	[excited] Alright folks, we're on second down right here at midfield! This could be it!
+2	[shouting] Here comes the offense, ready to take over the field!
+3	[excited] Halfway to heaven, folks! Let's see what happens next.
+4	[shouting] RUN, RUN, RUN! This could change everything!
+5	[excited] Second and ten! That's not going to be easy.
+6	[shouting] I TOLD YOU SO! Offense, go ahead and show us what you got!
+7	[shouting] PUT SOME RESPECT ON IT! Show them what you're made of!
+8	[excited] Second down and danger—let's see how they respond!
+9	[shouting] HERE WE GO! OFFENSE, TIME TO WRITE YOUR NAME IN THE SKY!

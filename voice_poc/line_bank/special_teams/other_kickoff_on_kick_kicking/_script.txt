@@ -1,0 +1,11 @@
+1	[excited] Alright folks, it's time to set the tone for this game! Let's see if our squad can start strong!
+2	[calm] Here we go, kickoff on KICK, watch out for that initial burst of speed!
+3	[shouting] Oh boy, here comes that first play! Put some respect on it, team!
+4	[excited] This is where the story begins. Let's see who's got main character energy today!
+5	[calm] It's all about momentum now, folks. Ready to see that kickoff flying high?
+6	[shouting] Started from the bottom and they're coming at us hard! Hold tight, team!
+7	[excited] Watch out for those legs—looks like a quick getaway could be on deck!
+8	[shouting] Time to make a statement! Don't hold back, boys!
+9	[excited] Alright, here comes the kickoff! Who's got the first big play in their sights?
+10	[shouting] No cap, this is where it all starts! Make it count, team!
+11	[shouting] Game on! Let's see who makes a statement with this kickoff!

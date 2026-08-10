@@ -291,33 +291,6 @@ export default {
         return new Response("file is required", { status: 400, headers: cors() });
       }
 
-      // Optional AudioTrackMetadata blob (Track Info drawer fields) carried alongside the file --
-      // same "just pass it through" treatment /profile's PUT gives stats/customTeamLogos, so a
-      // client that doesn't send one (or sends a malformed one) still uploads fine; the field is
-      // simply absent from the stored meta rather than failing the whole upload.
-      function parseTrackMetadata(raw) {
-        if (typeof raw !== "string" || raw.length === 0) return undefined;
-        let parsed;
-        try { parsed = JSON.parse(raw); } catch { return undefined; }
-        if (!parsed || typeof parsed !== "object") return undefined;
-        const str = (v, max) => typeof v === "string" ? v.slice(0, max) : null;
-        const out = {
-          standardTitle: str(parsed.standardTitle, 120),
-          standardArtist: str(parsed.standardArtist, 120),
-          energyLevel: str(parsed.energyLevel, 10),
-          prominentInstrumentation: str(parsed.prominentInstrumentation, 140),
-          primaryGameTriggerEvent: str(parsed.primaryGameTriggerEvent, 80),
-          marketplaceCategory: str(parsed.marketplaceCategory, 60),
-          recommendedReverbPreset: str(parsed.recommendedReverbPreset, 30),
-          acousticFingerprint: str(parsed.acousticFingerprint, 200),
-        };
-        // Drop null-valued keys rather than storing a meta object that's all nulls when the
-        // client sent an empty/partial form.
-        for (const k of Object.keys(out)) if (out[k] == null) delete out[k];
-        return Object.keys(out).length > 0 ? out : undefined;
-      }
-      const trackMetadata = parseTrackMetadata(form.get("metadata"));
-
       const id = crypto.randomUUID();
       const ownerToken = crypto.randomUUID();
       const safeFilename = sanitizeSegment(file.name) || "upload";
@@ -330,7 +303,6 @@ export default {
       const meta = {
         id, type, name, school, key: r2Key, uploadedAt: new Date().toISOString(),
         ownerToken, likes: 0, reports: 0, views: 0, downloads: 0,
-        ...(trackMetadata ? { metadata: trackMetadata } : {}),
       };
       await env.MARKETPLACE_META.put(`meta:${type}:${id}`, JSON.stringify(meta));
       await addToIndex(env, type, id);
@@ -344,12 +316,6 @@ export default {
         return new Response('type must be "song", "image", "pa", or "profile"', { status: 400, headers: cors() });
       }
       const schoolFilter = url.searchParams.get("school");
-      // category/energy/q filter on the optional AudioTrackMetadata blob (see /upload above) --
-      // items with no metadata simply never match a metadata-based filter, same as a school-less
-      // item never matching schoolFilter.
-      const categoryFilter = url.searchParams.get("category");
-      const energyFilter = url.searchParams.get("energy");
-      const qFilter = url.searchParams.get("q")?.toLowerCase();
       const sort = url.searchParams.get("sort") ?? "newest";
 
       let ids;
@@ -368,14 +334,6 @@ export default {
         if (!raw) continue;
         const meta = JSON.parse(raw);
         if (schoolFilter && meta.school.toLowerCase() !== schoolFilter.toLowerCase()) continue;
-        if (categoryFilter && meta.metadata?.marketplaceCategory !== categoryFilter) continue;
-        if (energyFilter && meta.metadata?.energyLevel !== energyFilter) continue;
-        if (qFilter) {
-          const haystack = [meta.name, meta.metadata?.standardTitle, meta.metadata?.standardArtist,
-            meta.metadata?.prominentInstrumentation, meta.metadata?.acousticFingerprint]
-            .filter(Boolean).join(" ").toLowerCase();
-          if (!haystack.includes(qFilter)) continue;
-        }
         // ownerToken is a delete credential -- never echoed back in /list, only returned once
         // at upload time, so a passive listing request can never leak another uploader's token.
         const { ownerToken, ...pub } = meta;
@@ -553,7 +511,6 @@ export default {
           favoriteTeam: existing.favoriteTeam ?? null,
           rivalTeam: existing.rivalTeam ?? null,
           bio: existing.bio ?? null,
-          isPublicProfile: !!existing.isPublicProfile,
           stats: existing.stats ?? {},
           customTeamLogos: existing.customTeamLogos ?? {},
         });
@@ -583,7 +540,6 @@ export default {
       const favoriteTeam = typeof body?.favoriteTeam === "string" ? sanitizeSegment(body.favoriteTeam) : (existing?.favoriteTeam ?? null);
       const rivalTeam = typeof body?.rivalTeam === "string" ? sanitizeSegment(body.rivalTeam) : (existing?.rivalTeam ?? null);
       const bio = typeof body?.bio === "string" ? body.bio.slice(0, 140) : (existing?.bio ?? null);
-      const isPublicProfile = typeof body?.isPublicProfile === "boolean" ? body.isPublicProfile : !!existing?.isPublicProfile;
       const stats = body?.stats && typeof body.stats === "object" ? {
         gamesWatched: Number(body.stats.gamesWatched) || 0,
         songsTriggered: Number(body.stats.songsTriggered) || 0,
@@ -618,64 +574,8 @@ export default {
         ? capLogos(body.customTeamLogos)
         : (existing?.customTeamLogos ?? {});
 
-      await env.MARKETPLACE_META.put(userKey, JSON.stringify({ ...(existing ?? {}), favoriteTeam, rivalTeam, bio, isPublicProfile, stats, customTeamLogos }));
-      return jsonResponse({ favoriteTeam, rivalTeam, bio, isPublicProfile, stats, customTeamLogos });
-    }
-
-    // GET /profile/:sub  (no auth -- public-safe subset only, and only if that user opted in via
-    //   the authenticated PUT above). Bio/customTeamLogos/rivalTeam are deliberately left out --
-    //   the private PUT payload above accepts them, but nothing about "opt into a public games/
-    //   events leaderboard" implies "publish my bio and rival team too", so this route hand-picks
-    //   only the fields the Player Profile dashboard actually shows on someone else's public page.
-    if (url.pathname.startsWith("/profile/") && request.method === "GET") {
-      const sub = decodeURIComponent(url.pathname.slice("/profile/".length));
-      if (!sub) return new Response("bad request", { status: 400, headers: cors() });
-      const raw = await env.MARKETPLACE_META.get(`user:${sub}`);
-      const existing = raw ? JSON.parse(raw) : null;
-      if (!existing || !existing.isPublicProfile) {
-        return new Response("not found", { status: 404, headers: cors() });
-      }
-      return jsonResponse({
-        found: true,
-        favoriteTeam: existing.favoriteTeam ?? null,
-        name: existing.name ?? null,
-        picture: existing.picture ?? null,
-        stats: {
-          gamesWatched: existing.stats?.gamesWatched ?? 0,
-          songsTriggered: existing.stats?.songsTriggered ?? 0,
-          streakCurrentDays: existing.stats?.streakCurrentDays ?? 0,
-        },
-      });
-    }
-
-    // GET /leaderboard/users?metric=games|events&limit=10  -- separate from the existing
-    //   /leaderboard?type=... (marketplace upload counts by school) above; this ranks PEOPLE who
-    //   opted into a public profile, by a lifetime stat. KV has no native cross-key aggregation,
-    //   so this lists "user:" keys and reduces in the worker -- fine at this app's roster size,
-    //   flagged here in case the user base ever grows enough for this to need a maintained index
-    //   instead of a full list-and-scan on every request.
-    if (url.pathname === "/leaderboard/users" && request.method === "GET") {
-      const metric = url.searchParams.get("metric") === "games" ? "gamesWatched" : "songsTriggered";
-      const limit = Math.min(Number(url.searchParams.get("limit")) || 10, 50);
-
-      const rows = [];
-      let cursor;
-      do {
-        const page = await env.MARKETPLACE_META.list({ prefix: "user:", cursor, limit: 1000 });
-        for (const key of page.keys) {
-          const raw = await env.MARKETPLACE_META.get(key.name);
-          if (!raw) continue;
-          const u = JSON.parse(raw);
-          if (!u.isPublicProfile) continue;
-          const value = Number(u.stats?.[metric]) || 0;
-          if (value <= 0) continue;
-          rows.push({ name: u.name ?? u.favoriteTeam ?? "Unknown", favoriteTeam: u.favoriteTeam ?? null, score: value, sub: key.name.slice("user:".length) });
-        }
-        cursor = page.list_complete ? undefined : page.cursor;
-      } while (cursor);
-
-      rows.sort((a, b) => b.score - a.score);
-      return jsonResponse({ metric, entries: rows.slice(0, limit) });
+      await env.MARKETPLACE_META.put(userKey, JSON.stringify({ ...(existing ?? {}), favoriteTeam, rivalTeam, bio, stats, customTeamLogos }));
+      return jsonResponse({ favoriteTeam, rivalTeam, bio, stats, customTeamLogos });
     }
 
     if (url.pathname.startsWith("/item/") && request.method === "DELETE") {

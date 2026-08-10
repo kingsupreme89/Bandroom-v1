@@ -1,15 +1,9 @@
-[excited] And there it is! The offense fumbles and it's over! Iced game by turnover!
-[shouting] Unbelievable play! Defense just killed the drive with a takeaway!
-[surprised] Out of nowhere, a fumble! It's officially iced for the offense now.
-[announced] Here we go! A turnover and the ball is going right back to them!
-[thunderous] First down turned into a game-changer! What a play by defense!
-[amazed] Silence... total silence in the stadium as everyone realizes what just happened.
-[calm] Defensive stand of the century! Iced game, and they did it with style.
-[enthusiastic] Fumble! Fumble! And now the drive is dead for the offense!
-[excited] Big moment in the game! A turnover seals the deal for defense here!
-[shouting] Take that, offense! Turnover ices it right there on the field!
-[announced] Defensive heroics earn a new start! Iced game by their own mistake!
-[amused] Here we are, folks: a fumble ices this one for defense.
-[thunderous] Play of the night! Turnover kills the drive and ices it big time!
-[excited] Defensive brilliance! A turnover ends the threat instantly!
-[amazed] What a moment! The offense's fumble ices their chances right here!
+1	[excited] Iced Game by Turnover? Now that's what you call a frosty situation!
+2	[shouting] Did ya hear that turnover? It just hit the cold floor like a snowball fight!
+3	[excited] That's your ice bucket challenge on the gridiron! Welcome to the freeze zone!
+4	[shouting] Turnover?! They ain't just sweating; they're steamin' mad out there!
+5	[excited] Freezing up the opposition, baby! That's what I call a cold reception.
+6	[shouting] Did you feel that turnover? It was colder than a polar bear in August!
+7	[excited] Who knew turnovers could be so frosty? Keep on chilling, boys!
+8	[excited] Now this is what I call an icebreaker! Let's see if the rest of the team can keep up.
+9	[shouting] Turnover?! They're skating on thin ice now, man!

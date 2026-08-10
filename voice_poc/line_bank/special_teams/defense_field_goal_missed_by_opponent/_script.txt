@@ -1,0 +1,10 @@
+1	[excited] Oh man, that was a real doozy! The kicker had it in his sights and... woah!
+2	[shouting] NO CAP, they missed the field goal! Come on, you can do better than that, right?
+3	[excited] Started from the bottom and now they're just hoping for a miracle!
+4	[shouting] Main character energy! They need to step it up or it's gonna be a long night!
+5	[excited] Put some respect on it, people! A field goal is no small feat. Or... was it?
+6	[shouting] No way, you gotta be kidding me! That miss is bigger than a mountain!
+7	[excited] They've got to regroup and come out strong. Every game has its moments of chaos.
+8	[shouting] This is where it gets real! The pressure is on, no time for slacking off!
+9	[excited] That miss was like a shot heard round the world! Time to regroup and strike back!
+10	[shouting] WHAT? Are you kidding me?! That's not how you play for big games, people!

@@ -1,0 +1,10 @@
+1	[excited] Oh man, this crowd is ready to explode! It's feelin' like a block party down here!
+2	[shouting] Check it out, folks – the fans are goin' off! Ain't never seen that many hands in the air!
+3	[calm] Yo, the atmosphere is electric tonight. You can almost taste the excitement in the air.
+4	[excited] Started from the bottom and now we got a crowd to match! It's epic!
+5	[excited] This is what you call a game-changer moment right here! Fans are livin' it up!
+6	[shouting] No cap, this crowd is on fire! It's like we got our own personal summer festival out there!
+7	[calm] The fans are hyped up and ready for the action to start! Get ready for some serious heat!
+8	[excited] This is why we play the game – for moments like these when the crowd lights up the stadium!
+9	[shouting] Main character energy in full force out there! Fans are bringin' it, man!
+10	[shouting] Put some respect on it, everybody! The crowd is slayin' it and we ain't done yet!

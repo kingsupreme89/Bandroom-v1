@@ -1,15 +1,9 @@
-[excited] Oh man, they held their ground there!
-[shouting] They just lost a critical second down stop!
-[determined] That defense is putting the clamps on now.
-[analyzing] A big gain would have changed everything; instead...
-[confident] They're going to force a three-and-out here.
-[reflective] Just one play away from putting their opponent in serious trouble.
-[surprised] That was close, but they held the line!
-[skeptical] Tough break for them; now it's second and long again.
-[calm] Let’s see how they respond to this challenge.
-[focused] Every play counts in this high-stakes environment.
-[analyzing] What adjustments will the defense make here?
-[excited] Look at their determination on that play!
-[shouting] Second down, and it's a tough sell for them!
-[reflective] How does that stop set up the remainder of the half?
-[calm] Let’s keep an eye on how this plays out.
+1	[excited] Come on now, you ain't seen nothing yet! Here we go!
+2	[shouting] No way Jose! They just couldn't make it over the line of scrimmage!
+3	[excited] Oh boy, that was a tough one to get away from!
+4	[shouting] What's wrong with this picture? They're short! Short!
+5	[calm] Just need two more yards to set them up.
+6	[shouting] You heard that? They didn't make it! No cap!
+7	[calm] One more yard and they'd have had the first down.
+8	[shouting] Come on, come on! Just one more step!
+9	[excited] That's the end of this drive! Back to the offense now!

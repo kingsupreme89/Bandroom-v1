@@ -1,15 +1,10 @@
-[shouting] And here we go on fourth down!
-[excited] Fourth and goal! The defense is ready to stop them cold!
-[eagerly] The ball's on the one-yard line; they've got to convert now!
-[confident] They're facing a tough test, but this defense can do it!
-[anticipating] It’s fourth down—let’s see how they handle the pressure!
-[urgently] Time is running out, and it's on fourth and short!
-[analyzing] They need a first down here; the defense must hold strong!
-[gritting teeth] Fourth down... will they make it or fall?
-[intensely] Short yardage situation—fourth and crucial!
-[focused] It's now or never for the offense on fourth down!
-[dramatically] The scoreboard is watching; can they convert?
-[thoughtfully] Fourth down... they better not miss this one!
-[reflecting] This moment defines their drive—fourth and critical!
-[pacing] Fourth down—it’s all on them now, folks!
-[analytically] Short field for the offense; fourth down is key here!
+1	[excited] Oh boy, fourth down! Time to see if that defense can stop the bleeding!
+2	[shouting] Fourth and short? Let's see how this team rolls up those hills!
+3	[calm] Alright, let's not go too fast here. Big play or no?
+4	[excited] Fourth and inches! Can you feel the tension, folks?
+5	[shouting] Fourth down and desperation! Bring it on, defense!
+6	[excited] Starting from the bottom? Let's see if they can climb that mountain!
+7	[shouting] No cap, fourth down! Better watch out!
+8	[calm] Let's just hope they don't fall flat on their face.
+9	[excited] Fourth and goal! Could be a game-changer right here!
+10	[shouting] Respect on it, fourth down! Time to show what you got!

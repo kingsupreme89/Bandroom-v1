@@ -1,0 +1,12 @@
+1	[excited] Man, look at that formation! They're setting it up like a hip-hop drop!
+2	[shouting] Holy smokes, is he taking the shotgun? Started from the bottom now, gotta get to the top!
+3	[calm] Okay, they're going for it on fourth down... got some respect on it.
+4	[excited] Watch out! The receiver's running a slant route, that's his move, no cap!
+5	[shouting] RUN BACK! HE'S SLOWING DOWN! PUT SOME RESPECT ON IT!
+6	[calm] They're in a tight end formation... things are getting interesting.
+7	[excited] That linebacker's taking the deep shot, like he's spitting bars over a beat!
+8	[shouting] HE'S GETTING FREE! NO CAP, HE'S GETTING FREE!
+9	[excited] They're in shotgun! That's where it's at, that's where it's at!
+10	[shouting] HE'S CATCHING IT! MAIN CHARACTER ENERGY!
+11	[excited] Quick-hitter to the slot receiver, he's running fast like a rhino!
+12	[shouting] HERE COMES THE CATCH! HE'S MAKING IT TO THE FIRST DOWN!

@@ -1,15 +1,12 @@
-[excited] Look at that! First down on third and long – what a play!
-[shouting] Big gain for the offense! Just what they needed to stay in it!
-[excited] They picked up first down right when they needed to, huge!
-[shouting] That’s an incredible drive start – first down, keep it rolling!
-[excited] First down! Third and long turned into a big gain!
-[shouting] Great team effort there! First down on the board!
-[excited] That was a solid push forward – first down well earned!
-[shouting] They held their ground and got that first down, key play!
-[excited] Big-time first down after all that pressure – what a play!
-[shouting] Great field position now with this first down! Keep it up!
-[excited] First down solidly earned – they’ve got some momentum now!
-[shouting] Excellent run game action here, first down gained!
-[excited] That’s a great defensive push to keep things on the field!
-[shouting] First down! They fought hard and earned it well!
-[excited] Big gain keeps this drive alive – first down makes all the difference!
+1	[excited] Alright folks, they just started from the bottom and worked their way up! That's a big play!
+2	[calm] Just another day at the office for these guys, huh? First down earned!
+3	[shouting] Oh man, look at that screen pass goin' in, and he makes it count! Respect!
+4	[excited] They just put some respect on this one, folks! Big gain indeed!
+5	[calm] Now that's what I call main character energy—straight up grinding it out.
+6	[shouting] Boom! That's a first down, and they're off to the races now!
+7	[excited] Just like in a hip-hop video—keep rollin', keep movin' forward!
+8	[shouting] You heard that whistle? They just put a check mark next to their name! Big win!
+9	[excited] They're flexing on the defense right now—what a move!
+10	[shouting] No cap, they just earned that first down with pure grit and determination!
+11	[excited] Look at them go! First down, and everyone's on their feet!
+12	[shouting] That's how you stay in the game, folks! Big first down earned!
