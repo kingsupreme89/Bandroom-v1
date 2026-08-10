@@ -59,6 +59,11 @@ internal static class CrowdBusService
     static AudioFileReader? _reader;
     static bool _loopStarted;
     static readonly object _lock = new();
+    // Which file _output is actually playing right now -- lets UpdatePlaybackState notice a
+    // live ClipPath reassignment (e.g. swapped in the Sound Booth mid-game) and rebuild the
+    // pipeline instead of looping the old file forever, since the old "if (_output == null)"
+    // guard alone only ever built the pipeline once and never revisited it.
+    static string? _playingClipPath;
 
     public static void Start(GameWatcher watcher)
     {
@@ -96,8 +101,9 @@ internal static class CrowdBusService
                 return;
             }
 
-            if (_output == null)
+            if (_output == null || !string.Equals(_playingClipPath, ClipPath, StringComparison.OrdinalIgnoreCase))
             {
+                StopInternal(); // tear down whatever's playing (old ClipPath, if any) before rebuilding
                 _reader = new AudioFileReader(ClipPath!);
                 var loop = new LoopStream(_reader);
                 ISampleProvider src = loop.WaveFormat.Channels == 1
@@ -107,6 +113,7 @@ internal static class CrowdBusService
                 _output = new WaveOutEvent();
                 _output.Init(_volumeProvider);
                 _output.Play();
+                _playingClipPath = ClipPath;
             }
 
             _volumeProvider!.Volume = ComputeIntensity(watcher.LastSnapshot) * AudioPlayer.MasterVolume;
@@ -130,5 +137,6 @@ internal static class CrowdBusService
         _reader?.Dispose();
         _reader = null;
         _volumeProvider = null;
+        _playingClipPath = null;
     }
 }

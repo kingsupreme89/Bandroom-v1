@@ -1018,7 +1018,21 @@ internal static class ConfigStore
 
     public static readonly string AvatarFolder = Path.Combine(UserDataRoot, "Avatar");
 
+    // Guards user_profile.json the same way CustomTeamsLock/MarketplaceDownloadsLock/
+    // LocalTracksLock guard their own manifests -- WebView2 host-object calls aren't serialized
+    // onto one thread, so a stat bump from a live game (RecordSongTriggered) and a profile edit
+    // from the UI (SetBio/SetFavoriteTeam/etc.) can otherwise both read the same on-disk snapshot
+    // and one's SaveUserProfile silently clobbers the other's change (lost update). Plain
+    // Load/Save are still exposed for read-only callers; anything that reads-then-writes should
+    // use MutateUserProfile below so the whole read-modify-write happens under one lock.
+    static readonly object UserProfileLock = new();
+
     public static UserProfile LoadUserProfile()
+    {
+        lock (UserProfileLock) return LoadUserProfileUnlocked();
+    }
+
+    static UserProfile LoadUserProfileUnlocked()
     {
         if (!File.Exists(UserProfilePath)) return new UserProfile();
         try { return JsonSerializer.Deserialize<UserProfile>(File.ReadAllText(UserProfilePath), JsonOptions) ?? new UserProfile(); }
@@ -1027,8 +1041,28 @@ internal static class ConfigStore
 
     public static void SaveUserProfile(UserProfile profile)
     {
+        lock (UserProfileLock) SaveUserProfileUnlocked(profile);
+    }
+
+    static void SaveUserProfileUnlocked(UserProfile profile)
+    {
         Directory.CreateDirectory(UserDataRoot);
         File.WriteAllText(UserProfilePath, JsonSerializer.Serialize(profile, JsonOptions));
+    }
+
+    /// <summary>Atomically loads, applies <paramref name="mutate"/>, and saves the user profile
+    /// under a single lock -- use this instead of separate LoadUserProfile()/SaveUserProfile()
+    /// calls for any read-modify-write (which is nearly every caller: SetBio, SetFavoriteTeam,
+    /// RecordSongTriggered, etc.) so a concurrent mutation from another thread can't be silently
+    /// lost between the read and the write. Returns the saved profile.</summary>
+    public static UserProfile MutateUserProfile(Func<UserProfile, UserProfile> mutate)
+    {
+        lock (UserProfileLock)
+        {
+            var updated = mutate(LoadUserProfileUnlocked());
+            SaveUserProfileUnlocked(updated);
+            return updated;
+        }
     }
 
     static bool PathsPointToSameFile(string a, string b) =>

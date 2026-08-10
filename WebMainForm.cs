@@ -489,38 +489,39 @@ public sealed class WebMainForm : Form
     /// locking in.</summary>
     static void RecordGameWatched(string homeName, string awayName)
     {
-        var current = ConfigStore.LoadUserProfile();
-        var byTeam = new Dictionary<string, int>(current.GamesWatchedByTeam);
-        foreach (var team in new[] { homeName, awayName })
-            byTeam[team] = byTeam.GetValueOrDefault(team) + 1;
+        var updated = ConfigStore.MutateUserProfile(current =>
+        {
+            var byTeam = new Dictionary<string, int>(current.GamesWatchedByTeam);
+            foreach (var team in new[] { homeName, awayName })
+                byTeam[team] = byTeam.GetValueOrDefault(team) + 1;
 
-        // Local date, not UTC -- "daily streak" means the user's own calendar day. Using UTC
-        // here would make the streak reset (or double-count) around the user's local midnight
-        // for anyone not near UTC, which would look broken even with genuinely consecutive days
-        // of real play.
-        var today = DateTime.Now.Date;
-        int streak = current.StreakCurrentDays;
-        if (current.StreakLastActiveDate == today)
-        {
-            // Already counted today -- leave streak as-is.
-        }
-        else if (current.StreakLastActiveDate == today.AddDays(-1))
-        {
-            streak += 1; // consecutive day
-        }
-        else
-        {
-            streak = 1; // gap in usage (or first-ever game) -- streak restarts
-        }
+            // Local date, not UTC -- "daily streak" means the user's own calendar day. Using UTC
+            // here would make the streak reset (or double-count) around the user's local midnight
+            // for anyone not near UTC, which would look broken even with genuinely consecutive days
+            // of real play.
+            var today = DateTime.Now.Date;
+            int streak = current.StreakCurrentDays;
+            if (current.StreakLastActiveDate == today)
+            {
+                // Already counted today -- leave streak as-is.
+            }
+            else if (current.StreakLastActiveDate == today.AddDays(-1))
+            {
+                streak += 1; // consecutive day
+            }
+            else
+            {
+                streak = 1; // gap in usage (or first-ever game) -- streak restarts
+            }
 
-        var updated = current with
-        {
-            GamesWatched = current.GamesWatched + 1,
-            GamesWatchedByTeam = byTeam,
-            StreakCurrentDays = streak,
-            StreakLastActiveDate = today,
-        };
-        ConfigStore.SaveUserProfile(updated);
+            return current with
+            {
+                GamesWatched = current.GamesWatched + 1,
+                GamesWatchedByTeam = byTeam,
+                StreakCurrentDays = streak,
+                StreakLastActiveDate = today,
+            };
+        });
         _ = ProfileSyncService.PushAsync(updated);
     }
 
@@ -533,12 +534,13 @@ public sealed class WebMainForm : Form
     /// network hammer against the marketplace worker.</summary>
     static void RecordSongTriggered(string eventName)
     {
-        var current = ConfigStore.LoadUserProfile();
-        var eventCounts = new Dictionary<string, int>(current.EventCounts);
-        if (!string.IsNullOrWhiteSpace(eventName))
-            eventCounts[eventName] = eventCounts.GetValueOrDefault(eventName) + 1;
-        var updated = current with { SongsTriggered = current.SongsTriggered + 1, EventCounts = eventCounts };
-        ConfigStore.SaveUserProfile(updated);
+        var updated = ConfigStore.MutateUserProfile(current =>
+        {
+            var eventCounts = new Dictionary<string, int>(current.EventCounts);
+            if (!string.IsNullOrWhiteSpace(eventName))
+                eventCounts[eventName] = eventCounts.GetValueOrDefault(eventName) + 1;
+            return current with { SongsTriggered = current.SongsTriggered + 1, EventCounts = eventCounts };
+        });
 
         if (DateTime.UtcNow - _lastSongTriggerCloudSync < TimeSpan.FromSeconds(30)) return;
         _lastSongTriggerCloudSync = DateTime.UtcNow;
@@ -925,12 +927,26 @@ public sealed class WebMainForm : Form
             }
             // Clip start/end sliders + Save, same as the "Volume" slider style in the main
             // shell -- TrimmerForm already has this, just wiring it back in here.
-            using var trimmer = new TrimmerForm(this, currentPath);
-            if (trimmer.ShowDialog(this) == DialogResult.OK && trimmer.SavedFilePath != null)
+            // TrimmerForm's constructor reads the file's duration up front (AudioFileReader),
+            // which throws uncaught if the file was deleted/became unreadable between the
+            // File.Exists check above and here, or is a format NAudio can't decode -- catch it
+            // here instead of letting it crash the caller.
+            TrimmerForm trimmer;
+            try { trimmer = new TrimmerForm(this, currentPath); }
+            catch (Exception ex)
             {
-                if (isPa) entry.PaAudioFile = trimmer.SavedFilePath; else entry.AudioFile = trimmer.SavedFilePath;
+                CrashLog.Write("TrimmerForm open failed", ex);
+                MessageBox.Show(this, "Couldn't open this song for trimming -- the file may be missing or in an unsupported format.", "Bandroom");
+                return;
             }
-            else return;
+            using (trimmer)
+            {
+                if (trimmer.ShowDialog(this) == DialogResult.OK && trimmer.SavedFilePath != null)
+                {
+                    if (isPa) entry.PaAudioFile = trimmer.SavedFilePath; else entry.AudioFile = trimmer.SavedFilePath;
+                }
+                else return;
+            }
         }
         else if (dlg.RequestClear)
         {
@@ -1103,15 +1119,21 @@ public sealed class WebMainForm : Form
     /// found until a real parser exists.</summary>
     public Task<string?> ScanDynastySaveFromWeb() => Task.FromResult<string?>(null);
 
-    public void AssignTrackFileFromWeb(string trigger, bool isPa, string path)
+    /// <summary>Returns false (no-op) if `trigger` doesn't match any entry in the current
+    /// profile -- callers that report a count of successful assignments (e.g.
+    /// WebBridge.ApplyMarketplaceProfile) should check this instead of assuming a match, since a
+    /// shared profile can reference a trigger key that's been retired/renamed since it was
+    /// exported.</summary>
+    public bool AssignTrackFileFromWeb(string trigger, bool isPa, string path)
     {
         var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
-        if (entry == null) return;
+        if (entry == null) return false;
         if (isPa) entry.PaAudioFile = path; else entry.AudioFile = path;
         ConfigStore.Save(_config);
         SaveCurrentTeamProfile();
         PushCategories();
         NormalizeAssignmentInBackground(entry, isPa);
+        return true;
     }
 
     public void ClearTrackAssignmentFromWeb(string trigger, bool isPa) => AssignTrackFileFromWeb(trigger, isPa, "");
@@ -1271,13 +1293,23 @@ public sealed class WebMainForm : Form
             MessageBox.Show(this, "Choose a song for this situation first, then you can trim it.", "Bandroom");
             return;
         }
-        using var trimmer = new TrimmerForm(this, currentPath);
-        if (trimmer.ShowDialog(this) == DialogResult.OK && trimmer.SavedFilePath != null)
+        TrimmerForm trimmer;
+        try { trimmer = new TrimmerForm(this, currentPath); }
+        catch (Exception ex)
         {
-            if (isPa) entry.PaAudioFile = trimmer.SavedFilePath; else entry.AudioFile = trimmer.SavedFilePath;
-            ConfigStore.Save(_config);
-            SaveCurrentTeamProfile();
-            PushCategories();
+            CrashLog.Write("TrimmerForm open failed", ex);
+            MessageBox.Show(this, "Couldn't open this song for trimming -- the file may be missing or in an unsupported format.", "Bandroom");
+            return;
+        }
+        using (trimmer)
+        {
+            if (trimmer.ShowDialog(this) == DialogResult.OK && trimmer.SavedFilePath != null)
+            {
+                if (isPa) entry.PaAudioFile = trimmer.SavedFilePath; else entry.AudioFile = trimmer.SavedFilePath;
+                ConfigStore.Save(_config);
+                SaveCurrentTeamProfile();
+                PushCategories();
+            }
         }
     }
 
@@ -1320,6 +1352,43 @@ public sealed class WebMainForm : Form
         catch (Exception ex)
         {
             CrashLog.Write("PrepareTrimFromWeb failed", ex);
+            return JsonSerializer.Serialize(new { ok = false, error = "Couldn't prepare that file for trimming." });
+        }
+    }
+
+    /// <summary>Whistle-mode counterpart to PrepareTrimFromWeb -- there's no trigger/event to key
+    /// off of when picking a lead-in whistle from Clipper Island's own song library, so this takes
+    /// the chosen library path directly instead of looking up an entry's AudioFile/PaAudioFile.
+    /// Same single working slot in TrimSourceFolder, same read-only probe semantics.</summary>
+    public string PrepareTrimForWhistleFromWeb(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return JsonSerializer.Serialize(new { ok = false, error = "That file couldn't be found." });
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.TrimSourceFolder);
+            foreach (var f in Directory.GetFiles(ConfigStore.TrimSourceFolder))
+                try { File.Delete(f); } catch { /* best-effort */ }
+
+            string fileName = "current" + Path.GetExtension(path);
+            string destPath = Path.Combine(ConfigStore.TrimSourceFolder, fileName);
+            File.Copy(path, destPath, overwrite: true);
+
+            double durationSec;
+            using (var probe = new NAudio.Wave.AudioFileReader(destPath)) durationSec = probe.TotalTime.TotalSeconds;
+
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                url = $"https://trimsrc/{Uri.EscapeDataString(fileName)}",
+                fileName = Path.GetFileName(path),
+                durationSec,
+            });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("PrepareTrimForWhistleFromWeb failed", ex);
             return JsonSerializer.Serialize(new { ok = false, error = "Couldn't prepare that file for trimming." });
         }
     }
@@ -1645,6 +1714,11 @@ public sealed class WebMainForm : Form
         ConfigStore.DeleteProfile(Theme.ActiveTeam.Name);
         _config = ConfigStore.BuildDefault();
         ConfigStore.Save(_config);
+        // Every other config-mutating path here (SaveProfileAs/Duplicate/Import/Auto-Assign)
+        // re-syncs _homeConfig/_awayConfig after touching disk -- this one didn't, so deleting
+        // the active team's profile mid-matchup left stale in-memory home/away data for the
+        // rest of the game even though disk (and the just-reset _config) had moved on.
+        RefreshHomeAwayConfigIfNeeded(Theme.ActiveTeam.Name);
         PushCategories();
         RunOnUi(() =>
         {
@@ -2325,10 +2399,20 @@ public sealed class WebMainForm : Form
         if (naming == null)
             return System.Text.Json.JsonSerializer.Serialize(new { success = false, cancelled = true });
 
-        using var trimmer = new TrimmerForm(this, ofd.FileName, presetSongName: naming.Name, presetType: naming.Type);
-        if (trimmer.ShowDialog(this) != DialogResult.OK || trimmer.SavedFilePath == null)
+        TrimmerForm trimmer;
+        try { trimmer = new TrimmerForm(this, ofd.FileName, presetSongName: naming.Name, presetType: naming.Type); }
+        catch (Exception ex)
+        {
+            CrashLog.Write("TrimmerForm open failed", ex);
+            MessageBox.Show(this, "Couldn't open this file for trimming -- it may be missing or in an unsupported format.", "Bandroom");
             return System.Text.Json.JsonSerializer.Serialize(new { success = false, cancelled = true });
+        }
+        using (trimmer)
+        {
+            if (trimmer.ShowDialog(this) != DialogResult.OK || trimmer.SavedFilePath == null)
+                return System.Text.Json.JsonSerializer.Serialize(new { success = false, cancelled = true });
 
-        return System.Text.Json.JsonSerializer.Serialize(new { success = true, path = trimmer.SavedFilePath, name = naming.Name });
+            return System.Text.Json.JsonSerializer.Serialize(new { success = true, path = trimmer.SavedFilePath, name = naming.Name });
+        }
     });
 }

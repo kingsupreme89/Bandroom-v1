@@ -118,18 +118,19 @@ internal sealed class ReverbProvider : ISampleProvider
     {
         readonly float[] _buffer;
         int _idx;
-        const float Feedback = 0.5f;
+        readonly float _feedback;
 
         public AllPass(int size, float feedback)
         {
             _buffer = new float[Math.Max(size, 1)];
+            _feedback = feedback;
         }
 
         public float Process(float input)
         {
             float bufOut = _buffer[_idx];
             float output = -input + bufOut;
-            _buffer[_idx] = input + bufOut * Feedback;
+            _buffer[_idx] = input + bufOut * _feedback;
             _idx = (_idx + 1) % _buffer.Length;
             return output;
         }

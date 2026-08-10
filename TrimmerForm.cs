@@ -73,8 +73,13 @@ internal sealed class TrimmerForm : Form
         BuildUi();
         FormClosing += (_, _) => { StopPreview(); _waveformBitmap?.Dispose(); };
 
-        // Load waveform async to keep UI responsive
-        Task.Run(LoadWaveformData);
+        // Load waveform async to keep UI responsive. Deferred to Load (not fired directly here
+        // in the constructor) so _waveformPanel definitely has a Win32 handle by the time the
+        // background task's Invoke call runs -- starting it from the constructor let a fast
+        // waveform render (small file, warm disk cache) finish and call Invoke before ShowDialog
+        // had created the handle, which throws InvalidOperationException (silently swallowed by
+        // LoadWaveformData's own catch, so the waveform just never appeared).
+        Load += (_, _) => Task.Run(LoadWaveformData);
     }
 
     void BuildUi()
@@ -319,16 +324,28 @@ internal sealed class TrimmerForm : Form
         StopPreview();
 
         var reader = new AudioFileReader(_sourcePath) { Volume = AudioPlayer.MasterVolume };
-        var offset = new OffsetSampleProvider(reader)
+        try
         {
-            SkipOver = start,
-            Take = end - start,
-        };
+            var offset = new OffsetSampleProvider(reader)
+            {
+                SkipOver = start,
+                Take = end - start,
+            };
 
-        _previewOutput = new WaveOutEvent();
-        _previewOutput.Init(offset.ToWaveProvider());
-        _previewOutput.PlaybackStopped += (_, _) => { reader.Dispose(); };
-        _previewOutput.Play();
+            _previewOutput = new WaveOutEvent();
+            _previewOutput.Init(offset.ToWaveProvider());
+            _previewOutput.PlaybackStopped += (_, _) => { reader.Dispose(); };
+            _previewOutput.Play();
+        }
+        catch (Exception ex)
+        {
+            // Init (or WaveOutEvent construction) failed -- PlaybackStopped never got wired up
+            // to dispose `reader`, so do it here instead of leaking the file handle.
+            reader.Dispose();
+            _previewOutput?.Dispose();
+            _previewOutput = null;
+            CrashLog.Write("PlayRange failed", ex);
+        }
     }
 
     void StopPreview()

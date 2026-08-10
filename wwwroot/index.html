@@ -510,11 +510,14 @@
         </div>
         <!-- Task queue item 5 (Session 11): was hidden entirely until a whistle clip existed
              (only settable via TrimmerForm's native "Set as Lead-In Whistle" button, buried in a
-             completely different flow). Always visible now, with its own real upload/replace
-             button (btn-leadin-whistle-upload -> WebBridge.BrowseAndSetLeadInWhistle, same
-             native-file-picker pattern as every other audio browse/import flow) so there's a
-             direct path to setting one right here -- the toggle row only shows once a clip
-             actually exists (see refreshLeadInWhistleSection in app.js). -->
+             completely different flow). Always visible now, with its own button
+             (btn-leadin-whistle-upload) so there's a direct path to setting one right here --
+             the toggle row only shows once a clip actually exists (see
+             refreshLeadInWhistleSection in app.js). That button used to pop a bare native file
+             picker, which was confusing (no hint you needed a song loaded, no confirmation once
+             picked) -- it now opens Clipper Island in "whistle" mode instead (see
+             openClipperAssignForWhistle in app.js): pick a track from the library, Trim... it,
+             Set as Lead-In Whistle, done, with a toast + panel glow on save. -->
         <div class="panel-section" id="leadin-whistle-section">
           <div class="panel-title">Lead-In Whistle</div>
           <p class="leadin-whistle-hint" id="leadin-whistle-hint">A short sound that plays right
@@ -524,7 +527,7 @@
             <input type="checkbox" id="toggle-leadin-whistle" />
             <span>Play before every triggered clip</span>
           </label>
-          <button id="btn-leadin-whistle-upload" class="btn-ghost">Upload / Replace Whistle...</button>
+          <button id="btn-leadin-whistle-upload" class="btn-ghost">Choose / Replace Whistle...</button>
         </div>
         <div class="panel-section">
           <div class="panel-title">Fire Sensitivity (Delay)</div>

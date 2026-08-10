@@ -1053,6 +1053,8 @@ async function afterClipperAssignAction(trigger, assignedThisEvent, songName) {
     closeClipperAssign();
     await advanceAutoAssignWizard();
   } else {
+    showToast(assignedThisEvent ? `Assigned "${songName || "clip"}".` : "Assignment cleared.");
+    flashPanel(document.getElementById("clipper-island"));
     closeClipperAssign();
   }
 }
@@ -2283,27 +2285,15 @@ function wireControls() {
   document.getElementById("toggle-leadin-whistle").addEventListener("change", (e) => {
     bridge?.SetLeadInWhistleEnabled(e.target.checked);
   });
-  // Task queue item 5 (Session 11) -- direct upload/replace path for the lead-in whistle clip,
-  // instead of the only way to set one being buried in TrimmerForm's "Set as Lead-In Whistle"
-  // button. Native file picker (BrowseAndSetLeadInWhistle copies the chosen file straight to
-  // ConfigStore.LeadInWhistlePath and turns the whistle on) -- same reasoning as every other
-  // audio browse flow in this app, a web <input type=file> can't hand back a real path.
-  document.getElementById("btn-leadin-whistle-upload").addEventListener("click", async () => {
-    const btn = document.getElementById("btn-leadin-whistle-upload");
-    btn.disabled = true;
-    try {
-      const ok = bridge ? await bridge.BrowseAndSetLeadInWhistle() : false;
-      if (ok) {
-        showToast("Lead-in whistle updated.");
-        await refreshLeadInWhistleSection();
-      }
-      // ok === false also covers "user cancelled the picker" -- no toast needed for that, same
-      // as every other cancel-a-native-dialog path elsewhere in this file.
-    } catch (err) {
-      console.error("BrowseAndSetLeadInWhistle failed", err);
-      showToast("Couldn't set that whistle clip -- try again.");
-    }
-    btn.disabled = false;
+  // Task queue item 5 (Session 11) -- direct path for the lead-in whistle clip, instead of the
+  // only way to set one being buried in the trimmer's "Set as Lead-In Whistle" button. Owner
+  // feedback (round after that): a bare native file picker here was confusing -- it didn't show
+  // you had to already have a song loaded, and gave no confirmation once you'd picked one. Now
+  // opens Clipper Island in "whistle" mode instead: pick a track from the library (or Browse for
+  // file... inside the island for a from-disk pick, same as before), Trim... it, then Set as
+  // Lead-In Whistle -- with a toast + panel glow on save (see btn-trim-whistle above).
+  document.getElementById("btn-leadin-whistle-upload").addEventListener("click", () => {
+    openClipperAssignForWhistle();
   });
   document.getElementById("slider-sensitivity").addEventListener("input", (e) => {
     document.getElementById("sensitivity-value").textContent = e.target.value;
@@ -4232,13 +4222,15 @@ let _clipperAssignIsPa = false;
 let _clipperAssignLibrary = null; // cached [{name, path}], same list for every trigger
 let _clipperAssignSelectedPath = null;
 let _clipperAssignSelectedName = null;
+let _clipperAssignMode = "event"; // "event" (assign/trim a situation's clip) | "whistle" (pick+trim the lead-in whistle)
 
-async function openClipperAssign(trigger, eventName, isPa, currentFileName) {
-  // Switching events while the inline trimmer was left open for a PREVIOUS event otherwise
-  // left its waveform/trim state on screen (clipper-assign-list stays hidden, clipper-trim-panel
-  // stays visible) instead of resetting to the newly clicked event's song list.
-  if (_trimTrigger) closeInlineTrimmer();
+async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode = "event") {
+  // Switching events (or into whistle mode) while the inline trimmer was left open for a
+  // PREVIOUS session otherwise left its waveform/trim state on screen (clipper-assign-list
+  // stays hidden, clipper-trim-panel stays visible) instead of resetting to the new song list.
+  if (_trimTrigger || _trimForWhistle) closeInlineTrimmer();
 
+  _clipperAssignMode = mode;
   _clipperAssignTrigger = trigger;
   _clipperAssignIsPa = isPa;
   _clipperAssignSelectedPath = null;
@@ -4247,12 +4239,19 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName) {
   stopPreview();
   document.getElementById("clipper-empty").hidden = true;
   document.getElementById("preview-bar").hidden = true;
-  document.getElementById("clipper-title-text").textContent = isPa ? "Assign PA Announcer Clip" : "Assign Track";
+  document.getElementById("clipper-title-text").textContent =
+    mode === "whistle" ? "Choose a Lead-In Whistle" : isPa ? "Assign PA Announcer Clip" : "Assign Track";
   document.getElementById("btn-clipper-close-assign").hidden = false;
-  document.getElementById("clipper-assign-event").textContent = `for ${friendlyEventName(eventName)}`;
-  document.getElementById("clipper-assign-current").textContent = currentFileName ? `Current: ${currentFileName}` : "Current: (none assigned)";
+  document.getElementById("clipper-assign-event").textContent = mode === "whistle" ? "" : `for ${friendlyEventName(eventName)}`;
+  document.getElementById("clipper-assign-current").textContent =
+    mode === "whistle" ? "Pick a song below, then Trim... it down to your whistle sound." : currentFileName ? `Current: ${currentFileName}` : "Current: (none assigned)";
   document.getElementById("clipper-assign-search").value = "";
   document.getElementById("btn-clipper-assign-select").disabled = true;
+  document.getElementById("btn-clipper-assign-select").hidden = mode === "whistle";
+  document.getElementById("btn-clipper-assign-clear").hidden = mode === "whistle";
+  // Event mode: Trim... always trims whatever's already assigned to this trigger. Whistle mode
+  // has no trigger to fall back on, so it needs a library row (or browsed file) picked first.
+  document.getElementById("btn-clipper-assign-trim").disabled = mode === "whistle";
   document.getElementById("clipper-assign").hidden = false;
 
   if (!_clipperAssignLibrary) {
@@ -4266,15 +4265,22 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName) {
   renderClipperAssignList("");
 }
 
+async function openClipperAssignForWhistle() {
+  await openClipperAssign(null, null, false, null, "whistle");
+}
+
 function closeClipperAssign() {
   bridge?.StopPreview();
-  if (_trimTrigger) closeInlineTrimmer();
+  if (_trimTrigger || _trimForWhistle) closeInlineTrimmer();
   document.getElementById("clipper-assign").hidden = true;
   document.getElementById("btn-clipper-close-assign").hidden = true;
   document.getElementById("clipper-title-text").textContent = "Clip Preview";
   document.getElementById("clipper-empty").hidden = !!_previewAudio;
   document.getElementById("preview-bar").hidden = !_previewAudio;
+  document.getElementById("btn-clipper-assign-select").hidden = false;
+  document.getElementById("btn-clipper-assign-clear").hidden = false;
   _clipperAssignTrigger = null;
+  _clipperAssignMode = "event";
 }
 
 // Source -> section label, in display order. Matches the "source" tag GetTrackLibraryFromWeb
@@ -4347,6 +4353,7 @@ function buildClipperAssignRow(item, list) {
     _clipperAssignSelectedPath = item.path;
     _clipperAssignSelectedName = item.name;
     document.getElementById("btn-clipper-assign-select").disabled = false;
+    if (_clipperAssignMode === "whistle") document.getElementById("btn-clipper-assign-trim").disabled = false;
   });
   return row;
 }
@@ -4395,6 +4402,7 @@ function renderClipperAssignList(filter) {
 // same RMS-normalize-and-limit save path via AudioNormalizer on the C# side) but drawn on a
 // <canvas> with the same waveform-decode approach as loadPreviewWaveform above.
 let _trimTrigger = null;
+let _trimForWhistle = false; // true when the trimmer opened via Clipper Island's whistle mode (no trigger to save back to)
 let _trimIsPa = false;
 let _trimUrl = null;
 let _trimDurationSec = 0;
@@ -4415,6 +4423,7 @@ async function openInlineTrimmer(trigger, isPa) {
     return;
   }
   _trimTrigger = trigger;
+  _trimForWhistle = false;
   _trimIsPa = isPa;
   _trimUrl = result.url;
   _trimDurationSec = result.durationSec;
@@ -4427,7 +4436,41 @@ async function openInlineTrimmer(trigger, isPa) {
   document.getElementById("clipper-trim-panel").hidden = false;
   document.getElementById("clipper-assign-actions-default").hidden = true;
   document.getElementById("clipper-trim-actions").hidden = false;
+  document.getElementById("btn-trim-save").hidden = false;
   document.getElementById("clipper-trim-filename").textContent = result.fileName;
+  updateTrimLabels();
+  drawTrimCanvas();
+
+  loadTrimWaveform(result.url);
+}
+
+/// Whistle-mode counterpart to openInlineTrimmer -- there's no trigger to pull an "already
+/// assigned" file from, so this trims whatever library row/browsed file the user just picked in
+/// Clipper Island (see PrepareTrimForWhistleFromWeb). "Save Trim" doesn't apply here (there's no
+/// event to assign back to), only "Set as Lead-In Whistle".
+async function openInlineTrimmerForWhistle(path, fileName) {
+  if (!bridge) return;
+  const result = JSON.parse(await bridge.PrepareTrimForWhistle(path));
+  if (!result.ok) {
+    showToast(result.error || "Couldn't open the trimmer.");
+    return;
+  }
+  _trimTrigger = null;
+  _trimForWhistle = true;
+  _trimIsPa = false;
+  _trimUrl = result.url;
+  _trimDurationSec = result.durationSec;
+  _trimStartSec = 0;
+  _trimEndSec = Math.min(result.durationSec, 15);
+  _trimPeaks = null;
+  _trimDecodeFailed = false;
+
+  document.getElementById("clipper-assign-list").hidden = true;
+  document.getElementById("clipper-trim-panel").hidden = false;
+  document.getElementById("clipper-assign-actions-default").hidden = true;
+  document.getElementById("clipper-trim-actions").hidden = false;
+  document.getElementById("btn-trim-save").hidden = true;
+  document.getElementById("clipper-trim-filename").textContent = result.fileName || fileName;
   updateTrimLabels();
   drawTrimCanvas();
 
@@ -4437,6 +4480,7 @@ async function openInlineTrimmer(trigger, isPa) {
 function closeInlineTrimmer() {
   stopTrimPreview();
   _trimTrigger = null;
+  _trimForWhistle = false;
   _trimUrl = null;
   _trimPeaks = null;
   _trimDecodeFailed = false;
@@ -4444,6 +4488,7 @@ function closeInlineTrimmer() {
   document.getElementById("clipper-trim-panel").hidden = true;
   document.getElementById("clipper-assign-actions-default").hidden = false;
   document.getElementById("clipper-trim-actions").hidden = true;
+  document.getElementById("btn-trim-save").hidden = false;
 }
 
 /// Same decode-for-peaks approach as loadPreviewWaveform, just against the trimsrc:// copy and
@@ -4615,7 +4660,12 @@ function wireInlineTrimmer() {
     if (!bridge) return;
     const result = JSON.parse(await bridge.SaveTrimAsLeadInWhistle(_trimStartSec, _trimEndSec));
     if (!result.ok) { showToast(result.error || "Couldn't save the whistle clip."); return; }
-    showToast("Lead-in whistle set -- it'll play before every real triggered clip until you turn it off in the Mixer panel.");
+    showToast("Lead-in whistle updated.");
+    flashPanel(document.getElementById("clipper-island"));
+    if (_trimForWhistle) {
+      closeClipperAssign();
+      await refreshLeadInWhistleSection();
+    }
   });
 
   document.getElementById("btn-trim-cancel").addEventListener("click", closeInlineTrimmer);
@@ -4651,11 +4701,21 @@ function initClipperAssign() {
   });
 
   document.getElementById("btn-clipper-assign-browse").addEventListener("click", async () => {
-    if (!_clipperAssignTrigger) return;
-    const trigger = _clipperAssignTrigger;
     const path = await bridge?.BrowseForAudioFile();
     if (!path) return;
     const songName = path.split(/[\\/]/).pop();
+
+    if (_clipperAssignMode === "whistle") {
+      document.querySelectorAll("#clipper-assign-list .clipper-assign-row.selected").forEach((r) => r.classList.remove("selected"));
+      _clipperAssignSelectedPath = path;
+      _clipperAssignSelectedName = songName;
+      document.getElementById("btn-clipper-assign-trim").disabled = false;
+      showToast(`Selected "${songName}" -- click Trim... to set it as your whistle.`);
+      return;
+    }
+
+    if (!_clipperAssignTrigger) return;
+    const trigger = _clipperAssignTrigger;
     await bridge?.AssignTrackFile(trigger, _clipperAssignIsPa, path);
     await refreshCategories();
     if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
@@ -4663,6 +4723,11 @@ function initClipperAssign() {
   });
 
   document.getElementById("btn-clipper-assign-trim").addEventListener("click", async () => {
+    if (_clipperAssignMode === "whistle") {
+      if (!_clipperAssignSelectedPath) return;
+      await openInlineTrimmerForWhistle(_clipperAssignSelectedPath, _clipperAssignSelectedName);
+      return;
+    }
     if (!_clipperAssignTrigger) return;
     await openInlineTrimmer(_clipperAssignTrigger, _clipperAssignIsPa);
   });

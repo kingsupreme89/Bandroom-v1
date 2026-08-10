@@ -237,7 +237,7 @@ internal static class AudioPlayer
                     // pre-roll delay/cooldown gate, not the whistle -- previews should sound like
                     // the real in-game cue).
                     {
-                        var leadIn = BuildLeadInProvider(source.WaveFormat, out leadInReader);
+                        var leadIn = BuildLeadInProvider(source.WaveFormat, volume, out leadInReader);
                         if (leadIn != null) source = new SequencedSampleProvider(leadIn, source);
                     }
 
@@ -290,8 +290,12 @@ internal static class AudioPlayer
     /// SequencedSampleProvider (mismatched sample rate/channel count would otherwise either throw
     /// or play back garbled). Returns null (no whistle) if disabled, unset, missing, or unreadable
     /// -- a broken lead-in clip should never block the real event's own audio from playing.
-    /// `reader` is returned separately so the caller can dispose it once playback finishes.</summary>
-    static ISampleProvider? BuildLeadInProvider(WaveFormat targetFormat, out AudioFileReader? reader)
+    /// `reader` is returned separately so the caller can dispose it once playback finishes.
+    /// `volume` is the same per-call volume (volumeOverride ?? MasterVolume) the main clip uses --
+    /// previously hard-coded to the static MasterVolume field here, which meant muting a side
+    /// (AwayVolume=0) or the PA layer (PaVolume=0) via volumeOverride still let the whistle play
+    /// at full volume.</summary>
+    static ISampleProvider? BuildLeadInProvider(WaveFormat targetFormat, float volume, out AudioFileReader? reader)
     {
         reader = null;
         if (!LeadInEnabled || string.IsNullOrWhiteSpace(LeadInClipPath) || !File.Exists(LeadInClipPath))
@@ -299,7 +303,7 @@ internal static class AudioPlayer
 
         try
         {
-            reader = new AudioFileReader(LeadInClipPath) { Volume = MasterVolume };
+            reader = new AudioFileReader(LeadInClipPath) { Volume = volume };
             ISampleProvider src = reader.WaveFormat.Channels == 1
                 ? new MonoToStereoSampleProvider(reader)
                 : reader;

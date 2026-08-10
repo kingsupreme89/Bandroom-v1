@@ -418,9 +418,8 @@ public sealed class WebBridge
                 var trigger = a.GetProperty("trigger").GetString() ?? "";
                 var eventName = a.GetProperty("eventName").GetString() ?? trigger;
                 var fileName = a.GetProperty("fileName").GetString() ?? "";
-                if (byFileName.TryGetValue(fileName, out var localPath))
+                if (byFileName.TryGetValue(fileName, out var localPath) && _host.AssignTrackFileFromWeb(trigger, isPa: false, localPath))
                 {
-                    _host.AssignTrackFileFromWeb(trigger, isPa: false, localPath);
                     applied++;
                 }
                 else
@@ -799,15 +798,13 @@ public sealed class WebBridge
 
     public void SetFavoriteTeam(string team)
     {
-        var updated = ConfigStore.LoadUserProfile() with { FavoriteTeam = string.IsNullOrWhiteSpace(team) ? null : team };
-        ConfigStore.SaveUserProfile(updated);
+        var updated = ConfigStore.MutateUserProfile(current => current with { FavoriteTeam = string.IsNullOrWhiteSpace(team) ? null : team });
         _ = ProfileSyncService.PushAsync(updated);
     }
 
     public void SetRivalTeam(string team)
     {
-        var updated = ConfigStore.LoadUserProfile() with { RivalTeam = string.IsNullOrWhiteSpace(team) ? null : team };
-        ConfigStore.SaveUserProfile(updated);
+        var updated = ConfigStore.MutateUserProfile(current => current with { RivalTeam = string.IsNullOrWhiteSpace(team) ? null : team });
         _ = ProfileSyncService.PushAsync(updated);
     }
 
@@ -815,15 +812,13 @@ public sealed class WebBridge
     {
         string trimmed = (bio ?? "").Trim();
         if (trimmed.Length > 140) trimmed = trimmed[..140]; // short tagline, not an essay
-        var updated = ConfigStore.LoadUserProfile() with { Bio = trimmed.Length == 0 ? null : trimmed };
-        ConfigStore.SaveUserProfile(updated);
+        var updated = ConfigStore.MutateUserProfile(current => current with { Bio = trimmed.Length == 0 ? null : trimmed });
         _ = ProfileSyncService.PushAsync(updated);
     }
 
     public void SetToastsEnabled(bool enabled)
     {
-        var updated = ConfigStore.LoadUserProfile() with { ToastsEnabled = enabled };
-        ConfigStore.SaveUserProfile(updated);
+        var updated = ConfigStore.MutateUserProfile(current => current with { ToastsEnabled = enabled });
         _ = ProfileSyncService.PushAsync(updated);
     }
 
@@ -832,11 +827,9 @@ public sealed class WebBridge
     /// auto-detected from GAMETIME/gameplay.</summary>
     public void RecordFavoriteTeamResult(bool win)
     {
-        var current = ConfigStore.LoadUserProfile();
-        var updated = win
+        var updated = ConfigStore.MutateUserProfile(current => win
             ? current with { FavoriteTeamWins = current.FavoriteTeamWins + 1 }
-            : current with { FavoriteTeamLosses = current.FavoriteTeamLosses + 1 };
-        ConfigStore.SaveUserProfile(updated);
+            : current with { FavoriteTeamLosses = current.FavoriteTeamLosses + 1 });
         _ = ProfileSyncService.PushAsync(updated);
     }
 
@@ -846,15 +839,13 @@ public sealed class WebBridge
     /// team's song-to-situation assignments and has nothing to do with the universal profile.</summary>
     public void ResetUserProfileStats()
     {
-        var current = ConfigStore.LoadUserProfile();
-        var updated = current with
+        var updated = ConfigStore.MutateUserProfile(current => current with
         {
             GamesWatched = 0, SongsTriggered = 0, MarketplaceUploads = 0, MarketplaceDownloads = 0,
             EventCounts = new(), GamesWatchedByTeam = new(),
             StreakCurrentDays = 0, StreakLastActiveDate = null,
             FavoriteTeamWins = 0, FavoriteTeamLosses = 0,
-        };
-        ConfigStore.SaveUserProfile(updated);
+        });
         _ = ProfileSyncService.PushAsync(updated);
     }
 
@@ -873,8 +864,7 @@ public sealed class WebBridge
             const string fileName = "avatar.png";
             File.WriteAllBytes(Path.Combine(ConfigStore.AvatarFolder, fileName), bytes);
 
-            var updated = ConfigStore.LoadUserProfile() with { AvatarFileName = fileName };
-            ConfigStore.SaveUserProfile(updated);
+            var updated = ConfigStore.MutateUserProfile(current => current with { AvatarFileName = fileName });
             _ = ProfileSyncService.PushAsync(updated);
             return true;
         }
@@ -897,18 +887,14 @@ public sealed class WebBridge
     /// signed in.</summary>
     public void RecordMarketplaceUpload()
     {
-        var current = ConfigStore.LoadUserProfile();
-        var updated = current with { MarketplaceUploads = current.MarketplaceUploads + 1 };
-        ConfigStore.SaveUserProfile(updated);
+        var updated = ConfigStore.MutateUserProfile(current => current with { MarketplaceUploads = current.MarketplaceUploads + 1 });
         _ = ProfileSyncService.PushAsync(updated);
     }
 
     /// <summary>Same as RecordMarketplaceUpload but for a completed "My Downloads" pull.</summary>
     public void RecordMarketplaceDownload()
     {
-        var current = ConfigStore.LoadUserProfile();
-        var updated = current with { MarketplaceDownloads = current.MarketplaceDownloads + 1 };
-        ConfigStore.SaveUserProfile(updated);
+        var updated = ConfigStore.MutateUserProfile(current => current with { MarketplaceDownloads = current.MarketplaceDownloads + 1 });
         _ = ProfileSyncService.PushAsync(updated);
     }
 
@@ -986,13 +972,14 @@ public sealed class WebBridge
             ok = true;
 
             var updatedAt = DateTime.UtcNow;
-            var current = ConfigStore.LoadUserProfile();
-            var newLogos = new Dictionary<string, ConfigStore.TeamLogoEntry>(current.CustomTeamLogos)
+            var updated = ConfigStore.MutateUserProfile(current =>
             {
-                [team] = new ConfigStore.TeamLogoEntry { Base64Png = base64Png, UpdatedAtUtc = updatedAt },
-            };
-            var updated = current with { CustomTeamLogos = newLogos };
-            ConfigStore.SaveUserProfile(updated);
+                var newLogos = new Dictionary<string, ConfigStore.TeamLogoEntry>(current.CustomTeamLogos)
+                {
+                    [team] = new ConfigStore.TeamLogoEntry { Base64Png = base64Png, UpdatedAtUtc = updatedAt },
+                };
+                return current with { CustomTeamLogos = newLogos };
+            });
 
             // This device just became the source of truth for this team's logo -- record it as
             // already-applied so a later pull of this same edit (echoed back from the cloud) never
@@ -1144,6 +1131,7 @@ public sealed class WebBridge
     public string? BrowseForAudioFile() => _host.BrowseForAudioFileFromWeb();
     public void OpenTrimmer(string trigger, bool isPa) => _host.OpenTrimmerFromWeb(trigger, isPa);
     public string PrepareTrim(string trigger, bool isPa) => _host.PrepareTrimFromWeb(trigger, isPa);
+    public string PrepareTrimForWhistle(string path) => _host.PrepareTrimForWhistleFromWeb(path);
     public string SaveTrim(string trigger, bool isPa, double startSec, double endSec) => _host.SaveTrimFromWeb(trigger, isPa, startSec, endSec);
     public string SaveTrimAsLeadInWhistle(double startSec, double endSec) => _host.SaveTrimAsLeadInWhistleFromWeb(startSec, endSec);
     public int GetEventVolume(string trigger) => _host.GetEventVolumeFromWeb(trigger);

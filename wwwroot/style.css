@@ -3758,7 +3758,7 @@ input, select, textarea, [contenteditable] {
    just a team-accent-colored "VS" pill instead of copying their iconography. */
 .matchup-vs-badge {
   position: absolute;
-  left: 50%; top: 40%;
+  left: 50%; top: 50%;
   transform: translate(-50%, -50%);
   z-index: 7;
   width: clamp(120px, 13vw, 190px);
