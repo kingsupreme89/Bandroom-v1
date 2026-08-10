@@ -34,6 +34,12 @@ squirrel_releases/
 .wrangler/
 **/.wrangler/
 
+# Claude Code agent worktrees -- each is its own nested git clone (has its own .git/), used for
+# isolated background agent sessions. Never commit these into the main repo: doing so would embed
+# a full second copy of the repo's history (multi-GB) as plain directory content instead of a
+# proper submodule/worktree reference.
+.claude/worktrees/
+
 # Internal planning/pitch/architecture guides -- personal-machine reference only, not meant to
 # ship in the public repo (they describe internal design/roadmap, not code).
 BANDROOM_AUDIO_TECHNOLOGY_GUIDE.md
