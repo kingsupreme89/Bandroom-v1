@@ -77,17 +77,50 @@ public sealed class ScorebugPreset
     /// finished calibration. Possession here uses the underline-brightness method (same reasoning
     /// as V3): this scorebug style shows a bright underline beneath the team currently on offense
     /// rather than a team-colored fill box.</summary>
+    /// <summary>Renamed from "Console/Remote Play v1" 2026-08-09 -- the PC game's own process is
+    /// literally named "CollegeFB27" (see GameWatcher.cs's window-lookup comments), so this is
+    /// the CFB 27 console/remote-play HUD, not a version-agnostic "v1". Coordinates unchanged.</summary>
     public static readonly ScorebugPreset ConsoleScorebugV1 = new()
     {
-        Name = "Console/Remote Play v1",
+        Name = "College Football 27 Console",
         BandFxY = 0.855, BandFxH = 0.10,
         AwayUnderlineFxX = 0.20, AwayUnderlineFxY = 0.965, AwayUnderlineFxW = 0.09, AwayUnderlineFxH = 0.015,
         HomeUnderlineFxX = 0.565, HomeUnderlineFxY = 0.965, HomeUnderlineFxW = 0.09, HomeUnderlineFxH = 0.015,
         AwayTimeoutFxX = 0.20, AwayTimeoutFxY = 0.905, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
     };
 
-    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebugV3, ConsoleScorebugV1 };
+    /// <summary>Added 2026-08-09 for the owner's separate CFB 26 PS/Xbox console capture, kept as
+    /// its own preset alongside the CFB 27 console one rather than overwriting it, same
+    /// "swap presets, don't hand-edit coordinates" rationale as every preset above. IMPORTANT:
+    /// cloned from ConsoleScorebugV1's coordinates as a starting point only -- I was not given
+    /// the actual CFB 26 screenshot's pixel data to calibrate against (only an unrelated app
+    /// screenshot came through in the request), so these crop boxes are UNVERIFIED for CFB 26's
+    /// actual HUD and need live tuning against a real CFB 26 console screenshot before relying on
+    /// this preset, same caveat as ConsoleScorebugV1 originally shipped with.</summary>
+    public static readonly ScorebugPreset CollegeFootball26Console = new()
+    {
+        Name = "College Football 26 Console",
+        BandFxY = 0.855, BandFxH = 0.10,
+        AwayUnderlineFxX = 0.20, AwayUnderlineFxY = 0.965, AwayUnderlineFxW = 0.09, AwayUnderlineFxH = 0.015,
+        HomeUnderlineFxX = 0.565, HomeUnderlineFxY = 0.965, HomeUnderlineFxW = 0.09, HomeUnderlineFxH = 0.015,
+        AwayTimeoutFxX = 0.20, AwayTimeoutFxY = 0.905, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
+    };
 
-    public static ScorebugPreset GetByName(string? name) =>
-        AllPresets.Find(p => p.Name.Equals(name, System.StringComparison.OrdinalIgnoreCase)) ?? KamsCbsScorebugV3;
+    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebugV3, ConsoleScorebugV1, CollegeFootball26Console };
+
+    /// <summary>Old preset names that got renamed, mapped to their current Name -- a returning
+    /// user's saved scorebug_preset.txt (see ConfigStore.LoadScorebugPresetName) still has the
+    /// old string on disk, and GetByName's exact-match lookup would otherwise silently fall back
+    /// to KamsCbsScorebugV3 instead of the console preset they actually had selected. Add an
+    /// entry here every time a preset's Name changes.</summary>
+    static readonly Dictionary<string, string> LegacyNameAliases = new(System.StringComparer.OrdinalIgnoreCase)
+    {
+        ["Console/Remote Play v1"] = "College Football 27 Console",
+    };
+
+    public static ScorebugPreset GetByName(string? name)
+    {
+        if (name != null && LegacyNameAliases.TryGetValue(name, out var currentName)) name = currentName;
+        return AllPresets.Find(p => p.Name.Equals(name, System.StringComparison.OrdinalIgnoreCase)) ?? KamsCbsScorebugV3;
+    }
 }

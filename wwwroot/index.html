@@ -590,6 +590,11 @@
           it. Every team's Sound Bank holds both songs and background images together -- open
           one and hit <strong>+ Upload</strong> to contribute.
         </p>
+        <!-- Shortcut hero row -- shared .bandroom-hero-row/.bandroom-hero-card component (Music
+             Library UX Brief v2 §4), same shortcut-strip idea as the reference layout's
+             Create New/Project/Ambient row, mapped to what actually exists here. Populated by
+             app.js (renderBandroomHub) so the counts stay live. -->
+        <div class="bandroom-hero-row" id="bandroom-hub-hero-row"><!-- populated by app.js --></div>
         <div class="bandroom-hub-section-label">
           Popular Songs
           <select id="bandroom-hub-sort" class="bandroom-hub-sort">
@@ -599,16 +604,30 @@
             <option value="likes">Most Liked</option>
           </select>
         </div>
-        <!-- Rotating carousel of the top songs ranked by downloads+likes -- auto-advances every
-             few seconds, pauses on hover/interaction (see startShelfRotation in app.js). Reuses
-             buildItemTile the same as every other item grid in the app. -->
-        <div class="bandroom-shelf" id="bandroom-popular-shelf"><!-- populated by app.js --></div>
+        <!-- Row-list table (Music Library UX Brief v2 §4), same shape as the per-team album/My
+             Downloads lists -- was a horizontal auto-rotating shelf before this pass; converted
+             to the shared .bandroom-album-grid-list layout so all three surfaces read as one
+             design system. Reuses buildItemTile's non-hub (.marketplace-card row) branch, the
+             same one the album/downloads lists already use. -->
+        <div class="bandroom-album-list-header">
+          <span class="bandroom-album-col-title">Title</span>
+          <span class="bandroom-album-col-type">Team</span>
+          <span class="bandroom-album-col-meta">Stats</span>
+          <span class="bandroom-album-col-actions">Actions</span>
+        </div>
+        <div class="bandroom-album-grid bandroom-album-grid-list" id="bandroom-popular-shelf"><!-- populated by app.js --></div>
 
         <div class="bandroom-hub-section-label">Top Team Background Uploads</div>
         <!-- Seeded from the existing local TeamBackgrounds pack for now (not yet a live
              marketplace image feed) -- one tile per team that has a background set, via
              bridge.GetTeamBackgroundUrl, same source Set Matchup/team select already use. -->
-        <div class="bandroom-shelf" id="bandroom-backgrounds-shelf"><!-- populated by app.js --></div>
+        <div class="bandroom-album-list-header">
+          <span class="bandroom-album-col-title">Team</span>
+          <span class="bandroom-album-col-type">Type</span>
+          <span class="bandroom-album-col-meta"></span>
+          <span class="bandroom-album-col-actions">Actions</span>
+        </div>
+        <div class="bandroom-album-grid bandroom-album-grid-list" id="bandroom-backgrounds-shelf"><!-- populated by app.js --></div>
       </div>
     </div>
   </div>
@@ -628,6 +647,17 @@
         <button id="btn-close-bandroom-album" class="icon-btn">&times;</button>
       </div>
       <p class="bandroom-instructions" id="bandroom-album-instructions"></p>
+      <!-- Apple-Music-album-header style summary card -- team logo + name + song/background
+           counts, filled in by app.js alongside the existing icon/name fields (see
+           renderTeamAlbumGrid). Uses the shared .bandroom-album-hero component (Music Library
+           UX Brief v2 §4) so this reads as the same design language as the hub's hero row. -->
+      <div class="bandroom-album-hero">
+        <span class="team-swatch" id="bandroom-album-hero-icon"></span>
+        <div>
+          <div class="bandroom-album-hero-title" id="bandroom-album-hero-title">Team</div>
+          <div class="bandroom-album-hero-meta" id="bandroom-album-hero-meta"></div>
+        </div>
+      </div>
       <div class="bandroom-album-toolbar">
         <input type="text" id="bandroom-album-search" placeholder="Search this album..." class="team-picker-search" />
         <button id="btn-bandroom-album-import-pack" class="btn-ghost" title="Import the default song pack from a .zip or folder">Import Song Pack</button>
@@ -638,9 +668,9 @@
            content types (there's no genre metadata on uploads, just song vs. background image).
            Wired in app.js (see bandroomAlbumTypeFilter). -->
       <div class="bandroom-album-filters" id="bandroom-album-filters">
-        <button class="pill bandroom-album-filter active" data-type="all">All</button>
-        <button class="pill bandroom-album-filter" data-type="song">Songs</button>
-        <button class="pill bandroom-album-filter" data-type="image">Backgrounds</button>
+        <button class="pill bandroom-album-filter bandroom-filter-pill active" data-type="all">All</button>
+        <button class="pill bandroom-album-filter bandroom-filter-pill" data-type="song">Songs</button>
+        <button class="pill bandroom-album-filter bandroom-filter-pill" data-type="image">Backgrounds</button>
       </div>
       <!-- Column header row for the list below -- Title/Type/Uploaded/Actions, same idea as the
            reference image's Title/Genre/Mood/Duration/License header over its track table. -->
@@ -844,14 +874,18 @@
         list them right away). Images are saved for later -- open a downloaded background from
         here if you want to set it as that team's live background.
       </p>
+      <!-- Glanceable count-card hero row, same shared component as the hub/album (Music Library
+           UX Brief v2 §4) -- click a card to apply the matching filter below, mirroring
+           .my-downloads-filter (see wireMyDownloadsHeroRow in app.js). -->
+      <div class="bandroom-hero-row" id="my-downloads-hero-row"><!-- populated by app.js --></div>
       <div class="my-downloads-toolbar">
         <input type="text" id="my-downloads-search" class="team-picker-search" placeholder="Search your downloads..." />
         <div class="my-downloads-filters" id="my-downloads-filters">
-          <button class="pill my-downloads-filter active" data-filter="all">All</button>
-          <button class="pill my-downloads-filter" data-filter="song">Songs</button>
-          <button class="pill my-downloads-filter" data-filter="image">Backgrounds</button>
-          <button class="pill my-downloads-filter" data-filter="local">Your Uploads</button>
-          <button class="pill my-downloads-filter" data-filter="missing">Missing</button>
+          <button class="pill my-downloads-filter bandroom-filter-pill active" data-filter="all">All</button>
+          <button class="pill my-downloads-filter bandroom-filter-pill" data-filter="song">Songs</button>
+          <button class="pill my-downloads-filter bandroom-filter-pill" data-filter="image">Backgrounds</button>
+          <button class="pill my-downloads-filter bandroom-filter-pill" data-filter="local">Your Uploads</button>
+          <button class="pill my-downloads-filter bandroom-filter-pill" data-filter="missing">Missing</button>
         </div>
         <select id="my-downloads-sort" class="bandroom-hub-sort" title="Sort">
           <option value="newest">Newest</option>
@@ -940,11 +974,11 @@
           </div>
           <div class="coverflow-name" id="matchup-away-name"></div>
         </div>
-        <!-- Gameday logo replaces the old plain "VS" text badge AND the separate "BIG GAME" pill
-             underneath it (see updateMatchupBigGameBadge in app.js) -- the logo is now the
-             centerpiece mark itself rather than disappearing/reappearing, so the "Show Big Game
-             badge" setting instead adds a .big-game-active class for an intensified glow-pulse,
-             same --away-badge-color/--home-badge-color mechanism as before. -->
+        <!-- Gameday logo centerpiece -- owner's explicit choice 2026-08-09 to keep using the real
+             ESPN-style asset (assets/gameday-logo.png) despite the trademark flag raised in chat;
+             shifted up slightly per that same request. When Big Game mode is active (see
+             updateMatchupBigGameBadge in app.js) the badge container gets a yellow glow via
+             .big-game-active, layered on top of the logo image itself. -->
         <div class="matchup-vs-badge" id="matchup-vs-badge">
           <img src="https://appassets/assets/gameday-logo.png" alt="Gameday" class="matchup-gameday-logo" id="matchup-gameday-logo">
         </div>

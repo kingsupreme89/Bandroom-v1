@@ -259,12 +259,11 @@ function renderSuggestedBatch() {
     // Task queue item 8 (Session 11): this row previously had no per-item transport at all --
     // just a type icon/name/school/download-count, and clicking anywhere on the row navigated
     // away to that item's team album. Same .bandroom-item-action button pattern already used on
-    // the marketplace hub's Popular Songs shelf tiles (buildItemTile's inHub branch), and the
-    // same click-guard that lets those buttons coexist with the row's own click-to-navigate
-    // handler.
-    // NOTE: intentionally NOT the .bandroom-item-actions class the Popular Songs shelf uses --
-    // that one is absolutely-positioned to overlay a square .bandroom-item-tile thumbnail, which
-    // would badly misplace itself on this row's horizontal list-item layout. Same
+    // the marketplace hub's Popular Songs row tiles (buildItemTile), and the same click-guard
+    // that lets those buttons coexist with the row's own click-to-navigate handler.
+    // NOTE: intentionally NOT the .bandroom-item-actions class buildItemTile's rows use -- that
+    // one overlays a square thumbnail, which would badly misplace itself on this row's
+    // horizontal list-item layout. Same
     // .bandroom-item-action BUTTON styling is reused (the actual icon-button look), just laid out
     // inline via .suggested-row-actions instead of as an overlay.
     const actions = document.createElement("div");
@@ -2760,6 +2759,7 @@ function openBandroomMarketplace() {
         });
       }
     }
+    renderBandroomHubHeroRow();
     renderPopularSongsShelf();
     renderTopTeamBackgroundsShelf();
     search.focus();
@@ -2839,12 +2839,47 @@ async function loadMyDownloads() {
   renderMyDownloadsList();
 }
 
+// Glanceable count-card hero row above the filter pills (Music Library UX Brief v2 §4) -- same
+// shared .bandroom-hero-row/.bandroom-hero-card component the hub and album header use. Clicking
+// a card just re-drives the existing pill filter (clicks the matching .my-downloads-filter
+// button) instead of duplicating the filter-apply logic here.
+function renderMyDownloadsHeroRow() {
+  const row = document.getElementById("my-downloads-hero-row");
+  if (!row) return;
+  const total = _myDownloadsItems.length;
+  const songs = _myDownloadsItems.filter((i) => i.type === "song").length;
+  const images = _myDownloadsItems.filter((i) => i.type === "image").length;
+  const missing = _myDownloadsItems.filter((i) => i.fileExists === false).length;
+  const cards = [
+    { filter: "all", icon: "\u{1F4E5}", label: "All Downloads", count: total },
+    { filter: "song", icon: "\u{1F3B5}", label: "Songs", count: songs },
+    { filter: "image", icon: "\u{1F5BC}", label: "Backgrounds", count: images },
+    { filter: "missing", icon: "⚠️", label: "Missing Files", count: missing },
+  ];
+  row.innerHTML = "";
+  for (const card of cards) {
+    const el = document.createElement("div");
+    el.className = "bandroom-hero-card" + (_myDownloadsFilter === card.filter ? " active" : "");
+    el.innerHTML = `
+      <div class="bandroom-hero-card-icon">${card.icon}</div>
+      <div>
+        <div class="bandroom-hero-card-label">${card.label}</div>
+        <div class="bandroom-hero-card-count">${card.count} item${card.count === 1 ? "" : "s"}</div>
+      </div>`;
+    el.addEventListener("click", () => {
+      document.querySelector(`.my-downloads-filter[data-filter="${card.filter}"]`)?.click();
+    });
+    row.appendChild(el);
+  }
+}
+
 function renderMyDownloadsList() {
   const list = document.getElementById("my-downloads-list");
   const countEl = document.getElementById("my-downloads-count");
   countEl.textContent = _myDownloadsItems.length > 0
     ? `${_myDownloadsItems.length} download${_myDownloadsItems.length === 1 ? "" : "s"}`
     : "";
+  renderMyDownloadsHeroRow();
 
   const q = (document.getElementById("my-downloads-search").value || "").trim().toLowerCase();
   let items = _myDownloadsItems.filter((item) => {
@@ -3171,41 +3206,19 @@ function buildMyDownloadRow(item) {
   return tile;
 }
 
-// ---- Popular Songs + Top Team Background shelves (Session 9 task queue item 1) --------
-// Replaces the old static "Uploads" grid + "Top Contributing Teams" leaderboard with two
-// horizontal shelves: a rotating "Popular Songs" carousel ranked by downloads+likes, and a
-// "Top Team Background Uploads" shelf seeded from the existing local TeamBackgrounds pack.
+// ---- Popular Songs + Top Team Background lists (Music Library UX Brief v2 §4) --------
+// Row-list tables (same .bandroom-album-grid-list shape as the per-team album/My Downloads
+// lists), ranked by downloads+likes for songs, seeded from the existing local TeamBackgrounds
+// pack for backgrounds. Previously two horizontal auto-rotating shelves -- converted to lists so
+// all three library surfaces (hub/album/downloads) read as one design system; the rotation timer
+// this used to need is gone along with the shelf layout.
 
-// One rotation timer shared by both shelves (keyed by element id) so re-opening the hub or
-// switching sort doesn't stack up duplicate intervals.
-const _shelfRotationTimers = {};
-
-function startShelfRotation(elId) {
-  stopShelfRotation(elId);
-  const el = document.getElementById(elId);
-  if (!el) return;
-  _shelfRotationTimers[elId] = setInterval(() => {
-    if (document.getElementById("bandroom-overlay")?.hidden) { stopShelfRotation(elId); return; }
-    if (el.matches(":hover")) return; // pause while the user is browsing the shelf
-    const tileWidth = el.firstElementChild?.getBoundingClientRect().width ?? 200;
-    const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 4;
-    el.scrollTo({ left: atEnd ? 0 : el.scrollLeft + tileWidth + 16, behavior: "smooth" });
-  }, 4000);
-}
-
-function stopShelfRotation(elId) {
-  if (_shelfRotationTimers[elId]) {
-    clearInterval(_shelfRotationTimers[elId]);
-    delete _shelfRotationTimers[elId];
-  }
-}
-
-/// Popular Songs carousel -- ranked by downloads+likes combined (falls back to whatever single
+/// Popular Songs list -- ranked by downloads+likes combined (falls back to whatever single
 /// sort the hub's dropdown has selected when that's not the default "newest"/combined view).
 async function renderPopularSongsShelf() {
   const el = document.getElementById("bandroom-popular-shelf");
   if (!el) return;
-  el.innerHTML = `<div class="bandroom-recent-empty">Loading...</div>`;
+  el.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
   try {
     const songs = await fetchUploadList("song", null, null);
     if (document.getElementById("bandroom-overlay").hidden) return;
@@ -3223,27 +3236,45 @@ async function renderPopularSongsShelf() {
     ranked = ranked.slice(0, 20);
     el.innerHTML = "";
     if (ranked.length === 0) {
-      el.innerHTML = `<div class="bandroom-recent-empty">No songs uploaded yet -- open any team's Sound Bank and be the first!</div>`;
+      el.innerHTML = `<div class="bandroom-empty-state">No songs uploaded yet -- open any team's Sound Bank and be the first!</div>`;
       return;
     }
-    for (const item of ranked) el.appendChild(buildItemTile(item, /*inHub*/ true));
-    startShelfRotation("bandroom-popular-shelf");
+    // Row-list table (Music Library UX Brief v2 §4), same .marketplace-card row branch the
+    // per-team album/My Downloads lists use -- was a "jump straight to that team's album" hub
+    // tile before this pass (buildItemTile(item, true)); the row branch's own click still
+    // previews the song (its actions already cover Preview/Get), so the school name is wired
+    // separately to keep the "jump to that team's Sound Bank" shortcut the hub had.
+    for (const item of ranked) {
+      const row = buildItemTile(item);
+      const schoolRow = row.querySelector(".marketplace-card-school");
+      if (schoolRow) {
+        schoolRow.title = `Open ${item.school}'s Sound Bank`;
+        schoolRow.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openTeamAlbum(item.school);
+        });
+      }
+      el.appendChild(row);
+    }
   } catch (err) {
     console.error("renderPopularSongsShelf failed", err);
-    el.innerHTML = `<div class="bandroom-recent-empty">Couldn't load popular songs right now.</div>`;
+    el.innerHTML = `<div class="bandroom-empty-state">Couldn't load popular songs right now.</div>`;
   }
 }
 
-/// Top Team Background Uploads shelf -- seeded from the existing local TeamBackgrounds pack
+/// Top Team Background Uploads list -- seeded from the existing local TeamBackgrounds pack
 /// (bridge.GetTeamBackgroundUrl, same source used everywhere else backgrounds are shown) rather
 /// than a live marketplace image feed, per the owner's "seeded from the existing pack for now"
-/// scoping. Clicking a tile jumps into that team's Sound Bank, same as every other hub tile.
+/// scoping. Clicking a row jumps into that team's Sound Bank, same as every other hub item.
+/// Row-list table (Music Library UX Brief v2 §4) instead of the old horizontal shelf, matching
+/// the album/downloads list shape -- built by hand (not buildItemTile) since these items only
+/// carry a team + url, not the full marketplace item shape buildItemTile expects.
 async function renderTopTeamBackgroundsShelf() {
   const el = document.getElementById("bandroom-backgrounds-shelf");
   if (!el) return;
-  el.innerHTML = `<div class="bandroom-recent-empty">Loading...</div>`;
+  el.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
   if (!bridge || !Array.isArray(state.teams)) {
-    el.innerHTML = `<div class="bandroom-recent-empty">Team backgrounds aren't available right now.</div>`;
+    el.innerHTML = `<div class="bandroom-empty-state">Team backgrounds aren't available right now.</div>`;
     return;
   }
   try {
@@ -3257,30 +3288,80 @@ async function renderTopTeamBackgroundsShelf() {
     const withBackgrounds = results.filter(Boolean).slice(0, 20);
     el.innerHTML = "";
     if (withBackgrounds.length === 0) {
-      el.innerHTML = `<div class="bandroom-recent-empty">No team backgrounds available yet.</div>`;
+      el.innerHTML = `<div class="bandroom-empty-state">No team backgrounds available yet.</div>`;
       return;
     }
     for (const { team, url } of withBackgrounds) {
-      const tile = document.createElement("div");
-      tile.className = "bandroom-item-tile";
-      tile.title = `${team.name} background`;
-      tile.innerHTML = `
-        <div class="bandroom-item-thumb"><img src="${sanitizeHTML(url)}" alt="${sanitizeHTML(team.name)}" loading="lazy"></div>
-        <div class="bandroom-item-name">${sanitizeHTML(team.name)}</div>
-        <div class="bandroom-item-school">Team Background</div>`;
-      tile.addEventListener("click", () => openTeamAlbum(team.name));
-      el.appendChild(tile);
+      const row = document.createElement("div");
+      row.className = "marketplace-card";
+      row.title = `${team.name} background`;
+      const thumb = document.createElement("div");
+      thumb.className = "marketplace-card-thumb";
+      thumb.innerHTML = `<img src="${sanitizeHTML(url)}" alt="${sanitizeHTML(team.name)}" loading="lazy">`;
+      const body = document.createElement("div");
+      body.className = "marketplace-card-body";
+      const title = document.createElement("div");
+      title.className = "marketplace-card-title";
+      title.textContent = team.name;
+      const schoolRow = document.createElement("div");
+      schoolRow.className = "marketplace-card-school";
+      schoolRow.textContent = "Team Background";
+      body.append(title, schoolRow);
+      const actions = document.createElement("div");
+      actions.className = "marketplace-card-actions";
+      const openBtn = document.createElement("button");
+      openBtn.className = "btn-ghost";
+      openBtn.textContent = "Open Sound Bank";
+      openBtn.addEventListener("click", (e) => { e.stopPropagation(); openTeamAlbum(team.name); });
+      actions.appendChild(openBtn);
+      body.appendChild(actions);
+      row.append(thumb, body);
+      row.addEventListener("click", () => openTeamAlbum(team.name));
+      el.appendChild(row);
     }
-    startShelfRotation("bandroom-backgrounds-shelf");
   } catch (err) {
     console.error("renderTopTeamBackgroundsShelf failed", err);
-    el.innerHTML = `<div class="bandroom-recent-empty">Couldn't load team backgrounds right now.</div>`;
+    el.innerHTML = `<div class="bandroom-empty-state">Couldn't load team backgrounds right now.</div>`;
+  }
+}
+
+// Shortcut hero row at the top of the hub's main pane (Music Library UX Brief v2 §4) -- reuses
+// the existing #bandroom-hub-sort ranking modes (_hubSort) as clickable cards instead of adding
+// a second, separate sort mechanism. Clicking a card sets _hubSort and re-renders the shelves,
+// same effect as picking that option from the dropdown.
+function renderBandroomHubHeroRow() {
+  const row = document.getElementById("bandroom-hub-hero-row");
+  if (!row) return;
+  const cards = [
+    { sort: "newest", icon: "\u{1F195}", label: "Newest Uploads", caption: "Freshest first" },
+    { sort: "downloads", icon: "\u{2B07}\u{FE0F}", label: "Most Downloaded", caption: "Crowd favorites" },
+    { sort: "likes", icon: "\u{2764}\u{FE0F}", label: "Most Liked", caption: "Top rated" },
+    { sort: "views", icon: "\u{1F441}\u{FE0F}", label: "Most Viewed", caption: "Trending" },
+  ];
+  row.innerHTML = "";
+  for (const card of cards) {
+    const el = document.createElement("div");
+    el.className = "bandroom-hero-card" + (_hubSort === card.sort ? " active" : "");
+    el.innerHTML = `
+      <div class="bandroom-hero-card-icon">${card.icon}</div>
+      <div>
+        <div class="bandroom-hero-card-label">${card.label}</div>
+        <div class="bandroom-hero-card-count">${card.caption}</div>
+      </div>`;
+    el.addEventListener("click", () => {
+      _hubSort = card.sort;
+      const sortSelect = document.getElementById("bandroom-hub-sort");
+      if (sortSelect) sortSelect.value = card.sort;
+      renderBandroomHub();
+    });
+    row.appendChild(el);
   }
 }
 
 // Kept as the shared refresh entry point other call sites (edit/delete handlers, sort-change
 // listener) already use -- now refreshes both shelves instead of the old single grid.
 async function renderBandroomHub() {
+  renderBandroomHubHeroRow();
   await Promise.all([renderPopularSongsShelf(), renderTopTeamBackgroundsShelf()]);
 }
 
@@ -3307,80 +3388,33 @@ function applySchoolGlow(el, schoolName) {
   el.setAttribute("data-glow", "");
 }
 
-function buildItemTile(item, inHub) {
+// inHub param removed 2026-08-09: the hub's Popular Songs/Top Team Backgrounds sections used to
+// call this with inHub=true to get a compact .bandroom-item-tile (see Session 22's row-list
+// conversion, which switched both hub call sites to the row/.marketplace-card branch below); no
+// call site passes true anymore, so the old tile-branch was dead code and has been removed rather
+// than left unreachable. If a compact tile view is ever wanted again, restore from git history
+// instead of resurrecting a parameter no current caller uses.
+function buildItemTile(item) {
   const tile = document.createElement("div");
-  tile.className = inHub ? "bandroom-item-tile" : "marketplace-card";
+  tile.className = "marketplace-card";
   const thumb = document.createElement("div");
-  thumb.className = inHub ? "bandroom-item-thumb" : "marketplace-card-thumb";
+  thumb.className = "marketplace-card-thumb";
   // item.name/item.school/item.url come from other users' marketplace uploads (worker.js
   // stores whatever string was posted for "name"/"school") -- innerHTML with those interpolated
   // raw is a real stored-XSS vector, sanitizeHTML() actually needs to run here rather than just
   // exist unused elsewhere in the file.
   if (item.type === "image") {
     thumb.innerHTML = `<img src="${sanitizeHTML(item.url)}" alt="${sanitizeHTML(item.name)}" loading="lazy">`;
-    if (!inHub) thumb.innerHTML += '<span class="card-type-badge">IMAGE</span>';
+    thumb.innerHTML += '<span class="card-type-badge">IMAGE</span>';
   } else {
     const logo = teamLogoUrl(item.school);
     thumb.innerHTML = logo
-      ? `<img src="${sanitizeHTML(logo)}" alt="${sanitizeHTML(item.school)}" ${inHub ? 'class="bandroom-item-thumb-logo"' : ""} loading="lazy">`
+      ? `<img src="${sanitizeHTML(logo)}" alt="${sanitizeHTML(item.school)}" loading="lazy">`
       : `<span>\u{1F3B5}</span>`;
-    if (!inHub) thumb.innerHTML += '<span class="card-type-badge">SONG</span>';
+    thumb.innerHTML += '<span class="card-type-badge">SONG</span>';
   }
 
-  if (inHub) {
-    const name = document.createElement("div");
-    name.className = "bandroom-item-name";
-    name.textContent = item.name;
-    const school = document.createElement("div");
-    school.className = "bandroom-item-school";
-    school.textContent = item.school;
-    applySchoolGlow(school, item.school);
-    tile.append(thumb, name, school);
-
-    // Per-item Play/Stop/Download transport on hub song tiles (Popular Songs shelf) -- reuses
-    // the exact .bandroom-item-actions hover-overlay pattern the album view (!inHub branch,
-    // below) already uses on these same .bandroom-item-tile elements, and the same
-    // previewSong/stopPreview/downloadMarketplaceItem calls the rest of the marketplace UI uses
-    // for remote items (NOT bridge.PreviewLocalFile/AddLibraryFileToDownloads -- those are for
-    // the clipper's LOCAL filesystem library, item.url here is a remote marketplace URL).
-    // Background shelf tiles (image type, built separately in renderTopTeamBackgroundsShelf)
-    // intentionally don't get this row -- there's nothing to play/download there yet.
-    if (item.type === "song") {
-      const actions = document.createElement("div");
-      actions.className = "bandroom-item-actions";
-
-      const playBtn = document.createElement("button");
-      playBtn.className = "bandroom-item-action";
-      playBtn.title = "Play";
-      playBtn.textContent = "▶";
-      playBtn.addEventListener("click", (e) => { e.stopPropagation(); previewSong(item); });
-      actions.appendChild(playBtn);
-
-      const stopBtn = document.createElement("button");
-      stopBtn.className = "bandroom-item-action";
-      stopBtn.title = "Stop";
-      stopBtn.textContent = "⏹";
-      stopBtn.addEventListener("click", (e) => { e.stopPropagation(); stopPreview(); });
-      actions.appendChild(stopBtn);
-
-      const dlBtn = document.createElement("button");
-      dlBtn.className = "bandroom-item-action";
-      dlBtn.title = "Download to My Downloads";
-      dlBtn.textContent = "⬇";
-      dlBtn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        dlBtn.disabled = true;
-        dlBtn.textContent = "...";
-        const ok = bridge ? await downloadMarketplaceItem(item) : false;
-        showToast(ok ? `Downloaded "${item.name}"!` : "Couldn't download that.");
-        dlBtn.disabled = false;
-        dlBtn.textContent = "⬇";
-      });
-      actions.appendChild(dlBtn);
-
-      tile.appendChild(actions);
-    }
-  } else {
+  {
     const body = document.createElement("div");
     body.className = "marketplace-card-body";
     const title = document.createElement("div");
@@ -3423,21 +3457,15 @@ function buildItemTile(item, inHub) {
     body.appendChild(actions);
     tile.append(thumb, body);
   }
-  tile.title = inHub ? `${item.name} -- ${item.school}` : `${item.name} \u2014 ${item.school}`;
+  tile.title = `${item.name} \u2014 ${item.school}`;
   tile.addEventListener("click", (e) => {
     if (e.target.closest(".bandroom-item-action")) return; // hover-button clicks handle themselves
-    if (inHub) {
-      // Jump straight into that upload's own team album, same as picking the team from search.
-      openTeamAlbum(item.school);
-    } else if (item.type === "song") {
-      previewSong(item);
-    }
+    if (item.type === "song") previewSong(item);
   });
 
-  // Hover action row -- only in an album view (not the hub, where tiles jump to the album
-  // instead of acting in place). Like/Report are always available; Set as Background only for
-  // Trophy Room images; Delete only shows on tiles this browser itself uploaded (item 5).
-  if (!inHub) {
+  // Hover action row. Like/Report are always available; Set as Background only for Trophy Room
+  // images; Delete only shows on tiles this browser itself uploaded (item 5).
+  {
     const actions = document.createElement("div");
     actions.className = "bandroom-item-actions";
 
@@ -4478,6 +4506,9 @@ function openTeamAlbum(name) {
     document.getElementById("bandroom-album-overlay").hidden = false;
     fillTeamSwatch(document.getElementById("bandroom-album-icon"), team);
     document.getElementById("bandroom-album-name").textContent = team.name;
+    fillTeamSwatch(document.getElementById("bandroom-album-hero-icon"), team);
+    document.getElementById("bandroom-album-hero-title").textContent = team.name;
+    document.getElementById("bandroom-album-hero-meta").textContent = "Loading...";
     document.getElementById("bandroom-album-instructions").textContent =
       "Click a song to preview it, or a background to set it live. Hit + Upload to add your own "
       + "-- songs are trimmed/normalized automatically, images resized to a consistent size.";
@@ -4541,6 +4572,14 @@ async function renderTeamAlbumGrid() {
   _albumItemsCache = { songs: songsResult.items, images: imagesResult.items };
   _albumFetchError = songsResult.error || imagesResult.error;
   try { _albumDefaultPackCache = JSON.parse(defaultPackJson) || []; } catch { _albumDefaultPackCache = []; }
+  const heroMeta = document.getElementById("bandroom-album-hero-meta");
+  if (heroMeta) {
+    const songCount = _albumItemsCache.songs.length;
+    const imageCount = _albumItemsCache.images.length;
+    heroMeta.textContent = _albumFetchError
+      ? "Couldn't load this team's uploads"
+      : `${songCount} song${songCount === 1 ? "" : "s"} · ${imageCount} background${imageCount === 1 ? "" : "s"}`;
+  }
   paintAlbumGrid(getAlbumSearchFilter());
 }
 
@@ -4670,10 +4709,18 @@ function paintAlbumGrid(filter) {
     grid.appendChild(empty);
   } else {
     for (const item of items) {
-      const tile = buildItemTile(item, /*inHub*/ false);
+      const tile = buildItemTile(item);
       if (item.type === "image") {
-        tile.querySelector(".bandroom-item-thumb").style.setProperty("--tile-color", team.secondary);
-        tile.querySelector(".bandroom-item-thumb").classList.add("bandroom-image-slot");
+        // Pre-existing bug found during this pass: buildItemTile's thumb has always been
+        // .marketplace-card-thumb here (this call site never passed the old inHub=true that
+        // would've made it .bandroom-item-thumb) -- this querySelector always returned null,
+        // throwing on every image-type item and silently truncating the rest of the album grid's
+        // render loop. Fixed to the actual thumb class.
+        const thumb = tile.querySelector(".marketplace-card-thumb");
+        if (thumb) {
+          thumb.style.setProperty("--tile-color", team.secondary);
+          thumb.classList.add("bandroom-image-slot");
+        }
       }
       grid.appendChild(tile);
     }
@@ -5837,6 +5884,19 @@ function renderMatchupCoverflow(side, filter) {
   if (column && sideColor) column.style.setProperty("--side-color", sideColor);
   const badge = document.getElementById("matchup-vs-badge");
   if (badge && sideColor) badge.style.setProperty(`--${side}-badge-color`, sideColor);
+
+  // Same team-background-behind-the-logo treatment applyVsBackdrop already does for the locked-in
+  // VS screen, applied here to the team-picker column too. Guarded by a request token so a fast
+  // arrow-click/search-keystroke burst can't let an earlier, now-stale fetch overwrite a newer one.
+  if (column) {
+    const requestToken = (column._bgRequestToken = (column._bgRequestToken || 0) + 1);
+    if (bridge) {
+      bridge.GetTeamBackgroundUrl(centerTeam.name).then((bgUrl) => {
+        if (column._bgRequestToken !== requestToken) return; // superseded by a newer pick
+        column.style.setProperty("--team-bg-image", bgUrl ? `url("${bgUrl}")` : "none");
+      }).catch(() => {});
+    }
+  }
 
   updateMatchupSubtext();
 }
