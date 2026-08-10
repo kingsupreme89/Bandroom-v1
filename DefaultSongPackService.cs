@@ -205,6 +205,12 @@ internal static class DefaultSongPackService
                     while (File.Exists(destPath = Path.Combine(destDir, $"{destStem}_{n}{ext}"))) n++;
                 }
                 File.Copy(sourceFile, destPath, overwrite: true);
+                // AudioCache (AudioEngine.cs) keys its RAM cache by path and never re-reads a path
+                // it's already cached -- if this exact destPath was played earlier this session
+                // (e.g. mid-game, or from an earlier import) and is now being overwritten by "Load
+                // All", the cache would otherwise keep serving the old bytes indefinitely. A no-op
+                // if this path was never cached.
+                AudioCache.Invalidate(destPath);
                 songCount++;
                 teamsImported.Add(team);
                 processedFiles++;

@@ -308,6 +308,37 @@ public static class IntakeEngine
         return new IntakeResult(cleaned, team, matchType, trigger, source, EventKeysFor(trigger), confidence, flags.ToArray());
     }
 
+    /// <summary>Populates an AudioTrackMetadata suggestion for a newly-imported file: reuses
+    /// Process() for title/team/trigger (no re-implementation of the filename-parsing logic) and
+    /// AudioTrackMetadataStore.AnalyzeAudioFile for the computed duration/loudness fields. Energy
+    /// level is guessed from the matched trigger's usual intensity -- a coarse heuristic, not a
+    /// real audio-analysis classifier -- so it's just a starting point the user confirms/edits in
+    /// the Track Info drawer, same spirit as every other suggestion this engine makes.</summary>
+    public static AudioTrackMetadata AnalyzeAndSuggest(string filePath)
+    {
+        var result = Process(Path.GetFileName(filePath));
+        float duration = 0f, lufsApprox = 0f;
+        try { (duration, lufsApprox) = AudioTrackMetadataStore.AnalyzeAudioFile(filePath); }
+        catch { /* unreadable/corrupt audio file -- leave computed fields null, title/team/trigger suggestions still stand */ }
+
+        return new AudioTrackMetadata
+        {
+            StandardTitle = result.CleanedTitle == "Unknown" ? null : result.CleanedTitle,
+            SchoolAbbreviation = result.Team == "Unknown" ? null : result.Team,
+            EnergyLevel = GuessEnergyLevel(result.PrimaryTrigger),
+            DurationSeconds = duration > 0 ? duration : null,
+            IntegratedLufsApprox = duration > 0 ? lufsApprox : null,
+        };
+    }
+
+    private static readonly HashSet<string> HighEnergyTriggers = new(StringComparer.Ordinal)
+        { "TD_HOME", "BIG_PLAY", "TURNOVER", "INTERCEPTION", "FUMBLE_RECOVERY", "GENERAL_HYPE" };
+    private static readonly HashSet<string> LowEnergyTriggers = new(StringComparer.Ordinal)
+        { "TIMEOUT", "PRE_SNAP", "PENALTY" };
+
+    private static string GuessEnergyLevel(string trigger) =>
+        HighEnergyTriggers.Contains(trigger) ? "High" : LowEnergyTriggers.Contains(trigger) ? "Low" : "Mid";
+
     /// <summary>True if `alias` appears in `lowerText` without being embedded in a longer run of
     /// letters on either side -- e.g. "nw" matches "b1g nw '21" (space-delimited) but not inside
     /// "answer". Digits/punctuation/apostrophes are fine neighbors (matches "clem4thdown"'s

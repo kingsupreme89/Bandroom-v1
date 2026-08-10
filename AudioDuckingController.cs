@@ -1,102 +1,86 @@
-using System;
-using System.Collections.Generic;
-using NAudio.Wave;
-
 namespace SupremeStadiumSoundSelector;
 
-/// <summary>
-/// Controls audio ducking: reduces background music volume when event cues play.
-/// Uses state machine to track duck level and smoothly fade between states.
-/// </summary>
-public sealed class AudioDuckingController
+/// <summary>Sidechain "ducking" gain calculator -- turned into a real, wired-in effect for
+/// the Sound Booth (previously a self-contained state machine that was never instantiated
+/// anywhere and never actually touched output volume). Not tied to any specific player:
+/// every currently-playing clip's own fade-poll loop in AudioPlayer.Play() reads
+/// GetGainMultiplier() each tick and multiplies it into that clip's own volume, so no clip
+/// needs a reference to any other clip. OnHighPriorityEventFired() is called for
+/// Touchdown/Turnover/Safety-class events; the shared gain dips to DuckLevel with a fast
+/// (~20ms) attack and eases back to 1.0 with a slower (~300ms) release once the duck
+/// window elapses.</summary>
+internal static class AudioDuckingController
 {
-    public enum DuckState { Normal, Ducking, Fading }
+    public static bool Enabled = false;
+    const float DuckLevel = 0.4f;
+    const float DuckWindowSeconds = 2.0f;
+    const float AttackPerSecond = 1f / 0.02f;   // reach target in ~20ms
+    const float ReleasePerSecond = 1f / 0.30f;  // ease back over ~300ms
 
-    public DuckState CurrentState { get; private set; } = DuckState.Normal;
-    public float CurrentDuckAmount { get; private set; } = 0f;  // 0-1, where 1 = fully ducked
+    static volatile float _current = 1f;
+    static DateTime _duckUntilUtc = DateTime.MinValue;
+    static DateTime _lastTick = DateTime.UtcNow;
+    static readonly object _lock = new();
+    static bool _loopStarted;
 
-    private float _targetDuckAmount = 0f;
-    private float _fadeDuration = 1f;
-    private List<IWavePlayer> _backgroundPlayers = new();
-
-    public event Action<DuckState>? StateChanged;
-    public event Action<string>? Log;
-
-    public AudioDuckingController() { }
-
-    /// <summary>Event fired (cue playing) - duck the background music.</summary>
-    public void OnEventFired(string eventName)
+    /// <summary>Call when a high-priority event (Touchdown/Turnover/Safety) fires. Ducks
+    /// every other currently-playing clip down to 40% for ~2 seconds, then eases back.
+    /// Extends (never shortens) a single shared deadline rather than each call scheduling its
+    /// own independent "un-duck after 2s" timer -- with independent timers, an earlier event's
+    /// timer could fire and reset the gain to 1.0 while a LATER, overlapping event's 2-second
+    /// window was still supposed to be active (e.g. Touchdown at t=0, Turnover at t=1: the first
+    /// timer firing at t=2 would prematurely end the duck a full second early). EnsureLoop's own
+    /// persistent tick is what decides attack-vs-release each frame by comparing to this deadline,
+    /// so there's only ever one source of truth for "should we still be ducked."</summary>
+    public static void OnHighPriorityEventFired()
     {
-        DuckMusic(targetDuckAmount: 1f, fadeDurationSeconds: 0.2f);
-        Log?.Invoke($"[Ducking] Event fired: {eventName}");
-    }
-
-    /// <summary>Play ended - resume background music.</summary>
-    public void OnPlayEnded()
-    {
-        DuckMusic(targetDuckAmount: 0f, fadeDurationSeconds: 1f);
-        Log?.Invoke("[Ducking] Play ended, resuming music");
-    }
-
-    /// <summary>Called every frame (~400ms) to update duck fade.</summary>
-    public void UpdateDuckFade(float deltaTimeSeconds)
-    {
-        if (Math.Abs(_targetDuckAmount - CurrentDuckAmount) < 0.01f)
+        if (!Enabled) return;
+        lock (_lock)
         {
-            CurrentDuckAmount = _targetDuckAmount;
-            if (CurrentState == DuckState.Fading)
+            var newDeadline = DateTime.UtcNow.AddSeconds(DuckWindowSeconds);
+            if (newDeadline > _duckUntilUtc) _duckUntilUtc = newDeadline;
+        }
+        EnsureLoop();
+    }
+
+    static void EnsureLoop()
+    {
+        lock (_lock)
+        {
+            if (_loopStarted) return;
+            _loopStarted = true;
+        }
+        Task.Run(async () =>
+        {
+            while (true)
             {
-                CurrentState = _targetDuckAmount > 0.5f ? DuckState.Ducking : DuckState.Normal;
-                StateChanged?.Invoke(CurrentState);
+                try
+                {
+                    var now = DateTime.UtcNow;
+                    float dt = (float)(now - _lastTick).TotalSeconds;
+                    _lastTick = now;
+                    float target = now < _duckUntilUtc ? DuckLevel : 1f;
+                    float rate = target < _current ? AttackPerSecond : ReleasePerSecond;
+                    float step = rate * dt;
+                    _current = target < _current
+                        ? Math.Max(target, _current - step)
+                        : Math.Min(target, _current + step);
+                }
+                catch (Exception ex)
+                {
+                    // This loop runs for the entire process lifetime once started -- an unhandled
+                    // exception here would silently kill it (unobserved task fault) and leave
+                    // _current frozen wherever it was, potentially stuck mid-duck (e.g. every clip
+                    // permanently capped at 40% volume) for the rest of the session with no
+                    // recovery. Log and keep ticking rather than let one bad tick end the loop.
+                    CrashLog.Write("AudioDuckingController loop tick failed", ex);
+                }
+                await Task.Delay(15);
             }
-            return;
-        }
-
-        // Smoothly interpolate toward target
-        float step = (1f / _fadeDuration) * deltaTimeSeconds;
-        CurrentDuckAmount = float.Lerp(CurrentDuckAmount, _targetDuckAmount, Math.Min(step, 1f));
-
-        if (CurrentState != DuckState.Fading)
-        {
-            CurrentState = DuckState.Fading;
-            StateChanged?.Invoke(CurrentState);
-        }
+        });
     }
 
-    /// <summary>Set ducking target and fade duration.</summary>
-    private void DuckMusic(float targetDuckAmount, float fadeDurationSeconds)
-    {
-        _targetDuckAmount = Math.Clamp(targetDuckAmount, 0f, 1f);
-        _fadeDuration = fadeDurationSeconds;
-    }
-
-    /// <summary>Preset ducking profiles for different use cases.</summary>
-    public void SetDuckingPreset(string presetName)
-    {
-        switch (presetName?.ToLower())
-        {
-            case "aggressive":  // Fade very quick, deep duck
-                DuckMusic(1f, 0.15f);
-                break;
-            case "subtle":      // Slow fade, light duck
-                DuckMusic(0.4f, 2f);
-                break;
-            case "off":         // No ducking
-                DuckMusic(0f, 0f);
-                break;
-            default:            // Standard
-                DuckMusic(1f, 0.3f);
-                break;
-        }
-    }
-
-    /// <summary>Get current duck level as dB reduction (0 to -30dB).</summary>
-    public float GetDuckLevelDb() => -30f * CurrentDuckAmount;
-
-    /// <summary>Register background audio player for ducking.</summary>
-    public void RegisterBackgroundPlayer(IWavePlayer player)
-    {
-        if (player != null && !_backgroundPlayers.Contains(player))
-            _backgroundPlayers.Add(player);
-    }
+    /// <summary>Current shared duck gain (1.0 = no ducking). Multiply into any clip's own
+    /// volume each poll tick -- returns 1.0 unconditionally when ducking is disabled.</summary>
+    public static float GetGainMultiplier() => Enabled ? _current : 1f;
 }

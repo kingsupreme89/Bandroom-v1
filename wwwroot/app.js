@@ -333,6 +333,10 @@ async function pollTickerActivity() {
     parts.push(
       ...items.map((it) => `${it.name} (${it.type === "song" ? "song" : "background"}) uploaded by ${it.school}`)
     );
+    // Standing credit -- always included in the ticker rotation, not tied to live upload data.
+    parts.push(
+      "Special Thanks To: CubensisMonster (School Band Rooms) & WashedOutConsultant (Base Sound Pack), For Their Contributions! This Would Be The Same Without You!"
+    );
     if (parts.length > 0) el.textContent = parts.join("      •      ");
   } catch (err) {
     console.error("pollTickerActivity failed", err);
@@ -505,6 +509,7 @@ async function openSituations(category) {
           <button class="bandroom-item-action" data-act="preview" title="Play" ${ev.fileName ? "" : "disabled"}>&#9654;</button>
           <button class="bandroom-item-action" data-act="stop" title="Stop">&#9209;</button>
           <button class="bandroom-item-action" data-act="volume" title="Adjust this event's own volume">&#128266;</button>
+          <button class="bandroom-item-action" data-act="track-info" title="Track Info" ${ev.fileName ? "" : "disabled"}>&#8505;</button>
         </span>
         <div class="situation-volume-popover" hidden>
           <input type="range" min="0" max="100" value="100" class="slider situation-volume-slider" />
@@ -516,6 +521,7 @@ async function openSituations(category) {
     row.querySelector('[data-act="assign-pa"]').addEventListener("click", () => openClipperAssign(ev.trigger, ev.eventName, true, ev.paFileName));
     row.querySelector('[data-act="preview"]').addEventListener("click", () => { _previewAudio?.pause(); bridge?.PreviewEvent(ev.trigger); });
     row.querySelector('[data-act="stop"]').addEventListener("click", () => bridge?.StopPreview());
+    row.querySelector('[data-act="track-info"]').addEventListener("click", () => openTrackInfoDrawer(ev.trigger, ev.fileName));
     wireSituationVolumePopover(row, ev.trigger);
     list.appendChild(row);
   }
@@ -1276,6 +1282,74 @@ function setWatching(mode) {
   if (stopBtn) stopBtn.hidden = mode === "off";
 }
 
+// ---- Track Info drawer (see AudioTrackMetadata.cs / WebBridge.GetTrackMetadata et al) ----
+let _trackInfoTrigger = null;
+// durationSeconds/integratedLufsApprox aren't editable in the form -- kept here so Save doesn't
+// silently drop whatever GetTrackMetadata/AnalyzeTrackMetadata last computed for this file.
+let _trackInfoComputed = { durationSeconds: null, integratedLufsApprox: null };
+
+function fillTrackInfoForm(meta) {
+  _trackInfoComputed = { durationSeconds: meta?.durationSeconds ?? null, integratedLufsApprox: meta?.integratedLufsApprox ?? null };
+  document.getElementById("ti-title").value = meta?.standardTitle ?? "";
+  document.getElementById("ti-artist").value = meta?.standardArtist ?? "";
+  document.getElementById("ti-school").value = meta?.schoolAbbreviation ?? "";
+  document.getElementById("ti-energy").value = meta?.energyLevel ?? "";
+  document.getElementById("ti-instrumentation").value = meta?.prominentInstrumentation ?? "";
+  document.getElementById("ti-trim").value = meta?.recommendedTrim ?? "";
+  document.getElementById("ti-duration").textContent = meta?.durationSeconds
+    ? `Duration: ${meta.durationSeconds.toFixed(1)}s` : "";
+  document.getElementById("ti-lufs").textContent = meta?.integratedLufsApprox != null
+    ? `Loudness (approx): ${meta.integratedLufsApprox.toFixed(1)} dBFS` : "";
+}
+
+async function openTrackInfoDrawer(trigger, fileName) {
+  _trackInfoTrigger = trigger;
+  document.getElementById("track-info-overlay").hidden = false;
+  document.getElementById("track-info-filename").textContent = fileName || "";
+  let meta = null;
+  try { meta = JSON.parse(await bridge.GetTrackMetadata(trigger)); } catch (err) { console.error("GetTrackMetadata failed", err); }
+  document.getElementById("track-info-empty").hidden = !!meta;
+  fillTrackInfoForm(meta);
+}
+document.getElementById("btn-close-track-info")?.addEventListener("click", () => {
+  document.getElementById("track-info-overlay").hidden = true;
+  _trackInfoTrigger = null;
+});
+document.getElementById("btn-track-info-suggest")?.addEventListener("click", async () => {
+  if (!_trackInfoTrigger || !bridge) return;
+  try {
+    const result = JSON.parse(await bridge.AnalyzeTrackMetadata(_trackInfoTrigger));
+    if (result.success) {
+      document.getElementById("track-info-empty").hidden = true;
+      fillTrackInfoForm(result.metadata);
+    } else {
+      showToast(result.error || "Couldn't analyze this file.");
+    }
+  } catch (err) { console.error("AnalyzeTrackMetadata failed", err); }
+});
+document.getElementById("btn-track-info-save")?.addEventListener("click", async () => {
+  if (!_trackInfoTrigger || !bridge) return;
+  const metadata = {
+    standardTitle: document.getElementById("ti-title").value.trim() || null,
+    standardArtist: document.getElementById("ti-artist").value.trim() || null,
+    schoolAbbreviation: document.getElementById("ti-school").value.trim() || null,
+    energyLevel: document.getElementById("ti-energy").value || null,
+    prominentInstrumentation: document.getElementById("ti-instrumentation").value.trim() || null,
+    recommendedTrim: document.getElementById("ti-trim").value.trim() || null,
+    durationSeconds: _trackInfoComputed.durationSeconds,
+    integratedLufsApprox: _trackInfoComputed.integratedLufsApprox,
+  };
+  try {
+    const result = JSON.parse(await bridge.SaveTrackMetadata(_trackInfoTrigger, JSON.stringify(metadata)));
+    if (result.success) {
+      showToast("Track info saved.");
+      document.getElementById("track-info-overlay").hidden = true;
+    } else {
+      showToast(result.error || "Couldn't save track info.");
+    }
+  } catch (err) { console.error("SaveTrackMetadata failed", err); }
+});
+
 // ---- Profile / Google sign-in (scaffolded -- see GoogleAuthService.ClientId for setup status) ----
 async function openProfile() {
   document.getElementById("profile-overlay").hidden = false;
@@ -1379,6 +1453,29 @@ async function refreshUniversalProfileView() {
   renderProfileAchievements(profile.achievements ?? []);
   renderProfileByTeamList(profile.gamesWatchedByTeam ?? {});
   await renderProfileMyUploads();
+  await renderProfileActivityFeed();
+}
+
+// Real activity feed -- reuses the same EventActivityLog buffer that powers the Help & Guide
+// Event Log tab (see WebBridge.GetEventActivityLog), shown newest-first, capped to the most
+// recent 15 entries so the profile panel doesn't grow unbounded.
+async function renderProfileActivityFeed() {
+  const el = document.getElementById("profile-activity-feed");
+  if (!el || !bridge) return;
+  let entries;
+  try {
+    entries = JSON.parse(await bridge.GetEventActivityLog());
+  } catch (err) {
+    console.error("GetEventActivityLog failed", err);
+    return;
+  }
+  const recent = entries.slice(-15).reverse();
+  el.innerHTML = recent.length
+    ? recent.map((e) => {
+        const [time, ...rest] = e.text.split(" -- ");
+        return `<div class="profile-activity-item"><span class="profile-activity-time">${time}</span><span>${rest.join(" -- ")}</span></div>`;
+      }).join("")
+    : `<div class="profile-activity-item">No activity yet -- fire a cue to see it here.</div>`;
 }
 
 function renderProfileAchievements(achievements) {
@@ -6695,7 +6792,7 @@ const COMMANDS = [
   { icon: "🎮", label: "Streamer Mode", hint: "toggle", action: () => toggleStreamerMode() },
   { icon: "⌨️", label: "Keyboard Shortcuts", hint: "hotkeys", action: () => openHotkeyPanel() },
   { icon: "📋", label: "Tips", hint: "show tip", action: () => showNextTip() },
-  { icon: "👤", label: "Profile", hint: "dashboard", action: () => openProfileDashboard() },
+  { icon: "👤", label: "Profile", hint: "dashboard", action: () => openProfile() },
   { icon: "⚙️", label: "Settings", hint: "preferences", action: () => document.getElementById("btn-settings")?.click() },
   { icon: "ℹ️", label: "Help", hint: "guide", action: () => bridge?.ShowHelp() },
   { icon: "🔄", label: "Reset Team Profile", hint: "reset", action: () => resetTeamProfile() },
@@ -7038,38 +7135,6 @@ document.getElementById("tip-never-show")?.addEventListener("click", () => {
   showToast("Tips disabled. Re-enable from Settings.");
 });
 document.getElementById("tip-next")?.addEventListener("click", showNextTip);
-
-// ================================================================
-// PROFILE DASHBOARD
-// ================================================================
-function openProfileDashboard() {
-  const overlay = document.getElementById("profile-dashboard-overlay");
-  overlay.hidden = false;
-  const stats = _getProfileStats();
-  document.getElementById("pd-stat-games").textContent = stats.games;
-  document.getElementById("pd-stat-songs").textContent = stats.songs;
-  document.getElementById("pd-stat-uploads").textContent = stats.uploads;
-  document.getElementById("pd-stat-downloads").textContent = stats.downloads;
-  document.getElementById("pd-stat-followers").textContent = stats.followers;
-  document.getElementById("profile-dashboard-name").textContent = state.activeTeam;
-  const team = state.teams.find((t) => t.name === state.activeTeam);
-  document.getElementById("profile-dashboard-avatar").src = team?.logoUrl || "";
-  // Populate activity feed
-  const feed = document.getElementById("profile-activity-feed");
-  feed.innerHTML = `<div class="profile-activity-item"><span class="profile-activity-time">Just now</span> Using Bandroom</div>`;
-}
-document.getElementById("btn-close-profile-dashboard")?.addEventListener("click", () => {
-  document.getElementById("profile-dashboard-overlay").hidden = true;
-});
-function _getProfileStats() {
-  return {
-    games: parseInt(document.getElementById("profile-stat-games")?.textContent || "0"),
-    songs: parseInt(document.getElementById("profile-stat-songs")?.textContent || "0"),
-    uploads: parseInt(document.getElementById("profile-stat-uploads")?.textContent || "0"),
-    downloads: parseInt(document.getElementById("profile-stat-downloads")?.textContent || "0"),
-    followers: 0,
-  };
-}
 
 // ================================================================
 // LEADERBOARDS
@@ -7424,7 +7489,7 @@ const HOTKEYS = [
   { label: "Set Matchup", keys: ["Ctrl", "M"], action: openMatchupPicker },
   { label: "Save Profile", keys: ["Ctrl", "Shift", "S"], action: openSaveProfileDialog },
   { label: "Streamer Mode", keys: ["Ctrl", "Alt", "S"], action: toggleStreamerMode },
-  { label: "Profile", keys: ["Ctrl", "P"], action: openProfileDashboard },
+  { label: "Profile", keys: ["Ctrl", "P"], action: openProfile },
   { label: "Undo", keys: ["Ctrl", "Z"], action: undoLastAction },
   { label: "Tips", keys: ["Ctrl", "T"], action: showNextTip },
 ];

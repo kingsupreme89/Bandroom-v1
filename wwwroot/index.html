@@ -307,6 +307,44 @@
         </div>
       </div>
 
+      <!-- Track Info drawer -- editable AudioTrackMetadata sidecar for the song assigned to one
+           trigger (see WebBridge.GetTrackMetadata/SaveTrackMetadata/AnalyzeTrackMetadata,
+           AudioTrackMetadata.cs). Slides in from the right rather than centered, so it reads as a
+           detail panel on top of whatever situations list opened it. -->
+      <div id="track-info-overlay" hidden>
+        <div id="track-info-dialog" class="glass track-info-glow">
+          <div class="clipper-header">
+            <span class="clipper-title">Track Info</span>
+            <button id="btn-close-track-info" class="icon-btn">&times;</button>
+          </div>
+          <div id="track-info-filename"></div>
+          <div id="track-info-empty" hidden>No metadata yet -- click "Suggest" to auto-fill from the file, or fill it in yourself.</div>
+          <div id="track-info-form">
+            <label>Title <input type="text" id="ti-title" maxlength="120" /></label>
+            <label>Artist <input type="text" id="ti-artist" maxlength="120" /></label>
+            <label>School <input type="text" id="ti-school" maxlength="20" /></label>
+            <label>Energy Level
+              <select id="ti-energy">
+                <option value="">Not set</option>
+                <option value="High">High</option>
+                <option value="Mid">Mid</option>
+                <option value="Low">Low</option>
+              </select>
+            </label>
+            <label>Instrumentation <input type="text" id="ti-instrumentation" maxlength="140" placeholder="e.g. Heavy Brass, Marching Snare Drums" /></label>
+            <label>Recommended Trim <input type="text" id="ti-trim" maxlength="40" placeholder="e.g. 00:05-00:15 (10s)" /></label>
+            <div id="track-info-computed">
+              <span id="ti-duration"></span>
+              <span id="ti-lufs"></span>
+            </div>
+          </div>
+          <div class="save-profile-actions">
+            <button id="btn-track-info-suggest" class="btn-ghost">Suggest</button>
+            <button id="btn-track-info-save" class="btn-primary">Save</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Center: team background showing through, with a horizontal categories strip on top -->
       <div id="center-column">
         <!-- Only shown once a matchup is set (see #btn-matchup). Assigning songs below always
@@ -835,6 +873,12 @@
 
       <div class="save-profile-header" id="profile-uploads-header">My Uploads</div>
       <div id="profile-my-uploads-list"><!-- populated by app.js from local upload tracking --></div>
+
+      <!-- Recent Activity -- real plain-English feed from the audio engine's EventActivityLog
+           ring buffer (see WebBridge.GetEventActivityLog, already powering the Help & Guide Event
+           Log tab), not a fake placeholder line. -->
+      <div class="save-profile-header" id="profile-activity-header">Recent Activity</div>
+      <div id="profile-activity-feed" class="profile-activity-feed"><!-- populated by app.js --></div>
 
       <label id="profile-toasts-toggle-row">
         <input type="checkbox" id="profile-toasts-toggle" checked />
@@ -1436,35 +1480,6 @@
       <button id="btn-close-hotkey-panel" class="icon-btn">&times;</button>
     </div>
     <div id="hotkey-list"><!-- populated by app.js --></div>
-  </div>
-
-  <!-- Profile Dashboard (replacing modal) -->
-  <div id="profile-dashboard-overlay" hidden>
-    <div id="profile-dashboard" class="glass">
-      <div class="team-picker-header">
-        <span>Profile</span>
-        <button id="btn-close-profile-dashboard" class="icon-btn">&times;</button>
-      </div>
-      <div class="profile-dashboard-header">
-        <img id="profile-dashboard-avatar" class="profile-avatar-lg" alt="" src="" />
-        <div>
-          <div class="profile-name-lg" id="profile-dashboard-name">User</div>
-          <div class="profile-handle" id="profile-dashboard-handle">@user</div>
-          <button class="follow-btn" id="profile-dashboard-follow-btn" hidden>Follow</button>
-        </div>
-      </div>
-      <div class="profile-stats">
-        <div class="profile-stat"><div class="profile-stat-value" id="pd-stat-games">0</div><div class="profile-stat-label">Games</div></div>
-        <div class="profile-stat"><div class="profile-stat-value" id="pd-stat-songs">0</div><div class="profile-stat-label">Songs</div></div>
-        <div class="profile-stat"><div class="profile-stat-value" id="pd-stat-uploads">0</div><div class="profile-stat-label">Uploads</div></div>
-        <div class="profile-stat"><div class="profile-stat-value" id="pd-stat-downloads">0</div><div class="profile-stat-label">Downloads</div></div>
-        <div class="profile-stat"><div class="profile-stat-value" id="pd-stat-followers">0</div><div class="profile-stat-label">Followers</div></div>
-      </div>
-      <div class="panel-title">Activity</div>
-      <div class="profile-activity-feed" id="profile-activity-feed">
-        <div class="bandroom-recent-empty">No recent activity</div>
-      </div>
-    </div>
   </div>
 
   <!-- Resume last session bar -->

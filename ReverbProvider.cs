@@ -2,7 +2,7 @@ using NAudio.Wave;
 
 namespace SupremeStadiumSoundSelector;
 
-internal enum ReverbPreset { Off, Stadium, Dome, NightGame }
+internal enum ReverbPreset { Off, Stadium, Dome, NightGame, StadiumRain, NightGamePrimeTime }
 
 internal static class ReverbPresets
 {
@@ -10,9 +10,12 @@ internal static class ReverbPresets
     // brighter/longer tail, more wet = more obviously "in the room" vs. dry/direct.
     public static (float roomSize, float damp, float wet, float width) Get(ReverbPreset preset) => preset switch
     {
-        ReverbPreset.Stadium => (0.75f, 0.35f, 0.28f, 1.0f),   // big open-air tail, some absorption from the crowd
-        ReverbPreset.Dome => (0.85f, 0.15f, 0.35f, 1.0f),      // enclosed, bright, long reflective tail
-        ReverbPreset.NightGame => (0.55f, 0.55f, 0.20f, 0.8f), // tighter, warmer, more damped -- cooler night air
+        ReverbPreset.Stadium => (0.75f, 0.35f, 0.28f, 1.0f),         // big open-air tail, some absorption from the crowd
+        ReverbPreset.Dome => (0.85f, 0.15f, 0.35f, 1.0f),            // enclosed, bright, long reflective tail
+        ReverbPreset.NightGame => (0.55f, 0.55f, 0.20f, 0.8f),       // tighter, warmer, more damped -- cooler night air
+        // Sound Booth weather variants (item #10):
+        ReverbPreset.StadiumRain => (0.60f, 0.70f, 0.22f, 0.85f),    // rain absorbs highs -- muffled, close, "wet November game"
+        ReverbPreset.NightGamePrimeTime => (0.65f, 0.40f, 0.24f, 1.0f), // big-game-under-the-lights: wider stereo image than NightGame
         _ => (0f, 0f, 0f, 0f),
     };
 }

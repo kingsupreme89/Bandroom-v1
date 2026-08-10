@@ -26,9 +26,26 @@ internal static class AudioPlayer
     public static ReverbPreset CurrentReverb = ReverbPreset.Off;
 
     // All exposed in the UI's Settings panel now, so no longer const.
-    public static double PreRollSeconds = 1.0;
+    // Sound Booth overhaul: was 1.0s -- that full second between a game event and the sound
+    // actually starting was the #1 complaint. RAM caching (AudioCache, below) is what makes
+    // 0.0 safe: there's no more disk-read stall hiding under the old delay.
+    public static double PreRollSeconds = 0.0;
     public static double FadeStartSeconds = 10.0;
     public static double FadeOutDuration = 4.5;
+
+    // ---- Sound Booth toggles (all off by default; every one gets a plain-English (i)
+    // description in the UI). Bypassable as a group via NoEffectsBypass. ----
+    public static bool NoEffectsBypass = false;
+    public static EqPreset CurrentEq = EqPreset.Off;
+    public static bool TransientShaperEnabled = false;
+    public static bool StereoWidenerEnabled = false;
+    public static float StereoWidenerAmount = 0.5f;
+    public static bool LimiterEnabled = true; // safety stage -- on by default, not really "an effect"
+    public static bool DuckingEnabled
+    {
+        get => AudioDuckingController.Enabled;
+        set => AudioDuckingController.Enabled = value;
+    }
 
     /// <summary>Owner request: a short cue (e.g. a band whistle) prepended immediately before
     /// every real triggered clip AND every manual preview, with zero gap -- like a drum major's
@@ -128,7 +145,10 @@ internal static class AudioPlayer
     /// is only meaningful for real game triggers) and skips the FireCooldown gate (owner: without
     /// this, clicking Preview on the same clip twice within 20s silently played nothing, with no
     /// error -- looked exactly like a broken/unassigned event).</param>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false)
+    /// <param name="isHighPriorityEvent">True for Touchdown/Turnover/Safety-class triggers --
+    /// when DuckingEnabled is on, every OTHER currently-playing clip is ducked to 40% for a
+    /// couple seconds so this one (and any PA layer playing alongside it) cuts through clearly.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
@@ -143,6 +163,7 @@ internal static class AudioPlayer
         }
 
         if (interruptPrevious) StopAll();
+        if (isHighPriorityEvent) AudioDuckingController.OnHighPriorityEventFired();
 
         float volume = volumeOverride ?? MasterVolume;
 
@@ -152,23 +173,41 @@ internal static class AudioPlayer
             {
                 if (!isPreview) Thread.Sleep((int)(PreRollSeconds * 1000)); // brief delay so it doesn't feel like it's stepping on the trigger moment
 
-                using var reader = new AudioFileReader(path);
+                // RAM cache first (Sound Booth: item #2) -- falls back to a normal disk read
+                // via AudioFileReader inside CachedAudioSource.Open if this path hasn't been
+                // preloaded (e.g. a brand-new assignment made mid-game).
+                using var audio = CachedAudioSource.Open(path);
                 using var output = new WaveOutEvent();
                 lock (Lock) ActiveOutputs.Add(output);
-                reader.Volume = volume;
+                audio.Volume = volume;
                 AudioFileReader? leadInReader = null;
 
                 try
                 {
-                    ISampleProvider source = reader.WaveFormat.Channels == 1
-                        ? new MonoToStereoSampleProvider(reader)
-                        : reader;
+                    ISampleProvider source = audio.WaveFormat.Channels == 1
+                        ? new MonoToStereoSampleProvider(audio.Sample)
+                        : audio.Sample;
 
-                    var preset = CurrentReverb;
-                    if (preset != ReverbPreset.Off)
+                    bool bypass = NoEffectsBypass; // "No Effects" button: skip every DSP stage, dry signal only
+
+                    if (!bypass)
                     {
-                        var (roomSize, damp, wet, width) = ReverbPresets.Get(preset);
-                        source = new ReverbProvider(source, roomSize, damp, wet, width);
+                        var preset = CurrentReverb;
+                        if (preset != ReverbPreset.Off)
+                        {
+                            var (roomSize, damp, wet, width) = ReverbPresets.Get(preset);
+                            source = new ReverbProvider(source, roomSize, damp, wet, width);
+                        }
+
+                        source = CurrentEq switch
+                        {
+                            EqPreset.MarchingBand => new ParametricEqProvider(source),
+                            EqPreset.Megaphone => new MegaphoneEqProvider(source),
+                            _ => source,
+                        };
+
+                        if (TransientShaperEnabled) source = new TransientShaperProvider(source);
+                        if (StereoWidenerEnabled) source = new StereoWidenerProvider(source, StereoWidenerAmount);
                     }
 
                     // Lead-in whistle: built from the main clip's post-mono/pre-reverb WaveFormat
@@ -183,12 +222,18 @@ internal static class AudioPlayer
                         if (leadIn != null) source = new SequencedSampleProvider(leadIn, source);
                     }
 
+                    // Master safety stage -- last thing before output, protects against clipping
+                    // when multiple clips overlap. Not affected by the "No Effects" bypass since
+                    // it's a safety net, not a creative effect.
+                    if (LimiterEnabled) source = new LimiterProvider(source);
+
                     output.Init(source.ToWaveProvider());
                     output.Play();
 
                     while (output.PlaybackState == PlaybackState.Playing)
                     {
-                        double elapsed = reader.CurrentTime.TotalSeconds;
+                        double elapsed = audio.CurrentTime.TotalSeconds;
+                        float duckMul = isHighPriorityEvent ? 1f : AudioDuckingController.GetGainMultiplier();
 
                         if (elapsed >= FadeStartSeconds)
                         {
@@ -198,13 +243,13 @@ internal static class AudioPlayer
                                 output.Stop();
                                 break;
                             }
-                            reader.Volume = volume * (float)(1.0 - fadeProgress);
+                            audio.Volume = volume * (float)(1.0 - fadeProgress) * duckMul;
                             Thread.Sleep(30); // finer steps during the fade for a smooth ramp
                         }
                         else
                         {
-                            reader.Volume = volume;
-                            Thread.Sleep(200);
+                            audio.Volume = volume * duckMul;
+                            Thread.Sleep(15); // fast enough to track the ~20ms duck attack smoothly
                         }
                     }
                 }

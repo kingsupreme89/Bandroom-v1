@@ -896,46 +896,8 @@ input, select, textarea, [contenteditable] {
 }
 
 /* ================================================================
-   PROFILE DASHBOARD (replacing modal)
+   PROFILE STATS / ACTIVITY (used by #profile-overlay)
    ================================================================ */
-#profile-dashboard-overlay {
-  position: fixed; inset: 0; z-index: 70;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.55);
-}
-#profile-dashboard-overlay[hidden] { display: none; }
-#profile-dashboard {
-  width: min(720px, 92vw); max-height: 85vh; overflow-y: auto;
-  border-radius: var(--radius-panel);
-  padding: 24px 28px;
-  background: rgba(10,11,13,0.9);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: blur(32px);
-  -webkit-backdrop-filter: blur(32px);
-  animation: cmd-enter 0.2s ease;
-}
-.profile-dashboard-header {
-  display: flex; align-items: center; gap: 16px;
-  margin-bottom: 20px;
-}
-.profile-avatar-lg {
-  width: 72px; height: 72px; border-radius: 50%;
-  object-fit: cover; border: 2px solid var(--accent);
-  box-shadow: 0 0 16px rgba(34,211,238,0.3);
-}
-.profile-name-lg {
-  font-size: 25px; font-weight: 700;
-}
-.profile-handle {
-  font-size: 15px; color: var(--text-muted);
-}
-.profile-banner {
-  width: 100%; height: 120px;
-  border-radius: 16px;
-  object-fit: cover;
-  margin-bottom: 16px;
-  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 30%, #000));
-}
 .profile-stats {
   display: flex; gap: 20px; margin-bottom: 20px;
 }
@@ -3072,6 +3034,86 @@ input, select, textarea, [contenteditable] {
 .reverb-tile:hover { background: rgba(255,255,255,0.06); }
 .reverb-tile.active { background: var(--accent); color: #06222a; border-color: transparent; }
 
+/* ================================================================
+   THE SOUND BOOTH -- pill/glass dashboard for the Sound Booth
+   overhaul. Reuses .reverb-tile's pill shape (as .sb-tile), the
+   existing streamer-pulse LED-dot pattern, and the situation-volume
+   popover's floating-card look for the (i) info explanations, so it
+   reads as the same design language as the rest of the app rather
+   than a bolted-on new screen.
+   ================================================================ */
+.soundbooth {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--glass-border));
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  position: relative;
+}
+.soundbooth-title { display: flex; align-items: center; gap: 8px; }
+.soundbooth-led {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: streamer-pulse 2s ease-in-out infinite;
+}
+.soundbooth-no-effects {
+  margin: 6px 0 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--glass-border));
+}
+.soundbooth-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  position: relative;
+}
+.soundbooth-label { display: flex; align-items: center; gap: 6px; font-size: 13.5px; flex: 1 1 auto; }
+.soundbooth-eq-tiles { display: flex; gap: 4px; }
+.sb-tile {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted-2);
+  font-size: 11.5px; font-weight: 600;
+  cursor: pointer;
+}
+.sb-tile:hover { background: rgba(255,255,255,0.06); }
+.sb-tile.active { background: var(--accent); color: #06222a; border-color: transparent; }
+.sb-info {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 10.5px; font-style: italic; font-weight: 700;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.sb-info:hover { background: var(--accent); color: #06222a; border-color: transparent; }
+.soundbooth-info-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  width: 240px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel-bg, #1a1d24);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--glass-border));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.soundbooth-info-popover[hidden] { display: none; }
+.soundbooth-info-text { font-size: 12.5px; line-height: 1.5; color: var(--text-primary); margin-bottom: 8px; }
+.soundbooth-info-close {
+  background: var(--accent); color: #06222a; border: none;
+  border-radius: 999px; padding: 4px 12px;
+  font-size: 11.5px; font-weight: 700; cursor: pointer;
+}
+
 .changelog-list {
   font-size: 13px;
   line-height: 1.5;
@@ -3311,14 +3353,33 @@ input, select, textarea, [contenteditable] {
    .profile-dialog's existing fixed-centered-overlay pattern. */
 #matchup-overlay, #save-profile-overlay, #bandroom-upload-overlay, #load-profile-overlay,
 #logo-crop-overlay, #bg-crop-overlay, #auto-assign-confirm-overlay, #auto-assign-summary-overlay,
-#quick-load-confirm-overlay {
+#quick-load-confirm-overlay, #track-info-overlay {
   position: fixed; inset: 0; z-index: 60;
   display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.6);
 }
 #matchup-overlay[hidden], #save-profile-overlay[hidden], #bandroom-upload-overlay[hidden], #load-profile-overlay[hidden],
 #logo-crop-overlay[hidden], #bg-crop-overlay[hidden], #auto-assign-confirm-overlay[hidden], #auto-assign-summary-overlay[hidden],
-#quick-load-confirm-overlay[hidden] { display: none; }
+#quick-load-confirm-overlay[hidden], #track-info-overlay[hidden] { display: none; }
+
+/* Track Info drawer -- same fixed-centered-glass footprint as the overlays above, plus the
+   standing team-color neon-pulse LED glow every new pill/modal/drawer in this app uses. */
+#track-info-dialog {
+  width: min(420px, 92vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 20px;
+  border-radius: var(--radius-panel);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.track-info-glow { animation: neon-pulse 3.2s ease-in-out infinite; }
+#track-info-filename { font-size: 13px; color: var(--text-muted); word-break: break-all; }
+#track-info-form { display: flex; flex-direction: column; gap: 10px; }
+#track-info-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-muted); }
+#track-info-form input, #track-info-form select { padding: 6px 10px; }
+#track-info-computed { display: flex; gap: 14px; font-size: 12px; color: var(--text-muted); }
 #quick-load-confirm-dialog { width: min(380px, 90vw); padding: 20px; border-radius: var(--radius-panel); }
 
 .quick-load-wrap { position: relative; display: flex; align-items: center; margin-left: 8px; }

@@ -262,6 +262,70 @@ public sealed class WebBridge
         return await ShareLocalTrackToMarketplace(entry.Id, school);
     }
 
+    // ---- Track Info drawer / audio metadata (see AudioTrackMetadata.cs) -----------------------
+    // Keyed by trigger (like GetEventsForCategory/AssignEvent above), not by raw file path --
+    // this bridge deliberately doesn't hand local filesystem paths to the renderer wholesale (see
+    // GetEventsForCategory's fileName-only shape), so these look the assigned AudioFile up
+    // server-side from the trigger the UI already has instead of taking a path parameter.
+    string? ResolveAudioFileForTrigger(string trigger) =>
+        _host.GetEvents(null).FirstOrDefault(e => e.Trigger == trigger && !string.IsNullOrWhiteSpace(e.AudioFile))?.AudioFile;
+
+    // AudioTrackMetadata is a real class (PascalCase properties), but every JS-facing payload in
+    // this bridge uses lowerCamelCase keys (see WebMainForm.cs's same convention for its own
+    // camelCase JsonSerializerOptions) -- anonymous types get this for free from their C# literal
+    // property names, a real class needs the naming policy spelled out explicitly.
+    static readonly JsonSerializerOptions CamelCaseJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    /// <summary>Null (serialized as JSON null) if the trigger has no song assigned yet, or the
+    /// assigned song has no `.meta.json` sidecar yet -- the drawer shows "No metadata available"
+    /// in either case, not an error.</summary>
+    public string GetTrackMetadata(string trigger)
+    {
+        var audioFile = ResolveAudioFileForTrigger(trigger);
+        if (audioFile == null) return "null";
+        var meta = AudioTrackMetadataStore.Load(audioFile);
+        return meta != null ? JsonSerializer.Serialize(meta, CamelCaseJsonOptions) : "null";
+    }
+
+    public string SaveTrackMetadata(string trigger, string metadataJson)
+    {
+        var audioFile = ResolveAudioFileForTrigger(trigger);
+        if (audioFile == null)
+            return JsonSerializer.Serialize(new { success = false, error = "No song is assigned to this trigger yet." });
+        try
+        {
+            var meta = JsonSerializer.Deserialize<AudioTrackMetadata>(metadataJson, CamelCaseJsonOptions) ?? new AudioTrackMetadata();
+            AudioTrackMetadataStore.Save(audioFile, meta);
+            return JsonSerializer.Serialize(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SaveTrackMetadata failed", ex);
+            return JsonSerializer.Serialize(new { success = false, error = "Couldn't save track info." });
+        }
+    }
+
+    /// <summary>Runs IntakeEngine.AnalyzeAndSuggest fresh (filename parsing + duration/loudness
+    /// read straight off the file) -- powers the drawer's "Regenerate Suggestions" button. Does
+    /// NOT save; the user still confirms via SaveTrackMetadata, same review-before-apply pattern
+    /// as every other IntakeEngine suggestion in this app.</summary>
+    public string AnalyzeTrackMetadata(string trigger)
+    {
+        var audioFile = ResolveAudioFileForTrigger(trigger);
+        if (audioFile == null || !File.Exists(audioFile))
+            return JsonSerializer.Serialize(new { success = false, error = "No song is assigned to this trigger yet." });
+        try
+        {
+            var suggestion = IntakeEngine.AnalyzeAndSuggest(audioFile);
+            return JsonSerializer.Serialize(new { success = true, metadata = suggestion }, CamelCaseJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("AnalyzeTrackMetadata failed", ex);
+            return JsonSerializer.Serialize(new { success = false, error = "Couldn't analyze this file." });
+        }
+    }
+
     // ---- Profile sharing ("Load Profile from Others") -----------------------------------------
     // Shares/loads a whole team's trigger->song assignment MAP, not audio bytes -- the uploaded
     // JSON only ever contains trigger/event/filename, never a full local path (those are
@@ -687,6 +751,13 @@ public sealed class WebBridge
         int totalActivity = p.GamesWatched * 5 + p.SongsTriggered + p.MarketplaceUploads * 10 + p.MarketplaceDownloads * 2;
         int level = 1 + totalActivity / 50;
 
+        // Achievement list is intentionally limited to what UserProfile actually tracks today.
+        // Several ideas floated for this batch -- Fight Song Collector (per-team assignment
+        // count), Rivalry Master (per-game opponent), Full Band (per-team slot completeness),
+        // Prime Time (per-game clock state), 5-Star Rated (marketplace ratings), Dynasty Mode
+        // (save-file detection), Iron Wall (per-game defensive-event count) -- would need new
+        // per-game or per-team-slot tracking that doesn't exist yet, so they're left out rather
+        // than backed by a field that doesn't mean what the badge claims.
         var achievements = new List<object>
         {
             new { id = "favorite_team_set", label = "Picked a Favorite Team", unlocked = p.FavoriteTeam != null },
@@ -697,6 +768,10 @@ public sealed class WebBridge
             new { id = "hundred_songs", label = "100 Songs Triggered", unlocked = p.SongsTriggered >= 100 },
             new { id = "thousand_songs", label = "1,000 Songs Triggered", unlocked = p.SongsTriggered >= 1000 },
             new { id = "week_streak", label = "7-Day Streak", unlocked = p.StreakCurrentDays >= 7 },
+            new { id = "month_streak", label = "30-Day Streak", unlocked = p.StreakCurrentDays >= 30 },
+            new { id = "marketplace_creator", label = "Marketplace Creator (10 Uploads)", unlocked = p.MarketplaceUploads >= 10 },
+            new { id = "sound_scout", label = "Sound Scout (50 Downloads)", unlocked = p.MarketplaceDownloads >= 50 },
+            new { id = "team_loyalist", label = "Team Loyalist (5 Games Logged)", unlocked = p.FavoriteTeamWins + p.FavoriteTeamLosses >= 5 },
         };
 
         return JsonSerializer.Serialize(new
@@ -1099,6 +1174,7 @@ public sealed class WebBridge
     public void SetDuckingEnabled(bool enabled) => _host.SetDuckingEnabledFromWeb(enabled);
     public bool GetNoEffectsBypass() => _host.GetNoEffectsBypassFromWeb();
     public void SetNoEffectsBypass(bool enabled) => _host.SetNoEffectsBypassFromWeb(enabled);
+    public string GetSystemVolumeInfo() => _host.GetSystemVolumeInfoFromWeb();
 
     /// <summary>Real changelog -- Bandroom's own GitHub Releases (version, title, bullet
     /// notes, published date). Powers the "Updates" panel (formerly a Live Feed of in-session

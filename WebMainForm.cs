@@ -708,12 +708,19 @@ public sealed class WebMainForm : Form
         if (_watching) return null;
 
         // Sound Booth item #2: load every assigned song into RAM once, right before the game
-        // starts, so no trigger during the game has to wait on a disk read.
+        // starts, so no trigger during the game has to wait on a disk read. Must finish BEFORE
+        // watching starts below -- this used to be a fire-and-forget Task.Run, which raced
+        // _hook.Start()/_watcher.Start(): if the very first event of the game fired before the
+        // background preload finished, that trigger fell through to a cold synchronous disk read
+        // with PreRollSeconds now at 0.0 (dropped from 1.0 specifically because caching was
+        // assumed to remove that stall), reintroducing the exact stall this cache exists to avoid,
+        // on the highest-stakes earliest plays. Blocking here briefly on GAMETIME press is the
+        // correct trade: a one-time short wait before kickoff instead of an audible gap mid-play.
         var toCache = (_homeConfig ?? Enumerable.Empty<TriggerEntry>())
             .Concat(_awayConfig ?? Enumerable.Empty<TriggerEntry>())
             .SelectMany(e => new[] { e.AudioFile, e.PaAudioFile })
             .Append(AudioPlayer.LeadInClipPath);
-        Task.Run(() => AudioCache.Preload(toCache));
+        AudioCache.Preload(toCache);
 
         _hook.Start();
         _watcher.Start();
@@ -933,6 +940,33 @@ public sealed class WebMainForm : Form
 
         ConfigStore.Save(_config);
         SaveCurrentTeamProfile();
+        NormalizeAssignmentInBackground(entry, isPa);
+    }
+
+    /// <summary>Sound Booth item #3: kicks off offline LUFS analysis + gain-matched copy for
+    /// a freshly-assigned clip, off the UI thread (never blocks the assign flow). Re-points the
+    /// entry at the normalized copy and re-saves once it's ready; a normalization failure just
+    /// leaves the original assignment in place (LoudnessNormalizationService itself never
+    /// throws -- see its own catch-and-return-sourcePath fallback).</summary>
+    void NormalizeAssignmentInBackground(TriggerEntry entry, bool isPa)
+    {
+        string path = isPa ? entry.PaAudioFile : entry.AudioFile;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+        var kind = isPa ? LoudnessKind.Pa : LoudnessKind.Song;
+
+        Task.Run(() =>
+        {
+            string normalized = LoudnessNormalizationService.NormalizeToTarget(path, kind);
+            if (normalized == path) return; // nothing changed (already normalized, or it failed)
+
+            RunOnUi(() =>
+            {
+                if (isPa) entry.PaAudioFile = normalized; else entry.AudioFile = normalized;
+                ConfigStore.Save(_config);
+                SaveCurrentTeamProfile();
+                AudioCache.Invalidate(path);
+            });
+        });
     }
 
     /// <summary>Web equivalent of AssignTrackForm's library list -- same source (everything
@@ -1073,6 +1107,7 @@ public sealed class WebMainForm : Form
         ConfigStore.Save(_config);
         SaveCurrentTeamProfile();
         PushCategories();
+        NormalizeAssignmentInBackground(entry, isPa);
     }
 
     public void ClearTrackAssignmentFromWeb(string trigger, bool isPa) => AssignTrackFileFromWeb(trigger, isPa, "");
@@ -1418,6 +1453,17 @@ public sealed class WebMainForm : Form
         AudioPlayer.LeadInClipPath = ConfigStore.LeadInWhistlePath;
         AudioPlayer.LeadInEnabled = true;
         ConfigStore.SaveLeadInWhistleEnabled(true);
+
+        // Sound Booth item #3: the whistle gets its own -12 LUFS target (short transient, needs
+        // to cut through) -- normalize in the background, same as song/PA assignment.
+        string whistlePath = ConfigStore.LeadInWhistlePath;
+        Task.Run(() =>
+        {
+            string normalized = LoudnessNormalizationService.NormalizeToTarget(whistlePath, LoudnessKind.LeadInWhistle);
+            if (normalized == whistlePath) return;
+            RunOnUi(() => AudioPlayer.LeadInClipPath = normalized);
+        });
+
         return true;
     }
 
@@ -1458,6 +1504,21 @@ public sealed class WebMainForm : Form
 
     public bool GetNoEffectsBypassFromWeb() => AudioPlayer.NoEffectsBypass;
     public void SetNoEffectsBypassFromWeb(bool enabled) => AudioPlayer.NoEffectsBypass = enabled;
+
+    /// <summary>Read-only: Windows' own system output volume/mute, alongside Bandroom's own
+    /// LUFS-normalized levels (item #3) -- so the Sound Booth can tell a user "your songs are
+    /// balanced, but Windows itself is muted/turned down" instead of that looking like a
+    /// Bandroom bug.</summary>
+    public string GetSystemVolumeInfoFromWeb()
+    {
+        var info = SystemVolumeService.GetCurrentOutputVolume();
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            known = info != null,
+            volumePercent = info != null ? (int)Math.Round(info.VolumeScalar * 100) : 100,
+            muted = info?.Muted ?? false,
+        });
+    }
 
     /// <summary>Classic Win32 "drag via titlebar" trick -- the HTML chrome bar has no native
     /// titlebar behind it (FormBorderStyle.None), so JS calls this on mousedown to let the OS
@@ -1781,8 +1842,12 @@ public sealed class WebMainForm : Form
             // so interruptPrevious MUST be false here -- true would call StopAll() and kill the
             // main clip that was just started a line above. Fired after, not before, the main
             // Play() call for the same reason (StopAll stops everything already in ActiveOutputs).
+            // isHighPriorityEvent must match the main cue's -- the whole point of ducking on a
+            // Touchdown/Turnover/Safety is so this PA layer cuts through clearly too; leaving it
+            // false here would duck the PA clip right along with everything else it's supposed to
+            // rise above.
             if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
-                AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false);
+                AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isHighPriorityEvent: isHighPriority);
             // Names exactly which trigger OCR just read as a small on-screen flash, so a user can
             // confirm what fired without digging through logs -- this call isn't gated on
             // _webView.CoreWebView2 being non-null elsewhere in this file only because FireEvent
