@@ -25,12 +25,39 @@ public sealed record AudioTrackMetadata
     /// <summary>Free text, e.g. "00:05-00:15 (10s)" -- a suggestion for TrimmerForm, not enforced.</summary>
     public string? RecommendedTrim { get; init; }
 
-    /// <summary>RMS-based loudness estimate in dBFS, reusing the same RMS pass as
-    /// AudioNormalizer.NormalizeAndLimit (see AudioMetadataAnalyzer.Analyze) -- an approximation
-    /// of EBU R128 integrated loudness, not a true K-weighted LUFS meter. Good enough for
-    /// "does this clip sound roughly as loud as the others", not broadcast-spec compliance.</summary>
+    /// <summary>Real ITU-R BS.1770/EBU-R128 K-weighted integrated loudness in LUFS, from the same
+    /// LoudnessAnalyzer (AudioEngine.cs) that already powers LoudnessNormalizationService's
+    /// assignment-time normalization -- NOT the RMS-based IntegratedLufsApprox field below.
+    /// Null until AnalyzeAudioFile has run for this file at least once (see
+    /// AudioTrackMetadataStore.AnalyzeAudioFile).</summary>
+    public float? IntegratedLufs { get; init; }
+    /// <summary>True peak in dBTP, from the same LoudnessAnalyzer pass as IntegratedLufs.</summary>
+    public float? TruePeakDbtp { get; init; }
+
+    /// <summary>RMS-based loudness estimate in dBFS -- kept only so old sidecars written before
+    /// IntegratedLufs existed still deserialize and show a number instead of blank while they wait
+    /// to be re-analyzed. New analyses populate IntegratedLufs (real K-weighted LUFS) instead;
+    /// prefer that field wherever both are present.</summary>
     public float? IntegratedLufsApprox { get; init; }
     public float? DurationSeconds { get; init; }
+
+    // -- Marketplace / GameWatcher routing (Audio Metadata Extension) --
+    /// <summary>The GameWatcher EventKey this track is meant for, e.g. "Offense: Touchdown
+    /// Scored" -- a suggestion for the marketplace browser and for auto-assigning a downloaded
+    /// pack's tracks to the right trigger slots, distinct from TriggerEntry.Event (the actual
+    /// live assignment on THIS install).</summary>
+    public string? PrimaryGameTriggerEvent { get; init; }
+    /// <summary>Marketplace browse/filter category, e.g. "Audio - Fight Song", "Audio - Hype
+    /// Sting" -- freeform but expected to match the categories worker.js's /list?category= filter
+    /// is queried with.</summary>
+    public string? MarketplaceCategory { get; init; }
+    /// <summary>Suggested ReverbProvider preset name (see ReverbProvider.cs's weather/venue
+    /// presets) for this specific track, e.g. "Stadium", "Dome", "Night Game" -- a per-track
+    /// override suggestion, not itself applied automatically.</summary>
+    public string? RecommendedReverbPreset { get; init; }
+    /// <summary>Short free-text description for marketplace search/discovery, e.g. "punchy brass
+    /// hit with a snare roll build" -- user-written or IntakeEngine-suggested, never computed.</summary>
+    public string? AcousticFingerprint { get; init; }
 
     public DateTime UpdatedAtUtc { get; init; } = DateTime.UtcNow;
 }
@@ -59,12 +86,18 @@ public static class AudioTrackMetadataStore
         File.WriteAllText(SidecarPathFor(audioFilePath), JsonSerializer.Serialize(metadata with { UpdatedAtUtc = DateTime.UtcNow }, JsonOptions));
     }
 
-    /// <summary>Reads DurationSeconds and an RMS-based loudness approximation straight off the
-    /// audio file (see AudioTrackMetadata.IntegratedLufsApprox doc for why this isn't true LUFS),
-    /// using the same AudioFileReader NAudio entry point TrimmerForm already uses elsewhere in
-    /// this app. Does not touch title/artist/school/trigger fields -- those come from
-    /// IntakeEngine.AnalyzeAndSuggest, which calls this for the computed half.</summary>
-    public static (float DurationSeconds, float IntegratedLufsApprox) AnalyzeAudioFile(string audioFilePath)
+    /// <summary>Reads DurationSeconds and loudness straight off the audio file, using the same
+    /// AudioFileReader NAudio entry point TrimmerForm already uses elsewhere in this app. Does not
+    /// touch title/artist/school/trigger fields -- those come from IntakeEngine.AnalyzeAndSuggest,
+    /// which calls this for the computed half.
+    ///
+    /// Loudness is now real ITU-R BS.1770/EBU-R128 K-weighted analysis via LoudnessAnalyzer
+    /// (AudioEngine.cs, added for LoudnessNormalizationService) -- the old RMS-only approximation
+    /// this method used to compute is kept as a fallback ONLY if LoudnessAnalyzer throws (e.g. an
+    /// exotic codec it can't decode via the K-weighting filter path but AudioFileReader still
+    /// opens), so a track that fails the more expensive analysis still gets SOME loudness number
+    /// instead of none.</summary>
+    public static (float DurationSeconds, float? IntegratedLufs, float? TruePeakDbtp, float IntegratedLufsApprox) AnalyzeAudioFile(string audioFilePath)
     {
         using var reader = new AudioFileReader(audioFilePath);
         float durationSeconds = (float)reader.TotalTime.TotalSeconds;
@@ -81,6 +114,15 @@ public static class AudioTrackMetadataStore
         float rms = sampleCount > 0 ? (float)Math.Sqrt(sumSquares / sampleCount) : 0f;
         float lufsApprox = rms > 0.0001f ? (float)(20 * Math.Log10(rms)) : -96f; // -96dBFS floor for silence
 
-        return (durationSeconds, lufsApprox);
+        float? realLufs = null, truePeakDbtp = null;
+        try
+        {
+            var measured = LoudnessAnalyzer.Analyze(audioFilePath);
+            realLufs = (float)measured.IntegratedLufs;
+            truePeakDbtp = (float)measured.TruePeakDb; // already in dB -- see LoudnessAnalyzer.Analyze
+        }
+        catch { /* fall back to the RMS approximation above -- see method doc */ }
+
+        return (durationSeconds, realLufs, truePeakDbtp, lufsApprox);
     }
 }

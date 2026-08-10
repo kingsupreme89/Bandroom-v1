@@ -979,6 +979,19 @@ input, select, textarea, [contenteditable] {
   margin: 12px auto;
 }
 
+#profile-share-link {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  word-break: break-all;
+  padding: 4px 0 8px;
+}
+#profile-public-toggle-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px;
+  padding: 4px 0 12px;
+}
+
 /* ================================================================
    TIPS SYSTEM -- floating coach's clipboard widget
    ================================================================ */
@@ -3589,6 +3602,29 @@ input, select, textarea, [contenteditable] {
   padding: 24px;
   border-radius: var(--radius-panel);
 }
+
+/* Read-only public profile viewer -- opened from Players Leaderboard rows (see openPublicProfile
+   in app.js), on top of #profile-overlay so it needs a higher z-index. */
+#public-profile-overlay {
+  position: fixed; inset: 0; z-index: 110;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+#public-profile-overlay[hidden] { display: none; }
+#public-profile-dialog {
+  width: min(360px, 90vw);
+  padding: 24px;
+  border-radius: var(--radius-panel);
+  text-align: center;
+}
+#public-profile-header { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-bottom: 16px; }
+#public-profile-avatar { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; }
+#public-profile-name { font-size: 18px; font-weight: 700; }
+#public-profile-team { font-size: 13px; color: var(--text-muted); }
+#public-profile-notfound { color: var(--text-muted); padding: 12px 0; }
+#public-profile-stats-grid { display: flex; justify-content: center; gap: 20px; }
+.leaderboard-row-clickable { cursor: pointer; }
+.leaderboard-row-clickable:hover { background: rgba(255,255,255,0.06); border-color: var(--glass-border); }
 
 /* Update / default-song-pack download dialogs -- #update-overlay, #songpack-prompt-overlay,
    #songpack-progress-overlay all share the same .update-dialog shape but had no CSS anywhere,
