@@ -248,7 +248,7 @@ public sealed class WebBridge
             // with no metadata and needing to be re-described from scratch by a downloader.
             var trackMeta = AudioTrackMetadataStore.Load(entry.Path);
             if (trackMeta != null)
-                form.Add(new System.Net.Http.StringContent(JsonSerializer.Serialize(trackMeta, CamelCaseJsonOptions)), "metadata");
+                AddFormPart(form, new System.Net.Http.StringContent(JsonSerializer.Serialize(trackMeta, CamelCaseJsonOptions)), "metadata");
 
             using var response = await ShareHttp.PostAsync(
                 "https://bandroom-marketplace.bandroom.workers.dev/upload", form);
