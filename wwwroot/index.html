@@ -1115,9 +1115,15 @@
         </div>
         <!-- Gameday logo centerpiece -- owner's explicit choice 2026-08-09 to keep using the real
              ESPN-style asset (assets/gameday-logo.png) despite the trademark flag raised in chat.
-             Centered on the coverflow's actual vertical middle (top:50%, matches
-             .coverflow-track .team-swatch's own top:50%) -- it was sitting at 42% and reading as
-             misplaced relative to the logos beneath it. When Big Game mode is active (see
+             Vertical position (top: in style.css's .matchup-vs-badge) has been nudged up from the
+             coverflow's 50% middle twice by explicit owner request -- Session 22 to 42% ("give it
+             up some"), then again to 40% -- NOT a bug and NOT meant to match
+             .coverflow-track .team-swatch's own top:50%. A prior version of this comment claimed
+             the opposite (that 50% was the intended/fixed value); that was wrong and led a later
+             bug-audit pass to "fix" it back to 50%, undoing both deliberate moves, until this
+             session caught the contradiction against Session 22's handoff and reverted it back to
+             40%. If this needs to move again, update BOTH this comment and the CSS value together
+             so this doesn't happen a third time. When Big Game mode is active (see
              updateMatchupBigGameBadge in app.js) the badge container gets a yellow glow via
              .big-game-active, layered on top of the logo image itself. -->
         <div class="matchup-vs-badge" id="matchup-vs-badge">
