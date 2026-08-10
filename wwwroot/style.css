@@ -1269,15 +1269,23 @@ input, select, textarea, [contenteditable] {
 }
 .header-center {
   flex: 1;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted-2);
   font-size: 15px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
 }
-#team-name { color: var(--text-primary); font-weight: 600; }
-.header-sep { margin: 0 8px; color: var(--text-muted); }
+/* Only the team name should ever truncate -- it used to be the whole .header-center row
+   (overflow/ellipsis/nowrap on the container), which clipped the actual matchup-lock and unlock
+   BUTTONS off the end whenever a long team name pushed them past the available width, replacing
+   them with a bare "..." instead of just eliding the name. */
+#team-name {
+  color: var(--text-primary); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.header-sep { margin: 0 8px; color: var(--text-muted); flex: none; }
+#btn-matchup, #btn-unlock-matchup { flex: none; }
 .header-right { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 
 /* Subtle "band members online" indicator */

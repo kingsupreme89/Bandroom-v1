@@ -107,16 +107,24 @@ public sealed class ScorebugPreset
     /// IMPORTANT CAVEAT, same as every preset in this file: coordinates below are eyeballed from
     /// screenshots (2560x1440, displayed/measured at 2000x1125), not pixel-measured against the
     /// raw image data -- treat as a strong starting point needing live tuning, not exact.
-    /// Possession/timeout crops (AwayUnderlineFx*/HomeUnderlineFx*/AwayTimeoutFx*) are
-    /// DELIBERATELY LEFT UNCALIBRATED (zero) for this preset -- none of the 7 screenshots show a
-    /// timeout-dash row or an underline under either team's name the way the CBS skin has. This
-    /// skin instead shows a small arrow ("▲") next to the ball-position number, which looks like
-    /// it's this HUD's possession indicator, but that's a fundamentally different signal
-    /// (position/shape of an arrow glyph, not underline brightness or a color-filled box) that
-    /// GameWatcher has no sampling method for yet. Possession detection will not work on this
-    /// preset until either a live screenshot showing timeout dashes/underline surfaces, or new
-    /// arrow-detection logic gets built -- don't guess coordinates for a signal that may not
-    /// exist in this skin at all.</summary>
+    /// Possession -- calibrated 2026-08-10 from two comparison screenshots: one where LSU (the
+    /// right/home-side team) had the ball, showing a small ball-position number + arrow ("26▲")
+    /// rendered inside the center pill right next to the home score block; one where Georgia
+    /// (left/away-side team) was kicking off, showing the equivalent "35▼" indicator on the
+    /// OPPOSITE (away) side of the pill instead. Confirms this indicator flips sides by team the
+    /// same way the CBS skin's underline did, just repositioned -- reused
+    /// AwayUnderlineFx*/HomeUnderlineFx* and GameWatcher.SamplePossessionByUnderline's existing
+    /// brightness-comparison method as-is (no new detection code needed), just pointed at this
+    /// skin's arrow-slot position instead of an actual underline. CAVEAT: only 2 data points (one
+    /// of them a kickoff, not a live snap) -- confirm this still flips correctly during a normal
+    /// live play before trusting it fully.
+    /// Timeouts -- calibrated 2026-08-10 from a tight crop of LSU's (home) block showing 3 small
+    /// lit pill/dash segments under "TIGERS" (3 timeouts remaining, none used). AwayTimeoutFx*
+    /// below is MIRRORED from that home-side measurement, not independently confirmed -- Georgia's
+    /// (away) block has logo-then-name-then-score ordering vs LSU's score-then-name-then-logo, so
+    /// the mirror assumption is shakier than a direct measurement would be. Get a Georgia-side
+    /// close-up (ideally with a timeout already used, e.g. 2/3 remaining, to confirm the
+    /// lit-vs-unlit visual difference too) to firm this up.</summary>
     public static readonly ScorebugPreset CollegeFootball27 = new()
     {
         Name = "College Football 27",
@@ -124,6 +132,9 @@ public sealed class ScorebugPreset
         AwayScoreFxX = 0.395, AwayScoreFxW = 0.035,
         HomeScoreFxX = 0.595, HomeScoreFxW = 0.035,
         ClockFxX = 0.465, ClockFxW = 0.06,
+        AwayUnderlineFxX = 0.430, AwayUnderlineFxY = 0.876, AwayUnderlineFxW = 0.045, AwayUnderlineFxH = 0.024,
+        HomeUnderlineFxX = 0.550, HomeUnderlineFxY = 0.876, HomeUnderlineFxW = 0.045, HomeUnderlineFxH = 0.024,
+        AwayTimeoutFxX = 0.253, AwayTimeoutFxY = 0.925, AwayTimeoutFxW = 0.091, AwayTimeoutFxH = 0.012,
     };
 
     /// <summary>Added 2026-08-09 for the owner's separate CFB 26 PS/Xbox console capture, kept as

@@ -594,6 +594,12 @@ public sealed class WebMainForm : Form
         ["Offense: Second Down"] = "down:2nd",
         ["Offense: Third Down"] = "down:3rd",
         ["Offense: Fourth Down"] = "down:4th",
+        // Added 2026-08-10 alongside OffenseDownHelper's short/long rewrite: a returning user's
+        // pre-existing "down:2nd"/"down:3rd" legacy assignment now surfaces under the new Short
+        // cards too, so their old 2nd/3rd Down song isn't silently orphaned by the split -- short
+        // is the more common/exciting case, so it's the more sensible default landing spot.
+        ["Offense: Second Down Short"] = "down:2nd",
+        ["Offense: Third Down Short"] = "down:3rd",
     };
 
     /// <summary>Returns what actually happened so callers that need visible feedback (the test
@@ -623,7 +629,12 @@ public sealed class WebMainForm : Form
         return entry;
     }
 
-    string FireEventForSide(string side, string eventName, bool bypassCooldown = false)
+    // volumeMultiplier added 2026-08-10 for the Big Game away-side rule (see
+    // OnEngineEventsDetected): when it's NOT a Big Game (away team only sends a small travel pep
+    // band, per the owner's real band experience), away-side cues that do fire still play
+    // quietly instead of at the same volume as a fully-present band. Defaults to 1 (no change)
+    // so every other caller (home side, previews, tests) is unaffected.
+    string FireEventForSide(string side, string eventName, bool bypassCooldown = false, float volumeMultiplier = 1f)
     {
         if ((side == "home" ? _homeConfig : _awayConfig) == null) return "no-profile";
         var entry = ResolveEntryForEvent(side, eventName);
@@ -632,7 +643,7 @@ public sealed class WebMainForm : Form
 
         if (bypassCooldown) AudioPlayer.ClearCooldown(entry.AudioFile);
         if (!File.Exists(entry.AudioFile)) return "file-missing";
-        FireEvent(entry, side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume);
+        FireEvent(entry, (side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume) * volumeMultiplier);
         return "fired:" + Path.GetFileName(entry.AudioFile);
     }
 
@@ -2138,17 +2149,36 @@ public sealed class WebMainForm : Form
                     : side;
 
                 bool sideAllowed = HomeOnlyEventsForNow ? routedSide == "home" : true;
+
+                // Big Game away-side rule, added 2026-08-10 (see ConfigStore.BigGameSettings's
+                // doc comment for the full "both bands physically present" rationale): home
+                // always plays every event at full volume, unaffected by this toggle. Away only
+                // plays every event at full volume when it's a real Big Game (both bands here);
+                // otherwise away is limited to IsEarnedBigEvent cues (the "big moment" events,
+                // e.g. touchdowns/turnovers -- see each helper's own IsEarnedBigEvent flag) at
+                // 25% volume, standing in for a small travel pep band rather than a silent one.
+                float awayVolumeMultiplier = 1f;
+                if (routedSide == "away" && !_watcher.IsBigGame)
+                {
+                    if (!evt.IsEarnedBigEvent) sideAllowed = false;
+                    awayVolumeMultiplier = 0.25f;
+                }
+
                 if (sideAllowed)
                 {
-                    string result = FireEventForSide(routedSide, evt.EventKey);
+                    float volumeMultiplier = routedSide == "away" ? awayVolumeMultiplier : 1f;
+                    string result = FireEventForSide(routedSide, evt.EventKey, volumeMultiplier: volumeMultiplier);
                     OnLog($"[engine] {evt.EventKey} -> {routedSide}: {result}");
                     RecordFireResult(evt.EventKey, routedSide, result);
                 }
                 else
                 {
-                    OnLog($"[engine] {evt.EventKey} -> {routedSide}: blocked (HomeOnlyEventsForNow)");
+                    string reason = HomeOnlyEventsForNow && routedSide != "home"
+                        ? "away-team events are turned off right now"
+                        : "not a Big Game -- away only plays big/earned events";
+                    OnLog($"[engine] {evt.EventKey} -> {routedSide}: blocked ({reason})");
                     EventActivityLog.Record(evt.EventKey, routedSide,
-                        $"{EventActivityLog.FriendlyEventName(evt.EventKey)} ({DisplaySide(routedSide)}) -- skipped: away-team events are turned off right now");
+                        $"{EventActivityLog.FriendlyEventName(evt.EventKey)} ({DisplaySide(routedSide)}) -- skipped: {reason}");
                 }
             }
         });

@@ -1306,13 +1306,15 @@ public sealed class WebBridge
     /// WebMainForm.PreviewConferencePackForTeamFromWeb / ApplyConferencePackSelectionsFromWeb.</summary>
     public string PreviewConferencePackForTeam(string teamName) => _host.PreviewConferencePackForTeamFromWeb(teamName);
     public int ApplyConferencePackSelections(string teamName, string eventKeysJson) => _host.ApplyConferencePackSelectionsFromWeb(teamName, eventKeysJson);
-    /// <summary>Big Game Rules panel (Adjust sidebar) -- lets the user edit the trigger rule
-    /// GameWatcher uses to boost cue volume during a close late game (see ConfigStore.
-    /// BigGameSettings / GameWatcher.cs's isBigGame computation). Returns/accepts JSON since
-    /// WebView2 host-object marshaling only reliably hands JS primitives/JSON strings.</summary>
+    /// <summary>Big Game panel (Adjust sidebar) -- lets the user manually flag "both bands are
+    /// physically present" for the current matchup (see ConfigStore.BigGameSettings's doc comment
+    /// for the 2026-08-10 redefinition away from an auto-detect close-score rule). Signature
+    /// simplified to a single bool -- QuarterThreshold/ScoreMargin are dead fields kept only for
+    /// old-file JSON compat, nothing in the UI needs to set them anymore. Returns/accepts JSON
+    /// since WebView2 host-object marshaling only reliably hands JS primitives/JSON strings.</summary>
     public string GetBigGameSettings() => JsonSerializer.Serialize(ConfigStore.LoadBigGameSettings());
-    public void SaveBigGameSettings(bool enabled, int quarterThreshold, int scoreMargin) =>
-        ConfigStore.SaveBigGameSettings(new ConfigStore.BigGameSettings(enabled, quarterThreshold, scoreMargin));
+    public void SaveBigGameSettings(bool isBigGame) =>
+        ConfigStore.SaveBigGameSettings(new ConfigStore.BigGameSettings(isBigGame, 4, 8));
 
     public void PlayClickSound() => _host.PlayUiClickSoundFromWeb();
     public bool IsMatchupLocked() => _host.IsMatchupLockedFromWeb();

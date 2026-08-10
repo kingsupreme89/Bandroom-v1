@@ -111,10 +111,21 @@ internal static class ConfigStore
     }
     static readonly string LeadInWhistleEnabledPath = Path.Combine(UserDataRoot, "leadin_whistle_enabled.txt");
 
-    /// <summary>User-editable Big Game trigger rule (see GameWatcher.cs's isBigGame computation,
-    /// which used to be a hardcoded "quarter 4 and score within 8" constant). Persisted as JSON
-    /// since it's more than one scalar, same file-under-UserDataRoot pattern as everything else
-    /// here.</summary>
+    /// <summary>REDEFINED 2026-08-10: this used to be an auto-detect rule ("quarter 4 and score
+    /// within 8 points" boosted cue volume 80-&gt;100). Replaced entirely at the owner's request --
+    /// "BigGame" now means something structurally different: a MANUAL per-game toggle for "both
+    /// teams' full bands are physically present" (e.g. Bama @ LSU), as opposed to a normal game
+    /// where the away team only sends a small travel pep band. The owner is a real band member and
+    /// wants this to gate whether the away side plays situational cues at all, not just how loud --
+    /// see WebMainForm.OnEngineEventsDetected's away-side routing. `Enabled` is now literally
+    /// "is this currently a Big Game" (the user flips it on before kickoff of a real one, off
+    /// otherwise) -- QuarterThreshold/ScoreMargin are DEAD FIELDS kept only so old saved
+    /// big_game_settings.json files still deserialize without a migration step; nothing reads them
+    /// anymore (GameWatcher.cs's isBigGame computation no longer references either). Default
+    /// changed true-&gt;false: the old default was harmless (auto-boost, always safe to leave on),
+    /// but defaulting the new manual toggle to true would silently play every away-side event at
+    /// full volume for every ordinary game, which is exactly the "small pep band" case this flag
+    /// is supposed to exclude.</summary>
     static readonly string BigGameSettingsPath = Path.Combine(UserDataRoot, "big_game_settings.json");
 
     public record BigGameSettings(bool Enabled, int QuarterThreshold, int ScoreMargin);
@@ -127,15 +138,15 @@ internal static class ConfigStore
     public static BigGameSettings LoadBigGameSettings()
     {
         if (_bigGameSettingsCache != null) return _bigGameSettingsCache;
-        if (!File.Exists(BigGameSettingsPath)) return _bigGameSettingsCache = new BigGameSettings(true, 4, 8);
+        if (!File.Exists(BigGameSettingsPath)) return _bigGameSettingsCache = new BigGameSettings(false, 4, 8);
         try
         {
             var loaded = JsonSerializer.Deserialize<BigGameSettings>(File.ReadAllText(BigGameSettingsPath), JsonOptions);
-            return _bigGameSettingsCache = loaded ?? new BigGameSettings(true, 4, 8);
+            return _bigGameSettingsCache = loaded ?? new BigGameSettings(false, 4, 8);
         }
         catch
         {
-            return _bigGameSettingsCache = new BigGameSettings(true, 4, 8);
+            return _bigGameSettingsCache = new BigGameSettings(false, 4, 8);
         }
     }
 
@@ -1269,11 +1280,22 @@ internal static class ConfigStore
         "Offense: Fourth Down",
         "Offense: Drive Starter",
         "Defense: Drive Starter",
+        // Added 2026-08-10: KickoffHelper no longer emits either of these (see its own comment) --
+        // every kickoff after the opening/second-half ones now relies on "Offense: PAT Made"
+        // firing right beforehand instead of its own dedicated cue, per the owner's call that the
+        // two were colliding in the scorebug's shared situation slot.
+        "Other: Kickoff on Kick (Receiving)",
+        "Other: Kickoff on Kick (Kicking)",
     };
 
     public static readonly string[] AllEngineEventKeys =
     {
         "Offense: Earned First Down (Big Gain)",
+        // Added 2026-08-10 alongside OffenseDownHelper's rewrite -- 2nd/3rd down now split by
+        // distance instead of firing one distance-blind card. Short = offense (this card); long
+        // reuses the pre-existing "Defense: Second/Third Down" cards below, unchanged.
+        "Offense: Second Down Short",
+        "Offense: Third Down Short",
         "Offense: PAT Made",
         "Offense: 2-Point Conversion Made",
         "Offense: Field Goal Made",

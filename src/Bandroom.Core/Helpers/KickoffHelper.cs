@@ -64,22 +64,13 @@ public sealed class KickoffHelper : IRuleEvaluator
             };
         }
 
-        // Other kickoffs: user's team receiving = user has possession
-        if (state.UserHasPossession)
-        {
-            return new TriggerEvent
-            {
-                EventKey = "Other: Kickoff on Kick (Receiving)",
-                Volume = 75,
-                IsEarnedBigEvent = false
-            };
-        }
-
-        return new TriggerEvent
-        {
-            EventKey = "Other: Kickoff on Kick (Kicking)",
-            Volume = 75,
-            IsEarnedBigEvent = false
-        };
+        // REMOVED 2026-08-10: every OTHER kickoff (after any mid-game score) used to fire
+        // "Other: Kickoff on Kick (Receiving/Kicking)" here. Owner's explicit call: these
+        // collided with PAT GOOD detection (both render in the scorebug's situation slot back to
+        // back right after a score) and weren't worth the noise -- "Offense: PAT Made" already
+        // fires right before every one of these kickoffs and is a perfectly good "we just scored,
+        // kickoff's coming" signal on its own. Only the two true one-time majors (opening,
+        // second-half) still fire from this helper now.
+        return null;
     }
 }

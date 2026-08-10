@@ -2040,21 +2040,18 @@ async function refreshCrowdBusSection() {
   document.getElementById("toggle-crowd-bus").disabled = !clipAvailable;
 }
 
-// Big Game Rules panel (Adjust sidebar) -- editable trigger rule that used to be a hardcoded
-// "quarter 4, score within 8" constant in GameWatcher.cs (see ConfigStore.BigGameSettings /
-// WebBridge.GetBigGameSettings/SaveBigGameSettings). _bigGameBannerEnabled is a separate,
-// purely-cosmetic flag (also persisted server-side, piggybacking on the same settings object via
-// a local-only field since the badge is a client-side display concern) controlling whether
-// #matchup-big-game-badge shows on the matchup screen.
+// Big Game panel (Adjust sidebar) -- REDEFINED 2026-08-10: was an editable auto-detect volume
+// rule ("quarter 4, score within 8"); now a manual per-matchup flag for "both bands are
+// physically here" (see ConfigStore.BigGameSettings's doc comment). _bigGameBannerEnabled is a
+// separate, purely-cosmetic flag (persisted client-side only) controlling whether
+// #matchup-big-game-badge shows on the matchup screen -- independent of the real gating flag.
 let _bigGameBannerEnabled = false;
 
 async function refreshBigGameSection() {
   if (!bridge) return;
   try {
     const s = JSON.parse(await bridge.GetBigGameSettings());
-    document.getElementById("toggle-big-game-enabled").checked = s.Enabled !== false;
-    document.getElementById("big-game-quarter").value = String(s.QuarterThreshold ?? 4);
-    document.getElementById("big-game-margin").value = String(s.ScoreMargin ?? 8);
+    document.getElementById("toggle-big-game-enabled").checked = s.Enabled === true;
   } catch (err) { console.error("GetBigGameSettings failed", err); }
   try {
     _bigGameBannerEnabled = localStorage.getItem("bandroom-biggame-banner") === "true";
@@ -2075,15 +2072,13 @@ function wireBigGameSection() {
     updateMatchupBigGameBadge();
   });
   document.getElementById("btn-big-game-save").addEventListener("click", async () => {
-    const enabled = document.getElementById("toggle-big-game-enabled").checked;
-    const quarterThreshold = Number(document.getElementById("big-game-quarter").value) || 4;
-    const scoreMargin = Math.max(0, Number(document.getElementById("big-game-margin").value) || 0);
+    const isBigGame = document.getElementById("toggle-big-game-enabled").checked;
     try {
-      await bridge?.SaveBigGameSettings(enabled, quarterThreshold, scoreMargin);
-      showToast("Big Game rules saved.");
+      await bridge?.SaveBigGameSettings(isBigGame);
+      showToast("Big Game setting saved.");
     } catch (err) {
       console.error("SaveBigGameSettings failed", err);
-      showToast("Couldn't save Big Game rules -- try again.");
+      showToast("Couldn't save Big Game setting -- try again.");
     }
   });
 }
@@ -6855,7 +6850,9 @@ const EVENT_FRIENDLY_NAMES = {
   "Offense: Earned First Down (Midfield)": "Got 1st Down - Past Midfield",
   "Offense: Second Down": "2nd Down",
   "Offense: Second Down (Midfield)": "2nd Down - Past Midfield",
+  "Offense: Second Down Short": "2nd & Short",
   "Offense: Third Down": "3rd Down",
+  "Offense: Third Down Short": "3rd & Short",
   "Offense: Drive Starter": "Drive Starts",
   "Offense: PAT Made": "Extra Point Good",
   "Offense: 2-Point Conversion Made": "2-Point Conversion Good",
@@ -6863,10 +6860,10 @@ const EVENT_FRIENDLY_NAMES = {
   "Offense: Iced Game by First Down": "Game Sealed - Got 1st Down",
   "Offense: Victory in Hand": "Game Won",
   "Offense: Touchdown Scored": "Touchdown",
-  "Defense: Third Down": "3rd Down",
+  "Defense: Third Down": "3rd & Long",
   "Defense: Fourth Down": "Stopped Them on 4th",
   "Defense: Third Down (Loss)": "3rd Down After a Loss",
-  "Defense: Second Down": "2nd Down",
+  "Defense: Second Down": "2nd & Long",
   "Defense: Second Down (Midfield)": "2nd Down - Past Midfield",
   "Defense: Second Down (Loss)": "2nd Down After a Loss",
   "Defense: Fourth Down (Loss)": "Stopped Them on 4th After a Loss",

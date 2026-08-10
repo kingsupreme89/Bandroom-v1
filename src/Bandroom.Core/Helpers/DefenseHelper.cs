@@ -41,22 +41,14 @@ public sealed class DefenseHelper : IRuleEvaluator
             };
         }
 
-        // Plain 3rd-down stop -- the ordinary case (incomplete pass, short gain that doesn't
-        // convert, no loss of yards, no turnover) had NO evaluator at all: BigEventHelper only
-        // fires "Defense: Third Down" for the rare same-snap turnover (NewPossession, already
-        // excluded by the guard above), and the branch above only covers a stuffed-for-a-loss
-        // 3rd down. So the single most common "held them on 3rd, forced 4th down" scenario never
-        // fired any cue, despite every team's default song pack already having a
-        // "Defense: Third Down" song mapped for exactly this.
-        if (state.Current.Down == 3)
-        {
-            return new TriggerEvent
-            {
-                EventKey = "Defense: Third Down",
-                Volume = state.Current.BigGame ? 100 : 80,
-                IsEarnedBigEvent = state.Current.BigGame
-            };
-        }
+        // REMOVED 2026-08-10 (the "gameplan" rewrite): this used to also fire a plain, distance-
+        // blind "Defense: Third Down" here for every 3rd-down stop. That's now OffenseDownHelper's
+        // job -- it fires "Defense: Third Down" (this same, pre-existing key, so default song
+        // packs keep working unchanged) specifically for 3rd & LONG, and a new "Offense: Third
+        // Down Short" for 3rd & short instead of always crediting the defense. Kept the (Loss)
+        // branch here since a stuffed-for-a-loss down is always "long" too and needs to stay a
+        // distinct, more specific cue rather than colliding with the plain long-yardage one --
+        // OffenseDownHelper defers to this branch by skipping entirely whenever YardsToGo went up.
 
         // FIXED: same dead-signal bug as the Down == 3 branch above -- see its comment.
         if (state.Current.Down == 2 && state.Current.YardsToGo > state.Previous.YardsToGo)
@@ -69,15 +61,8 @@ public sealed class DefenseHelper : IRuleEvaluator
             };
         }
 
-        if (state.Current.Down == 2)
-        {
-            return new TriggerEvent
-            {
-                EventKey = "Defense: Second Down",
-                Volume = state.Current.BigGame ? 100 : 70,
-                IsEarnedBigEvent = false
-            };
-        }
+        // REMOVED 2026-08-10: see the Down == 3 comment above -- "Defense: Second Down" (plain,
+        // distance-blind) is now OffenseDownHelper's job too, fired only for 2nd & long.
 
         return null;
     }

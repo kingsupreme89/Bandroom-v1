@@ -103,6 +103,12 @@ internal sealed class GameWatcher
     /// starting the watcher so the engine knows which side to attribute events to.</summary>
     public bool UserIsHome { get; set; }
 
+    /// <summary>Reflects the current snapshot's manual Big Game toggle (see ConfigStore.
+    /// BigGameSettings) -- read by WebMainForm.OnEngineEventsDetected to decide whether the
+    /// away side plays every event at full volume (Big Game) or only IsEarnedBigEvent ones at
+    /// 25% (ordinary game, away team only sends a small travel pep band).</summary>
+    public bool IsBigGame => _snapshotCurrent.BigGame;
+
     /// <summary>Set alongside UserIsHome (see WebMainForm.SetGameTeamsFromWeb) so the "penalty"
     /// region can determine WHICH team a penalty was called against -- the game's own penalty
     /// decision overlay shows "Against &lt;Team Name&gt;" text, which only means something once
@@ -235,7 +241,15 @@ internal sealed class GameWatcher
             // graphic OCR-splitting into "KICK OFF" would silently fail this pattern entirely
             // (no match, situation stays whatever it was before) -- see NormalizeMatch's new
             // "kick off" => "kickoff" case below for the other half of this fix.
-            Pattern = new Regex(@"\b(KICK\s*OFF|PAT\s*GOOD|TOUCHDOWN|INTERCEPTED|FUMBLE|TURNOVER|FAIR\s*CATCH|NO\s*RETURN)\b", RegexOptions.IgnoreCase),
+            // TIME\s*OUT added 2026-08-10 from a live CFB 27 screenshot (Georgia State @ Georgia
+            // Southern) showing "Time Out" rendered as spelled-out text in this exact band/slot
+            // during a timeout, same as KICKOFF replacing the down/distance line -- confirmed the
+            // same underlying scorebug skin as the calibrated Georgia/LSU shots, just unranked
+            // teams (no rank number) and different team colors. No downstream evaluator currently
+            // keys off this specific value (TimeoutHelper reads the dash-count crop instead, not
+            // this text), so it just normalizes to "time_out" via NormalizeMatch's default
+            // fallback and sits available in PlaySnapshot.Situation if something needs it later.
+            Pattern = new Regex(@"\b(KICK\s*OFF|PAT\s*GOOD|TOUCHDOWN|INTERCEPTED|FUMBLE|TURNOVER|FAIR\s*CATCH|NO\s*RETURN|TIME\s*OUT)\b", RegexOptions.IgnoreCase),
         },
         // Quarter indicator -- reads the HUD's quarter number (sits between the score and the
         // game clock in the bottom scorebug, e.g. "1st | 5:11 | -- | KICKOFF") so we can
@@ -886,24 +900,12 @@ internal sealed class GameWatcher
         int homeScore = int.TryParse(_lastKnownHomeScore, out int hScore) ? hScore : 0;
         int timeRemainingSeconds = ParseClockToSeconds(clockRegion?.Last);
 
-        // BigGame (task queue item 3, Session 11): used to be hardcoded `false` unconditionally --
-        // BigEventHelper/DefenseHelper/TflHelper/TimeoutHelper/TouchdownHelper/TurnoverHelper/
-        // OffenseDownHelper all already check state.Current.BigGame to boost volume to 100, so the
-        // boost simply never fired. There's no OCR'd team-ranking or rivalry-schedule signal
-        // anywhere in this codebase to detect "big game" from (checked TeamColors.cs and
-        // scripts/team_registry.json -- neither has rankings or rivalry data), so this uses the
-        // one real, already-OCR'd signal that's actually reliable: a close-score late quarter.
-        // Now user-editable (ConfigStore.LoadBigGameSettings / the "Big Game Rules" panel in
-        // Adjust) instead of the hardcoded "quarter 4, within 8" constant -- defaults are
-        // unchanged (quarter 4 = the standard broadcaster "one-score game" definition). Quarter
-        // is only ever 1-4 here (ParseOrdinal has no overtime case -- see its own comment), so
-        // this intentionally doesn't try to detect OT specifically; a tied/close OT game still
-        // reads as "4th quarter, close score" from the scorebug's perspective anyway since the
-        // quarter indicator doesn't change.
+        // REDEFINED 2026-08-10: BigGame used to be an auto-detect "close score, late quarter"
+        // heuristic. Replaced with a pure manual read of ConfigStore.BigGameSettings.Enabled --
+        // see that field's doc comment for why (it's now "both bands physically present," a fact
+        // about the real-world matchup no OCR signal can detect, not a live-score condition).
         var bigGameSettings = ConfigStore.LoadBigGameSettings();
-        bool isBigGame = bigGameSettings.Enabled
-            && quarter >= bigGameSettings.QuarterThreshold
-            && Math.Abs(homeScore - awayScore) <= bigGameSettings.ScoreMargin;
+        bool isBigGame = bigGameSettings.Enabled;
 
         // "penaltyagainst" holds "Against <Team Name>" text while the penalty decision overlay
         // is up (null otherwise -- see EnsureAllEvents/the region's own comment for why this is
@@ -934,6 +936,22 @@ internal sealed class GameWatcher
         bool isPenaltyOnOffense = penalizedIsHome.HasValue && possessionIsHomeNow.HasValue && penalizedIsHome.Value == possessionIsHomeNow.Value;
         bool isPenaltyOnDefense = penalizedIsHome.HasValue && possessionIsHomeNow.HasValue && penalizedIsHome.Value != possessionIsHomeNow.Value;
 
+        // Structural turnover backstop, added 2026-08-10 (owner's own rule, from years in the
+        // band watching this exact flow): "if the possession switches on any down besides 4th,
+        // that's a turnover." Doesn't replace the OCR-text check (situation == "turnover", which
+        // catches INTERCEPTED/FUMBLE/TURNOVER-on-downs) -- ORs with it, so a turnover still fires
+        // even on a tick where the CFB 27 default HUD's interception/fumble text hasn't been
+        // calibrated yet (see ScorebugPreset.CollegeFootball27's still-open situation-text gaps)
+        // or OCR simply misses the frame. Guards: _snapshotPrevious.Down != 4 excludes punts and
+        // turnover-on-downs (both change possession on a real 4th down, neither is a "turnover"
+        // by the owner's own definition); Down != 0 excludes the pregame/not-yet-read state;
+        // excluding any kickoff-adjacent tick excludes the ordinary receiving-team-gets-the-ball
+        // "flip" after a score, which is not a turnover either.
+        bool possessionFlipped = _lastPossession != null && _snapshotPrevious.PossessionAway != (_lastPossession == "away");
+        bool structuralTurnover = possessionFlipped
+            && _snapshotPrevious.Down != 4 && _snapshotPrevious.Down != 0
+            && situation != "kickoff" && !_snapshotPrevious.IsKickoff;
+
         var snapshot = new PlaySnapshot
         {
             Down = down,
@@ -943,7 +961,7 @@ internal sealed class GameWatcher
             IsKickoff = situation == "kickoff",
             IsPAT = situation == "pat_good",
             IsTouchdown = situation == "touchdown",
-            IsTurnover = situation == "turnover",
+            IsTurnover = situation == "turnover" || structuralTurnover,
             IsNoPuntReturn = situation == "nopuntreturn",
             IsPenaltyOnOffense = isPenaltyOnOffense,
             IsPenaltyOnDefense = isPenaltyOnDefense,
