@@ -1947,7 +1947,7 @@ input, select, textarea, [contenteditable] {
 .bandroom-album-icon { width: 28px; height: 28px; border-radius: 8px; flex: none; cursor: pointer; transition: transform 0.12s ease, box-shadow 0.12s ease; }
 .bandroom-album-icon:hover { transform: scale(1.08); box-shadow: 0 0 0 2px color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, transparent); }
 
-.bandroom-album-grid { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+.bandroom-album-grid { flex: 1 1 auto; overflow-y: auto; min-height: 0; scrollbar-gutter: stable; }
 /* Team album (songs + background images together) — Nexus Mods-style 4-column card grid.
    Trophy Room used to be its own #bandroom-images-grid; folded into #bandroom-songs-grid (kept
    the id to avoid churning every other selector/JS reference). MY DOWNLOADS moved off this grid
@@ -2188,6 +2188,12 @@ input, select, textarea, [contenteditable] {
   border-radius: 8px;
   font-size: 22px;
 }
+/* The full-card badge ("SONG"/"IMAGE" at 11.5px/3px 8px padding) doesn't fit inside a 44px
+   list-mode thumb -- it was overflowing the square and bleeding text into the row to its left.
+   The TYPE header column already communicates this, so just drop it here instead of shrinking. */
+.bandroom-album-grid-list .marketplace-card-thumb .card-type-badge {
+  display: none;
+}
 .bandroom-album-grid-list .marketplace-card-body {
   flex: 1 1 auto;
   flex-direction: row;
@@ -2227,9 +2233,12 @@ input, select, textarea, [contenteditable] {
   padding: 0;
   inset: auto;
 }
-.bandroom-album-grid-list .marketplace-card-actions .btn-ghost {
-  flex: 0 0 auto;
-  padding: 6px 10px;
+/* Preview/Get text buttons duplicate controls the row already has -- clicking anywhere on the
+   row previews (see buildItemTile's tile click handler) and the icon action row's own download
+   button does the same "Get". Keeping both was what pushed the row wide enough to need a
+   horizontal scrollbar and squeeze the other columns. */
+.bandroom-album-grid-list .marketplace-card-actions {
+  display: none;
 }
 
 /* My Downloads team grouping headers */
@@ -2316,9 +2325,9 @@ input, select, textarea, [contenteditable] {
   pointer-events: auto;
 }
 .bandroom-item-action {
-  font-size: 11.5px;
+  font-size: 14.5px;
   font-weight: 600;
-  padding: 3px 2px;
+  padding: 5px 6px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: rgba(10, 14, 18, 0.72);
@@ -2356,20 +2365,20 @@ input, select, textarea, [contenteditable] {
 /* Teams */
 #team-grid, #team-picker-grid, #bandroom-team-grid, .team-picker-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
   overflow-y: auto;
 }
 #team-grid { overflow: visible; }
 .team-swatch {
   position: relative; width: 100%; aspect-ratio: 1;
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid var(--glass-border);
   overflow: hidden;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
   background: rgba(255, 255, 255, 0.04);
-  font-size: 19.5px; font-weight: 800;
+  font-size: 15px; font-weight: 800;
   color: rgba(255, 255, 255, 0.55);
   box-shadow:
     0 3px 6px rgba(0, 0, 0, 0.35),
@@ -3444,7 +3453,7 @@ input, select, textarea, [contenteditable] {
   flex-direction: column;
   gap: 12px;
 }
-.update-header { font-size: 18px; font-weight: 700; }
+.update-header { font-size: 18px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .update-progress-track {
   width: 100%;
   height: 8px;
@@ -3655,16 +3664,19 @@ input, select, textarea, [contenteditable] {
   overflow: hidden;
   --side-color: var(--accent);
   --team-bg-image: none;
-  /* Photo layer sits UNDER the two color-tint gradients (renderMatchupCoverflow sets
-     --team-bg-image, same GetTeamBackgroundUrl call applyVsBackdrop uses for the locked-in VS
-     screen) -- gradients keep it readable/on-theme instead of a raw photo behind the text/logos. */
+  /* Photo layer sits UNDER the color-tint gradients (renderMatchupCoverflow sets --team-bg-image,
+     same GetTeamBackgroundUrl call applyVsBackdrop uses for the locked-in VS screen). Owner
+     request: an Apple CoverFlow-style near-black stage -- top black fade is heaviest right behind
+     the covers/reflection (where CoverFlow itself is pure black) and eases off toward the edges
+     so the team photo still reads underneath instead of being fully replaced. */
   background-image:
+    linear-gradient(180deg, rgba(4, 4, 6, 0.94) 0%, rgba(4, 4, 6, 0.75) 38%, rgba(4, 4, 6, 0.3) 68%, transparent 100%),
     radial-gradient(ellipse 90% 70% at 50% 42%, color-mix(in srgb, var(--side-color) 30%, transparent) 0%, transparent 72%),
     linear-gradient(180deg, color-mix(in srgb, var(--side-color) 14%, transparent) 0%, transparent 45%),
     var(--team-bg-image);
-  background-size: auto, auto, cover;
-  background-position: center, center, center;
-  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-size: auto, auto, auto, cover;
+  background-position: center, center, center, center;
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;
   transition: background-image 0.35s ease;
 }
 .matchup-column-away { border-right: 1px solid color-mix(in srgb, var(--side-color) 35%, var(--glass-border)); }
@@ -3685,7 +3697,7 @@ input, select, textarea, [contenteditable] {
    just a team-accent-colored "VS" pill instead of copying their iconography. */
 .matchup-vs-badge {
   position: absolute;
-  left: 50%; top: 42%;
+  left: 50%; top: 50%;
   transform: translate(-50%, -50%);
   z-index: 7;
   width: clamp(120px, 13vw, 190px);
@@ -3814,6 +3826,19 @@ input, select, textarea, [contenteditable] {
    every tile (root cause of "matchup logos don't show" -- team-picker/onboarding don't hit this
    since their flex-column parents don't override align-items, so they get the stretch default). */
 .matchup-columns .coverflow-stage { height: min(48vh, 420px); flex: 1 1 auto; width: 100%; }
+/* Coverflow arrows here specifically (owner request): filled primary-color circle with a
+   secondary-color glyph, rather than the plain glass circle .coverflow-arrow uses everywhere
+   else (scorebug switcher, team picker, onboarding). --side-primary/--side-secondary are set per
+   column in renderMatchupCoverflow off the currently-centered team's own colors. */
+.matchup-columns .coverflow-arrow {
+  background: var(--side-primary, var(--accent));
+  border-color: color-mix(in srgb, var(--side-primary, var(--accent)) 70%, black 20%);
+  color: var(--side-secondary, #fff);
+}
+.matchup-columns .coverflow-arrow:hover {
+  background: color-mix(in srgb, var(--side-primary, var(--accent)) 85%, white 15%);
+  color: var(--side-secondary, #fff);
+}
 .matchup-columns .coverflow-track .team-swatch {
   width: clamp(90px, 13vw, 150px);
   height: clamp(90px, 13vw, 150px);
@@ -3859,6 +3884,7 @@ input, select, textarea, [contenteditable] {
 }
 .save-profile-header {
   font-size: 18px; font-weight: 700;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
 }
 .save-profile-instructions {
   font-size: 13.5px;
@@ -3986,6 +4012,58 @@ input, select, textarea, [contenteditable] {
   pointer-events: none;
 }
 .toast-visible { opacity: 1; transform: translate(-50%, 0); }
+
+/* Band Room viewer -- fullscreen team-background gallery, opened from the Situations panel's
+   "Enter Band Room" pill. Whole overlay fades in/out (opacity + class toggle, same as .toast);
+   the two stacked image layers crossfade independently at 60fps on prev/next. */
+#bandroom-viewer-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+#bandroom-viewer-overlay[hidden] { display: none; }
+#bandroom-viewer-overlay.bandroom-viewer-visible { opacity: 1; pointer-events: auto; }
+.bandroom-viewer-layer {
+  position: absolute; inset: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+.bandroom-viewer-arrow {
+  position: absolute; top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+}
+.bandroom-viewer-arrow-prev { left: 24px; }
+.bandroom-viewer-arrow-next { right: 24px; }
+.bandroom-viewer-footer {
+  position: absolute; left: 0; right: 0; bottom: 28px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  z-index: 2;
+}
+.bandroom-viewer-team-pill { font-size: 15px; font-weight: 700; }
+.bandroom-viewer-counter {
+  font-size: 13px; font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(10, 14, 18, 0.72);
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+.bandroom-viewer-close {
+  position: absolute; top: 20px; right: 20px;
+  z-index: 3;
+  background: rgba(10, 14, 18, 0.72);
+}
+.bandroom-enter-pill {
+  margin-left: auto;
+  margin-right: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
 
 /* What's New popup */
 #whats-new-overlay {

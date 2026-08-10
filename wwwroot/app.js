@@ -595,6 +595,7 @@ function setupQuickLoadProfile() {
   const yesBtn = document.getElementById("btn-quick-load-yes");
   const noBtn = document.getElementById("btn-quick-load-no");
   if (!input || !loadBtn) return;
+  document.getElementById("btn-quick-load-close").addEventListener("click", () => noBtn.click());
 
   const updateHint = () => {
     const match = findTeamByAbbreviation(input.value);
@@ -1128,6 +1129,95 @@ async function applyBackground(name) {
   const url = bridge ? await bridge.GetTeamBackgroundUrl(name) : null;
   const el = document.getElementById("backdrop");
   el.style.backgroundImage = url ? `url("${url}")` : "none";
+}
+
+// ---- Band Room viewer (Situations panel "Enter Band Room" pill) -----------------------------
+// Fullscreen gallery of the active team's background images. Gathers the gallery from the
+// team's Sound Bank image uploads (fetchUploadList("image", team)) plus whatever's currently
+// live via GetTeamBackgroundUrl (in case that one isn't itself in the upload list, e.g. a
+// bundled default-pack background). Two stacked layers (#bandroom-viewer-layer-a/-b) crossfade
+// via opacity so prev/next actually animates instead of hard-cutting -- background-image itself
+// isn't a real animatable CSS property despite some other spots in this app declaring a
+// transition on it.
+let _bvImages = [];
+let _bvIndex = 0;
+let _bvActiveLayer = "a";
+
+async function openBandroomViewer() {
+  const team = state.teams?.find((t) => t.name === state.activeTeam);
+  if (!team) { showToast("Pick a team first."); return; }
+
+  const nameEl = document.getElementById("bandroom-viewer-team-name");
+  nameEl.textContent = team.name;
+  applySchoolGlow(nameEl, team.name);
+
+  const [items, activeUrl] = await Promise.all([
+    fetchUploadList("image", team.name, null),
+    bridge ? bridge.GetTeamBackgroundUrl(team.name) : null,
+  ]);
+  _bvImages = (items || []).map((i) => i.url).filter(Boolean);
+  if (activeUrl && !_bvImages.includes(activeUrl)) _bvImages.unshift(activeUrl);
+  if (!_bvImages.length) {
+    showToast(`${team.name} has no backgrounds yet -- add one from the Sound Bank.`);
+    return;
+  }
+  _bvIndex = Math.max(0, activeUrl ? _bvImages.indexOf(activeUrl) : 0);
+
+  const overlay = document.getElementById("bandroom-viewer-overlay");
+  overlay.hidden = false;
+  requestAnimationFrame(() => overlay.classList.add("bandroom-viewer-visible"));
+  setBandroomViewerImage(_bvImages[_bvIndex], true);
+  updateBandroomViewerCounter();
+}
+
+function setBandroomViewerImage(url, first) {
+  const layerA = document.getElementById("bandroom-viewer-layer-a");
+  const layerB = document.getElementById("bandroom-viewer-layer-b");
+  const showing = _bvActiveLayer === "a" ? layerA : layerB;
+  const hidden = _bvActiveLayer === "a" ? layerB : layerA;
+  hidden.style.backgroundImage = `url("${sanitizeHTML(url)}")`;
+  if (first) {
+    showing.style.backgroundImage = `url("${sanitizeHTML(url)}")`;
+    showing.style.opacity = "1";
+    hidden.style.opacity = "0";
+    return;
+  }
+  void hidden.offsetWidth; // force reflow so the opacity change below actually transitions
+  hidden.style.opacity = "1";
+  showing.style.opacity = "0";
+  _bvActiveLayer = _bvActiveLayer === "a" ? "b" : "a";
+}
+
+function shiftBandroomViewer(dir) {
+  if (!_bvImages.length) return;
+  _bvIndex = ((_bvIndex + dir) % _bvImages.length + _bvImages.length) % _bvImages.length;
+  setBandroomViewerImage(_bvImages[_bvIndex]);
+  updateBandroomViewerCounter();
+}
+
+function updateBandroomViewerCounter() {
+  document.getElementById("bandroom-viewer-counter").textContent =
+    _bvImages.length > 1 ? `${_bvIndex + 1} / ${_bvImages.length}` : "";
+}
+
+function closeBandroomViewer() {
+  const overlay = document.getElementById("bandroom-viewer-overlay");
+  overlay.classList.remove("bandroom-viewer-visible");
+  setTimeout(() => { overlay.hidden = true; }, 300);
+}
+
+function setupBandroomViewer() {
+  document.getElementById("btn-enter-bandroom-viewer").addEventListener("click", openBandroomViewer);
+  document.getElementById("btn-close-bandroom-viewer").addEventListener("click", closeBandroomViewer);
+  document.getElementById("btn-bandroom-viewer-prev").addEventListener("click", () => shiftBandroomViewer(-1));
+  document.getElementById("btn-bandroom-viewer-next").addEventListener("click", () => shiftBandroomViewer(1));
+  document.addEventListener("keydown", (e) => {
+    const overlay = document.getElementById("bandroom-viewer-overlay");
+    if (overlay.hidden) return;
+    if (e.key === "Escape") closeBandroomViewer();
+    else if (e.key === "ArrowLeft") shiftBandroomViewer(-1);
+    else if (e.key === "ArrowRight") shiftBandroomViewer(1);
+  });
 }
 
 async function refreshCategories() {
@@ -2000,6 +2090,7 @@ function wireControls() {
 
   document.getElementById("bandroom-upload-file-input").addEventListener("change", onUploadFileChosen);
   document.getElementById("btn-bandroom-upload-cancel").addEventListener("click", closeUploadDialog);
+  document.getElementById("btn-bandroom-upload-close").addEventListener("click", closeUploadDialog);
   document.getElementById("bandroom-upload-overlay").addEventListener("click", (e) => {
     if (e.target.id === "bandroom-upload-overlay") closeUploadDialog();
   });
@@ -2070,6 +2161,15 @@ function wireControls() {
     document.getElementById("situations-panel").hidden = true;
     state.currentSituationsCategory = null;
   });
+  setupBandroomViewer();
+  // These two dialogs attach their real Cancel/Skip handlers dynamically each time they're
+  // opened (see handleAutoAssignClick/showDefaultProfilePrompt) since the outcome is awaited via
+  // a per-open Promise -- the X buttons just proxy a click onto whichever Cancel/Skip button is
+  // live right now rather than duplicating that per-open wiring.
+  document.getElementById("btn-auto-assign-close").addEventListener("click", () =>
+    document.getElementById("btn-auto-assign-cancel").click());
+  document.getElementById("btn-default-profile-close").addEventListener("click", () =>
+    document.getElementById("btn-default-profile-skip").click());
 
   window.addEventListener("bandroom:refresh", refreshCategories);
   // Fired by WebMainForm.SyncPublicTeamLogosAsync when the startup public-logo sync actually
@@ -2202,6 +2302,7 @@ function wireControls() {
   });
 
   document.getElementById("btn-save-profile-cancel").addEventListener("click", closeSaveProfileDialog);
+  document.getElementById("btn-save-profile-close").addEventListener("click", closeSaveProfileDialog);
   document.getElementById("btn-save-profile-confirm").addEventListener("click", confirmSaveProfile);
   document.getElementById("save-profile-overlay").addEventListener("click", (e) => {
     if (e.target.id === "save-profile-overlay") closeSaveProfileDialog();
@@ -2418,6 +2519,50 @@ function renderImportTargetTeamGrid(filter) {
 /// main Team picker, so this dialog stays a fully custom entry point for anything not in either
 /// list. Logo isn't set here -- once added, the new school shows up in the full Team picker like
 /// any other, where the existing per-tile pencil icon (openLogoCropTool) already works for it.
+/// In-app replacement for window.prompt() when editing an upload's name/school (used by both the
+/// per-owner edit pencil and the admin-only edit tool). Resolves { name, school } on Save, or
+/// null if closed/cancelled -- same contract the two prompt() calls it replaces had (null = bail).
+function editUploadDialog(initialName, initialSchool, title) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("edit-upload-overlay");
+    const nameInput = document.getElementById("edit-upload-name");
+    const schoolInput = document.getElementById("edit-upload-school");
+    const err = document.getElementById("edit-upload-error");
+    const confirmBtn = document.getElementById("btn-edit-upload-confirm");
+    const closeBtn = document.getElementById("btn-close-edit-upload");
+
+    document.getElementById("edit-upload-title").textContent = title || "Edit Upload";
+    nameInput.value = initialName ?? "";
+    schoolInput.value = initialSchool ?? "";
+    err.hidden = true;
+    err.textContent = "";
+    overlay.hidden = false;
+    nameInput.focus();
+
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      overlay.hidden = true;
+      confirmBtn.onclick = null;
+      closeBtn.onclick = null;
+      overlay.onclick = null;
+      resolve(result);
+    };
+    confirmBtn.onclick = () => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        err.textContent = "A name is required.";
+        err.hidden = false;
+        return;
+      }
+      finish({ name, school: schoolInput.value.trim() });
+    };
+    closeBtn.onclick = () => finish(null);
+    overlay.onclick = (e) => { if (e.target === overlay) finish(null); };
+  });
+}
+
 function openAddSchoolDialog() {
   document.getElementById("add-school-name").value = "";
   document.getElementById("add-school-mascot").value = "";
@@ -3554,10 +3699,10 @@ function buildItemTile(item) {
       editBtn.textContent = "\u{270F}\u{FE0F}";
       editBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
-        const newName = prompt("Edit name:", item.name);
-        if (newName === null) return;
-        const typedSchool = prompt("Edit school/team:", item.school ?? "");
-        if (typedSchool === null) return;
+        const edited = await editUploadDialog(item.name, item.school, "Edit Upload");
+        if (edited === null) return;
+        const newName = edited.name;
+        const typedSchool = edited.school;
         // ROOT CAUSE FIX (Music Library UX Brief v2 §1/§2.2 team-key mismatch): this used to send
         // whatever free text was typed here straight to the worker's PATCH /item with zero
         // validation against the actual team roster -- unlike the "Share to Marketplace" flow
@@ -3625,10 +3770,10 @@ function buildItemTile(item) {
       adminEditBtn.textContent = "\u{1F6E0}";
       adminEditBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
-        const newName = prompt("Admin edit -- name:", item.name);
-        if (newName === null) return;
-        const typedSchool = prompt("Admin edit -- school:", item.school ?? "");
-        if (typedSchool === null) return;
+        const edited = await editUploadDialog(item.name, item.school, "Admin: Edit Upload");
+        if (edited === null) return;
+        const newName = edited.name;
+        const typedSchool = edited.school;
         // Same team-key validation as the per-owner edit above (root cause fix, Music Library UX
         // Brief v2 §1/§2.2) -- the admin path had the identical unvalidated free-text hole.
         const matchedAdminTeam = state.teams.find((t) => t.name.toLowerCase() === typedSchool.trim().toLowerCase());
@@ -4364,6 +4509,7 @@ function initDefaultSongPackPrompt() {
   })();
 
   document.getElementById("btn-songpack-skip").addEventListener("click", () => { promptOverlay.hidden = true; });
+  document.getElementById("btn-songpack-prompt-close").addEventListener("click", () => { promptOverlay.hidden = true; });
   document.getElementById("btn-songpack-download").addEventListener("click", () => {
     promptOverlay.hidden = true;
     // The pack is too large for GitHub Releases / the in-app R2 pipeline isn't populated yet
@@ -4375,6 +4521,7 @@ function initDefaultSongPackPrompt() {
   });
 
   document.getElementById("btn-songpack-import-later").addEventListener("click", () => { importOverlay.hidden = true; });
+  document.getElementById("btn-songpack-import-close").addEventListener("click", () => { importOverlay.hidden = true; });
   document.getElementById("btn-songpack-import").addEventListener("click", async () => {
     const zipPath = await bridge?.BrowseForSongPackZip();
     if (!zipPath) return;
@@ -4574,7 +4721,12 @@ async function renderTeamAlbumGrid() {
   try { _albumDefaultPackCache = JSON.parse(defaultPackJson) || []; } catch { _albumDefaultPackCache = []; }
   const heroMeta = document.getElementById("bandroom-album-hero-meta");
   if (heroMeta) {
-    const songCount = _albumItemsCache.songs.length;
+    // Marketplace-uploaded songs (_albumItemsCache.songs) and imported default-pack songs
+    // (_albumDefaultPackCache) are two separate sources that both render into the same grid below
+    // (see paintAlbumGrid) -- this count needs both too, or a team like LSU with a full default
+    // pack imported but zero marketplace uploads shows "0 songs" while the list right underneath
+    // is full of them.
+    const songCount = _albumItemsCache.songs.length + _albumDefaultPackCache.length;
     const imageCount = _albumItemsCache.images.length;
     heroMeta.textContent = _albumFetchError
       ? "Couldn't load this team's uploads"
@@ -5554,6 +5706,7 @@ function wireBgCropTool() {
     document.getElementById("bg-crop-file-input").click());
   document.getElementById("bg-crop-file-input").addEventListener("change", onBgCropFileChosen);
   document.getElementById("btn-bg-crop-cancel").addEventListener("click", closeBackgroundCropTool);
+  document.getElementById("btn-bg-crop-close").addEventListener("click", closeBackgroundCropTool);
 
   const viewport = document.getElementById("bg-crop-viewport");
   const canvas = document.getElementById("bg-crop-canvas");
@@ -5624,6 +5777,7 @@ function wireLogoCropTool() {
     document.getElementById("logo-crop-file-input").click());
   document.getElementById("logo-crop-file-input").addEventListener("change", onLogoCropFileChosen);
   document.getElementById("btn-logo-crop-cancel").addEventListener("click", closeLogoCropTool);
+  document.getElementById("btn-logo-crop-close").addEventListener("click", closeLogoCropTool);
 
   const viewport = document.getElementById("logo-crop-viewport");
   const canvas = document.getElementById("logo-crop-canvas");
@@ -5882,6 +6036,13 @@ function renderMatchupCoverflow(side, filter) {
   const column = track.closest(".matchup-column");
   const sideColor = centerTeam.secondary || centerTeam.primary;
   if (column && sideColor) column.style.setProperty("--side-color", sideColor);
+  // Coverflow arrows (owner request): primary-color filled circle, secondary-color arrow glyph --
+  // separate from --side-color above (which favors secondary and drives the tint/glow) since the
+  // arrows specifically need both colors at once, primary as the fill and secondary as the ink.
+  if (column) {
+    column.style.setProperty("--side-primary", centerTeam.primary || sideColor);
+    column.style.setProperty("--side-secondary", centerTeam.secondary || sideColor);
+  }
   const badge = document.getElementById("matchup-vs-badge");
   if (badge && sideColor) badge.style.setProperty(`--${side}-badge-color`, sideColor);
 

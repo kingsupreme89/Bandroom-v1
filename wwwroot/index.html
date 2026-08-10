@@ -232,6 +232,26 @@
         </div>
       </div>
 
+      <!-- Edit Upload (name/school) -- replaces window.prompt() with the app's own glass dialog,
+           same shape as add-school-overlay above, so editing a Sound Bank upload doesn't drop
+           into a native OS-style popup. -->
+      <div id="edit-upload-overlay" hidden>
+        <div id="edit-upload-dialog" class="glass">
+          <div class="team-picker-header">
+            <span id="edit-upload-title">Edit Upload</span>
+            <button id="btn-close-edit-upload" class="icon-btn">&times;</button>
+          </div>
+          <div class="add-school-body">
+            <label class="add-school-label" for="edit-upload-name">Name</label>
+            <input type="text" id="edit-upload-name" class="team-picker-search" maxlength="80" />
+            <label class="add-school-label" for="edit-upload-school">School / team</label>
+            <input type="text" id="edit-upload-school" placeholder="e.g. Georgia" class="team-picker-search" maxlength="60" />
+            <div id="edit-upload-error" class="add-school-error" hidden></div>
+            <button id="btn-edit-upload-confirm" class="btn-ghost btn-block">Save</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Auto-Assign overwrite confirmation -- Auto-Assign now overwrites EVERY slot with the
            default pack (not just empty ones), so this confirm/cancel step guards against
            silently wiping a hand-tuned arrangement. If the default pack isn't downloaded at all,
@@ -241,6 +261,7 @@
         <div id="auto-assign-confirm-dialog" class="glass">
           <div class="clipper-header">
             <span class="clipper-title">Overwrite current arrangement?</span>
+            <button id="btn-auto-assign-close" class="icon-btn">&times;</button>
           </div>
           <p id="auto-assign-confirm-text" class="auto-assign-confirm-text"></p>
           <div class="auto-assign-confirm-actions">
@@ -314,6 +335,7 @@
           <div id="quick-load-confirm-dialog" class="glass">
             <div class="clipper-header">
               <span class="clipper-title">Confirm Team</span>
+              <button id="btn-quick-load-close" class="icon-btn">&times;</button>
             </div>
             <div id="quick-load-confirm-text" class="add-school-hint" style="font-size: 16px;"></div>
             <div class="add-school-colors" style="margin-top: 10px;">
@@ -338,6 +360,7 @@
         <div id="situations-panel" class="glass" hidden>
           <div class="situations-header">
             <span id="situations-title">Situations</span>
+            <button id="btn-enter-bandroom-viewer" class="pill bandroom-enter-pill">&#127958; Enter Band Room</button>
             <button id="btn-close-situations" class="icon-btn">&times;</button>
           </div>
           <div class="situations-list" id="situations-list"><!-- populated by app.js --></div>
@@ -798,7 +821,7 @@
   <input type="file" id="batch-logo-folder-input" accept="image/*" webkitdirectory multiple hidden />
   <div id="logo-crop-overlay" hidden>
     <div id="logo-crop-dialog" class="glass">
-      <div class="save-profile-header" id="logo-crop-header">Set Team Logo</div>
+      <div class="save-profile-header"><span id="logo-crop-header">Set Team Logo</span><button id="btn-logo-crop-close" class="icon-btn">&times;</button></div>
       <p class="save-profile-instructions">
         Drag the image to reposition it, use the slider to zoom. Whatever shows inside the
         square becomes the logo -- keep the important part centered.
@@ -836,7 +859,7 @@
   <input type="file" id="bg-crop-file-input" accept="image/*" hidden />
   <div id="bg-crop-overlay" hidden>
     <div id="bg-crop-dialog" class="glass">
-      <div class="save-profile-header" id="bg-crop-header">Set Team Background</div>
+      <div class="save-profile-header"><span id="bg-crop-header">Set Team Background</span><button id="btn-bg-crop-close" class="icon-btn">&times;</button></div>
       <p class="save-profile-instructions">
         Drag the image to reposition it, use the slider to zoom. Whatever shows inside the
         widescreen window becomes the backdrop behind that team's screens.
@@ -975,8 +998,10 @@
           <div class="coverflow-name" id="matchup-away-name"></div>
         </div>
         <!-- Gameday logo centerpiece -- owner's explicit choice 2026-08-09 to keep using the real
-             ESPN-style asset (assets/gameday-logo.png) despite the trademark flag raised in chat;
-             shifted up slightly per that same request. When Big Game mode is active (see
+             ESPN-style asset (assets/gameday-logo.png) despite the trademark flag raised in chat.
+             Centered on the coverflow's actual vertical middle (top:50%, matches
+             .coverflow-track .team-swatch's own top:50%) -- it was sitting at 42% and reading as
+             misplaced relative to the logos beneath it. When Big Game mode is active (see
              updateMatchupBigGameBadge in app.js) the badge container gets a yellow glow via
              .big-game-active, layered on top of the logo image itself. -->
         <div class="matchup-vs-badge" id="matchup-vs-badge">
@@ -1008,7 +1033,7 @@
        the matchup dialog above it, on purpose. -->
   <div id="default-profile-prompt-overlay" hidden>
     <div class="update-dialog glass">
-      <div class="update-header"><span class="songpack-led"></span>No songs assigned yet</div>
+      <div class="update-header"><span><span class="songpack-led"></span>No songs assigned yet</span><button id="btn-default-profile-close" class="icon-btn">&times;</button></div>
       <p class="update-sub">
         <span id="default-profile-prompt-teams">This team</span> doesn't have any songs assigned
         yet. Hitting GAMETIME will automatically fill it in with a starter profile from the
@@ -1029,7 +1054,7 @@
   <div id="save-profile-overlay" hidden>
     <div id="save-profile-dialog" class="glass">
       <div id="save-profile-ask">
-        <div class="save-profile-header">Save Profile</div>
+        <div class="save-profile-header">Save Profile<button id="btn-save-profile-close" class="icon-btn">&times;</button></div>
         <p class="save-profile-instructions">
           This saves every song currently assigned to situations for the active team. Keep the
           name as-is to overwrite that team's existing save, or type a different name to keep
@@ -1071,7 +1096,7 @@
   <input type="file" id="bandroom-upload-file-input" hidden />
   <div id="bandroom-upload-overlay" hidden>
     <div id="bandroom-upload-dialog" class="glass">
-      <div class="save-profile-header" id="bandroom-upload-header">Upload</div>
+      <div class="save-profile-header"><span id="bandroom-upload-header">Upload</span><button id="btn-bandroom-upload-close" class="icon-btn">&times;</button></div>
       <p class="save-profile-instructions" id="bandroom-upload-instructions"></p>
       <input type="text" id="bandroom-upload-name" class="save-profile-input" placeholder="Name..." />
       <div class="save-profile-subtext" id="bandroom-upload-subtext"></div>
@@ -1150,7 +1175,7 @@
        happening" rather than a new UI pattern. -->
   <div id="songpack-prompt-overlay" hidden>
     <div class="update-dialog glass">
-      <div class="update-header"><span class="songpack-led"></span>Get the Free Default Song Pack</div>
+      <div class="update-header"><span><span class="songpack-led"></span>Get the Free Default Song Pack</span><button id="btn-songpack-prompt-close" class="icon-btn">&times;</button></div>
       <p class="update-sub" id="songpack-prompt-sub">
         This is a one-time download that fills every team with real songs automatically, so you
         don't have to upload your own. It's about 2.8&nbsp;GB (2,241 songs), so it can take a
@@ -1178,7 +1203,7 @@
        already drive team auto-assign off whatever lands in DownloadedDefaultSongsFolder). -->
   <div id="songpack-import-overlay" hidden>
     <div class="update-dialog glass">
-      <div class="update-header"><span class="songpack-led"></span>Ready to Import?</div>
+      <div class="update-header"><span><span class="songpack-led"></span>Ready to Import?</span><button id="btn-songpack-import-close" class="icon-btn">&times;</button></div>
       <p class="update-sub">
         Once your download has finished, click <strong>Locate &amp; Import</strong> below and pick
         the .zip file from your Downloads folder &mdash; or, if you already unzipped it (or someone
@@ -1269,6 +1294,23 @@
         <button id="btn-whats-new-gotit" class="btn-primary">Got it!</button>
       </div>
     </div>
+  </div>
+
+  <!-- Band Room viewer -- fullscreen gallery of a team's background images, opened via the
+       "Enter Band Room" pill on the Situations panel. Two stacked layers crossfade on
+       prev/next (JS toggles opacity, not background-image, so the swap actually animates
+       smoothly instead of hard-cutting); the overlay itself fades in/out as a whole via the
+       same opacity+class-toggle pattern as .toast. -->
+  <div id="bandroom-viewer-overlay" hidden>
+    <div class="bandroom-viewer-layer" id="bandroom-viewer-layer-a"></div>
+    <div class="bandroom-viewer-layer" id="bandroom-viewer-layer-b"></div>
+    <button class="coverflow-arrow bandroom-viewer-arrow bandroom-viewer-arrow-prev" id="btn-bandroom-viewer-prev">&#8249;</button>
+    <button class="coverflow-arrow bandroom-viewer-arrow bandroom-viewer-arrow-next" id="btn-bandroom-viewer-next">&#8250;</button>
+    <div class="bandroom-viewer-footer">
+      <span class="pill bandroom-viewer-team-pill" id="bandroom-viewer-team-name"></span>
+      <span class="bandroom-viewer-counter" id="bandroom-viewer-counter"></span>
+    </div>
+    <button id="btn-close-bandroom-viewer" class="icon-btn bandroom-viewer-close">&times;</button>
   </div>
 
   <!-- ================================================================
