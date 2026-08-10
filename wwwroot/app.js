@@ -1209,22 +1209,37 @@ function setWatching(mode) {
 
 // ---- Track Info drawer (see AudioTrackMetadata.cs / WebBridge.GetTrackMetadata et al) ----
 let _trackInfoTrigger = null;
-// durationSeconds/integratedLufsApprox aren't editable in the form -- kept here so Save doesn't
-// silently drop whatever GetTrackMetadata/AnalyzeTrackMetadata last computed for this file.
-let _trackInfoComputed = { durationSeconds: null, integratedLufsApprox: null };
+// durationSeconds/integratedLufs(Approx)/truePeakDbtp aren't editable in the form -- kept here so
+// Save doesn't silently drop whatever GetTrackMetadata/AnalyzeTrackMetadata last computed for
+// this file.
+let _trackInfoComputed = { durationSeconds: null, integratedLufs: null, truePeakDbtp: null, integratedLufsApprox: null };
 
 function fillTrackInfoForm(meta) {
-  _trackInfoComputed = { durationSeconds: meta?.durationSeconds ?? null, integratedLufsApprox: meta?.integratedLufsApprox ?? null };
+  _trackInfoComputed = {
+    durationSeconds: meta?.durationSeconds ?? null,
+    integratedLufs: meta?.integratedLufs ?? null,
+    truePeakDbtp: meta?.truePeakDbtp ?? null,
+    integratedLufsApprox: meta?.integratedLufsApprox ?? null,
+  };
   document.getElementById("ti-title").value = meta?.standardTitle ?? "";
   document.getElementById("ti-artist").value = meta?.standardArtist ?? "";
   document.getElementById("ti-school").value = meta?.schoolAbbreviation ?? "";
   document.getElementById("ti-energy").value = meta?.energyLevel ?? "";
   document.getElementById("ti-instrumentation").value = meta?.prominentInstrumentation ?? "";
   document.getElementById("ti-trim").value = meta?.recommendedTrim ?? "";
+  document.getElementById("ti-trigger-event").value = meta?.primaryGameTriggerEvent ?? "";
+  document.getElementById("ti-category").value = meta?.marketplaceCategory ?? "";
+  document.getElementById("ti-reverb-preset").value = meta?.recommendedReverbPreset ?? "";
+  document.getElementById("ti-fingerprint").value = meta?.acousticFingerprint ?? "";
   document.getElementById("ti-duration").textContent = meta?.durationSeconds
     ? `Duration: ${meta.durationSeconds.toFixed(1)}s` : "";
-  document.getElementById("ti-lufs").textContent = meta?.integratedLufsApprox != null
-    ? `Loudness (approx): ${meta.integratedLufsApprox.toFixed(1)} dBFS` : "";
+  // Real K-weighted LUFS wins when present; fall back to the old RMS approximation for sidecars
+  // written before LoudnessAnalyzer existed (see AudioTrackMetadata.IntegratedLufsApprox doc).
+  document.getElementById("ti-lufs").textContent = meta?.integratedLufs != null
+    ? `Loudness: ${meta.integratedLufs.toFixed(1)} LUFS`
+    : meta?.integratedLufsApprox != null ? `Loudness (approx): ${meta.integratedLufsApprox.toFixed(1)} dBFS` : "";
+  document.getElementById("ti-truepeak").textContent = meta?.truePeakDbtp != null
+    ? `True Peak: ${meta.truePeakDbtp.toFixed(1)} dBTP` : "";
 }
 
 async function openTrackInfoDrawer(trigger, fileName) {
@@ -1261,7 +1276,13 @@ document.getElementById("btn-track-info-save")?.addEventListener("click", async 
     energyLevel: document.getElementById("ti-energy").value || null,
     prominentInstrumentation: document.getElementById("ti-instrumentation").value.trim() || null,
     recommendedTrim: document.getElementById("ti-trim").value.trim() || null,
+    primaryGameTriggerEvent: document.getElementById("ti-trigger-event").value.trim() || null,
+    marketplaceCategory: document.getElementById("ti-category").value.trim() || null,
+    recommendedReverbPreset: document.getElementById("ti-reverb-preset").value || null,
+    acousticFingerprint: document.getElementById("ti-fingerprint").value.trim() || null,
     durationSeconds: _trackInfoComputed.durationSeconds,
+    integratedLufs: _trackInfoComputed.integratedLufs,
+    truePeakDbtp: _trackInfoComputed.truePeakDbtp,
     integratedLufsApprox: _trackInfoComputed.integratedLufsApprox,
   };
   try {
@@ -1379,6 +1400,86 @@ async function refreshUniversalProfileView() {
   renderProfileByTeamList(profile.gamesWatchedByTeam ?? {});
   await renderProfileMyUploads();
   await renderProfileActivityFeed();
+
+  state.profileGoogleUserId = profile.googleUserId ?? null;
+  const publicToggle = document.getElementById("profile-public-toggle");
+  publicToggle.checked = !!profile.isPublicProfile;
+  document.getElementById("profile-share-actions").hidden = !profile.isPublicProfile;
+  document.getElementById("profile-share-panel").hidden = true;
+  loadPlayersLeaderboard();
+}
+
+// ---- Public Profile: opt-in toggle + share link/QR ------------------------------------
+// Distinct from #btn-share-profile (a per-TEAM song-assignment share, see shareCurrentProfile
+// above) -- this shares the player's own identity/stats page, gated behind Google sign-in since
+// the public URL is keyed by the stable GoogleUserId (see WebBridge.TogglePublicProfile).
+async function onProfilePublicToggleChanged(e) {
+  const checked = e.target.checked;
+  let result;
+  try {
+    result = JSON.parse(await bridge.TogglePublicProfile(checked));
+  } catch (err) {
+    console.error("TogglePublicProfile failed", err);
+    result = { ok: false, error: "Couldn't reach the server -- try again." };
+  }
+  if (!result.ok) {
+    e.target.checked = !checked; // revert the checkbox
+    showToast(result.error || "Couldn't update your public profile setting.");
+    return;
+  }
+  document.getElementById("profile-share-actions").hidden = !result.isPublicProfile;
+  if (!result.isPublicProfile) document.getElementById("profile-share-panel").hidden = true;
+  showToast(result.isPublicProfile ? "Your profile is now public." : "Your profile is now private.");
+}
+
+function shareMyProfile() {
+  if (!state.profileGoogleUserId) {
+    showToast("Sign in with Google first.");
+    return;
+  }
+  const url = `https://bandroom.app/profile/${encodeURIComponent(state.profileGoogleUserId)}`;
+  document.getElementById("profile-share-link").textContent = url;
+  document.getElementById("profile-share-panel").hidden = false;
+  generateQRCode(url, "profile-share-qr");
+}
+
+async function openPublicProfile(sub) {
+  const overlay = document.getElementById("public-profile-overlay");
+  const notFound = document.getElementById("public-profile-notfound");
+  const statsGrid = document.getElementById("public-profile-stats-grid");
+  overlay.hidden = false;
+  notFound.hidden = true;
+  statsGrid.hidden = false;
+  try {
+    const res = await fetch(`${MARKETPLACE_URL}/profile/${encodeURIComponent(sub)}`);
+    if (!res.ok) throw new Error(`not found: ${res.status}`);
+    const p = await res.json();
+
+    document.getElementById("public-profile-name").textContent = p.name || "Bandroom Player";
+    document.getElementById("public-profile-team").textContent = p.favoriteTeam || "No favorite team set";
+    const avatar = document.getElementById("public-profile-avatar");
+    if (p.picture) { avatar.src = p.picture; avatar.hidden = false; } else { avatar.hidden = true; }
+    document.getElementById("public-profile-stat-games").textContent = p.stats?.gamesWatched ?? 0;
+    document.getElementById("public-profile-stat-songs").textContent = p.stats?.songsTriggered ?? 0;
+    document.getElementById("public-profile-stat-streak").textContent = p.stats?.streakCurrentDays ?? 0;
+  } catch (err) {
+    console.error("openPublicProfile failed", err);
+    statsGrid.hidden = true;
+    notFound.hidden = false;
+  }
+}
+
+async function loadPlayersLeaderboard() {
+  const container = document.getElementById("profile-leaderboard-table");
+  if (!container) return;
+  try {
+    const res = await fetch(`${MARKETPLACE_URL}/leaderboard/users?metric=games&limit=10`);
+    const data = res.ok ? await res.json() : { entries: [] };
+    renderLeaderboardTable(container, data.entries ?? [], "users");
+  } catch (err) {
+    console.error("loadPlayersLeaderboard failed", err);
+    renderLeaderboardTable(container, [], "users");
+  }
 }
 
 // Real activity feed -- reuses the same EventActivityLog buffer that powers the Help & Guide
@@ -1995,6 +2096,9 @@ function wireControls() {
   document.getElementById("btn-profile").addEventListener("click", openProfile);
   document.getElementById("btn-close-profile").addEventListener("click", closeProfile);
   document.getElementById("btn-close-profile-top").addEventListener("click", closeProfile);
+  document.getElementById("btn-close-public-profile").addEventListener("click", () => {
+    document.getElementById("public-profile-overlay").hidden = true;
+  });
   document.getElementById("btn-google-signin").addEventListener("click", async () => {
     const btn = document.getElementById("btn-google-signin");
     btn.disabled = true;
@@ -2061,6 +2165,8 @@ function wireControls() {
   });
   document.getElementById("btn-export-user-profile").addEventListener("click", () => bridge.ExportUserProfile());
   document.getElementById("btn-import-user-profile").addEventListener("click", () => bridge.ImportUserProfile());
+  document.getElementById("profile-public-toggle").addEventListener("change", onProfilePublicToggleChanged);
+  document.getElementById("btn-share-my-profile").addEventListener("click", shareMyProfile);
   window.addEventListener("bandroom:profileimported", async () => {
     showToast("Profile imported.");
     await refreshUniversalProfileView();
@@ -7245,6 +7351,12 @@ function renderLeaderboardTable(container, data, type) {
     row.className = "leaderboard-row";
     const rankClass = i === 0 ? "top1" : i === 1 ? "top2" : i === 2 ? "top3" : "";
     row.innerHTML = `<span class="leaderboard-rank ${rankClass}">#${i + 1}</span><span class="leaderboard-user">${entry.name || entry.school || "Unknown"}</span><span class="leaderboard-score">${entry.score || entry.count || 0}</span>`;
+    // Player rows (type "users") carry a `sub` -- clickable through to their public profile.
+    // School rows (marketplace upload counts) have no such identity, so stay inert.
+    if (type === "users" && entry.sub) {
+      row.classList.add("leaderboard-row-clickable");
+      row.addEventListener("click", () => openPublicProfile(entry.sub));
+    }
     container.appendChild(row);
   });
 }

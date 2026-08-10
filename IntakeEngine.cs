@@ -318,7 +318,8 @@ public static class IntakeEngine
     {
         var result = Process(Path.GetFileName(filePath));
         float duration = 0f, lufsApprox = 0f;
-        try { (duration, lufsApprox) = AudioTrackMetadataStore.AnalyzeAudioFile(filePath); }
+        float? realLufs = null, truePeakDbtp = null;
+        try { (duration, realLufs, truePeakDbtp, lufsApprox) = AudioTrackMetadataStore.AnalyzeAudioFile(filePath); }
         catch { /* unreadable/corrupt audio file -- leave computed fields null, title/team/trigger suggestions still stand */ }
 
         return new AudioTrackMetadata
@@ -326,7 +327,10 @@ public static class IntakeEngine
             StandardTitle = result.CleanedTitle == "Unknown" ? null : result.CleanedTitle,
             SchoolAbbreviation = result.Team == "Unknown" ? null : result.Team,
             EnergyLevel = GuessEnergyLevel(result.PrimaryTrigger),
+            PrimaryGameTriggerEvent = result.SuggestedEventKeys.Length > 0 ? result.SuggestedEventKeys[0] : null,
             DurationSeconds = duration > 0 ? duration : null,
+            IntegratedLufs = duration > 0 ? realLufs : null,
+            TruePeakDbtp = duration > 0 ? truePeakDbtp : null,
             IntegratedLufsApprox = duration > 0 ? lufsApprox : null,
         };
     }

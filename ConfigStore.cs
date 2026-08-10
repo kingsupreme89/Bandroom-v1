@@ -947,6 +947,20 @@ internal static class ConfigStore
         /// WebBridge.MergeLatestWins). Works fully offline/signed-out same as before; this dict is
         /// just the cloud-sync record of what was last saved locally, per team.</summary>
         public Dictionary<string, TeamLogoEntry> CustomTeamLogos { get; init; } = new();
+
+        // -- Profile Dashboard: public sharing --
+        /// <summary>Google "sub" claim (AuthSession.Sub), copied in on sign-in so a public profile
+        /// URL/leaderboard entry has a stable ID that survives display-name changes. Null while
+        /// signed out -- IsPublicProfile can only be true for a signed-in profile (see
+        /// WebBridge.TogglePublicProfile), since a public page has nothing stable to key on
+        /// otherwise.</summary>
+        public string? GoogleUserId { get; init; }
+        /// <summary>Opt-in: when true, ProfileSyncService's push includes the public-safe subset of
+        /// this record (favorite team, achievements, stats -- never Bio/RivalTeam) so the
+        /// marketplace worker's /profile GET can serve it to other users, and so this profile can
+        /// appear on the events/games leaderboard. Defaults false -- profile data is local-only
+        /// until the user opts in.</summary>
+        public bool IsPublicProfile { get; init; }
     }
 
     /// <summary>One custom team logo edit -- the base64 PNG bytes plus when it was saved, so a

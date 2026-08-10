@@ -327,9 +327,33 @@
             </label>
             <label>Instrumentation <input type="text" id="ti-instrumentation" maxlength="140" placeholder="e.g. Heavy Brass, Marching Snare Drums" /></label>
             <label>Recommended Trim <input type="text" id="ti-trim" maxlength="40" placeholder="e.g. 00:05-00:15 (10s)" /></label>
+            <label>Game Trigger Event <input type="text" id="ti-trigger-event" maxlength="80" placeholder="e.g. Offense: Touchdown Scored" /></label>
+            <label>Marketplace Category
+              <input type="text" id="ti-category" maxlength="60" list="ti-category-options" placeholder="e.g. Audio - Fight Song" />
+              <datalist id="ti-category-options">
+                <option value="Audio - Fight Song"></option>
+                <option value="Audio - Hype Sting"></option>
+                <option value="Audio - Chant"></option>
+                <option value="Audio - Cadence"></option>
+                <option value="Audio - Pregame"></option>
+                <option value="Audio - Postgame"></option>
+              </datalist>
+            </label>
+            <label>Recommended Reverb Preset
+              <select id="ti-reverb-preset">
+                <option value="">Not set</option>
+                <option value="Stadium">Stadium</option>
+                <option value="Dome">Dome</option>
+                <option value="NightGame">Night Game</option>
+                <option value="StadiumRain">Stadium Rain</option>
+                <option value="NightGamePrimeTime">Night Game Prime Time</option>
+              </select>
+            </label>
+            <label>Acoustic Fingerprint <input type="text" id="ti-fingerprint" maxlength="200" placeholder="Short description for marketplace search, e.g. punchy brass hit with snare roll build" /></label>
             <div id="track-info-computed">
               <span id="ti-duration"></span>
               <span id="ti-lufs"></span>
+              <span id="ti-truepeak"></span>
             </div>
           </div>
           <div class="save-profile-actions">
@@ -904,6 +928,22 @@
       <div class="save-profile-header" id="profile-activity-header">Recent Activity</div>
       <div id="profile-activity-feed" class="profile-activity-feed"><!-- populated by app.js --></div>
 
+      <div class="save-profile-header" id="profile-public-header">Public Profile<span class="info-i" title="When on, your favorite team, level, achievements, and lifetime stats (never your bio or rival team) can be viewed by others via a share link, and you'll appear on the Marketplace's Players leaderboard. Requires signing in with Google.">i</span></div>
+      <label id="profile-public-toggle-row">
+        <input type="checkbox" id="profile-public-toggle" />
+        Make my profile public
+      </label>
+      <div class="save-profile-actions" id="profile-share-actions" hidden>
+        <button id="btn-share-my-profile" class="btn-ghost">Share Profile</button>
+      </div>
+      <div id="profile-share-panel" hidden>
+        <div id="profile-share-link"></div>
+        <div id="profile-share-qr"></div>
+      </div>
+
+      <div class="save-profile-header" id="profile-leaderboard-header">Players Leaderboard</div>
+      <div id="profile-leaderboard-table" class="leaderboard-table"><!-- populated by app.js --></div>
+
       <label id="profile-toasts-toggle-row">
         <input type="checkbox" id="profile-toasts-toggle" checked />
         Show toast notifications
@@ -917,6 +957,32 @@
 
       <div class="save-profile-actions">
         <button id="btn-close-profile" class="btn-ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Read-only view of ANOTHER player's public profile (server-side only, via the marketplace
+       worker's unauthenticated GET /profile/:sub -- see WebBridge.GetUserProfile's
+       isPublicProfile field and worker.js's /profile/:sub route). Opened from the Players
+       Leaderboard rows in the profile dialog above. Deliberately a
+       separate, much smaller dialog than #profile-overlay -- only the fields the public route
+       actually returns (favoriteTeam/name/picture/a few stats), never bio/rival/uploads, since
+       those were never asked to be public. -->
+  <div id="public-profile-overlay" hidden>
+    <div id="public-profile-dialog" class="glass">
+      <div id="public-profile-header">
+        <img id="public-profile-avatar" alt="" hidden />
+        <div id="public-profile-name"></div>
+        <div id="public-profile-team"></div>
+      </div>
+      <div id="public-profile-stats-grid">
+        <div class="profile-stat"><span id="public-profile-stat-games">0</span><label>Games Watched</label></div>
+        <div class="profile-stat"><span id="public-profile-stat-songs">0</span><label>Songs Triggered</label></div>
+        <div class="profile-stat"><span id="public-profile-stat-streak">0</span><label>Day Streak</label></div>
+      </div>
+      <div id="public-profile-notfound" hidden>This player's profile isn't public.</div>
+      <div class="save-profile-actions">
+        <button id="btn-close-public-profile" class="btn-ghost">Close</button>
       </div>
     </div>
   </div>
