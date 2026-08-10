@@ -533,6 +533,50 @@
             <button class="reverb-tile" data-reverb="stadium">Stadium</button>
             <button class="reverb-tile" data-reverb="dome">Dome</button>
             <button class="reverb-tile" data-reverb="nightgame">Night Game</button>
+            <button class="reverb-tile" data-reverb="stadiumrain">Rain</button>
+            <button class="reverb-tile" data-reverb="nightgameprimetime">Prime Time</button>
+          </div>
+        </div>
+        <!-- The Sound Booth: Sound Booth overhaul dashboard. Every toggle below is off by
+             default and has an (i) info button (sb-info) that pops a plain-language
+             explanation via toggleSoundBoothInfo() in app.js -- reuses the existing popover
+             pattern from the per-event volume popover (situation-volume-popover). -->
+        <div class="panel-section soundbooth glass-pulse" id="soundbooth-section">
+          <div class="panel-title soundbooth-title">
+            <span class="soundbooth-led"></span> The Sound Booth
+          </div>
+          <button id="btn-soundbooth-no-effects" class="btn-ghost btn-block soundbooth-no-effects">
+            No Effects &mdash; Hear It Raw
+          </button>
+          <div class="soundbooth-row">
+            <div class="soundbooth-label">
+              Marching Band EQ
+              <button class="sb-info" data-info="eq-marchingband" aria-label="What does this do?">i</button>
+            </div>
+            <div class="soundbooth-eq-tiles" id="soundbooth-eq-tiles">
+              <button class="sb-tile" data-eq="off">Off</button>
+              <button class="sb-tile" data-eq="marchingband">Band</button>
+              <button class="sb-tile" data-eq="megaphone">Megaphone</button>
+            </div>
+          </div>
+          <label class="toggle-row soundbooth-row">
+            <input type="checkbox" id="toggle-transient-shaper" />
+            <span>Punchier Drums</span>
+            <button class="sb-info" data-info="transient-shaper" aria-label="What does this do?">i</button>
+          </label>
+          <label class="toggle-row soundbooth-row">
+            <input type="checkbox" id="toggle-stereo-widener" />
+            <span>Wider Stereo Sound</span>
+            <button class="sb-info" data-info="stereo-widener" aria-label="What does this do?">i</button>
+          </label>
+          <label class="toggle-row soundbooth-row">
+            <input type="checkbox" id="toggle-ducking" />
+            <span>Duck Music on Big Plays</span>
+            <button class="sb-info" data-info="ducking" aria-label="What does this do?">i</button>
+          </label>
+          <div class="soundbooth-info-popover" id="soundbooth-info-popover" hidden>
+            <div class="soundbooth-info-text" id="soundbooth-info-text"></div>
+            <button class="soundbooth-info-close" id="soundbooth-info-close">Got it</button>
           </div>
         </div>
         <!-- Top-downloaded songs/images/profiles across the whole marketplace, pulled by
@@ -1219,6 +1263,7 @@
       <div class="update-actions">
         <button id="btn-songpack-import-later" class="btn-ghost">I'll Import Later</button>
         <button id="btn-songpack-import-folder" class="btn-ghost">Import from Folder</button>
+        <button id="btn-songpack-import-folder-all" class="btn-ghost" title="Import from a folder, overwriting any already-imported songs with matching names and re-assigning every event slot for every team found">Load All (Overwrite)</button>
         <button id="btn-songpack-import" class="btn-primary">Locate & Import</button>
       </div>
     </div>

@@ -978,7 +978,20 @@ public sealed class WebBridge
     /// for a user who already extracted the pack, or was handed a folder instead of a .zip.</summary>
     public string? BrowseForSongPackFolder() => _host.BrowseForSongPackFolderFromWeb();
 
-    public void ImportDefaultSongPackFolder(string folderPath) => _host.ImportDefaultSongPackFolderFromWeb(folderPath);
+    public void ImportDefaultSongPackFolder(string folderPath, bool overwrite = false) => _host.ImportDefaultSongPackFolderFromWeb(folderPath, overwrite);
+
+    /// <summary>Cloud Sync (Supabase) settings -- see CloudDatabaseService and schema.sql. No
+    /// dedicated Settings UI panel yet; these exist so the URL/anon key can be wired up (e.g. from
+    /// a future settings screen or one-off dev console call) without editing config files by hand
+    /// on disk. anonKey is deliberately returned in full -- Supabase's anon key is public-by-design
+    /// (RLS is the real access control), same as every other non-secret value this bridge exposes.</summary>
+    public string GetSupabaseSettings()
+    {
+        var (url, anonKey) = ConfigStore.LoadSupabaseSettings();
+        return System.Text.Json.JsonSerializer.Serialize(new { url, anonKey });
+    }
+
+    public void SaveSupabaseSettings(string url, string anonKey) => ConfigStore.SaveSupabaseSettings(url, anonKey);
 
     /// <summary>Current on-disk location of the default song pack (task queue item 7a, Session
     /// 10) -- shown in-app so it's actually clear where these files land, instead of that only
@@ -1074,6 +1087,18 @@ public sealed class WebBridge
     public bool BrowseAndSetLeadInWhistle() => _host.BrowseAndSetLeadInWhistleFromWeb();
     public void SetFadeDelay(int seconds) => _host.SetFadeDelayFromWeb(seconds);
     public void SetReverb(string key) => _host.SetReverbFromWeb(key);
+
+    // ---- The Sound Booth dashboard ----
+    public string GetEqPreset() => _host.GetEqPresetFromWeb();
+    public void SetEqPreset(string key) => _host.SetEqPresetFromWeb(key);
+    public bool GetTransientShaperEnabled() => _host.GetTransientShaperEnabledFromWeb();
+    public void SetTransientShaperEnabled(bool enabled) => _host.SetTransientShaperEnabledFromWeb(enabled);
+    public bool GetStereoWidenerEnabled() => _host.GetStereoWidenerEnabledFromWeb();
+    public void SetStereoWidenerEnabled(bool enabled) => _host.SetStereoWidenerEnabledFromWeb(enabled);
+    public bool GetDuckingEnabled() => _host.GetDuckingEnabledFromWeb();
+    public void SetDuckingEnabled(bool enabled) => _host.SetDuckingEnabledFromWeb(enabled);
+    public bool GetNoEffectsBypass() => _host.GetNoEffectsBypassFromWeb();
+    public void SetNoEffectsBypass(bool enabled) => _host.SetNoEffectsBypassFromWeb(enabled);
 
     /// <summary>Real changelog -- Bandroom's own GitHub Releases (version, title, bullet
     /// notes, published date). Powers the "Updates" panel (formerly a Live Feed of in-session

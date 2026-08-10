@@ -33,3 +33,10 @@ squirrel_releases/
 # machine-local build/runtime artifacts, not source.
 .wrangler/
 **/.wrangler/
+
+# Internal planning/pitch/architecture guides -- personal-machine reference only, not meant to
+# ship in the public repo (they describe internal design/roadmap, not code).
+BANDROOM_AUDIO_TECHNOLOGY_GUIDE.md
+BANDROOM_PITCH_DECK.md
+BANDROOM_STREAMER_MASTER_PROMPT.md
+BANDROOM_TECHNOLOGY_GUIDE.md

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace SupremeStadiumSoundSelector;
@@ -57,6 +58,11 @@ internal static class ConfigStore
     /// rather than folded into triggers.json/user_profile.json so TeamColors can load them at
     /// static-init time without depending on the rest of ConfigStore's per-user state.</summary>
     static readonly string CustomTeamsPath = Path.Combine(UserDataRoot, "custom_teams.json");
+    /// <summary>Supabase project URL + anon key for CloudDatabaseService (BANDROOM_STREAMER_MASTER_PROMPT.md
+    /// System 1). The anon key is NOT a secret by Supabase's own design (it's meant to be embedded
+    /// in client apps; row-level security is what actually gates access), same "not a secret,
+    /// still not hardcoded" treatment ADMIN_TOKEN-style values get elsewhere in this file.</summary>
+    static readonly string SupabaseSettingsPath = Path.Combine(UserDataRoot, "supabase_settings.json");
     static readonly object CustomTeamsLock = new();
 
     public sealed record CustomTeamEntry
@@ -281,6 +287,30 @@ internal static class ConfigStore
         File.WriteAllText(LeadInWhistleEnabledPath, enabled ? "true" : "false");
     }
 
+    sealed record SupabaseSettings(string Url, string AnonKey);
+
+    /// <summary>(Url, AnonKey), both "" if never configured. CloudDatabaseService treats either
+    /// being blank as "not configured" and no-ops rather than throwing.</summary>
+    public static (string Url, string AnonKey) LoadSupabaseSettings()
+    {
+        if (!File.Exists(SupabaseSettingsPath)) return ("", "");
+        try
+        {
+            var settings = JsonSerializer.Deserialize<SupabaseSettings>(File.ReadAllText(SupabaseSettingsPath));
+            return (settings?.Url ?? "", settings?.AnonKey ?? "");
+        }
+        catch
+        {
+            return ("", "");
+        }
+    }
+
+    public static void SaveSupabaseSettings(string url, string anonKey)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(SupabaseSettingsPath, JsonSerializer.Serialize(new SupabaseSettings(url, anonKey)));
+    }
+
     /// <summary>
     /// Imports default song pack assignments for a team. Looks in the bundled
     /// Songs\Default\{conference}\{teamName}\ folder and maps each EventKey-named
@@ -358,28 +388,62 @@ internal static class ConfigStore
     {
         string name = Path.GetFileNameWithoutExtension(file);
         string eventKey = name.Replace("_", ": ").Replace("  ", " ");
-        return System.Text.RegularExpressions.Regex.Replace(eventKey, @"_\d+$", "");
+        // The variant suffix started as a trailing "_2"/"_3" in the raw filename, but by this
+        // point every "_" has already become ": " above, so it now reads ": 2"/": 3" -- matching
+        // on "_\d+$" here was always a no-op (there are no underscores left to match), which left
+        // every variant-numbered file's EventKey stuck with its index still attached and never
+        // matching the base TriggerEntry.Event it was meant to be an alternate for.
+        return System.Text.RegularExpressions.Regex.Replace(eventKey, @":\s*\d+$", "");
     }
 
     public sealed record ConferencePackPreviewItem(string EventKey, string FileName, string FilePath, string? CurrentFile);
 
+    /// <summary>Shared file source for "Load Conference Pack": the team's OWN subfolder first
+    /// (Songs\Default\{Conference}\{Team}\*.mp3 -- the actual pack content for packs organized
+    /// per-team, e.g. the real SEC pack, which has 0 loose files at the conference root), then any
+    /// loose conference-wide files sitting directly in the conference folder (shared chants/cues
+    /// not specific to one school). Team-specific files win on an EventKey collision, same
+    /// "team-specific beats generic" precedence the wizard's local-library merge already uses
+    /// (app.js's pack-before-conference ordering). Without the team-folder pass, "Load Conference
+    /// Pack" found nothing for any conference whose pack is organized as team subfolders instead
+    /// of loose conference-root files -- which is every real default pack on disk.</summary>
+    static IEnumerable<(string File, string EventKey)> ConferencePackFiles(string teamName)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? teamFolder = FindDefaultPackTeamFolder(teamName);
+        if (teamFolder != null)
+        {
+            foreach (var file in Directory.GetFiles(teamFolder, "*.*", SearchOption.TopDirectoryOnly))
+            {
+                if (!AudioExtensions.Contains(Path.GetExtension(file).ToLowerInvariant())) continue;
+                string eventKey = EventKeyFromFileName(file);
+                if (seen.Add(eventKey)) yield return (file, eventKey);
+            }
+        }
+        string? confFolder = FindDefaultPackConferenceFolder(teamName);
+        if (confFolder != null)
+        {
+            foreach (var file in Directory.GetFiles(confFolder, "*.*", SearchOption.TopDirectoryOnly))
+            {
+                if (!AudioExtensions.Contains(Path.GetExtension(file).ToLowerInvariant())) continue;
+                string eventKey = EventKeyFromFileName(file);
+                if (seen.Add(eventKey)) yield return (file, eventKey);
+            }
+        }
+    }
+
     /// <summary>Preview of what "Load Conference Pack" WOULD do, without touching the profile --
-    /// one row per event the conference folder has a file for, including whatever the team
-    /// already has assigned (if anything) so the caller can decide per-event whether to overwrite
-    /// instead of the old silent "only fill empty slots" behavior. Owner feedback: most users
-    /// already have SOME songs assigned, so a backfill-only pass quietly did nothing for them --
-    /// they need to be asked, event by event, whether to replace what's there.</summary>
+    /// one row per event the team's pack (team subfolder + loose conference-root files) has a file
+    /// for, including whatever the team already has assigned (if anything) so the caller can
+    /// decide per-event whether to overwrite instead of the old silent "only fill empty slots"
+    /// behavior. Owner feedback: most users already have SOME songs assigned, so a backfill-only
+    /// pass quietly did nothing for them -- they need to be asked, event by event, whether to
+    /// replace what's there.</summary>
     public static List<ConferencePackPreviewItem> PreviewConferencePackForTeam(string teamName, List<TriggerEntry> profile)
     {
         var result = new List<ConferencePackPreviewItem>();
-        string? confFolder = FindDefaultPackConferenceFolder(teamName);
-        if (confFolder == null) return result;
-
-        foreach (var file in Directory.GetFiles(confFolder, "*.*", SearchOption.TopDirectoryOnly))
+        foreach (var (file, eventKey) in ConferencePackFiles(teamName))
         {
-            string ext = Path.GetExtension(file).ToLowerInvariant();
-            if (!AudioExtensions.Contains(ext)) continue;
-            string eventKey = EventKeyFromFileName(file);
             var entry = profile.FirstOrDefault(e => e.Event.Equals(eventKey, StringComparison.OrdinalIgnoreCase));
             if (entry == null) continue; // no matching event in this profile at all
             result.Add(new ConferencePackPreviewItem(eventKey, Path.GetFileName(file), file,
@@ -394,15 +458,10 @@ internal static class ConfigStore
     /// that isn't in this set is left untouched. Returns the count actually changed.</summary>
     public static int ApplyConferencePackSelections(string teamName, List<TriggerEntry> profile, IEnumerable<string> eventKeysToAssign)
     {
-        string? confFolder = FindDefaultPackConferenceFolder(teamName);
-        if (confFolder == null) return 0;
         var wanted = new HashSet<string>(eventKeysToAssign, StringComparer.OrdinalIgnoreCase);
         int assigned = 0;
-        foreach (var file in Directory.GetFiles(confFolder, "*.*", SearchOption.TopDirectoryOnly))
+        foreach (var (file, eventKey) in ConferencePackFiles(teamName))
         {
-            string ext = Path.GetExtension(file).ToLowerInvariant();
-            if (!AudioExtensions.Contains(ext)) continue;
-            string eventKey = EventKeyFromFileName(file);
             if (!wanted.Contains(eventKey)) continue;
             var entry = profile.FirstOrDefault(e => e.Event.Equals(eventKey, StringComparison.OrdinalIgnoreCase));
             if (entry == null) continue;
@@ -430,9 +489,7 @@ internal static class ConfigStore
             {
                 string ext = Path.GetExtension(file).ToLowerInvariant();
                 if (!AudioExtensions.Contains(ext)) continue;
-                string name = Path.GetFileNameWithoutExtension(file);
-                string eventKey = System.Text.RegularExpressions.Regex.Replace(
-                    name.Replace("_", ": ").Replace("  ", " "), @"_\d+$", "");
+                string eventKey = EventKeyFromFileName(file);
                 var entry = profile.FirstOrDefault(e => e.Event.Equals(eventKey, StringComparison.OrdinalIgnoreCase));
                 if (entry != null) entry.AudioFile = file;
             }
@@ -443,22 +500,27 @@ internal static class ConfigStore
         return profile.Count(e => !string.IsNullOrWhiteSpace(e.AudioFile)) - before;
     }
 
-    public static int ImportDefaultPackForTeam(string teamName, List<TriggerEntry> profile, bool overwrite = false)
+    public static int ImportDefaultPackForTeam(string teamName, List<TriggerEntry> profile, bool overwrite = false) =>
+        ImportTeamFolderForTeam(FindDefaultPackTeamFolder(teamName), profile, overwrite);
+
+    /// <summary>Same assignment loop as ImportDefaultPackForTeam, but takes the team's folder
+    /// directly instead of resolving it via FindDefaultPackTeamFolder/DefaultSongsFolder --
+    /// DefaultSongsFolder prefers the BUNDLED pack over DownloadedDefaultSongsFolder whenever the
+    /// bundled one exists and is non-empty (see DefaultSongsFolder's own doc comment), so anything
+    /// that must specifically use a folder the user JUST imported (the "Load All" flow) needs to
+    /// bypass that resolution entirely or it silently reads stale bundled files -- or nothing at
+    /// all, for a team the bundled pack doesn't have -- instead of what was just picked.</summary>
+    public static int ImportTeamFolderForTeam(string? teamFolder, List<TriggerEntry> profile, bool overwrite = false)
     {
         int assigned = 0;
-        string? teamFolder = FindDefaultPackTeamFolder(teamName);
-        if (teamFolder == null) return 0;
+        if (teamFolder == null || !Directory.Exists(teamFolder)) return 0;
 
         foreach (var file in Directory.GetFiles(teamFolder, "*.*", SearchOption.TopDirectoryOnly))
         {
             string ext = Path.GetExtension(file).ToLowerInvariant();
             if (!AudioExtensions.Contains(ext)) continue;
 
-            // Filename format: Offense_ Earned First Down.mp3 → "Offense: Earned First Down"
-            string name = Path.GetFileNameWithoutExtension(file);
-            string eventKey = name.Replace("_", ": ").Replace("  ", " ");
-            // Handle variant suffixes like "Offense_ Touchdown Scored_2" → "Offense: Touchdown Scored"
-            eventKey = System.Text.RegularExpressions.Regex.Replace(eventKey, @"_\d+$", "");
+            string eventKey = EventKeyFromFileName(file);
 
             var entry = profile.FirstOrDefault(e =>
                 e.Event.Equals(eventKey, StringComparison.OrdinalIgnoreCase));
@@ -539,9 +601,7 @@ internal static class ConfigStore
             string ext = Path.GetExtension(file).ToLowerInvariant();
             if (!AudioExtensions.Contains(ext)) continue;
 
-            string name = Path.GetFileNameWithoutExtension(file);
-            string eventKey = name.Replace("_", ": ").Replace("  ", " ");
-            eventKey = System.Text.RegularExpressions.Regex.Replace(eventKey, @"_\d+$", "");
+            string eventKey = EventKeyFromFileName(file);
 
             var entry = profile.FirstOrDefault(e =>
                 e.Event.Equals(eventKey, StringComparison.OrdinalIgnoreCase));
@@ -1010,11 +1070,52 @@ internal static class ConfigStore
     }
 
     /// <summary>Saves the CURRENT working config (whatever's loaded/edited right now) as a
-    /// named, reloadable profile -- e.g. one saved setup per team.</summary>
+    /// named, reloadable profile -- e.g. one saved setup per team. Local disk write happens first
+    /// and is always synchronous/authoritative; the Supabase mirror push (CloudDatabaseService,
+    /// System 1 of BANDROOM_STREAMER_MASTER_PROMPT.md) is fire-and-forget best-effort AFTER that
+    /// succeeds, so a slow/unreachable/unconfigured cloud never blocks or fails a local save --
+    /// Bandroom must keep working fully offline.</summary>
     public static void SaveProfile(string name, List<TriggerEntry> entries)
     {
         Directory.CreateDirectory(ProfilesFolder);
         File.WriteAllText(ProfilePath(name), JsonSerializer.Serialize(entries, JsonOptions));
+        if (CloudDatabaseService.IsConfigured)
+            QueueCloudProfilePush(name, entries);
+    }
+
+    static readonly ConcurrentDictionary<string, CancellationTokenSource> PendingCloudPushes = new();
+
+    /// <summary>Debounces the Supabase mirror push -- SaveProfile is called on every single tick
+    /// of a volume slider's 'input' event (no debounce upstream in app.js), so pushing on every
+    /// call would fire dozens of concurrent unthrottled HTTP POSTs while a user just drags one
+    /// slider. Cancels any pending push for this team and schedules a new one 1.5s out; only the
+    /// last call in a burst actually reaches the network, with whatever `entries` looked like at
+    /// that last call. entries is cloned into JSON up front (not captured by reference) so a
+    /// caller mutating the same List&lt;TriggerEntry&gt; instance after this returns (the profile
+    /// lists in this app are long-lived and reused, e.g. WebMainForm._config) can't change what
+    /// actually gets pushed once the delay elapses.</summary>
+    static void QueueCloudProfilePush(string name, List<TriggerEntry> entries)
+    {
+        string snapshotJson = JsonSerializer.Serialize(entries, JsonOptions);
+        var cts = new CancellationTokenSource();
+        PendingCloudPushes.AddOrUpdate(name, cts, (_, old) => { old.Cancel(); return cts; });
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1.5), cts.Token);
+                var snapshot = JsonSerializer.Deserialize<List<TriggerEntry>>(snapshotJson, JsonOptions) ?? new List<TriggerEntry>();
+                await CloudDatabaseService.PushTeamProfileAsync(name, snapshot);
+            }
+            catch (TaskCanceledException)
+            {
+                // Superseded by a newer save for the same team within the debounce window -- expected.
+            }
+            finally
+            {
+                PendingCloudPushes.TryRemove(new KeyValuePair<string, CancellationTokenSource>(name, cts));
+            }
+        });
     }
 
     public static List<TriggerEntry> LoadProfile(string name)

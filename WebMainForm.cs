@@ -706,6 +706,15 @@ public sealed class WebMainForm : Form
     {
         if (_homeTeam is null || _awayTeam is null) return "no-matchup";
         if (_watching) return null;
+
+        // Sound Booth item #2: load every assigned song into RAM once, right before the game
+        // starts, so no trigger during the game has to wait on a disk read.
+        var toCache = (_homeConfig ?? Enumerable.Empty<TriggerEntry>())
+            .Concat(_awayConfig ?? Enumerable.Empty<TriggerEntry>())
+            .SelectMany(e => new[] { e.AudioFile, e.PaAudioFile })
+            .Append(AudioPlayer.LeadInClipPath);
+        Task.Run(() => AudioCache.Preload(toCache));
+
         _hook.Start();
         _watcher.Start();
         _watching = true;
@@ -1144,8 +1153,14 @@ public sealed class WebMainForm : Form
 
     /// <summary>Folder-flavored counterpart to ImportDefaultSongPackZipFromWeb -- for a user who
     /// already extracted the pack (or was handed a folder instead of the .zip). Same
-    /// bandroom:songpack* events, so app.js's existing progress UI works unchanged for either path.</summary>
-    public void ImportDefaultSongPackFolderFromWeb(string folderPath)
+    /// bandroom:songpack* events, so app.js's existing progress UI works unchanged for either path.
+    /// overwrite=true is the "Load All" button's path: JS has already gotten an explicit yes/no
+    /// from the user before calling this (same contract as ApplyDefaultProfileForTeamOverwriteFromWeb),
+    /// so on top of replacing colliding files on disk (see DefaultSongPackService.CopyFile) this
+    /// also re-runs ImportDefaultPackForTeam(overwrite:true) for every team the import found, so the
+    /// newly-copied songs actually land in each team's event slots instead of just sitting in the
+    /// library unassigned.</summary>
+    public void ImportDefaultSongPackFolderFromWeb(string folderPath, bool overwrite = false)
     {
         _ = Task.Run(async () =>
         {
@@ -1156,9 +1171,42 @@ public sealed class WebMainForm : Form
                 var result = await DefaultSongPackService.ImportExistingFolderAsync(folderPath,
                     (frac, file) => RunOnUi(() => _ = _webView.ExecuteScriptAsync(
                         $"window.dispatchEvent(new CustomEvent('bandroom:songpackimportprogress', {{ detail: {{ fraction: {frac.ToString(System.Globalization.CultureInfo.InvariantCulture)}, file: {System.Text.Json.JsonSerializer.Serialize(file)} }} }}))")),
-                    _lifetimeCts.Token);
+                    _lifetimeCts.Token, overwrite);
 
-                string msgJson = System.Text.Json.JsonSerializer.Serialize(result.Message);
+                string resultMessage = result.Message;
+                if (result.Success && overwrite)
+                {
+                    int teamsAssigned = 0;
+                    foreach (var teamName in result.TeamNames)
+                    {
+                        // Read straight from where DefaultSongPackService.CopyFile just wrote this
+                        // team's files (DownloadedDefaultSongsFolder\Imported\{team}) rather than
+                        // going through ImportDefaultPackForTeam/DefaultSongsFolder -- that path
+                        // prefers the BUNDLED pack whenever one exists and is non-empty, which would
+                        // silently ignore what the user just picked (or find nothing at all for a
+                        // team the bundled pack doesn't have).
+                        string importedFolder = Path.Combine(ConfigStore.DownloadedDefaultSongsFolder, "Imported", teamName);
+                        var config = ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase)
+                            ? ConfigStore.LoadProfile(teamName) : ConfigStore.BuildDefault();
+                        int assigned = ConfigStore.ImportTeamFolderForTeam(importedFolder, config, overwrite: true);
+                        if (assigned > 0)
+                        {
+                            ConfigStore.SaveProfile(teamName, config);
+                            RefreshHomeAwayConfigIfNeeded(teamName);
+                            // RefreshActiveConfigIfNeeded calls PushCategories(), which touches the
+                            // WebView2 CoreWebView2 directly -- that object is thread-affinitized to
+                            // the UI thread, and this whole method runs inside Task.Run (a
+                            // thread-pool thread), so this must be marshaled through RunOnUi like
+                            // every other _webView touch in this method already is.
+                            RunOnUi(() => RefreshActiveConfigIfNeeded(teamName, config));
+                            teamsAssigned++;
+                        }
+                    }
+                    if (teamsAssigned > 0)
+                        resultMessage += $" Re-assigned event slots for {teamsAssigned} team{(teamsAssigned == 1 ? "" : "s")}.";
+                }
+
+                string msgJson = System.Text.Json.JsonSerializer.Serialize(resultMessage);
                 RunOnUi(() => _ = _webView.ExecuteScriptAsync(result.Success
                     ? $"window.dispatchEvent(new CustomEvent('bandroom:songpackready', {{ detail: {{ message: {msgJson} }} }}))"
                     : $"window.dispatchEvent(new CustomEvent('bandroom:songpackimportfailed', {{ detail: {{ message: {msgJson} }} }}))"));
@@ -1383,8 +1431,33 @@ public sealed class WebMainForm : Form
         "stadium" => ReverbPreset.Stadium,
         "dome" => ReverbPreset.Dome,
         "nightgame" => ReverbPreset.NightGame,
+        // Sound Booth weather variants (item #10):
+        "stadiumrain" => ReverbPreset.StadiumRain,
+        "nightgameprimetime" => ReverbPreset.NightGamePrimeTime,
         _ => ReverbPreset.Off,
     };
+
+    // ---- Sound Booth toggles (Sound Booth dashboard -> WebBridge -> here, mirrors the
+    // existing SetReverbFromWeb/SetFadeDelayFromWeb pattern above). ----
+    public string GetEqPresetFromWeb() => AudioPlayer.CurrentEq.ToString().ToLowerInvariant();
+    public void SetEqPresetFromWeb(string key) => AudioPlayer.CurrentEq = key switch
+    {
+        "marchingband" => EqPreset.MarchingBand,
+        "megaphone" => EqPreset.Megaphone,
+        _ => EqPreset.Off,
+    };
+
+    public bool GetTransientShaperEnabledFromWeb() => AudioPlayer.TransientShaperEnabled;
+    public void SetTransientShaperEnabledFromWeb(bool enabled) => AudioPlayer.TransientShaperEnabled = enabled;
+
+    public bool GetStereoWidenerEnabledFromWeb() => AudioPlayer.StereoWidenerEnabled;
+    public void SetStereoWidenerEnabledFromWeb(bool enabled) => AudioPlayer.StereoWidenerEnabled = enabled;
+
+    public bool GetDuckingEnabledFromWeb() => AudioPlayer.DuckingEnabled;
+    public void SetDuckingEnabledFromWeb(bool enabled) => AudioPlayer.DuckingEnabled = enabled;
+
+    public bool GetNoEffectsBypassFromWeb() => AudioPlayer.NoEffectsBypass;
+    public void SetNoEffectsBypassFromWeb(bool enabled) => AudioPlayer.NoEffectsBypass = enabled;
 
     /// <summary>Classic Win32 "drag via titlebar" trick -- the HTML chrome bar has no native
     /// titlebar behind it (FormBorderStyle.None), so JS calls this on mousedown to let the OS
@@ -1696,7 +1769,12 @@ public sealed class WebMainForm : Form
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
         {
             float mainVolume = (volumeOverride ?? AudioPlayer.MasterVolume) * eventVolumeScale;
-            AudioPlayer.Play(entry.AudioFile, mainVolume, interruptPrevious: true);
+            // Sound Booth item #9: Touchdown/Turnover/Safety are the "big moment" events that
+            // duck everything else so this cue (and its PA layer below) cuts through clearly.
+            bool isHighPriority = entry.Event.Contains("Touchdown", StringComparison.OrdinalIgnoreCase)
+                || entry.Event.Contains("Turnover", StringComparison.OrdinalIgnoreCase)
+                || entry.Event.Contains("Safety", StringComparison.OrdinalIgnoreCase);
+            AudioPlayer.Play(entry.AudioFile, mainVolume, interruptPrevious: true, isHighPriorityEvent: isHighPriority);
             RecordSongTriggered(entry.Event);
 
             // PA Announcer layer: plays concurrently with the main cue above, not instead of it,

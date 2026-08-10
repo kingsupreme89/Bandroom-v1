@@ -165,6 +165,9 @@ async function init() {
     try {
       await refreshBigGameSection();
     } catch (err) { console.error("refreshBigGameSection failed", err); }
+    try {
+      await refreshSoundBoothSection();
+    } catch (err) { console.error("refreshSoundBoothSection failed", err); }
   } else {
     state.teams = [{ name: "General", primary: "#22d3ee", secondary: "#22d3ee" }];
     state.categories = [
@@ -1849,6 +1852,46 @@ async function refreshLeadInWhistleSection() {
     document.getElementById("toggle-leadin-whistle").checked = await bridge.GetLeadInWhistleEnabled();
 }
 
+// THE SOUND BOOTH -- Sound Booth overhaul dashboard. Plain-language (i) explanations live here
+// (not on the server) since they're static copy, not app state; SB_INFO_TEXT keys match each
+// control's data-info attribute in index.html.
+const SB_INFO_TEXT = {
+  "eq-marchingband": "This cleans up your marching band recordings so they sound less muddy -- it cuts out some rumble, tames boomy tuba/bass drum, and brings out the trumpets and snare a little more. \"Megaphone\" instead makes anything sound like it's blasting through an old stadium PA speaker, on purpose.",
+  "transient-shaper": "Makes drum and cymbal hits punch harder without turning up the whole song -- like giving the snare a little extra crack right when it hits.",
+  "stereo-widener": "Takes a recording that sounds narrow or one-note (like it's coming from one spot) and spreads it out so it sounds bigger and fuller through two speakers.",
+  "ducking": "When something big happens like a touchdown, this quietly turns the music down for a second so the crowd sound and announcer can be heard clearly, then brings the music back up on its own.",
+};
+
+function refreshSoundBoothInfoPopover(key) {
+  const popover = document.getElementById("soundbooth-info-popover");
+  const text = document.getElementById("soundbooth-info-text");
+  text.textContent = SB_INFO_TEXT[key] || "";
+  popover.hidden = false;
+}
+
+async function refreshSoundBoothSection() {
+  if (!bridge) return;
+  try {
+    const eqPreset = await bridge.GetEqPreset();
+    document.querySelectorAll("#soundbooth-eq-tiles .sb-tile").forEach((t) => {
+      t.classList.toggle("active", t.dataset.eq === eqPreset);
+    });
+  } catch (err) { console.error("GetEqPreset failed", err); }
+  try {
+    document.getElementById("toggle-transient-shaper").checked = await bridge.GetTransientShaperEnabled();
+  } catch (err) { console.error("GetTransientShaperEnabled failed", err); }
+  try {
+    document.getElementById("toggle-stereo-widener").checked = await bridge.GetStereoWidenerEnabled();
+  } catch (err) { console.error("GetStereoWidenerEnabled failed", err); }
+  try {
+    document.getElementById("toggle-ducking").checked = await bridge.GetDuckingEnabled();
+  } catch (err) { console.error("GetDuckingEnabled failed", err); }
+  try {
+    const bypassed = await bridge.GetNoEffectsBypass();
+    document.getElementById("btn-soundbooth-no-effects").classList.toggle("active", bypassed);
+  } catch (err) { console.error("GetNoEffectsBypass failed", err); }
+}
+
 // Big Game Rules panel (Adjust sidebar) -- editable trigger rule that used to be a hardcoded
 // "quarter 4, score within 8" constant in GameWatcher.cs (see ConfigStore.BigGameSettings /
 // WebBridge.GetBigGameSettings/SaveBigGameSettings). _bigGameBannerEnabled is a separate,
@@ -2151,6 +2194,41 @@ function wireControls() {
       tile.classList.add("active");
       bridge?.SetReverb(tile.dataset.reverb);
     });
+  });
+
+  // The Sound Booth
+  document.querySelectorAll("#soundbooth-eq-tiles .sb-tile").forEach((tile) => {
+    tile.addEventListener("click", () => {
+      document.querySelectorAll("#soundbooth-eq-tiles .sb-tile").forEach((t) => t.classList.remove("active"));
+      tile.classList.add("active");
+      bridge?.SetEqPreset(tile.dataset.eq);
+    });
+  });
+  document.getElementById("toggle-transient-shaper").addEventListener("change", (e) => {
+    bridge?.SetTransientShaperEnabled(e.target.checked);
+  });
+  document.getElementById("toggle-stereo-widener").addEventListener("change", (e) => {
+    bridge?.SetStereoWidenerEnabled(e.target.checked);
+  });
+  document.getElementById("toggle-ducking").addEventListener("change", (e) => {
+    bridge?.SetDuckingEnabled(e.target.checked);
+  });
+  document.getElementById("btn-soundbooth-no-effects").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-soundbooth-no-effects");
+    const next = !btn.classList.contains("active");
+    btn.classList.toggle("active", next);
+    btn.textContent = next ? "Effects Off -- Click to Restore" : "No Effects -- Hear It Raw";
+    await bridge?.SetNoEffectsBypass(next);
+  });
+  document.querySelectorAll(".sb-info").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      refreshSoundBoothInfoPopover(btn.dataset.info);
+    });
+  });
+  document.getElementById("soundbooth-info-close").addEventListener("click", () => {
+    document.getElementById("soundbooth-info-popover").hidden = true;
   });
 
   document.querySelectorAll("[data-action]").forEach((item) => {
@@ -4533,6 +4611,45 @@ function initDefaultSongPackPrompt() {
     if (!folderPath) return;
     importOverlay.hidden = true;
     bridge?.ImportDefaultSongPackFolder(folderPath);
+  });
+  // "Load All (Overwrite)" -- unlike plain "Import from Folder" (merges, numbers collisions as
+  // alternates), this replaces already-imported songs that share a filename AND re-assigns every
+  // event slot for every team the folder turns out to contain (see
+  // ImportDefaultSongPackFolderFromWeb's overwrite=true path). Destructive, so it reuses the same
+  // #auto-assign-confirm-overlay Yes/Cancel pattern every other overwrite action in this file gates
+  // behind an explicit confirm -- just with the Guided/Conference buttons hidden since neither
+  // applies to a folder-wide import.
+  document.getElementById("btn-songpack-import-folder-all").addEventListener("click", async () => {
+    const folderPath = await bridge?.BrowseForSongPackFolder();
+    if (!folderPath) return;
+
+    const overlay = document.getElementById("auto-assign-confirm-overlay");
+    const cancelBtn = document.getElementById("btn-auto-assign-cancel");
+    const yesBtn = document.getElementById("btn-auto-assign-confirm-yes");
+    const guidedBtn = document.getElementById("btn-auto-assign-guided");
+    const conferenceBtn = document.getElementById("btn-auto-assign-conference");
+    document.getElementById("auto-assign-confirm-text").textContent =
+      "This will overwrite any already-imported songs that share a filename, and re-assign every event slot for every team found in this folder. Continue?";
+    guidedBtn.hidden = true;
+    conferenceBtn.hidden = true;
+    overlay.hidden = false;
+    const proceed = await new Promise((resolve) => {
+      const cleanup = () => {
+        cancelBtn.removeEventListener("click", onCancel);
+        yesBtn.removeEventListener("click", onYes);
+        overlay.hidden = true;
+        guidedBtn.hidden = false;
+        conferenceBtn.hidden = false;
+      };
+      const onCancel = () => { cleanup(); resolve(false); };
+      const onYes = () => { cleanup(); resolve(true); };
+      cancelBtn.addEventListener("click", onCancel);
+      yesBtn.addEventListener("click", onYes);
+    });
+    if (!proceed) return;
+
+    importOverlay.hidden = true;
+    bridge?.ImportDefaultSongPackFolder(folderPath, true);
   });
 
   window.addEventListener("bandroom:songpackdownloading", () => {

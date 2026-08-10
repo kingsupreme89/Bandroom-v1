@@ -149,7 +149,7 @@ internal static class DefaultSongPackService
     /// nested one level under "Default" or "Songs\Default" like the zip flow), a folder of team
     /// folders with no conference level (Team\*.mp3), or a single team's folder with the audio
     /// files directly inside it (e.g. the user pointed us straight at "Alabama").</summary>
-    public static Task<FolderImportResult> ImportExistingFolderAsync(string folderPath, Action<double, string> progress, CancellationToken ct)
+    public static Task<FolderImportResult> ImportExistingFolderAsync(string folderPath, Action<double, string> progress, CancellationToken ct, bool overwrite = false)
     {
         return Task.Run(() =>
         {
@@ -192,12 +192,14 @@ internal static class DefaultSongPackService
                 Directory.CreateDirectory(destDir);
                 string ext = Path.GetExtension(sourceFile);
                 string destPath = Path.Combine(destDir, destStem + ext);
-                // A collision means a second file wants the same situation slot -- keep the first
-                // (whichever wins the EventKey-exact filename that auto-fill matches on) and give
-                // the rest a numbered alternate so they're still copied and browsable/assignable by
-                // hand, they just won't auto-fill (matches how the app already stores alternates,
-                // e.g. "Defense_Earned First Down_3.mp3").
-                if (File.Exists(destPath))
+                // A collision means a second file wants the same situation slot. Normally keep the
+                // first (whichever wins the EventKey-exact filename that auto-fill matches on) and
+                // give the rest a numbered alternate so they're still copied and browsable/assignable
+                // by hand, they just won't auto-fill (matches how the app already stores alternates,
+                // e.g. "Defense_Earned First Down_3.mp3"). "Load All" callers pass overwrite=true to
+                // replace the existing file at destStem instead, since the whole point of that button
+                // is "replace everything from this folder" rather than accumulate alternates.
+                if (!overwrite && File.Exists(destPath))
                 {
                     int n = 2;
                     while (File.Exists(destPath = Path.Combine(destDir, $"{destStem}_{n}{ext}"))) n++;
