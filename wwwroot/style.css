@@ -3041,6 +3041,10 @@ input, select, textarea, [contenteditable] {
   cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
 }
+/* Author `display` at equal specificity always beats the UA default [hidden]{display:none}, so
+   without this an .icon-btn stays visible even with the hidden attribute set -- unexercised until
+   #btn-unlock-matchup became the first .icon-btn ever toggled hidden. */
+.icon-btn[hidden] { display: none; }
 .icon-btn:hover { background: rgba(255, 255, 255, 0.06); color: var(--text-primary); }
 
 .header-team-badge { width: 30px; height: 30px; flex: none; }

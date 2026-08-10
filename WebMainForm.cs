@@ -758,12 +758,20 @@ public sealed class WebMainForm : Form
             .Append(AudioPlayer.LeadInClipPath);
         AudioCache.Preload(toCache);
 
+        // Set BEFORE Start() below -- GameWatcher.Start() fires WindowFoundChanged synchronously
+        // (RunAsync runs up to its first await before Start() returns), and that handler reads
+        // _watching via WatchStateString() to push the "waiting"/"watching" pill state to the web
+        // UI. If _watching were still false at that point, every watch start would report "off"
+        // to the page, wiping out the pill and (since setWatching("off") also clears the
+        // client-side matchupLocked flag) hiding the unlock button while the backend was still
+        // genuinely locked/watching.
+        _watching = true;
+
         ControllerRumbleService.Start(_watcher);
         CrowdBusService.Start(_watcher);
 
         _hook.Start();
         _watcher.Start();
-        _watching = true;
         return null;
     }
 

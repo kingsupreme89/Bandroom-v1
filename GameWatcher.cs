@@ -60,15 +60,30 @@ internal sealed class GameWatcher
         {
             // "flag" was added 2026-08-07 sharing the same band as down/situation/quarter (see
             // its calibration comment above). awayscore/homescore/clock share the SAME vertical
-            // band too (BandFxY/BandFxH) even though their horizontal FxX/FxW stay fixed at
-            // today's CBS-specific offsets -- a future non-CBS preset would need its own score/
-            // clock FxX values added to ScorebugPreset to be fully correct horizontally, but at
-            // least the vertical band won't silently go stale like it would if these were left
-            // out of this list entirely.
-            if (region.Name is "down" or "situation" or "quarter" or "flag" or "awayscore" or "homescore" or "clock")
+            // band too (BandFxY/BandFxH). FIXED 2026-08-10: their horizontal FxX/FxW used to be
+            // hardcoded CBS-specific offsets shared by every preset -- promoted to per-preset
+            // fields (ScorebugPreset.AwayScoreFx*/HomeScoreFx*/ClockFx*) once the CFB 27 default
+            // scorebug update proved a single shared X/W could never be correct for two skins
+            // with genuinely different score/clock layouts at once.
+            if (region.Name is "down" or "situation" or "quarter" or "flag")
             {
                 region.FxY = preset.BandFxY;
                 region.FxH = preset.BandFxH;
+            }
+            else if (region.Name == "awayscore")
+            {
+                region.FxX = preset.AwayScoreFxX; region.FxW = preset.AwayScoreFxW;
+                region.FxY = preset.BandFxY; region.FxH = preset.BandFxH;
+            }
+            else if (region.Name == "homescore")
+            {
+                region.FxX = preset.HomeScoreFxX; region.FxW = preset.HomeScoreFxW;
+                region.FxY = preset.BandFxY; region.FxH = preset.BandFxH;
+            }
+            else if (region.Name == "clock")
+            {
+                region.FxX = preset.ClockFxX; region.FxW = preset.ClockFxW;
+                region.FxY = preset.BandFxY; region.FxH = preset.BandFxH;
             }
         }
     }

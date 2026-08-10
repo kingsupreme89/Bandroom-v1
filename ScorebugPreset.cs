@@ -33,6 +33,21 @@ public sealed class ScorebugPreset
     public double AwayTimeoutFxW { get; init; }
     public double AwayTimeoutFxH { get; init; }
 
+    /// <summary>Tight positional crops for the away/home score digits and the game clock,
+    /// promoted from hardcoded constants in GameWatcher.cs to per-preset fields 2026-08-10 --
+    /// the CBS skin's crops (X=0.35/0.58/0.65) assumed a horizontal score/clock layout that
+    /// simply doesn't hold for CFB 27's default scorebug (score digits sit flush against the
+    /// team-color blocks, clock sits in a taller two-row center pill), so a single shared set
+    /// of X/W values could never be correct for both skins at once. Every existing preset below
+    /// keeps the original CBS-calibrated numbers as its default so none of them silently regress
+    /// from this change -- only CollegeFootball27 (see below) uses the new layout.</summary>
+    public double AwayScoreFxX { get; init; } = 0.35;
+    public double AwayScoreFxW { get; init; } = 0.05;
+    public double HomeScoreFxX { get; init; } = 0.58;
+    public double HomeScoreFxW { get; init; } = 0.05;
+    public double ClockFxX { get; init; } = 0.65;
+    public double ClockFxW { get; init; } = 0.08;
+
     /// <summary>Tight crop directly under each team's name for possession sampling by brightness
     /// comparison (GameWatcher.SamplePossessionByUnderline), NOT color matching -- correction
     /// 2026-08-07: the possession signal on this scorebug revision is a thin underline beneath
@@ -77,16 +92,38 @@ public sealed class ScorebugPreset
     /// finished calibration. Possession here uses the underline-brightness method (same reasoning
     /// as V3): this scorebug style shows a bright underline beneath the team currently on offense
     /// rather than a team-colored fill box.</summary>
-    /// <summary>Renamed from "Console/Remote Play v1" 2026-08-09 -- the PC game's own process is
-    /// literally named "CollegeFB27" (see GameWatcher.cs's window-lookup comments), so this is
-    /// the CFB 27 console/remote-play HUD, not a version-agnostic "v1". Coordinates unchanged.</summary>
-    public static readonly ScorebugPreset ConsoleScorebugV1 = new()
+    /// <summary>Overwritten 2026-08-10 (was "College Football 27 Console" / "Console/Remote Play
+    /// v1") -- the game update changed the default scorebug to the same layout on PC and console
+    /// both, per 7 live screenshots the owner sent (Georgia @ LSU, Alabama @ LSU, multiple game
+    /// states: kickoff, pregame team-select, 2nd/3rd down live play). Renamed to drop "Console"
+    /// since it's no longer console-specific. Band widened taller than the old console preset
+    /// (BandFxH 0.10 -> 0.075 actually shrunk slightly, see below) to cover BOTH the team-color
+    /// score row AND the down-and-distance ("2nd &amp; 5") row rendered just below it in this
+    /// skin's taller two-row center pill -- confirmed from the screenshots that "1st | 6:11 |
+    /// [ball-position]" and "2nd &amp; 5" are two separate lines inside one pill, not one line.
+    /// AwayScoreFx*/HomeScoreFx*/ClockFx* are NEW per-preset fields (see their declaration above)
+    /// -- this skin's score digits sit flush against each team's color block and the clock sits
+    /// centered in the pill, both at very different X positions than the CBS skin's crops.
+    /// IMPORTANT CAVEAT, same as every preset in this file: coordinates below are eyeballed from
+    /// screenshots (2560x1440, displayed/measured at 2000x1125), not pixel-measured against the
+    /// raw image data -- treat as a strong starting point needing live tuning, not exact.
+    /// Possession/timeout crops (AwayUnderlineFx*/HomeUnderlineFx*/AwayTimeoutFx*) are
+    /// DELIBERATELY LEFT UNCALIBRATED (zero) for this preset -- none of the 7 screenshots show a
+    /// timeout-dash row or an underline under either team's name the way the CBS skin has. This
+    /// skin instead shows a small arrow ("▲") next to the ball-position number, which looks like
+    /// it's this HUD's possession indicator, but that's a fundamentally different signal
+    /// (position/shape of an arrow glyph, not underline brightness or a color-filled box) that
+    /// GameWatcher has no sampling method for yet. Possession detection will not work on this
+    /// preset until either a live screenshot showing timeout dashes/underline surfaces, or new
+    /// arrow-detection logic gets built -- don't guess coordinates for a signal that may not
+    /// exist in this skin at all.</summary>
+    public static readonly ScorebugPreset CollegeFootball27 = new()
     {
-        Name = "College Football 27 Console",
-        BandFxY = 0.855, BandFxH = 0.10,
-        AwayUnderlineFxX = 0.20, AwayUnderlineFxY = 0.965, AwayUnderlineFxW = 0.09, AwayUnderlineFxH = 0.015,
-        HomeUnderlineFxX = 0.565, HomeUnderlineFxY = 0.965, HomeUnderlineFxW = 0.09, HomeUnderlineFxH = 0.015,
-        AwayTimeoutFxX = 0.20, AwayTimeoutFxY = 0.905, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
+        Name = "College Football 27",
+        BandFxY = 0.870, BandFxH = 0.075,
+        AwayScoreFxX = 0.395, AwayScoreFxW = 0.035,
+        HomeScoreFxX = 0.595, HomeScoreFxW = 0.035,
+        ClockFxX = 0.465, ClockFxW = 0.06,
     };
 
     /// <summary>Added 2026-08-09 for the owner's separate CFB 26 PS/Xbox console capture, kept as
@@ -106,7 +143,7 @@ public sealed class ScorebugPreset
         AwayTimeoutFxX = 0.20, AwayTimeoutFxY = 0.905, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
     };
 
-    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebugV3, ConsoleScorebugV1, CollegeFootball26Console };
+    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebugV3, CollegeFootball27, CollegeFootball26Console };
 
     /// <summary>Old preset names that got renamed, mapped to their current Name -- a returning
     /// user's saved scorebug_preset.txt (see ConfigStore.LoadScorebugPresetName) still has the
@@ -115,7 +152,8 @@ public sealed class ScorebugPreset
     /// entry here every time a preset's Name changes.</summary>
     static readonly Dictionary<string, string> LegacyNameAliases = new(System.StringComparer.OrdinalIgnoreCase)
     {
-        ["Console/Remote Play v1"] = "College Football 27 Console",
+        ["Console/Remote Play v1"] = "College Football 27",
+        ["College Football 27 Console"] = "College Football 27",
     };
 
     public static ScorebugPreset GetByName(string? name)
