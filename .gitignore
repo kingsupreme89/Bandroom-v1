@@ -29,6 +29,16 @@ __pycache__/
 # accidentally committed once already.
 squirrel_releases/
 
+# Working mirror of build output pushed to teammates via "8888" -- not source, hundreds of
+# files, don't want release.ps1's `git add -A` sweeping it into commits.
+publish-dev-share/
+publish-dev-share-lite/
+*.rar
+
+# Local secrets -- contains a real ElevenLabs API key, was accidentally committed by
+# release.ps1's `git add -A` step (2026-08-11), flagged since Session 36.
+voice_poc/.env
+
 # Cloudflare Workers local dev state (wrangler dev/miniflare cache, sqlite, R2 emulation) --
 # machine-local build/runtime artifacts, not source.
 .wrangler/
