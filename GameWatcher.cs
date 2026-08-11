@@ -137,7 +137,18 @@ internal sealed class GameWatcher
     /// for built-in roster teams (their canonical Name already matches what the game shows).</summary>
     public string? HomeTeamMascot { get; set; }
     public string? AwayTeamMascot { get; set; }
-    static readonly Regex DistancePattern = new(@"&\s*(-?\d+)", RegexOptions.IgnoreCase);
+    // FIXED 2026-08-11 (found from live screenshots, not caught by the code-only audit earlier
+    // this session): "3rd & inches" and "1st & Goal" both render with no digit at all -- the
+    // original digit-only pattern simply never matched either, silently leaving YardsToGo frozen
+    // on whatever the PREVIOUS down's distance happened to be instead of updating it, which could
+    // misclassify a genuinely short down as long (or vice versa) downstream. "inches" is always
+    // under a yard (unambiguously short); "Goal" is owner's explicit call (2026-08-11) to also
+    // treat as short for the hype logic, even though the real yard-to-go varies -- both now
+    // normalize to "1" via NormalizeDistanceRaw below instead of leaving the field stale.
+    static readonly Regex DistancePattern = new(@"&\s*(-?\d+|inches|goal)", RegexOptions.IgnoreCase);
+
+    static string NormalizeDistanceRaw(string raw) =>
+        int.TryParse(raw, out _) ? raw : "1";
     string? _lastDistanceRaw;
     string? _lastFiredDistanceRaw;
     DateTime _lossCooldownUntil;
@@ -221,7 +232,18 @@ internal sealed class GameWatcher
     // delta of 0 through any stretch of blank OCR ticks, no matter how long.
     string? _lastKnownAwayScore;
     string? _lastKnownHomeScore;
+    // A single misread OCR frame (e.g. "14" -> "16" -> "14" for one 250ms tick, no blank in
+    // between) isn't covered by the sticky-value fix above -- that only guards against BLANK
+    // reads during pauses, not a bad-but-non-blank digit read landing on a real committed value
+    // for exactly one tick. Reported live as "Safety" firing off a phantom +2. Require the same
+    // new value on two consecutive ticks before committing, same debounce idea as CommitDownAndDistance.
+    string? _pendingAwayScore;
+    string? _pendingHomeScore;
     string? _lastKnownQuarter;
+    // Same single-bad-frame risk as score (a misread "1st"->"3rd"->"1st" for one tick could
+    // falsely trigger GameStateEventHelper's quarter-transition cues) -- added same session,
+    // same CommitValueIfConfirmed debounce, found by audit rather than a live report.
+    string? _pendingQuarter;
 
     readonly List<WatchedRegion> _regions = new()
     {
@@ -318,7 +340,11 @@ internal sealed class GameWatcher
         {
             Name = "banner",
             FxX = 0.35, FxY = 0.87, FxW = 0.3, FxH = 0.08,
-            Pattern = new Regex(@"\b(TOUCHDOWN|FIELD GOAL|SAFETY)\b", RegexOptions.IgnoreCase),
+            // FIELD\s*GOAL (not a literal "FIELD GOAL") -- confirmed from a live screenshot
+            // 2026-08-11 that this skin's banner renders it as one solid word "FIELDGOAL", same
+            // single-word style as TOUCHDOWN/SAFETY. The literal-space version silently never
+            // matched, so IsFieldGoalAttempt was always false (see FieldGoalMissedHelper.cs).
+            Pattern = new Regex(@"\b(TOUCHDOWN|FIELD\s*GOAL|SAFETY)\b", RegexOptions.IgnoreCase),
         },
         // Score + clock -- unlike down/situation/quarter above, bare digits have no unique
         // textual pattern to regex-match against inside the full-width band (a score digit and
@@ -531,7 +557,15 @@ internal sealed class GameWatcher
                         // score to the wrong team. Generalizing the existing FLAG guard to also
                         // cover "situation" being active closes that gap.
                         bool situationActive = _regions.FirstOrDefault(r => r.Name == "situation")?.Last != null;
-                        if (!flagActive && !situationActive) SamplePossessionFromWindow(fullBmp, winW, winH);
+                        // FIXED same session (audit finding): "situation" doesn't necessarily
+                        // cover TOUCHDOWN -- the "situation" region's own comment already notes
+                        // TOUCHDOWN may only ever render in the separate full-screen "banner"
+                        // region, not the small situation box. Without checking banner too, a
+                        // touchdown celebration frame could still get its possession color
+                        // sampled and misattribute the score to the wrong team, the exact bug
+                        // this guard exists to prevent.
+                        bool bannerActive = _regions.FirstOrDefault(r => r.Name == "banner")?.Last != null;
+                        if (!flagActive && !situationActive && !bannerActive) SamplePossessionFromWindow(fullBmp, winW, winH);
                     }
 
                     var match = region.Pattern.Match(text);
@@ -540,13 +574,16 @@ internal sealed class GameWatcher
                     if (region.Name == "down")
                     {
                         var distanceMatch = DistancePattern.Match(text);
-                        string? distanceRaw = distanceMatch.Success ? distanceMatch.Groups[1].Value : null;
+                        string? distanceRaw = distanceMatch.Success ? NormalizeDistanceRaw(distanceMatch.Groups[1].Value) : null;
                         CheckForLossOfYards(distanceRaw);
                         CommitDownAndDistance(currentValue, distanceRaw);
                     }
-                    if (region.Name == "awayscore" && currentValue != null) _lastKnownAwayScore = currentValue;
-                    if (region.Name == "homescore" && currentValue != null) _lastKnownHomeScore = currentValue;
-                    if (region.Name == "quarter" && currentValue != null) _lastKnownQuarter = currentValue;
+                    if (region.Name == "awayscore" && currentValue != null)
+                        CommitValueIfConfirmed(currentValue, ref _pendingAwayScore, ref _lastKnownAwayScore);
+                    if (region.Name == "homescore" && currentValue != null)
+                        CommitValueIfConfirmed(currentValue, ref _pendingHomeScore, ref _lastKnownHomeScore);
+                    if (region.Name == "quarter" && currentValue != null)
+                        CommitValueIfConfirmed(currentValue, ref _pendingQuarter, ref _lastKnownQuarter);
 
                     if (currentValue != null && currentValue != region.Last)
                     {
@@ -870,6 +907,38 @@ internal sealed class GameWatcher
         _pendingDistanceRaw = null;
     }
 
+    /// <summary>Requires <paramref name="currentValue"/> to be read on two consecutive ticks
+    /// before promoting it from <paramref name="pending"/> to <paramref name="committed"/>,
+    /// filtering out a single bad OCR frame (see the _pendingAwayScore/_pendingHomeScore field
+    /// comment for the live bug this fixes).
+    ///
+    /// FIXED same session: the original version discarded an unconfirmed `pending` outright
+    /// whenever a THIRD distinct value showed up before it confirmed -- fine for a single bad
+    /// misread reverting back to `committed`, but it also silently ate a real fast second score
+    /// (e.g. a touchdown's new total read once, then a quick 2-point conversion's total read
+    /// before the touchdown's total got its confirming second tick). The engine would then see
+    /// one big delta jump straight from the old score to the newest one, which doesn't match any
+    /// evaluator's expected delta, so BOTH scoring cues could go silent. Now the outgoing pending
+    /// value is committed once (unconfirmed) before starting a fresh confirmation cycle on the
+    /// newest read, so a real back-to-back score still produces two deltas instead of one
+    /// unrecognizable one -- at the cost of a narrower residual risk (two different bad misreads
+    /// landing on consecutive ticks, with no reversion in between, could still commit garbage).</summary>
+    static void CommitValueIfConfirmed(string currentValue, ref string? pending, ref string? committed)
+    {
+        if (currentValue == committed) { pending = null; return; }
+
+        if (currentValue == pending)
+        {
+            committed = currentValue;
+            pending = null;
+        }
+        else
+        {
+            if (pending != null) committed = pending;
+            pending = currentValue;
+        }
+    }
+
     /// <summary>Collapses OCR-noisy variants ("PATGOOD", "PAT  GOOD") of "situation"/"banner"
     /// matches down to a stable key used in triggers.json (situation:pat_good, etc).
     /// "down"/"flag" matches pass through as plain lowercase, unchanged from before.</summary>
@@ -1052,11 +1121,21 @@ internal sealed class GameWatcher
         };
 
         // The onDuplicateDropped callback fires when two rule evaluators both matched the same
-        // EventKey on this tick and only the first is kept (see EventRouter.Dedupe's own comment) --
-        // logged here in plain English for the user-facing Event Log rather than inside
-        // Bandroom.Core, which has no UI-facing logging of its own.
-        var results = _eventRouter.Route(state, dupe =>
-            EventActivityLog.Record(dupe.EventKey, "n/a", $"{EventActivityLog.FriendlyEventName(dupe.EventKey)} -- skipped: duplicate of an event we just fired this instant"));
+        // EventKey on this tick and only the first (by fixed evaluator order) is kept (see
+        // EventRouter.Dedupe's own comment) -- logged here in plain English for the user-facing
+        // Event Log rather than inside Bandroom.Core, which has no UI-facing logging of its own.
+        // 2026-08-11 audit item #3: now includes WHICH evaluator's event was kept vs dropped
+        // (provenance), not just that a duplicate was dropped.
+        var results = _eventRouter.Route(state, (dupe, droppedBy, keptBy) =>
+            EventActivityLog.Record(dupe.EventKey, "n/a", $"{EventActivityLog.FriendlyEventName(dupe.EventKey)} -- skipped: duplicate of an event we just fired this instant ({droppedBy} was dropped in favor of {keptBy})"));
+
+        // 2026-08-11 audit item #5 ("almost fired" ghost log): buffered evaluators (DownDistance-
+        // Buffer users) append a note here when their confirmation window times out without the
+        // change they were waiting for. Logged as a distinct near-miss entry rather than silently
+        // doing nothing.
+        foreach (var nearMiss in state.NearMisses)
+            EventActivityLog.Record("n/a", "n/a", $"(near miss) {nearMiss}");
+
         if (results.Count > 0)
             EventsDetected?.Invoke(results);
     }

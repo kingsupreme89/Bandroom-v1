@@ -27,6 +27,12 @@ public sealed class GameStateEventHelper : IRuleEvaluator
                 };
             }
 
+            // NOTE: quarter 3 (halftime -> second half) is deliberately NOT handled here --
+            // KickoffHelper already fires "Other: Second-Half Kickoff" for that exact moment,
+            // gated on the actual kickoff situation-text edge (more precise than a bare quarter
+            // transition) and registered in ConfigStore.AllEngineEventKeys. Adding a second
+            // event here would just double-fire on the same real-world moment.
+
             if (state.Current.Quarter == 4)
             {
                 return new TriggerEvent

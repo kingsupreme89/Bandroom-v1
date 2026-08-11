@@ -13,18 +13,16 @@ public sealed class DefenseHelper : IRuleEvaluator
     // tick N+1 Current.Down == Previous.Down so the old "down just changed" guard excluded it too
     // -- the loss never fired. Fix: remember the down and the yards-to-go baseline from the tick
     // right before the transition, and keep comparing against that baseline for a short window
-    // instead of requiring both fields to move on the exact same tick.
-    int? _pendingDown;
-    int _baselineYardsToGo;
-    int _ticksPending;
-    const int MaxPendingTicks = 3;
+    // instead of requiring both fields to move on the exact same tick. Shared bookkeeping
+    // extracted into DownDistanceBuffer (2026-08-11 audit).
+    readonly DownDistanceBuffer _buffer = new();
 
     public TriggerEvent? Evaluate(GameState state)
     {
         // Defense = user's team does NOT have the ball
         if (state.UserHasPossession)
         {
-            _pendingDown = null;
+            _buffer.Clear();
             return null;
         }
 
@@ -35,33 +33,38 @@ public sealed class DefenseHelper : IRuleEvaluator
         // STATE_MACHINE_ANALYSIS.md Discrepancy #4.
         if (state.Delta.NewPossession)
         {
-            _pendingDown = null;
+            _buffer.Clear();
             return null;
         }
 
         if (state.Current.Down != state.Previous.Down)
         {
-            _pendingDown = state.Current.Down;
-            _baselineYardsToGo = state.Previous.YardsToGo;
-            _ticksPending = 0;
+            _buffer.Start(state.Current.Down, state.Previous.YardsToGo);
         }
-        else if (_pendingDown != null)
+        else if (_buffer.IsPending)
         {
-            _ticksPending++;
-            if (_ticksPending > MaxPendingTicks)
-                _pendingDown = null;
+            int pendingDown = _buffer.PendingDown!.Value;
+            if (_buffer.Advance())
+            {
+                // Timed out with the down never matching Current.Down again, or matching but
+                // YardsToGo never actually increasing (item #5: "almost fired" ghost log). Only
+                // downs 2/3 are this evaluator's territory (see the down==2/3 branches below).
+                if (pendingDown is 2 or 3)
+                    state.NearMisses.Add($"DefenseHelper: buffered wait for a down-{pendingDown} Loss timed out, no YardsToGo increase detected");
+                _buffer.Clear();
+            }
         }
 
-        if (_pendingDown == null || _pendingDown != state.Current.Down)
+        if (_buffer.PendingDown == null || _buffer.PendingDown != state.Current.Down)
             return null;
 
-        if (state.Current.YardsToGo <= _baselineYardsToGo)
+        if (state.Current.YardsToGo <= _buffer.BaselineYardsToGo)
             return null;
 
         // Consume the pending window so this fires once per down transition, not once per tick
         // it happens to still be true.
-        int down = _pendingDown.Value;
-        _pendingDown = null;
+        int down = _buffer.PendingDown.Value;
+        _buffer.Clear();
 
         // REMOVED 2026-08-10 (the "gameplan" rewrite): this used to also fire a plain, distance-
         // blind "Defense: Third Down" here for every 3rd-down stop. That's now OffenseDownHelper's

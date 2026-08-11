@@ -1,7 +1,44 @@
-// Bridge to the C# host (WebMainForm.cs via CoreWebView2.AddHostObjectToScript("bandroom", ...)).
-// Falls back to static placeholder data when opened outside WebView2 (e.g. a plain browser
-// preview) so the layout is still inspectable without the host app running.
-const bridge = window.chrome?.webview?.hostObjects?.bandroom ?? null;
+// Bridge to the C# host. On Windows this is WebMainForm.cs via
+// CoreWebView2.AddHostObjectToScript("bandroom", ...). The Mac app has no embedded webview (it
+// opens this page in the system browser over its own HttpListener), so `window.chrome.webview`
+// never exists there -- instead MainWindow.axaml.cs stamps `window.__BANDROOM_HTTP_BRIDGE__` onto
+// the page when it serves index.html, and in that case we use a synchronous-XHR Proxy that POSTs
+// each call to /bridge/{MethodName} (see MainWindow.axaml.cs's ServeBridgeCall) and parses the
+// JSON response -- same call shape (`bridge.Method(args)`, awaitable) as the WebView2 path, so no
+// other call site in this file needs to know which transport is in use. Falls back to static
+// placeholder data only when neither transport is present (e.g. a plain browser preview opened
+// with no host app running at all) so the layout is still inspectable.
+function _makeHttpRpcBridge() {
+  return new Proxy({}, {
+    get(_target, methodName) {
+      if (typeof methodName !== "string") return undefined;
+      return function (...args) {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `/bridge/${methodName}`, false); // synchronous: matches both `await bridge.X()` and non-awaited `bridge.X()` call sites
+        xhr.setRequestHeader("Content-Type", "application/json");
+        try {
+          xhr.send(JSON.stringify(args));
+        } catch (err) {
+          console.error(`[mac-bridge] ${methodName} request failed`, err);
+          return null;
+        }
+        if (xhr.status < 200 || xhr.status >= 300) {
+          console.error(`[mac-bridge] ${methodName} returned ${xhr.status}`, xhr.responseText);
+          return null;
+        }
+        if (!xhr.responseText) return null;
+        try {
+          return JSON.parse(xhr.responseText);
+        } catch {
+          return xhr.responseText;
+        }
+      };
+    },
+  });
+}
+const bridge =
+  window.chrome?.webview?.hostObjects?.bandroom ??
+  (window.__BANDROOM_HTTP_BRIDGE__ ? _makeHttpRpcBridge() : null);
 
 // The Bandroom community marketplace worker (cloudflare-marketplace/worker.js) -- R2 for files,
 // KV for name/school metadata. See that file for the exact /upload, /list, /file contract.
@@ -507,6 +544,7 @@ async function openSituations(category) {
     // nothing assigned yet = dim/no pulse) without needing to read the badge text.
     const ledClass = !ev.fileName ? "situation-led-off" : ev.confirmed ? "situation-led-green" : "situation-led-amber";
     row.className = "situation-row" + (ev.confirmed ? "" : " situation-unconfirmed");
+    row.dataset.trigger = ev.trigger; // punch-list item 6: lets scrollToSituationRow() find this card after a trim-save
     row.innerHTML = `
       <span class="situation-text">
         <div class="situation-name"><span class="situation-led ${ledClass}"></span><span class="situation-name-text">${friendlyEventName(ev.eventName)}</span></div>
@@ -516,6 +554,7 @@ async function openSituations(category) {
       <span class="situation-actions" style="position: relative;">
         <button class="situation-btn" data-act="assign">Assign / Edit</button>
         <button class="situation-btn situation-btn-pa" data-act="assign-pa" title="Assign a PA Announcer clip that plays alongside the main song for this situation">Assign PA</button>
+        <button class="situation-btn situation-btn-copy" data-act="copy-from" title="Copy the song/PA assignment from another already-assigned event on this team, as a starting point">Copy From&hellip;</button>
         <span class="situation-transport">
           <button class="bandroom-item-action" data-act="preview" title="Play" ${ev.fileName ? "" : "disabled"}>&#9654;</button>
           <button class="bandroom-item-action" data-act="stop" title="Stop">&#9209;</button>
@@ -528,9 +567,15 @@ async function openSituations(category) {
           <span class="situation-volume-value">100%</span>
           <button class="situation-volume-close" title="Close">&times;</button>
         </div>
+        <div class="situation-copy-popover glass" hidden>
+          <div class="situation-copy-title">Copy assignment from&hellip;</div>
+          <div class="situation-copy-list"></div>
+          <button class="situation-copy-close" title="Close">&times;</button>
+        </div>
       </span>`;
     row.querySelector('[data-act="assign"]').addEventListener("click", () => openClipperAssign(ev.trigger, ev.eventName, false, ev.fileName));
     row.querySelector('[data-act="assign-pa"]').addEventListener("click", () => openClipperAssign(ev.trigger, ev.eventName, true, ev.paFileName));
+    wireSituationCopyFromPopover(row, ev, events);
     row.querySelector('[data-act="preview"]').addEventListener("click", () => { _previewAudio?.pause(); bridge?.PreviewEvent(ev.trigger); });
     row.querySelector('[data-act="stop"]').addEventListener("click", () => bridge?.StopPreview());
     row.querySelector('[data-act="track-info"]').addEventListener("click", () => openTrackInfoDrawer(ev.trigger, ev.fileName));
@@ -546,6 +591,50 @@ async function openSituations(category) {
     wireSituationVolumePopover(row, ev.trigger);
     list.appendChild(row);
   }
+}
+
+/// Punch-list item 3: "Copy From..." button pops a small list of this SAME team's other
+/// already-assigned events (source of truth is the `events` array openSituations() already
+/// fetched for this card's category -- same team by construction, no extra bridge call needed
+/// just to build the picker). Picking one calls WebBridge.CopyEventAssignment, which copies
+/// AudioFile/PaAudioFile/PlayLeadInWhistle server-side (WebMainForm.CopyEventAssignmentFromWeb),
+/// then re-opens the current category so the card reflects the new assignment immediately.
+function wireSituationCopyFromPopover(row, ev, events) {
+  const btn = row.querySelector('[data-act="copy-from"]');
+  const popover = row.querySelector(".situation-copy-popover");
+  const list = row.querySelector(".situation-copy-list");
+  const closeBtn = row.querySelector(".situation-copy-close");
+
+  const closePopover = () => { popover.hidden = true; };
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!popover.hidden) { closePopover(); return; }
+    document.querySelectorAll(".situation-copy-popover").forEach((p) => { p.hidden = true; });
+    const candidates = events.filter((other) => other.trigger !== ev.trigger && (other.fileName || other.paFileName));
+    list.innerHTML = candidates.length
+      ? ""
+      : `<div class="situation-copy-empty">No other assigned events on this team yet.</div>`;
+    for (const other of candidates) {
+      const item = document.createElement("button");
+      item.className = "situation-copy-option";
+      item.innerHTML = `<span class="situation-copy-option-name">${friendlyEventName(other.eventName)}</span><span class="situation-copy-option-file">${other.fileName || other.paFileName}</span>`;
+      item.addEventListener("click", async (ce) => {
+        ce.stopPropagation();
+        const ok = bridge ? await bridge.CopyEventAssignment(other.trigger, ev.trigger) : false;
+        closePopover();
+        if (ok) {
+          showToast(`Copied "${friendlyEventName(other.eventName)}"'s assignment to "${friendlyEventName(ev.eventName)}".`);
+          await openSituations(state.currentSituationsCategory);
+        } else {
+          showToast("Couldn't copy that assignment.");
+        }
+      });
+      list.appendChild(item);
+    }
+    popover.hidden = false;
+  });
+  closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
 }
 
 /// Volume button on an event card pops out a small slider (+ close/X) instead of a permanent
@@ -1317,6 +1406,103 @@ async function openProfile() {
 function closeProfile() {
   document.getElementById("profile-overlay").hidden = true;
 }
+
+// Settings tab (merged into the themed Profile overlay -- replaces the old native
+// SettingsForm.cs, opened via the header gear icon). See switchProfileTab/wireProfileSettingsTab.
+let _profileSettingsLoaded = false;
+
+function switchProfileTab(tab) {
+  document.querySelectorAll(".profile-rail-tab").forEach((btn) => {
+    const active = btn.dataset.profileTab === tab;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll(".profile-tab-panel").forEach((panel) => {
+    panel.hidden = panel.dataset.profilePanel !== tab;
+  });
+  if (tab === "settings" && !_profileSettingsLoaded) {
+    _profileSettingsLoaded = true;
+    refreshProfileSettingsTab();
+  }
+}
+
+const REVERB_PRESET_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "stadium", label: "Stadium" },
+  { value: "dome", label: "Dome" },
+  { value: "nightgame", label: "Night Game" },
+  { value: "stadiumrain", label: "Rain" },
+  { value: "nightgameprimetime", label: "Prime Time" },
+];
+
+async function refreshProfileSettingsTab() {
+  if (!bridge) return;
+  try {
+    const [timingJson, volume, reverb, scorebugJson, alwaysOnTop] = await Promise.all([
+      bridge.GetPlaybackTimingSettings(),
+      bridge.GetVolume(),
+      bridge.GetReverb(),
+      bridge.GetScorebugPresets(),
+      bridge.GetAlwaysOnTop(),
+    ]);
+    const timing = JSON.parse(timingJson);
+    document.getElementById("settings-pre-roll").value = timing.PreRollSeconds;
+    document.getElementById("settings-fade-start").value = timing.FadeStartSeconds;
+    document.getElementById("settings-fade-duration").value = timing.FadeOutDuration;
+    document.getElementById("settings-cooldown").value = timing.CooldownSeconds;
+
+    document.getElementById("settings-volume").value = volume;
+    document.getElementById("settings-volume-value").textContent = `${volume}%`;
+
+    const reverbSelect = document.getElementById("settings-reverb");
+    reverbSelect.innerHTML = "";
+    for (const opt of REVERB_PRESET_OPTIONS) reverbSelect.appendChild(new Option(opt.label, opt.value, false, opt.value === reverb));
+
+    const scorebug = JSON.parse(scorebugJson);
+    const scorebugSelect = document.getElementById("settings-scorebug");
+    scorebugSelect.innerHTML = "";
+    for (const name of scorebug.names || []) scorebugSelect.appendChild(new Option(name, name, false, name === scorebug.active));
+
+    document.getElementById("settings-always-on-top").checked = !!alwaysOnTop;
+  } catch (err) { console.error("refreshProfileSettingsTab failed", err); }
+}
+
+function wireProfileSettingsTab() {
+  document.querySelectorAll(".profile-rail-tab").forEach((btn) => {
+    btn.addEventListener("click", () => switchProfileTab(btn.dataset.profileTab));
+  });
+  document.getElementById("btn-close-profile-settings").addEventListener("click", closeProfile);
+
+  document.getElementById("btn-apply-timing-settings").addEventListener("click", async () => {
+    const settings = {
+      PreRollSeconds: Number(document.getElementById("settings-pre-roll").value) || 0,
+      FadeStartSeconds: Number(document.getElementById("settings-fade-start").value) || 0,
+      FadeOutDuration: Number(document.getElementById("settings-fade-duration").value) || 0,
+      CooldownSeconds: Number(document.getElementById("settings-cooldown").value) || 0,
+    };
+    try {
+      await bridge.SavePlaybackTimingSettings(JSON.stringify(settings));
+      showToast("Timing settings applied");
+    } catch (err) { console.error("SavePlaybackTimingSettings failed", err); }
+  });
+
+  document.getElementById("settings-volume").addEventListener("input", (e) => {
+    bridge?.SetVolume(Number(e.target.value));
+    document.getElementById("settings-volume-value").textContent = `${e.target.value}%`;
+  });
+  document.getElementById("settings-reverb").addEventListener("change", (e) => bridge?.SetReverb(e.target.value));
+  document.getElementById("settings-scorebug").addEventListener("change", (e) => bridge?.SetScorebugPreset(e.target.value));
+  document.getElementById("settings-always-on-top").addEventListener("change", (e) => bridge?.SetAlwaysOnTop(e.target.checked));
+
+  document.getElementById("btn-settings-stop-playback").addEventListener("click", () => bridge?.StopPlayback());
+  document.getElementById("btn-settings-open-songs-folder").addEventListener("click", () => bridge?.OpenSongsFolder());
+  document.getElementById("btn-settings-clear-all").addEventListener("click", () => {
+    if (confirm("Clear every saved song assignment for every team? This can't be undone.")) bridge?.ClearAllAssignments();
+  });
+  document.getElementById("btn-settings-reset-team").addEventListener("click", () => {
+    if (confirm("Clear every saved assignment for the currently selected team? This can't be undone.")) bridge?.ResetTeamProfile();
+  });
+}
 async function refreshProfileView() {
   if (!bridge) return;
   let user;
@@ -1683,6 +1869,9 @@ function initHelpGuide() {
 
   const exportLogBtn = document.getElementById("btn-export-event-log");
   if (exportLogBtn) exportLogBtn.addEventListener("click", exportEventActivityLog);
+
+  const logSearchInput = document.getElementById("event-log-search");
+  if (logSearchInput) logSearchInput.addEventListener("input", renderEventLogList);
 }
 
 // Live "why didn't my song play" feed inside Help & Guide's Event Log tab. Polls only while
@@ -1700,24 +1889,39 @@ function stopEventLogPolling() {
     _eventLogPollHandle = null;
   }
 }
+// Punch-list item 7: search/filter box above the Event Log list. The full buffer is already
+// fetched every 2s poll -- _eventLogEntries holds the latest raw fetch so the search box can
+// re-filter instantly on every keystroke without waiting on the next poll, and so a poll landing
+// mid-search still respects whatever's currently typed.
+let _eventLogEntries = [];
+function renderEventLogList() {
+  const list = document.getElementById("event-log-list");
+  if (!list) return;
+  const query = (document.getElementById("event-log-search")?.value || "").trim().toLowerCase();
+  const filtered = query ? _eventLogEntries.filter((e) => (e.text || "").toLowerCase().includes(query)) : _eventLogEntries;
+  if (_eventLogEntries.length === 0) {
+    list.innerHTML = `<div class="event-log-empty">Nothing logged yet -- this fills in as Bandroom plays or skips cues during a game.</div>`;
+    return;
+  }
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="event-log-empty">No log entries match "${sanitizeHTML(query)}".</div>`;
+    return;
+  }
+  // Newest first, so the most recent "why didn't that play" answer is right at the top.
+  list.innerHTML = filtered.slice().reverse().map((e) =>
+    `<div class="event-log-row">${sanitizeHTML(e.text)}</div>`
+  ).join("");
+}
 async function refreshEventActivityLog() {
   const list = document.getElementById("event-log-list");
   if (!list || !bridge) return;
-  let entries = [];
   try {
-    entries = JSON.parse(await bridge.GetEventActivityLog()) || [];
+    _eventLogEntries = JSON.parse(await bridge.GetEventActivityLog()) || [];
   } catch (err) {
     console.error("GetEventActivityLog failed", err);
     return;
   }
-  if (entries.length === 0) {
-    list.innerHTML = `<div class="event-log-empty">Nothing logged yet -- this fills in as Bandroom plays or skips cues during a game.</div>`;
-    return;
-  }
-  // Newest first, so the most recent "why didn't that play" answer is right at the top.
-  list.innerHTML = entries.slice().reverse().map((e) =>
-    `<div class="event-log-row">${sanitizeHTML(e.text)}</div>`
-  ).join("");
+  renderEventLogList();
 }
 async function exportEventActivityLog() {
   if (!bridge) return;
@@ -1997,6 +2201,20 @@ async function refreshVolumeSliders() {
       if (label) label.textContent = String(v);
     } catch (err) { console.error(`refreshVolumeSliders: ${sliderId} failed`, err); }
   }
+
+  // Punch-list item 4: sound-start-delay slider, same hydrate-on-startup treatment as the
+  // volume sliders above -- separate from `map` since it's ms-on-the-wire/seconds-in-the-UI
+  // instead of a plain 0-100 passthrough.
+  try {
+    const delayMs = await bridge.GetSoundStartDelayMs();
+    if (typeof delayMs === "number") {
+      const slider = document.getElementById("slider-sound-start-delay");
+      const label = document.getElementById("sound-start-delay-value");
+      const secs = delayMs / 1000;
+      if (slider) slider.value = secs;
+      if (label) label.textContent = secs.toFixed(1);
+    }
+  } catch (err) { console.error("refreshVolumeSliders: sound-start-delay failed", err); }
 }
 
 // Sound Booth's knobs and the sidebar sliders both drive the same underlying bridge values
@@ -2209,7 +2427,13 @@ function wireControls() {
   wireBgCropTool();
   initHelpGuide();
   wireBigGameSection();
+  wireBandDirector();
+  wireProfileSettingsTab();
   document.getElementById("btn-profile").addEventListener("click", openProfile);
+  document.getElementById("btn-settings").addEventListener("click", async () => {
+    await openProfile();
+    switchProfileTab("settings");
+  });
   document.getElementById("btn-close-profile").addEventListener("click", closeProfile);
   document.getElementById("btn-close-profile-top").addEventListener("click", closeProfile);
   document.getElementById("btn-close-public-profile").addEventListener("click", () => {
@@ -2328,7 +2552,6 @@ function wireControls() {
     }
   });
 
-  document.getElementById("btn-settings").addEventListener("click", () => bridge?.OpenSettings());
   document.getElementById("btn-minimize").addEventListener("click", () => bridge?.MinimizeWindow());
   document.getElementById("btn-maximize").addEventListener("click", () => bridge?.MaximizeWindow());
   document.getElementById("btn-close").addEventListener("click", () => bridge?.CloseWindow());
@@ -2464,6 +2687,14 @@ function wireControls() {
   document.getElementById("slider-sensitivity").addEventListener("input", (e) => {
     document.getElementById("sensitivity-value").textContent = e.target.value;
     bridge?.SetFadeDelay(Number(e.target.value));
+  });
+  // Punch-list item 4: 0-5s delay between an event firing and its assigned sound actually
+  // starting playback (WebMainForm._soundStartDelayMs/FireEvent). The slider works in seconds
+  // (0-5, 0.1 steps) for a friendlier UI; the bridge stores/reads milliseconds.
+  document.getElementById("slider-sound-start-delay").addEventListener("input", (e) => {
+    const seconds = Number(e.target.value);
+    document.getElementById("sound-start-delay-value").textContent = seconds.toFixed(1);
+    bridge?.SetSoundStartDelayMs(Math.round(seconds * 1000));
   });
 
   document.querySelectorAll(".reverb-tile").forEach((tile) => {
@@ -3343,6 +3574,180 @@ function closeMyDownloads() {
   _previewAudio?.pause();
 }
 
+// Band Director streamer dashboard (Phase 1 -- see BANDROOM_STREAMER_MASTER_PROMPT.md SYSTEM 2).
+// Everything Twitch/YouTube-specific is static mock data; Master Volume and the Quick Trigger
+// slot mapping are real (same bridge plumbing as elsewhere in the app).
+const MOCK_BD_CHAT_COMMANDS = [
+  { cmd: "td", when: "3m ago" },
+  { cmd: "kickoff", when: "just now" },
+  { cmd: "hype", when: "5m ago" },
+];
+const MOCK_BD_LIVE_LOG = [
+  { text: "TD: Fight Song (12s)" },
+  { text: "3rd: Hype Sting (8s)" },
+  { text: "DEF: Stop Chant (6s)" },
+];
+const MOCK_BD_QUEUE = [
+  { title: "Kickoff Song", source: "waiting" },
+  { title: "TD Song", source: "viewer" },
+  { title: "Boos", source: null },
+];
+const MOCK_BD_POLL = {
+  question: "Pick 3rd Down",
+  options: [{ label: "Neck", votes: 12 }, { label: "Hype", votes: 8 }, { label: "Chant", votes: 5 }],
+};
+
+let _bdQuickTriggerMap = null;
+
+function openBandDirector() {
+  document.getElementById("band-director-overlay").hidden = false;
+  renderBandDirectorMockData();
+  refreshBandDirectorVolume();
+}
+
+function closeBandDirector() {
+  document.getElementById("band-director-overlay").hidden = true;
+}
+
+function renderBandDirectorMockData() {
+  document.getElementById("bd-chat-commands-list").innerHTML = MOCK_BD_CHAT_COMMANDS
+    .map((c) => `<div class="bd-list-row"><span>!${c.cmd}</span><span class="bd-muted">${c.when}</span></div>`)
+    .join("");
+  document.getElementById("bd-live-log-list").innerHTML = MOCK_BD_LIVE_LOG
+    .map((l) => `<div class="bd-list-row">${l.text}</div>`)
+    .join("");
+  document.getElementById("bd-queue-list").innerHTML = MOCK_BD_QUEUE
+    .map((q, i) => `<div class="bd-list-row">${i === 0 ? "▶" : `${i + 1}.`} ${q.title}${q.source ? ` (${q.source})` : ""}</div>`)
+    .join("");
+  const totalVotes = MOCK_BD_POLL.options.reduce((sum, o) => sum + o.votes, 0);
+  document.getElementById("bd-polls-panel").innerHTML =
+    `<div class="bd-panel-title" style="margin-bottom:8px;">"${MOCK_BD_POLL.question}"</div>` +
+    MOCK_BD_POLL.options
+      .map((o) => `<div class="bd-list-row"><span>${o.label}</span><span class="bd-muted">${o.votes} (${totalVotes ? Math.round((o.votes / totalVotes) * 100) : 0}%)</span></div>`)
+      .join("");
+}
+
+async function refreshBandDirectorVolume() {
+  try {
+    const v = await bridge.GetVolume();
+    document.getElementById("bd-master-volume").value = v;
+    document.getElementById("bd-master-volume-value").textContent = `${v}%`;
+  } catch (err) { console.error("refreshBandDirectorVolume failed", err); }
+}
+
+async function loadBandDirectorQuickTriggerMap() {
+  try {
+    const settings = JSON.parse(await bridge.GetBandDirectorDashboardSettings());
+    _bdQuickTriggerMap = settings.QuickTriggerMap || {};
+  } catch (err) {
+    console.error("loadBandDirectorQuickTriggerMap failed", err);
+    _bdQuickTriggerMap = {};
+  }
+  return _bdQuickTriggerMap;
+}
+
+async function onBandDirectorQuickTriggerClick(slot) {
+  const map = _bdQuickTriggerMap || (await loadBandDirectorQuickTriggerMap());
+  const eventKey = map[slot];
+  if (!eventKey) {
+    showToast(`Slot ${slot} has no song assigned -- set it in ⚙ Settings`);
+    return;
+  }
+  bridge?.FireTestEvent("Home", eventKey);
+}
+
+async function openBandDirectorSettings() {
+  document.getElementById("band-director-settings-overlay").hidden = false;
+  try {
+    const [settings, eventsJson] = await Promise.all([
+      loadBandDirectorQuickTriggerMap(),
+      bridge.GetEventsForCategory(null),
+    ]);
+    const eventNames = [...new Set(JSON.parse(eventsJson).map((e) => e.eventName))].sort();
+    const container = document.getElementById("bd-settings-slots");
+    container.innerHTML = "";
+    for (let i = 1; i <= 8; i++) {
+      const slot = String(i);
+      const current = settings[slot] || "";
+      const row = document.createElement("div");
+      row.className = "bd-settings-row";
+      const label = document.createElement("label");
+      label.textContent = `Slot ${slot}`;
+      const select = document.createElement("select");
+      select.dataset.slot = slot;
+      select.appendChild(new Option("-- Unassigned --", ""));
+      for (const name of eventNames) select.appendChild(new Option(name, name, false, name === current));
+      row.appendChild(label);
+      row.appendChild(select);
+      container.appendChild(row);
+    }
+  } catch (err) { console.error("openBandDirectorSettings failed", err); }
+}
+
+function closeBandDirectorSettings() {
+  document.getElementById("band-director-settings-overlay").hidden = true;
+}
+
+async function saveBandDirectorSettings() {
+  const map = {};
+  document.querySelectorAll("#bd-settings-slots select").forEach((sel) => { map[sel.dataset.slot] = sel.value; });
+  try {
+    await bridge.SaveBandDirectorDashboardSettings(JSON.stringify(map));
+    _bdQuickTriggerMap = map;
+    closeBandDirectorSettings();
+    showToast("Band Director quick triggers saved");
+  } catch (err) { console.error("saveBandDirectorSettings failed", err); }
+}
+
+function wireBandDirector() {
+  document.getElementById("btn-band-director").addEventListener("click", openBandDirector);
+  document.getElementById("btn-close-band-director").addEventListener("click", closeBandDirector);
+  document.getElementById("btn-band-director-settings").addEventListener("click", openBandDirectorSettings);
+  document.getElementById("btn-close-band-director-settings").addEventListener("click", closeBandDirectorSettings);
+  document.getElementById("btn-cancel-band-director-settings").addEventListener("click", closeBandDirectorSettings);
+  document.getElementById("btn-save-band-director-settings").addEventListener("click", saveBandDirectorSettings);
+  document.getElementById("bd-master-volume").addEventListener("input", (e) => {
+    bridge?.SetVolume(Number(e.target.value));
+    document.getElementById("bd-master-volume-value").textContent = `${e.target.value}%`;
+  });
+  document.querySelectorAll(".bd-trigger-btn").forEach((btn) => {
+    btn.addEventListener("click", () => onBandDirectorQuickTriggerClick(btn.dataset.triggerSlot));
+  });
+  document.getElementById("btn-bd-copy-overlay-url").addEventListener("click", async () => {
+    try {
+      const url = await bridge.GetOverlayChatUrl();
+      await navigator.clipboard.writeText(url);
+      showToast("Overlay URL copied -- add it as an OBS Browser Source");
+    } catch (err) {
+      console.error("GetOverlayChatUrl/copy failed", err);
+      showToast("Couldn't copy the overlay URL");
+    }
+  });
+  document.getElementById("btn-bd-edit-overlay").addEventListener("click", () => showToast("Overlay editor -- coming soon"));
+  document.getElementById("btn-bd-generate-guest-code").addEventListener("click", () => showToast("Guest DJ -- coming soon"));
+  wireBandDirectorTabs();
+}
+
+// Setup / Live tabs -- scoped to #band-director so this never collides with Sound Booth's own
+// .soundbooth-tab/.soundbooth-tab-panel reuse (see the #sound-booth-scoped fix above this
+// function's sibling wiring block for the bug that pattern already caused once).
+function wireBandDirectorTabs() {
+  document.querySelectorAll("#band-director [data-bd-tab]").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll("#band-director [data-bd-tab]").forEach((t) => {
+        t.classList.remove("active");
+        t.setAttribute("aria-selected", "false");
+      });
+      tab.classList.add("active");
+      tab.setAttribute("aria-selected", "true");
+      const target = tab.dataset.bdTab;
+      document.querySelectorAll("#band-director [data-bd-panel]").forEach((panel) => {
+        panel.hidden = panel.dataset.bdPanel !== target;
+      });
+    });
+  });
+}
+
 function openSoundBooth() {
   document.getElementById("sound-booth-overlay").hidden = false;
   refreshSoundBoothSection();
@@ -3506,16 +3911,21 @@ function initSoundBoothRack() {
     });
   });
 
-  document.querySelectorAll(".soundbooth-tab").forEach((tab) => {
+  // Scoped to #sound-booth -- .soundbooth-tab/.soundbooth-tab-panel are also reused (for their
+  // visual style only) by the Band Director dashboard's Setup/Live tabs (wireBandDirectorTabs),
+  // which use their own data-bd-tab/data-bd-panel attributes. An unscoped query here used to
+  // match those too and, since they lack dataset.sbTab/sbPanel, unhide every panel in both
+  // overlays on any click -- same class-reuse trap as the soundboard-btn bug.
+  document.querySelectorAll("#sound-booth .soundbooth-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
-      document.querySelectorAll(".soundbooth-tab").forEach((t) => {
+      document.querySelectorAll("#sound-booth .soundbooth-tab").forEach((t) => {
         t.classList.remove("active");
         t.setAttribute("aria-selected", "false");
       });
       tab.classList.add("active");
       tab.setAttribute("aria-selected", "true");
       const target = tab.dataset.sbTab;
-      document.querySelectorAll(".soundbooth-tab-panel").forEach((panel) => {
+      document.querySelectorAll("#sound-booth .soundbooth-tab-panel").forEach((panel) => {
         panel.hidden = panel.dataset.sbPanel !== target;
       });
       document.getElementById("soundbooth-info-popover").hidden = true;
@@ -5354,6 +5764,14 @@ function wireInlineTrimmer() {
     await refreshCategories();
     if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
     await afterClipperAssignAction(trigger, true);
+    // Punch-list item 6: afterClipperAssignAction's closeClipperAssign() above just hides the
+    // Clipper's assign sub-panel, dropping the user back on Clipper Island's generic song-list
+    // browse view -- a dead end with no link back to which event this clip belongs to. Scroll
+    // the situations panel (already refreshed above) to the event card this trim was just saved
+    // for and flash it, so "you just finished editing this clip" actually lands somewhere with
+    // context, not just an empty song list. Skipped for the auto-assign wizard case (it already
+    // advances to its own next-event picker instead).
+    if (!_autoAssignWizard) scrollToSituationRow(trigger);
   });
 
   document.getElementById("btn-trim-whistle").addEventListener("click", async () => {
@@ -6530,6 +6948,17 @@ function flashPanel(el) {
   setTimeout(() => el.classList.remove("panel-flash"), 900);
 }
 
+/// Punch-list item 6 helper: scrolls the situations-panel to the event card matching `trigger`
+/// (see the row.dataset.trigger set in the situations-list render loop) and flashes it, so
+/// finishing a trim-save lands the user back on the specific card the clip belongs to instead of
+/// a generic, context-free song-list view.
+function scrollToSituationRow(trigger) {
+  const row = document.querySelector(`#situations-list .situation-row[data-trigger="${CSS.escape(trigger)}"]`);
+  if (!row) return;
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  flashPanel(row);
+}
+
 function updateMatchupLabel() {
   const btn = document.getElementById("btn-matchup");
   const unlockBtn = document.getElementById("btn-unlock-matchup");
@@ -7306,6 +7735,11 @@ async function confirmMatchup() {
   // GAMETIME now locks the matchup AND starts watching in one press (WebMainForm.ConfirmGametimeFromWeb)
   // -- reflect that immediately instead of requiring a separate Start Watching click.
   setWatching("waiting");
+  // Punch-list item 2: locking in used to just close the dialog and drop the user back on the
+  // Band Room's Assignments panel (already the base screen underneath), leaving Sound Booth a
+  // separate extra click away. Open it right on top now so both are visible together instead of
+  // requiring that extra navigation step.
+  openSoundBooth();
   showToast(`GAMETIME! ${state.matchupAway} @ ${state.matchupHome} -- watching started`);
 }
 
@@ -7546,7 +7980,8 @@ const WHATS_NEW_BLOCKING_OVERLAY_IDS = [
   "quick-load-confirm-overlay", "track-info-overlay", "team-picker-overlay", "bandroom-overlay",
   "my-downloads-overlay", "sound-booth-overlay", "profile-overlay", "onboarding-overlay",
   "add-school-overlay", "import-target-team-overlay", "songpack-prompt-overlay",
-  "songpack-import-overlay", "songpack-progress-overlay",
+  "songpack-import-overlay", "songpack-progress-overlay", "band-director-overlay",
+  "band-director-settings-overlay",
 ];
 function showWhatsNewWhenClear() {
   const anyOpen = WHATS_NEW_BLOCKING_OVERLAY_IDS.some((id) => {
@@ -8018,7 +8453,12 @@ function toggleStreamerMode() {
 let _soundboardSlots = {};
 function loadSoundboard() {
   try { _soundboardSlots = JSON.parse(localStorage.getItem("bandroom-soundboard") || "{}"); } catch (_) { _soundboardSlots = {}; }
-  document.querySelectorAll(".soundboard-btn").forEach((btn) => {
+  // Scoped to #soundboard-bar specifically -- .soundboard-btn is also reused (for its visual
+  // style only) by the Band Director dashboard's Quick Trigger buttons, which have their own
+  // dataset (data-trigger-slot, not data-key) and their own click handler
+  // (onBandDirectorQuickTriggerClick); a bare ".soundboard-btn" query here used to clobber their
+  // text and double-fire clicks.
+  document.querySelectorAll("#soundboard-bar .soundboard-btn").forEach((btn) => {
     const key = btn.dataset.key;
     const entry = _soundboardSlots[key];
     btn.title = entry ? entry.label : `Favorite ${key} (unassigned)`;
@@ -8031,7 +8471,7 @@ function assignSoundboardSlot(key, label, songPath) {
   loadSoundboard();
   showToast(`Soundboard slot ${key} set to "${label}"`);
 }
-document.querySelectorAll(".soundboard-btn").forEach((btn) => {
+document.querySelectorAll("#soundboard-bar .soundboard-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     const key = btn.dataset.key;
     const entry = _soundboardSlots[key];
@@ -8391,7 +8831,8 @@ document.addEventListener("keydown", (e) => {
       "matchup-overlay", "profile-overlay", "profile-dashboard-overlay",
       "hotkey-panel", "discord-chat-overlay", "my-downloads-overlay", "sound-booth-overlay",
       "load-profile-overlay", "situations-panel", "quick-load-confirm-overlay",
-      "add-school-overlay", "public-profile-overlay"
+      "add-school-overlay", "public-profile-overlay", "band-director-settings-overlay",
+      "band-director-overlay"
     ];
     for (const id of overlays) {
       const el = document.getElementById(id);

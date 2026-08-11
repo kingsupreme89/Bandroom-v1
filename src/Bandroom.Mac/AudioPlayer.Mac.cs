@@ -28,12 +28,32 @@ internal static class AudioPlayer
     public static float HomeVolume = 1.0f;
     public static float AwayVolume = 1.0f;
     public static float PaVolume = 1.0f;
+    public static float WhistleVolume = 1.0f;
 
     public enum ReverbPreset { Off, Stadium, Dome, NightGame }
     public static ReverbPreset CurrentReverb = ReverbPreset.Off;
 
     public static bool LeadInEnabled = false;
     public static string? LeadInClipPath = null;
+
+    // ---- Sound Booth DSP settings (Session Mac-parity pass) ----
+    // AudioPlayer.Mac's playback backend is `afplay` (a bare macOS CLI process, see class doc
+    // above) -- there is no NAudio-equivalent real-time DSP graph here, so none of these fields
+    // change what's actually heard. They exist purely so MacWebBridge's Get/Set pairs have
+    // somewhere real to read/write (matching Windows' own AudioPlayer.cs fields, see AudioPlayer.cs
+    // lines ~51-64) instead of the Settings UI losing/resetting these toggles on every call.
+    // Same precedent as Windows' old no-op "Compact Mode" setting. Exactly like the Windows
+    // fields they mirror, these are in-memory only (not ConfigStore-persisted) -- Windows itself
+    // never persisted them either (GetEqPresetFromWeb etc. just read the static field), so this
+    // matches existing (if surprising) cross-platform behavior rather than diverging from it.
+    public enum EqPreset { Off, MarchingBand, Megaphone }
+    public enum SubBassIntensity { Off, Subtle, Stadium, Earthquake }
+    public static bool NoEffectsBypass = false;
+    public static EqPreset CurrentEq = EqPreset.Off;
+    public static bool TransientShaperEnabled = false;
+    public static bool StereoWidenerEnabled = false;
+    public static bool DuckingEnabled = false;
+    public static SubBassIntensity SubBassLevel = SubBassIntensity.Off;
 
     public static double PreRollSeconds = 1.0;
     public static double FadeStartSeconds = 10.0;
@@ -99,7 +119,12 @@ internal static class AudioPlayer
     /// <param name="volumeOverride">If set, used instead of MasterVolume.</param>
     /// <param name="interruptPrevious">True stops all current playback before starting new clip.</param>
     /// <param name="isPreview">True skips PreRollSeconds delay and FireCooldown gate.</param>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false)
+    /// <param name="playLeadInWhistle">Parity fix (2026-08-11 audit): Windows' WebMainForm.FireEvent
+    /// passes this per-call to suppress the whistle during library/soundboard preview (it should
+    /// only play for real event-card triggers). Mac had no equivalent override, so preview/soundboard
+    /// playback always played the whistle whenever LeadInEnabled+interruptPrevious. Defaults true to
+    /// preserve every other existing caller's behavior.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool playLeadInWhistle = true)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
@@ -128,7 +153,7 @@ internal static class AudioPlayer
                     Thread.Sleep((int)(PreRollSeconds * 1000));
 
                 // --- Lead-in whistle (sequential, not gapless on macOS) ---
-                if (LeadInEnabled && !string.IsNullOrWhiteSpace(LeadInClipPath) &&
+                if (playLeadInWhistle && LeadInEnabled && !string.IsNullOrWhiteSpace(LeadInClipPath) &&
                     File.Exists(LeadInClipPath) && interruptPrevious)
                 {
                     PlayProcess(LeadInClipPath, volume, wait: true, maxWaitMs: 5000);

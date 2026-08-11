@@ -1080,11 +1080,29 @@ public sealed class WebBridge
     }
 
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
-    public void OpenSettings() => _host.OpenSettingsFromWeb();
     /// <summary>Matchup-screen scorebug switcher pill -- see WebMainForm.GetScorebugPresetsFromWeb/
     /// SetScorebugPresetFromWeb.</summary>
     public string GetScorebugPresets() => _host.GetScorebugPresetsFromWeb();
     public void SetScorebugPreset(string name) => _host.SetScorebugPresetFromWeb(name);
+
+    // Settings tab (merged into the themed Profile overlay -- replaces the old native
+    // SettingsForm.cs). Volume/Reverb/ScorebugPreset/ResetTeamProfile are already exposed above.
+    public void StopPlayback() => _host.StopPlaybackFromWeb();
+    public void OpenSongsFolder() => _host.OpenSongsFolderFromWeb();
+    public void ClearAllAssignments() => _host.ClearAllAssignmentsFromWeb();
+    public bool GetAlwaysOnTop() => _host.GetAlwaysOnTopFromWeb();
+    public void SetAlwaysOnTop(bool enabled) => _host.SetAlwaysOnTopFromWeb(enabled);
+    /// <summary>Real, working OBS Browser Source URL -- served by LocalOverlayServer.cs, not a
+    /// mock. Chat is empty until real Twitch/YouTube wiring exists (later phase); the page itself
+    /// already polls and renders whatever it gets.</summary>
+    public string GetOverlayChatUrl() => "http://localhost:18765/overlay/chat";
+
+    public string GetPlaybackTimingSettings() => _host.GetPlaybackTimingSettingsFromWeb();
+    public void SavePlaybackTimingSettings(string settingsJson)
+    {
+        var settings = JsonSerializer.Deserialize<ConfigStore.PlaybackTimingSettings>(settingsJson);
+        if (settings != null) _host.SavePlaybackTimingSettingsFromWeb(settings);
+    }
     /// <summary>Help &amp; Guide "Event Log" tab -- see WebMainForm.GetEventActivityLogFromWeb/
     /// ExportEventActivityLogFromWeb for the plain-English "why didn't my song play" feed.</summary>
     public string GetEventActivityLog() => _host.GetEventActivityLogFromWeb();
@@ -1208,6 +1226,8 @@ public sealed class WebBridge
     public Task<string?> ScanDynastySave() => _host.ScanDynastySaveFromWeb();
     public void AssignTrackFile(string trigger, bool isPa, string path) => _host.AssignTrackFileFromWeb(trigger, isPa, path);
     public void ClearTrackAssignment(string trigger, bool isPa) => _host.ClearTrackAssignmentFromWeb(trigger, isPa);
+    // Punch-list item 3: copy-assignment-from-another-event button on event cards.
+    public bool CopyEventAssignment(string sourceTrigger, string targetTrigger) => _host.CopyEventAssignmentFromWeb(sourceTrigger, targetTrigger);
     // Big Game conditional-alternate slot -- see WebMainForm.AssignBigGameTrackFileFromWeb.
     public bool AssignBigGameTrackFile(string trigger, string path) => _host.AssignBigGameTrackFileFromWeb(trigger, path);
     public void ClearBigGameTrackAssignment(string trigger) => _host.ClearBigGameTrackAssignmentFromWeb(trigger);
@@ -1242,6 +1262,10 @@ public sealed class WebBridge
     public bool BrowseAndSetLeadInWhistle() => _host.BrowseAndSetLeadInWhistleFromWeb();
     public void SetFadeDelay(int seconds) => _host.SetFadeDelayFromWeb(seconds);
     public int GetFadeDelay() => _host.GetFadeDelayFromWeb();
+    // Punch-list item 4: configurable 0-5000ms delay between an event firing and its sound
+    // actually starting playback -- see WebMainForm._soundStartDelayMs / FireEvent.
+    public void SetSoundStartDelayMs(int ms) => _host.SetSoundStartDelayMsFromWeb(ms);
+    public int GetSoundStartDelayMs() => _host.GetSoundStartDelayMsFromWeb();
     public void SetReverb(string key) => _host.SetReverbFromWeb(key);
     public string GetReverb() => _host.GetReverbFromWeb();
 
@@ -1342,6 +1366,16 @@ public sealed class WebBridge
     public string GetBigGameSettings() => JsonSerializer.Serialize(ConfigStore.LoadBigGameSettings());
     public void SaveBigGameSettings(bool isBigGame) =>
         ConfigStore.SaveBigGameSettings(new ConfigStore.BigGameSettings(isBigGame, 4, 8));
+
+    /// <summary>Band Director dashboard, Phase 1 (see BANDROOM_STREAMER_MASTER_PROMPT.md SYSTEM
+    /// 2) -- only the quick-trigger slot->EventKey mapping is real/persisted so far.</summary>
+    public string GetBandDirectorDashboardSettings() =>
+        JsonSerializer.Serialize(ConfigStore.LoadBandDirectorDashboardSettings());
+    public void SaveBandDirectorDashboardSettings(string quickTriggerMapJson)
+    {
+        var map = JsonSerializer.Deserialize<Dictionary<string, string>>(quickTriggerMapJson) ?? new Dictionary<string, string>();
+        ConfigStore.SaveBandDirectorDashboardSettings(new ConfigStore.BandDirectorDashboardSettings(map));
+    }
 
     public void PlayClickSound() => _host.PlayUiClickSoundFromWeb();
     public bool IsMatchupLocked() => _host.IsMatchupLockedFromWeb();

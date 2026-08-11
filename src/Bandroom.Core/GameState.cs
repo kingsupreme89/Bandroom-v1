@@ -18,4 +18,14 @@ public sealed class GameState
     /// <summary>True when the USER's team currently has possession of the ball.</summary>
     public bool UserHasPossession =>
         UserIsHome ? !Current.PossessionAway : Current.PossessionAway;
+
+    /// <summary>2026-08-11 audit item #5 ("almost fired" ghost log): buffered evaluators
+    /// (DownDistanceBuffer users) append a plain-English note here when their confirmation window
+    /// times out WITHOUT the change they were waiting for -- e.g. "was this a Loss?" buffering
+    /// that never saw YardsToGo actually increase. GameWatcher drains this after each Route() call
+    /// and writes each note to EventActivityLog as a near-miss entry, distinct from a real fire, so
+    /// it's visible in the Event Log UI instead of silently doing nothing. Plain List, not a
+    /// pooled/reused field like EventRouter's internals, since near-misses are rare (not 4x/sec
+    /// hot path) and GameState itself is already a fresh instance per tick.</summary>
+    public List<string> NearMisses { get; } = new();
 }

@@ -23,6 +23,7 @@ public sealed class WebMainForm : Form
     List<TriggerEntry> _config = new();
     readonly KeyboardHook _hook = new();
     readonly GameWatcher _watcher = new();
+    readonly LocalOverlayServer _overlayServer = new();
     readonly CancellationTokenSource _lifetimeCts = new();
     WebView2 _webView = null!;
     bool _updateAvailable;
@@ -69,6 +70,7 @@ public sealed class WebMainForm : Form
 
         Text = "Bandroom";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
+        TopMost = ConfigStore.LoadAppWindowSettings().AlwaysOnTop;
 
         // BUG FIX (owner report, 2026-08-10): window was hardcoded to 1920x1080 with
         // CenterScreen, with nothing anywhere clamping it to the actual monitor. On any display
@@ -145,10 +147,12 @@ public sealed class WebMainForm : Form
         AudioPlayer.AwayVolume = savedAudio.AwayVolume / 100f;
         AudioPlayer.PaVolume = savedAudio.PaVolume / 100f;
         AudioPlayer.WhistleVolume = savedAudio.WhistleVolume / 100f;
+        _soundStartDelayMs = Math.Clamp(savedAudio.SoundStartDelayMs, 0, 5000);
 
         NormalizeExistingLibraryOnce();
 
-        FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); FlushOcrLog(); };
+        _overlayServer.Start();
+        FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); FlushOcrLog(); _overlayServer.Stop(); };
 
         Load += async (_, _) =>
         {
@@ -899,29 +903,38 @@ public sealed class WebMainForm : Form
 
     string WatchStateString() => !_watching ? "off" : _windowFound ? "watching" : "waiting";
 
-    public void OpenSettingsFromWeb()
+    /// <summary>Settings modal migration: these used to be inline lambdas built inline inside
+    /// OpenSettingsFromWeb (native SettingsForm.cs, now deleted) -- extracted into named
+    /// ...FromWeb methods, same convention as every other web-bridge-backed action, now that the
+    /// themed Profile overlay's Settings tab calls them directly instead of a native dialog.</summary>
+    public void StopPlaybackFromWeb() => AudioPlayer.StopAll();
+
+    public void OpenSongsFolderFromWeb()
     {
-        var opts = new SettingsForm.Options(
-            AlwaysOnTop: TopMost,
-            SetAlwaysOnTop: v => TopMost = v,
-            Volume: (int)(AudioPlayer.MasterVolume * 100),
-            SetVolume: v => AudioPlayer.MasterVolume = v / 100f,
-            Reverb: AudioPlayer.CurrentReverb,
-            SetReverb: r => AudioPlayer.CurrentReverb = r,
-            StopPlayback: () => AudioPlayer.StopAll(),
-            OpenSongsFolder: () => { Directory.CreateDirectory(ConfigStore.SongsFolder); System.Diagnostics.Process.Start("explorer.exe", ConfigStore.SongsFolder); },
-            ClearAll: ClearAll,
-            Compact: false,
-            ToggleCompact: () => { },
-            ResetTeamProfile: ResetTeamProfileFromWeb,
-            ScorebugPresetName: _watcher.ActivePreset.Name,
-            SetScorebugPresetName: name =>
-            {
-                _watcher.ActivePreset = ScorebugPreset.GetByName(name);
-                ConfigStore.SaveScorebugPresetName(name);
-            }
-        );
-        new SettingsForm(this, opts).ShowDialog(this);
+        Directory.CreateDirectory(ConfigStore.SongsFolder);
+        System.Diagnostics.Process.Start("explorer.exe", ConfigStore.SongsFolder);
+    }
+
+    public void ClearAllAssignmentsFromWeb() => ClearAll();
+
+    public bool GetAlwaysOnTopFromWeb() => ConfigStore.LoadAppWindowSettings().AlwaysOnTop;
+
+    public void SetAlwaysOnTopFromWeb(bool enabled)
+    {
+        TopMost = enabled;
+        ConfigStore.SaveAppWindowSettings(new ConfigStore.AppWindowSettings(enabled));
+    }
+
+    public string GetPlaybackTimingSettingsFromWeb() =>
+        System.Text.Json.JsonSerializer.Serialize(ConfigStore.LoadPlaybackTimingSettings());
+
+    internal void SavePlaybackTimingSettingsFromWeb(ConfigStore.PlaybackTimingSettings settings)
+    {
+        AudioPlayer.PreRollSeconds = settings.PreRollSeconds;
+        AudioPlayer.FadeStartSeconds = settings.FadeStartSeconds;
+        AudioPlayer.FadeOutDuration = settings.FadeOutDuration;
+        GameWatcher.Cooldown = TimeSpan.FromSeconds(settings.CooldownSeconds);
+        ConfigStore.SavePlaybackTimingSettings(settings);
     }
 
     /// <summary>Matchup-screen scorebug switcher (pill + arrows, owner-requested) -- same
@@ -1349,8 +1362,14 @@ public sealed class WebMainForm : Form
     /// content process, same reason PreviewEventFromWeb doesn't either.</summary>
     public void PreviewLocalFileFromWeb(string path)
     {
+        // Punch-list item 5: AudioPlayer.Play's playLeadInWhistle parameter defaults to TRUE
+        // (it's built for the real event-firing path) -- this call site never overrode it, so
+        // the universal lead-in whistle was incorrectly playing every time someone previewed a
+        // song from the song list while assigning, not just when a song actually fires from an
+        // event card. Explicitly false here; PreviewEventFromWeb (the event card's own Preview
+        // button) is untouched and still honors entry.PlayLeadInWhistle as before.
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-            AudioPlayer.Play(path, AudioPlayer.MasterVolume, interruptPrevious: true, isPreview: true);
+            AudioPlayer.Play(path, AudioPlayer.MasterVolume, interruptPrevious: true, isPreview: true, playLeadInWhistle: false);
     }
 
     /// <summary>Soundboard bar (currently hidden via #soundboard-bar[hidden] -- not yet a shipped
@@ -1361,8 +1380,11 @@ public sealed class WebMainForm : Form
     /// already playing.</summary>
     public void PlaySoundboardSlotFromWeb(string key, string path)
     {
+        // Same reasoning as PreviewLocalFileFromWeb above (punch-list item 5) -- a manual
+        // soundboard hit isn't a real event-card trigger, so it shouldn't carry the lead-in
+        // whistle either.
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-            AudioPlayer.Play(path, AudioPlayer.MasterVolume, interruptPrevious: true, isPreview: true);
+            AudioPlayer.Play(path, AudioPlayer.MasterVolume, interruptPrevious: true, isPreview: true, playLeadInWhistle: false);
     }
 
     /// <summary>Dynasty-mode save-file scanning (currently has no caller anywhere in app.js --
@@ -1393,6 +1415,33 @@ public sealed class WebMainForm : Form
     }
 
     public void ClearTrackAssignmentFromWeb(string trigger, bool isPa) => AssignTrackFileFromWeb(trigger, isPa, "");
+
+    /// <summary>Punch-list item 3: "copy assignment from another event" button on an event card
+    /// -- lets an unassigned (or already-assigned) event pull in another same-team event's
+    /// existing song/PA/lead-in-whistle setting as a starting point, e.g. "3rd and short"
+    /// borrowing "2nd and short"'s song. Both triggers are looked up in the SAME _config (the
+    /// currently active team's profile, same source every other AssignTrackFileFromWeb-style
+    /// method reads from) so this can never cross teams. Copies AudioFile + PaAudioFile +
+    /// PlayLeadInWhistle together rather than needing two separate calls (main-song assign
+    /// already normally goes hand-in-hand with the PA clip in the same picker). Returns false if
+    /// either trigger doesn't resolve or the source has nothing assigned yet.</summary>
+    public bool CopyEventAssignmentFromWeb(string sourceTrigger, string targetTrigger)
+    {
+        var source = _config.FirstOrDefault(e => e.Trigger == sourceTrigger);
+        var target = _config.FirstOrDefault(e => e.Trigger == targetTrigger);
+        if (source == null || target == null) return false;
+        if (string.IsNullOrWhiteSpace(source.AudioFile) && string.IsNullOrWhiteSpace(source.PaAudioFile)) return false;
+
+        target.AudioFile = source.AudioFile;
+        target.PaAudioFile = source.PaAudioFile;
+        target.PlayLeadInWhistle = source.PlayLeadInWhistle;
+        ConfigStore.Save(_config);
+        SaveCurrentTeamProfile();
+        PushCategories();
+        if (!string.IsNullOrWhiteSpace(target.AudioFile)) NormalizeAssignmentInBackground(target, isPa: false);
+        if (!string.IsNullOrWhiteSpace(target.PaAudioFile)) NormalizeAssignmentInBackground(target, isPa: true);
+        return true;
+    }
 
     /// <summary>Big Game conditional-alternate slot (TriggerEntry.BigGameAudioFile, added
     /// 2026-08-10) -- deliberately a separate pair of methods rather than folding into
@@ -1816,7 +1865,7 @@ public sealed class WebMainForm : Form
                 ConfigStore.SaveAudioSettings(new ConfigStore.AudioSettings(
                     (int)(AudioPlayer.MasterVolume * 100), (int)(AudioPlayer.HomeVolume * 100),
                     (int)(AudioPlayer.AwayVolume * 100), (int)(AudioPlayer.PaVolume * 100),
-                    (int)(AudioPlayer.WhistleVolume * 100)));
+                    (int)(AudioPlayer.WhistleVolume * 100), _soundStartDelayMs));
             }
             catch (Exception ex) { CrashLog.Write("PersistAudioSettingsDebounced failed", ex); }
         }, null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
@@ -1843,6 +1892,25 @@ public sealed class WebMainForm : Form
     /// SetPaVolumeFromWeb. See AudioPlayer.WhistleVolume.</summary>
     public void SetWhistleVolumeFromWeb(int percent) { AudioPlayer.WhistleVolume = percent / 100f; PersistAudioSettingsDebounced(); }
     public int GetWhistleVolumeFromWeb() => (int)(AudioPlayer.WhistleVolume * 100);
+
+    /// <summary>Punch-list item 4: configurable delay (0-5000ms) between an event firing and its
+    /// assigned sound actually starting playback -- e.g. to line up with a broadcast delay. Kept
+    /// as a plain WebMainForm field (not an AudioPlayer static) since it's a UI-facing timing knob,
+    /// not an audio engine parameter; read at the FireEvent call site via Task.Delay before the
+    /// actual AudioPlayer.Play call, non-blocking (see FireEventForSide/FireEvent).</summary>
+    int _soundStartDelayMs;
+    public int GetSoundStartDelayMsFromWeb() => _soundStartDelayMs;
+    public void SetSoundStartDelayMsFromWeb(int ms) { _soundStartDelayMs = Math.Clamp(ms, 0, 5000); PersistAudioSettingsDebounced(); }
+
+    /// <summary>Bug found in the 2026-08-11 audit: a delayed FireEvent (see _soundStartDelayMs
+    /// below) had no way to notice the game situation moved on before its Task.Delay elapsed --
+    /// e.g. a 3rd Down cue queued with a 2s delay, then a Touchdown fires 1s later; without this,
+    /// the stale 3rd Down clip would still play at the 2s mark and (via interruptPrevious's
+    /// StopAll) cut off the Touchdown audio that was legitimately already playing. Incremented
+    /// only for interruptPrevious:true calls (the only ones capable of clobbering fresher audio --
+    /// the PA-layer/same-tick-layering calls always pass interruptPrevious:false and are meant to
+    /// play regardless, so they don't touch this counter and are never cancelled by it).</summary>
+    long _soundFireGeneration;
 
     public bool GetLeadInWhistleAvailableFromWeb() => !string.IsNullOrWhiteSpace(AudioPlayer.LeadInClipPath) && File.Exists(AudioPlayer.LeadInClipPath);
     public bool GetLeadInWhistleEnabledFromWeb() => AudioPlayer.LeadInEnabled;
@@ -2338,19 +2406,43 @@ public sealed class WebMainForm : Form
                 || entry.Event.Contains("Safety", StringComparison.OrdinalIgnoreCase);
             bool isBigHit = entry.Event.Contains("Tackle for Loss", StringComparison.OrdinalIgnoreCase);
             bool isPregame = entry.Event.Contains("Pregame Ready", StringComparison.OrdinalIgnoreCase);
-            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle);
             RecordSongTriggered(entry.Event);
 
-            // PA Announcer layer: plays concurrently with the main cue above, not instead of it,
-            // so interruptPrevious MUST be false here -- true would call StopAll() and kill the
-            // main clip that was just started a line above. Fired after, not before, the main
-            // Play() call for the same reason (StopAll stops everything already in ActiveOutputs).
-            // isHighPriorityEvent must match the main cue's -- the whole point of ducking on a
-            // Touchdown/Turnover/Safety is so this PA layer cuts through clearly too; leaving it
-            // false here would duck the PA clip right along with everything else it's supposed to
-            // rise above.
-            if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
-                AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isHighPriorityEvent: isHighPriority);
+            // Punch-list item 4: configurable delay (0-5000ms, _soundStartDelayMs) between the
+            // event firing and playback actually starting -- e.g. to line up with a broadcast
+            // delay. Applied here via a non-blocking Task.Delay rather than Thread.Sleep so
+            // FireEvent (and its caller, FireEventForSide -> the OCR event pipeline) returns
+            // immediately instead of stalling the watcher loop for up to 5 seconds. At 0ms
+            // (default) this fires the AudioPlayer.Play calls synchronously same as before.
+            int delayMs = _soundStartDelayMs;
+            string paFile = entry.PaAudioFile;
+            bool paExists = !string.IsNullOrWhiteSpace(paFile) && File.Exists(paFile);
+            // See _soundFireGeneration's doc comment: only interruptPrevious:true calls bump/check
+            // the generation, since only those are capable of clobbering fresher audio if left to
+            // fire stale after a delay.
+            long myGeneration = interruptPrevious
+                ? System.Threading.Interlocked.Increment(ref _soundFireGeneration)
+                : System.Threading.Interlocked.Read(ref _soundFireGeneration);
+            void PlayNow()
+            {
+                if (interruptPrevious && myGeneration != System.Threading.Interlocked.Read(ref _soundFireGeneration))
+                    return; // a newer interrupting event superseded this delayed one -- don't stomp it with stale audio
+                AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle);
+                // PA Announcer layer: plays concurrently with the main cue above, not instead of it,
+                // so interruptPrevious MUST be false here -- true would call StopAll() and kill the
+                // main clip that was just started a line above. Fired after, not before, the main
+                // Play() call for the same reason (StopAll stops everything already in ActiveOutputs).
+                // isHighPriorityEvent must match the main cue's -- the whole point of ducking on a
+                // Touchdown/Turnover/Safety is so this PA layer cuts through clearly too; leaving it
+                // false here would duck the PA clip right along with everything else it's supposed to
+                // rise above.
+                if (paExists)
+                    AudioPlayer.Play(paFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isHighPriorityEvent: isHighPriority);
+            }
+            if (delayMs > 0)
+                _ = Task.Delay(delayMs).ContinueWith(_ => PlayNow(), TaskScheduler.Default);
+            else
+                PlayNow();
             // Names exactly which trigger OCR just read as a small on-screen flash, so a user can
             // confirm what fired without digging through logs -- this call isn't gated on
             // _webView.CoreWebView2 being non-null elsewhere in this file only because FireEvent

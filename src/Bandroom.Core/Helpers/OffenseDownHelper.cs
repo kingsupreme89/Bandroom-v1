@@ -23,27 +23,60 @@ namespace Bandroom.Core.Helpers;
 /// request to reduce clutter.</summary>
 public sealed class OffenseDownHelper : IRuleEvaluator
 {
-    public bool CanFire(GameState state) => state.Current.Down != state.Previous.Down;
+    // Buffered edge-detection, same fix as DefenseHelper's (Loss) branch (STATE_MACHINE_ANALYSIS
+    // Discrepancy #12): "down" and "yards to go" are two independent OCR reads that don't always
+    // land on the same tick. Classifying short-vs-long off Current.YardsToGo on the exact tick
+    // Down changes can read a stale (pre-snap) distance -- caused real misfires: a genuine 2nd &
+    // long read as still "short" (wrong event key, or silently swallowed if the stale value also
+    // looked like a loss), and 3rd/4th & long double-firing once here off the stale short-looking
+    // value and again a tick later from DefenseHelper's own (correctly buffered) Loss branch.
+    // Now waits up to MaxPendingTicks for YardsToGo to actually move off its pre-transition
+    // baseline before classifying, falling back to whatever's read by then on timeout so a genuine
+    // OCR gap still fires something rather than going silent.
+    readonly DownDistanceBuffer _buffer = new();
+
+    public bool CanFire(GameState state) => true;
 
     public TriggerEvent? Evaluate(GameState state)
     {
-        if (state.Current.Down == state.Previous.Down)
+        if (state.Current.Down != state.Previous.Down)
+        {
+            // A turnover also resets Down for the new offense -- that's TurnoverHelper's moment,
+            // not a down-and-distance cue. Same NewPossession guard FirstDownHelper/DefenseHelper
+            // use.
+            if (state.Delta.NewPossession)
+            {
+                _buffer.Clear();
+                return null;
+            }
+
+            _buffer.Start(state.Current.Down, state.Previous.YardsToGo);
+            return null; // wait for the yards-to-go OCR read to catch up before classifying
+        }
+
+        if (!_buffer.IsPending)
             return null;
 
-        // A turnover also resets Down for the new offense -- that's TurnoverHelper's moment, not
-        // a down-and-distance cue. Same NewPossession guard FirstDownHelper/DefenseHelper use.
-        if (state.Delta.NewPossession)
-            return null;
+        bool timedOut = _buffer.Advance();
+        if (!timedOut && state.Current.YardsToGo == _buffer.BaselineYardsToGo)
+            return null; // yards-to-go hasn't updated yet -- keep waiting
+
+        int down = _buffer.PendingDown!.Value;
+        int baselineYardsToGo = _buffer.BaselineYardsToGo;
+        _buffer.Clear();
+
+        if (down < 2 || down > 4)
+            return null; // 1st down is FirstDownHelper's/DriveStarterHelper's territory.
 
         // Defer to DefenseHelper's "(Loss)" branch -- a down that got LONGER (tackle for loss)
         // always reads as "long" here too, which would otherwise double-fire a generic long cue
         // alongside the more specific Loss one on the same snap.
-        if (state.Current.YardsToGo > state.Previous.YardsToGo)
+        if (state.Current.YardsToGo > baselineYardsToGo)
+        {
+            if (timedOut)
+                state.NearMisses.Add($"OffenseDownHelper: buffered wait for down-{down} classification timed out while YardsToGo looked like a Loss, deferring to DefenseHelper");
             return null;
-
-        int down = state.Current.Down;
-        if (down < 2 || down > 4)
-            return null; // 1st down is FirstDownHelper's/DriveStarterHelper's territory.
+        }
 
         bool isShort = state.Current.YardsToGo <= 3;
 

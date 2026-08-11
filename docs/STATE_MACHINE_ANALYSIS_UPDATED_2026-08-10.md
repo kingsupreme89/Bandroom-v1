@@ -1,4 +1,4 @@
-# Bandroom State-Machine Analysis — Updated Complete Audit
+ill at hem State-Machine Analysis — Updated Complete Audit
 
 **Date:** August 10, 2026  
 **Author:** Senior State-Machine & Event-Driven Systems Engineer  

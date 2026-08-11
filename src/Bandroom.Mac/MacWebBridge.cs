@@ -78,7 +78,6 @@ public sealed class MacWebBridge
     // ---- Settings & Watching ----
 
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
-    public void OpenSettings() => _host.OpenSettingsFromWeb();
     public void ShowUpdate() { /* TODO: Sparkle update check */ }
     public void RestartForUpdate() { /* TODO: Sparkle restart */ }
     public void ResetTeamProfile() => _host.ResetTeamProfileFromWeb();
@@ -115,11 +114,53 @@ public sealed class MacWebBridge
     public string GetTrackLibrary() => _host.GetTrackLibraryFromWeb();
     public void PreviewLocalFile(string path) => _host.PreviewLocalFileFromWeb(path);
     public void AssignTrackFile(string trigger, bool isPa, string path) => _host.AssignTrackFileFromWeb(trigger, isPa, path);
+    // Parity gap found in the 2026-08-11 audit: app.js's "Copy From..." button and sound-start-delay
+    // slider called these bridge method names unconditionally on both platforms, but Mac had no
+    // matching MacWebBridge methods at all -- would throw on click/drag. Mirrors WebBridge.cs's
+    // naming exactly.
+    public bool CopyEventAssignment(string sourceTrigger, string targetTrigger) => _host.CopyEventAssignmentFromWeb(sourceTrigger, targetTrigger);
+    public void SetSoundStartDelayMs(int ms) => _host.SetSoundStartDelayMsFromWeb(ms);
+    public int GetSoundStartDelayMs() => _host.GetSoundStartDelayMsFromWeb();
     public void ClearTrackAssignment(string trigger, bool isPa) => _host.ClearTrackAssignmentFromWeb(trigger, isPa);
     public string? BrowseForAudioFile() => _host.BrowseForAudioFileFromWeb();
     public void OpenTrimmer(string trigger, bool isPa) => _host.OpenTrimmerFromWeb(trigger, isPa);
     public int GetEventVolume(string trigger) => _host.GetEventVolumeFromWeb(trigger);
     public void SetEventVolume(string trigger, int percent) => _host.SetEventVolumeFromWeb(trigger, percent);
+    public bool AddLibraryFileToDownloads(string path) => _host.AddLibraryFileToDownloadsFromWeb(path);
+    public string AddSongsBatch() => _host.AddSongsBatchFromWeb();
+    public string PrepareTrim(string trigger, bool isPa) => _host.PrepareTrimFromWeb(trigger, isPa);
+    public string SaveTrim(string trigger, bool isPa, double startSec, double endSec, string? sourceName = null) =>
+        JsonSerializer.Serialize(new { ok = false, error = "Trimming isn't supported on the Mac app yet -- choose a different clip instead." });
+
+    // ---- Default/conference song pack browsing (mirrors WebBridge.cs ~1128-1354) ----
+
+    public string? BrowseForSongPackFolder() => _host.BrowseForSongPackFolderFromWeb();
+    public void ImportDefaultSongPackFolder(string folderPath, bool overwrite = false) => _host.ImportDefaultSongPackFolderFromWeb(folderPath, overwrite);
+    public string GetDefaultSongsFolderPath() => ConfigStore.DownloadedDefaultSongsFolder;
+    public string GetDefaultPackSongsForTeam(string teamName) => _host.GetDefaultPackSongsForTeamFromWeb(teamName);
+    public string GetDefaultPackTeams() => _host.GetDefaultPackTeamsFromWeb();
+    public string GetConferencePackSongsForTeam(string teamName) => _host.GetConferencePackSongsForTeamFromWeb(teamName);
+    public string PreviewConferencePackForTeam(string teamName) => _host.PreviewConferencePackForTeamFromWeb(teamName);
+    public int ApplyConferencePackSelections(string teamName, string eventKeysJson) => _host.ApplyConferencePackSelectionsFromWeb(teamName, eventKeysJson);
+
+    // ---- Whistle volume + meter levels (mirrors WebBridge.cs ~1255-1267) ----
+
+    public void SetWhistleVolume(int percent) => AudioPlayer.WhistleVolume = percent / 100f;
+    public int GetWhistleVolume() => (int)(AudioPlayer.WhistleVolume * 100);
+
+    /// <summary>Sound Booth meters -- Mac's afplay backend has no live level-metering tap (no
+    /// audio pipeline to read from, unlike NAudio's sample-provider chain on Windows), so this
+    /// always reports silence rather than faking movement.</summary>
+    public string GetCurrentLevels() => "{\"in\":0,\"out\":0}";
+
+    /// <summary>Windows Core Audio (WASAPI) readout -- no macOS equivalent wired up (would need
+    /// CoreAudio/AVFoundation native interop). Reports "unknown" honestly instead of faking a
+    /// system volume reading.</summary>
+    public string GetSystemVolumeInfo() => JsonSerializer.Serialize(new { known = false, volumePercent = 100, muted = false });
+
+    /// <summary>Band Director dashboard's OBS overlay chat URL -- same port the Mac HttpListener
+    /// already serves everything else from, so this works unmodified.</summary>
+    public string GetOverlayChatUrl() => "http://localhost:18765/overlay/chat";
 
     // ---- Volume & Audio settings ----
 
@@ -130,6 +171,35 @@ public sealed class MacWebBridge
     public int GetAwayVolume() => _host.GetAwayVolumeFromWeb();
     public void SetPaVolume(int percent) => _host.SetPaVolumeFromWeb(percent);
     public int GetPaVolume() => _host.GetPaVolumeFromWeb();
+    public int GetVolume() => (int)(AudioPlayer.MasterVolume * 100);
+    public int GetFadeDelay() => _host.GetFadeDelayFromWeb();
+    public string GetReverb() => _host.GetReverbFromWeb();
+    public string GetScorebugPresets() => _host.GetScorebugPresetsFromWeb();
+    public void SetScorebugPreset(string name) => _host.SetScorebugPresetFromWeb(name);
+
+    // ---- Settings tab (merged into the themed Profile overlay on Windows too — see
+    // Bandroom_Handoff_2026-08-11_Session40.md) ----
+    public void StopPlayback() => _host.StopPlaybackFromWeb();
+    public void OpenSongsFolder() => _host.OpenSongsFolderFromWeb();
+    public void ClearAllAssignments() => _host.ClearAllAssignmentsFromWeb();
+    public bool GetAlwaysOnTop() => _host.GetAlwaysOnTopFromWeb();
+    public void SetAlwaysOnTop(bool enabled) => _host.SetAlwaysOnTopFromWeb(enabled);
+    public string GetPlaybackTimingSettings() => _host.GetPlaybackTimingSettingsFromWeb();
+    public void SavePlaybackTimingSettings(string settingsJson)
+    {
+        var settings = JsonSerializer.Deserialize<ConfigStore.PlaybackTimingSettings>(settingsJson);
+        if (settings != null) _host.SavePlaybackTimingSettingsFromWeb(settings);
+    }
+
+    /// <summary>Band Director dashboard, Phase 1 — only the quick-trigger slot->EventKey mapping
+    /// is real/persisted so far (see Bandroom_Handoff_2026-08-11_Session40.md).</summary>
+    public string GetBandDirectorDashboardSettings() =>
+        JsonSerializer.Serialize(ConfigStore.LoadBandDirectorDashboardSettings());
+    public void SaveBandDirectorDashboardSettings(string quickTriggerMapJson)
+    {
+        var map = JsonSerializer.Deserialize<Dictionary<string, string>>(quickTriggerMapJson) ?? new Dictionary<string, string>();
+        ConfigStore.SaveBandDirectorDashboardSettings(new ConfigStore.BandDirectorDashboardSettings(map));
+    }
     public bool GetLeadInWhistleAvailable() => !string.IsNullOrWhiteSpace(AudioPlayer.LeadInClipPath) && File.Exists(AudioPlayer.LeadInClipPath);
     public bool GetLeadInWhistleEnabled() => AudioPlayer.LeadInEnabled;
     public void SetLeadInWhistleEnabled(bool enabled)
@@ -628,4 +698,202 @@ public sealed class MacWebBridge
     public void MaximizeWindow() => _host.MaximizeWindowFromWeb();
     public void CloseWindow() => _host.CloseWindowFromWeb();
     public void PlayClickSound() => _host.PlayUiClickSoundFromWeb();
+
+    // ---- Track Info drawer / audio metadata (mirrors WebBridge.cs ~312-357) ----
+
+    static readonly JsonSerializerOptions CamelCaseJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    string? ResolveAudioFileForTrigger(string trigger) =>
+        _host.GetEvents(null).FirstOrDefault(e => e.Trigger == trigger && !string.IsNullOrWhiteSpace(e.AudioFile))?.AudioFile;
+
+    public string GetTrackMetadata(string trigger)
+    {
+        var audioFile = ResolveAudioFileForTrigger(trigger);
+        if (audioFile == null) return "null";
+        var meta = AudioTrackMetadataStore.Load(audioFile);
+        return meta != null ? JsonSerializer.Serialize(meta, CamelCaseJsonOptions) : "null";
+    }
+
+    public string SaveTrackMetadata(string trigger, string metadataJson)
+    {
+        var audioFile = ResolveAudioFileForTrigger(trigger);
+        if (audioFile == null)
+            return JsonSerializer.Serialize(new { success = false, error = "No song is assigned to this trigger yet." });
+        try
+        {
+            var meta = JsonSerializer.Deserialize<AudioTrackMetadata>(metadataJson, CamelCaseJsonOptions) ?? new AudioTrackMetadata();
+            AudioTrackMetadataStore.Save(audioFile, meta);
+            return JsonSerializer.Serialize(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SaveTrackMetadata failed", ex);
+            return JsonSerializer.Serialize(new { success = false, error = "Couldn't save track info." });
+        }
+    }
+
+    /// <summary>Mac counterpart of WebBridge.AnalyzeTrackMetadata -- IntakeEngine.AnalyzeAndSuggest
+    /// itself is cross-platform, but the duration/loudness half of what it returns depends on
+    /// AudioTrackMetadataStore.AnalyzeAudioFile, which is a Mac stub returning zeros/nulls (see
+    /// PlatformStubs.Mac.cs -- real analysis needs NAudio's AudioFileReader, Windows-only). Title/
+    /// artist/school filename-parsing suggestions still come back real.</summary>
+    public string AnalyzeTrackMetadata(string trigger)
+    {
+        var audioFile = ResolveAudioFileForTrigger(trigger);
+        if (audioFile == null || !File.Exists(audioFile))
+            return JsonSerializer.Serialize(new { success = false, error = "No song is assigned to this trigger yet." });
+        try
+        {
+            var suggestion = IntakeEngine.AnalyzeAndSuggest(audioFile);
+            return JsonSerializer.Serialize(new { success = true, metadata = suggestion }, CamelCaseJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("AnalyzeTrackMetadata failed", ex);
+            return JsonSerializer.Serialize(new { success = false, error = "Couldn't analyze this file." });
+        }
+    }
+
+    // ---- Public profile toggle (mirrors WebBridge.cs ~858) ----
+
+    public string TogglePublicProfile(bool isPublic)
+    {
+        var current = ConfigStore.LoadUserProfile();
+        if (isPublic && string.IsNullOrWhiteSpace(current.GoogleUserId))
+            return JsonSerializer.Serialize(new { ok = false, error = "Sign in with Google first -- a public profile needs an account to publish under." });
+
+        var updated = ConfigStore.MutateUserProfile(c => c with { IsPublicProfile = isPublic });
+        _ = ProfileSyncService.PushAsync(updated);
+        return JsonSerializer.Serialize(new { ok = true, isPublicProfile = updated.IsPublicProfile });
+    }
+
+    // ---- Big Game conditional slots (mirrors WebBridge.cs ~1224-1226, ~1355-1357) ----
+
+    public bool AssignBigGameTrackFile(string trigger, string path) => _host.AssignBigGameTrackFileFromWeb(trigger, path);
+    public void ClearBigGameTrackAssignment(string trigger) => _host.ClearBigGameTrackAssignmentFromWeb(trigger);
+    public string GetBigGameSettings() => JsonSerializer.Serialize(ConfigStore.LoadBigGameSettings());
+    public void SaveBigGameSettings(bool isBigGame) =>
+        ConfigStore.SaveBigGameSettings(new ConfigStore.BigGameSettings(isBigGame, 4, 8));
+
+    // ---- Help & Guide Event Log (mirrors WebBridge.cs ~1101-1104) ----
+
+    public string GetEventActivityLog() => _host.GetEventActivityLogFromWeb();
+    public string ExportEventActivityLog() => _host.ExportEventActivityLogFromWeb();
+
+    // ---- Supabase settings (mirrors WebBridge.cs ~1132-1138) ----
+
+    public string GetSupabaseSettings()
+    {
+        var (url, anonKey) = ConfigStore.LoadSupabaseSettings();
+        return JsonSerializer.Serialize(new { url, anonKey });
+    }
+    public void SaveSupabaseSettings(string url, string anonKey) => ConfigStore.SaveSupabaseSettings(url, anonKey);
+
+    // ---- Default songs folder relocate (mirrors WebBridge.cs ~1153) ----
+
+    public async Task<string> RelocateDefaultSongsFolder()
+    {
+        string? chosen = await _host.BrowseForFolderFromWeb("Choose where to keep the default song pack");
+        if (chosen == null)
+            return JsonSerializer.Serialize(new { success = false, cancelled = true });
+
+        bool ok = ConfigStore.SetDefaultSongsFolderOverride(chosen);
+        return ok
+            ? JsonSerializer.Serialize(new { success = true, path = chosen })
+            : JsonSerializer.Serialize(new { success = false, error = "Couldn't move the song pack there." });
+    }
+
+    // ---- Soundboard / Dynasty save (mirrors WebBridge.cs ~1220-1221) ----
+
+    public void PlaySoundboardSlot(string key, string path) => _host.PlaySoundboardSlotFromWeb(key, path);
+    public Task<string?> ScanDynastySave() => _host.ScanDynastySaveFromWeb();
+
+    // ---- Whistle trim/browse (mirrors WebBridge.cs ~1232-1255) ----
+
+    public string PrepareTrimForWhistle(string path) => _host.PrepareTrimForWhistleFromWeb(path);
+    public string SaveTrimAsLeadInWhistle(double startSec, double endSec) => _host.SaveTrimAsLeadInWhistleFromWeb(startSec, endSec);
+    public void SetEventPlayLeadInWhistle(string trigger, bool enabled) => _host.SetEventPlayLeadInWhistleFromWeb(trigger, enabled);
+    public async Task<bool> BrowseAndSetLeadInWhistle() => await _host.BrowseAndSetLeadInWhistleFromWeb();
+
+    // ---- EQ/DSP controls (mirrors WebBridge.cs ~1265-1283) ----
+    // See AudioPlayer.Mac.cs's DSP-fields doc comment: afplay has no real-time effects chain, so
+    // these persist state (in-memory, matching Windows' own non-ConfigStore-backed behavior) but
+    // do not change actual playback.
+
+    public string GetEqPreset() => AudioPlayer.CurrentEq.ToString().ToLowerInvariant();
+    public void SetEqPreset(string key) => AudioPlayer.CurrentEq = key switch
+    {
+        "marchingband" => AudioPlayer.EqPreset.MarchingBand,
+        "megaphone" => AudioPlayer.EqPreset.Megaphone,
+        _ => AudioPlayer.EqPreset.Off,
+    };
+    public bool GetTransientShaperEnabled() => AudioPlayer.TransientShaperEnabled;
+    public void SetTransientShaperEnabled(bool enabled) => AudioPlayer.TransientShaperEnabled = enabled;
+    public bool GetStereoWidenerEnabled() => AudioPlayer.StereoWidenerEnabled;
+    public void SetStereoWidenerEnabled(bool enabled) => AudioPlayer.StereoWidenerEnabled = enabled;
+    public bool GetDuckingEnabled() => AudioPlayer.DuckingEnabled;
+    public void SetDuckingEnabled(bool enabled) => AudioPlayer.DuckingEnabled = enabled;
+    public bool GetNoEffectsBypass() => AudioPlayer.NoEffectsBypass;
+    public void SetNoEffectsBypass(bool enabled) => AudioPlayer.NoEffectsBypass = enabled;
+    public bool GetControllerRumbleEnabled() => ControllerRumbleService.Enabled;
+    public void SetControllerRumbleEnabled(bool enabled) => ControllerRumbleService.Enabled = enabled;
+    public string GetSubBassLevel() => AudioPlayer.SubBassLevel.ToString().ToLowerInvariant();
+    public void SetSubBassLevel(string level) => AudioPlayer.SubBassLevel = level switch
+    {
+        "subtle" => AudioPlayer.SubBassIntensity.Subtle,
+        "stadium" => AudioPlayer.SubBassIntensity.Stadium,
+        "earthquake" => AudioPlayer.SubBassIntensity.Earthquake,
+        _ => AudioPlayer.SubBassIntensity.Off,
+    };
+    public bool GetCrowdBusEnabled() => CrowdBusService.Enabled;
+    public void SetCrowdBusEnabled(bool enabled) => CrowdBusService.Enabled = enabled;
+    public bool GetCrowdBusClipAvailable() => !string.IsNullOrWhiteSpace(CrowdBusService.ClipPath) && File.Exists(CrowdBusService.ClipPath);
+    public async Task<bool> BrowseAndSetCrowdBusClip() => await _host.BrowseAndSetCrowdBusClipFromWeb();
+
+    // ---- Profile management (mirrors WebBridge.cs ~1318-1341) ----
+
+    public bool DuplicateProfile(string fromTeam, string toTeam) => _host.DuplicateProfileFromWeb(fromTeam, toTeam);
+    public string GetTeamsNeedingDefaultProfile(string home, string away) =>
+        JsonSerializer.Serialize(_host.GetTeamsNeedingDefaultProfileFromWeb(home, away));
+    public int ApplyDefaultProfileForTeam(string teamName) => _host.ApplyDefaultProfileForTeamFromWeb(teamName);
+    public int ApplyDefaultProfileForTeamOverwrite(string teamName) => _host.ApplyDefaultProfileForTeamOverwriteFromWeb(teamName);
+    public int ApplyConferencePackForTeam(string teamName, bool overwrite) => _host.ApplyConferencePackForTeamFromWeb(teamName, overwrite);
+
+    // ---- TeamBuilder custom team (mirrors WebBridge.cs ~1384-1418) ----
+
+    public string AddCustomTeam(string name, string primaryHex, string secondaryHex, string mascot = "")
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return JsonSerializer.Serialize(new { success = false, error = "A school name is required." });
+
+            string trimmed = name.Trim();
+            if (TeamColors.All.Any(t => t.Name.Equals(trimmed, StringComparison.OrdinalIgnoreCase)))
+                return JsonSerializer.Serialize(new { success = false, error = $"\"{trimmed}\" already exists." });
+
+            System.Drawing.Color primary, secondary;
+            try
+            {
+                primary = System.Drawing.ColorTranslator.FromHtml(primaryHex);
+                secondary = System.Drawing.ColorTranslator.FromHtml(secondaryHex);
+            }
+            catch
+            {
+                return JsonSerializer.Serialize(new { success = false, error = "Pick valid primary and secondary colors." });
+            }
+
+            var team = TeamColors.AddCustomTeam(trimmed, primary, secondary, mascot ?? "");
+            return JsonSerializer.Serialize(new
+            {
+                success = true,
+                error = (string?)null,
+                team = new { name = team.Name, primary = ColorHex(primary), secondary = ColorHex(secondary), mascot = team.Mascot },
+            });
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { success = false, error = $"Couldn't add school: {ex.Message}" });
+        }
+    }
 }

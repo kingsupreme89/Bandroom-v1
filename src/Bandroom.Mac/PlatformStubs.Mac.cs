@@ -94,6 +94,82 @@ internal static class TeamBackdrop
     }
 }
 
+/// <summary>Mac-compatible AudioCache stub — the real AudioCache (AudioEngine.cs) is NAudio/Windows-only
+/// and isn't linked into the Mac project; DefaultSongPackService only needs Invalidate() to exist.</summary>
+internal static class AudioCache
+{
+    public static void Invalidate(string? path) { }
+}
+
+/// <summary>Mac-compatible AudioTrackMetadata — same data shape as the Windows record
+/// (AudioTrackMetadata.cs), duplicated here because the Windows version's file also carries the
+/// NAudio-based AnalyzeAudioFile implementation, and NAudio is a Windows Core Audio wrapper that
+/// isn't usable on macOS. Keep this record's fields in sync with AudioTrackMetadata.cs by hand.</summary>
+public sealed record AudioTrackMetadata
+{
+    public string? StandardTitle { get; init; }
+    public string? StandardArtist { get; init; }
+    public string? SchoolAbbreviation { get; init; }
+    public string? EnergyLevel { get; init; }
+    public string? ProminentInstrumentation { get; init; }
+    public string? RecommendedTrim { get; init; }
+    public float? IntegratedLufs { get; init; }
+    public float? TruePeakDbtp { get; init; }
+    public float? IntegratedLufsApprox { get; init; }
+    public float? DurationSeconds { get; init; }
+    public string? PrimaryGameTriggerEvent { get; init; }
+    public string? MarketplaceCategory { get; init; }
+    public string? RecommendedReverbPreset { get; init; }
+    public string? AcousticFingerprint { get; init; }
+    public DateTime UpdatedAtUtc { get; init; } = DateTime.UtcNow;
+}
+
+/// <summary>Mac-compatible AudioTrackMetadataStore — Load/Save mirror the Windows sidecar-JSON
+/// logic exactly. AnalyzeAudioFile is a stub (returns zeros/nulls) since real analysis needs
+/// NAudio's AudioFileReader, which isn't available on macOS; a future Mac-native audio decoder
+/// (e.g. AVFoundation) could fill this in for real duration/loudness numbers.</summary>
+public static class AudioTrackMetadataStore
+{
+    static string SidecarPathFor(string audioFilePath) => audioFilePath + ".meta.json";
+    static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+    public static AudioTrackMetadata? Load(string audioFilePath)
+    {
+        var path = SidecarPathFor(audioFilePath);
+        if (!File.Exists(path)) return null;
+        try { return System.Text.Json.JsonSerializer.Deserialize<AudioTrackMetadata>(File.ReadAllText(path), JsonOptions); }
+        catch { return null; }
+    }
+
+    public static void Save(string audioFilePath, AudioTrackMetadata metadata)
+    {
+        File.WriteAllText(SidecarPathFor(audioFilePath), System.Text.Json.JsonSerializer.Serialize(metadata with { UpdatedAtUtc = DateTime.UtcNow }, JsonOptions));
+    }
+
+    public static (float DurationSeconds, float? IntegratedLufs, float? TruePeakDbtp, float IntegratedLufsApprox) AnalyzeAudioFile(string audioFilePath)
+        => (0f, null, null, -96f);
+}
+
+/// <summary>Mac-compatible CrowdBusService stub -- the real CrowdBusService.cs uses NAudio's
+/// gapless-loop sample providers (Windows-only) for an ambient crowd-noise bed under the main
+/// cue. No Mac/afplay equivalent exists yet (afplay has no mixing graph to bed a second clip
+/// into), so this only tracks the Enabled toggle + clip path in memory so Settings UI round-trips
+/// without crashing/resetting -- it does not actually play a crowd bed. Real crowd-bus audio
+/// would need a Mac-native mixer (AVAudioEngine) to fill in for real.</summary>
+internal static class CrowdBusService
+{
+    public static bool Enabled = false;
+    public static string? ClipPath = null;
+}
+
+/// <summary>Mac-compatible ControllerRumbleService stub -- the real one is XInput (Windows-only)
+/// P/Invoke haptics. No macOS controller-haptics equivalent wired up yet; tracks the Enabled
+/// toggle in memory only so Settings UI round-trips without crashing.</summary>
+internal static class ControllerRumbleService
+{
+    public static bool Enabled = false;
+}
+
 /// <summary>Mac-compatible TeamBackgroundDownloadService — downloads team background images
 /// and saves them to the UserData/TeamBackgrounds folder.</summary>
 internal static class TeamBackgroundDownloadService

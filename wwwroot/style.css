@@ -566,6 +566,47 @@ input, select, textarea, [contenteditable] {
 }
 
 /* ================================================================
+   BAND DIRECTOR STREAMER DASHBOARD (Phase 1 -- see
+   BANDROOM_STREAMER_MASTER_PROMPT.md SYSTEM 2)
+   ================================================================ */
+#band-director-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#band-director-overlay[hidden] { display: none; }
+#band-director-settings-overlay {
+  position: fixed; inset: 0; z-index: 65;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#band-director-settings-overlay[hidden] { display: none; }
+#band-director { width: min(1000px, 92vw); max-height: 88vh; overflow-y: auto; }
+.bd-panel-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
+.bd-panel { padding: 10px; min-height: 160px; display: flex; flex-direction: column; }
+.bd-panel-title { font-weight: 600; margin-bottom: 6px; opacity: 0.85; }
+.bd-panel-list { flex: 1; overflow-y: auto; font-size: 13px; }
+.bd-list-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.bd-muted { opacity: 0.55; font-size: 12px; }
+.bd-section-label { font-weight: 600; margin-bottom: 6px; opacity: 0.85; }
+.bd-quick-triggers-row { margin: 14px 0; }
+.bd-trigger-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.bd-trigger-btn { width: auto; height: 40px; padding: 0 10px; font-size: 13px; }
+.bd-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin: 14px 0; }
+.bd-status-item { display: flex; align-items: center; gap: 6px; }
+.bd-toggle { cursor: pointer; }
+.bd-conn-pill[data-connected="false"] { border-color: rgba(255,255,255,0.15); color: var(--text-secondary, #8b95a1); }
+.bd-conn-pill[data-connected="true"] { border-color: #22c55e; color: #22c55e; }
+.bd-overlay-preview { margin-top: 10px; padding: 12px; }
+.bd-overlay-preview-box { border: 1px solid var(--glass-border); border-radius: 8px; padding: 10px; margin: 8px 0; }
+.bd-overlay-preview-situation, .bd-overlay-preview-requester { font-size: 12.5px; opacity: 0.7; margin-top: 4px; }
+.bd-overlay-preview-actions { display: flex; gap: 8px; }
+#band-director-settings-dialog { width: min(520px, 90vw); }
+.bd-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; }
+.bd-settings-row label { opacity: 0.85; }
+.bd-settings-row select { flex: 1; max-width: 320px; }
+
+/* ================================================================
    FPS/PING STATUS INDICATOR
    ================================================================ */
 #status-indicator {
@@ -901,8 +942,26 @@ input, select, textarea, [contenteditable] {
 .profile-stats {
   display: flex; gap: 20px; margin-bottom: 20px;
 }
+/* Stat card treatment -- borrowed layout idea from an owner-supplied light-theme dashboard
+   reference (small elevated cards in a row), rendered in this app's existing dark glass palette.
+   #profile-stats-grid arranges these in a 3-col grid; #public-profile-stats-grid (a plain flex
+   row) gets the same card look for free since both share this class. */
+#profile-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 6px; }
 .profile-stat {
   text-align: center;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 8px 6px;
+}
+.profile-stat span {
+  display: block;
+  font-size: 19px; font-weight: 700;
+  color: var(--tile-color, var(--accent));
+}
+.profile-stat label {
+  font-size: 10.5px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.03em;
 }
 .profile-stat-value {
   font-size: 23px; font-weight: 700;
@@ -912,6 +971,24 @@ input, select, textarea, [contenteditable] {
   font-size: 11.5px; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.04em;
 }
+/* Table-style row treatment (list sections in #profile-overlay's Profile tab: Favorite Team
+   Record, Games Watched by Team) -- alternating background, right-aligned value column. Borrowed
+   layout idea from an owner-supplied reference dashboard, rendered in the app's existing dark
+   glass palette. */
+.profile-by-team-row {
+  display: flex; justify-content: space-between; gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13.5px;
+}
+.profile-by-team-row:nth-child(odd) { background: rgba(255,255,255,0.025); }
+.profile-by-team-row-empty { color: var(--text-muted); font-size: 13px; padding: 6px 0; }
+#profile-record-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px;
+}
+#profile-record-text { font-weight: 700; color: var(--accent); margin-right: auto; }
+
 .profile-activity-feed {
   display: flex; flex-direction: column; gap: 8px;
 }
@@ -2819,6 +2896,57 @@ input, select, textarea, [contenteditable] {
 }
 .situation-volume-close:hover { color: var(--text-primary); }
 
+/* Punch-list item 3: "Copy From..." button/picker on event cards -- same popover mechanics as
+   .situation-volume-popover above (absolute, pops above the card, one at a time) but a scrollable
+   option list instead of a slider. */
+.situation-btn-copy { border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 65%, var(--glass-border)); }
+.situation-copy-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  width: 260px;
+  max-height: 260px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.situation-copy-popover[hidden] { display: none; }
+.situation-copy-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--team-glow, var(--accent));
+  margin-bottom: 6px;
+}
+.situation-copy-list { overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.situation-copy-option {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.situation-copy-option:hover {
+  border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, var(--glass-border));
+  background: color-mix(in srgb, var(--team-secondary, var(--accent)) 18%, rgba(255, 255, 255, 0.05));
+}
+.situation-copy-option-file { color: var(--team-glow, var(--accent)); font-weight: 600; }
+.situation-copy-empty { font-size: 12px; color: var(--team-glow, var(--accent)); opacity: 0.75; padding: 6px 2px; }
+.situation-copy-close {
+  align-self: flex-end;
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 17px; line-height: 1; padding: 0 2px; margin-top: 4px;
+}
+.situation-copy-close:hover { color: var(--text-primary); }
+
 .toggle-row { display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
 .toggle-row input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
 
@@ -2986,6 +3114,25 @@ input, select, textarea, [contenteditable] {
   margin-bottom: 12px;
 }
 .event-log-hint { font-size: 14px; color: var(--text-muted); }
+/* Punch-list item 7: search/filter box above the log list. Same glass-input treatment as other
+   text inputs in this app (rounded, glass border, team-glow focus ring). */
+.event-log-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 13.5px;
+}
+.event-log-search::placeholder { color: var(--text-muted); }
+.event-log-search:focus {
+  outline: none;
+  border-color: var(--team-glow, var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--team-glow, var(--accent)) 30%, transparent);
+}
 .event-log-list { display: flex; flex-direction: column; gap: 6px; }
 .event-log-row {
   padding: 9px 12px;
@@ -4009,12 +4156,51 @@ input, select, textarea, [contenteditable] {
 #profile-overlay[hidden] { display: none; }
 #profile-dialog {
   position: relative;
-  width: min(440px, 92vw);
+  width: min(640px, 94vw);
   max-height: 82vh;
-  overflow-y: auto;
   padding: 24px;
   border-radius: var(--radius-panel);
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
 }
+
+/* Left-side tab rail (Profile / Settings) -- see #profile-body below. Settings used to be a
+   separate native SettingsForm.cs dialog; merged into this overlay as a second tab. */
+.profile-tab-rail {
+  flex: 0 0 76px;
+  display: flex; flex-direction: column; gap: 8px;
+  padding-top: 4px;
+}
+.profile-rail-tab {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 4px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+.profile-rail-tab span { font-size: 10.5px; font-weight: 600; }
+.profile-rail-tab:hover { background: rgba(255,255,255,0.08); }
+.profile-rail-tab.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 12px rgba(34,211,238,0.25);
+}
+#profile-body { flex: 1; min-width: 0; max-height: 78vh; overflow-y: auto; }
+.profile-tab-panel[hidden] { display: none; }
+
+/* Settings tab (migrated from the old native SettingsForm.cs) */
+.profile-settings-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 6px 0;
+}
+.profile-settings-row label { color: var(--text-secondary, #cdd3da); font-size: 13.5px; }
+.profile-settings-row input[type="number"] { width: 80px; }
+.profile-settings-row select { flex: 1; max-width: 220px; }
 
 /* Read-only public profile viewer -- opened from Players Leaderboard rows (see openPublicProfile
    in app.js), on top of #profile-overlay so it needs a higher z-index. */
@@ -4517,6 +4703,21 @@ input, select, textarea, [contenteditable] {
 .matchup-columns .coverflow-arrow:hover {
   background: color-mix(in srgb, var(--side-primary, var(--accent)) 85%, white 15%);
   color: var(--side-secondary, #fff);
+}
+/* Punch-list item 1: team-switch arrows were "barely visible" -- give them a pulsing
+   LED-outline glow keyed to the currently-active team's color (--side-primary per column,
+   same var the filled circle above already uses), matching the app's standing neon-pulse
+   pattern used on panels/pills elsewhere. */
+.matchup-columns .coverflow-arrow {
+  animation: matchup-arrow-glow 1.8s ease-in-out infinite;
+}
+@keyframes matchup-arrow-glow {
+  0%, 100% {
+    box-shadow: 0 0 6px 0px color-mix(in srgb, var(--side-primary, var(--accent)) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 16px 3px color-mix(in srgb, var(--side-primary, var(--accent)) 85%, transparent);
+  }
 }
 .matchup-columns .coverflow-track .team-swatch {
   width: clamp(90px, 13vw, 150px);

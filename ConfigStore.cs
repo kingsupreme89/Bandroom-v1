@@ -164,6 +164,114 @@ internal static class ConfigStore
         _bigGameSettingsCache = settings;
     }
 
+    static readonly string BandDirectorDashboardSettingsPath = Path.Combine(UserDataRoot, "band_director_dashboard_settings.json");
+
+    /// <summary>Phase 1 of the Band Director streamer dashboard (see
+    /// BANDROOM_STREAMER_MASTER_PROMPT.md SYSTEM 2). QuickTriggerMap keys are the 8 quick-trigger
+    /// slot ids ("1".."8") mapped to an engine EventKey (e.g. "Offense: Touchdown Scored"); empty
+    /// string = unassigned. Everything else in the dashboard (Twitch/YouTube connection, chat
+    /// commands, polls, guest DJ) is mock-only in this phase and has no persisted config yet.</summary>
+    public record BandDirectorDashboardSettings(Dictionary<string, string> QuickTriggerMap)
+    {
+        public static readonly BandDirectorDashboardSettings Default = new(new Dictionary<string, string> {
+            ["1"] = "", ["2"] = "", ["3"] = "", ["4"] = "", ["5"] = "", ["6"] = "", ["7"] = "", ["8"] = "",
+        });
+    }
+
+    static BandDirectorDashboardSettings? _bandDirectorDashboardSettingsCache;
+
+    public static BandDirectorDashboardSettings LoadBandDirectorDashboardSettings()
+    {
+        if (_bandDirectorDashboardSettingsCache != null) return _bandDirectorDashboardSettingsCache;
+        if (!File.Exists(BandDirectorDashboardSettingsPath)) return _bandDirectorDashboardSettingsCache = BandDirectorDashboardSettings.Default;
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<BandDirectorDashboardSettings>(File.ReadAllText(BandDirectorDashboardSettingsPath), JsonOptions);
+            return _bandDirectorDashboardSettingsCache = loaded ?? BandDirectorDashboardSettings.Default;
+        }
+        catch
+        {
+            return _bandDirectorDashboardSettingsCache = BandDirectorDashboardSettings.Default;
+        }
+    }
+
+    public static void SaveBandDirectorDashboardSettings(BandDirectorDashboardSettings settings)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(BandDirectorDashboardSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        _bandDirectorDashboardSettingsCache = settings;
+    }
+
+    static readonly string PlaybackTimingSettingsPath = Path.Combine(UserDataRoot, "playback_timing_settings.json");
+
+    /// <summary>Settings-modal migration (native SettingsForm.cs -> themed Profile overlay): these
+    /// 4 fields used to only live in AudioPlayer/GameWatcher's in-memory statics with no disk
+    /// persistence at all, so every relaunch silently reset them to defaults even after the owner
+    /// used "Apply Timing" in the old dialog. Defaults here match those statics' own defaults
+    /// (AudioPlayer.cs: PreRollSeconds=0.0, FadeStartSeconds=10.0, FadeOutDuration=4.5;
+    /// GameWatcher.cs: Cooldown=2.0s).</summary>
+    public record PlaybackTimingSettings(double PreRollSeconds, double FadeStartSeconds, double FadeOutDuration, double CooldownSeconds)
+    {
+        public static readonly PlaybackTimingSettings Default = new(0.0, 10.0, 4.5, 2.0);
+    }
+
+    static PlaybackTimingSettings? _playbackTimingSettingsCache;
+
+    public static PlaybackTimingSettings LoadPlaybackTimingSettings()
+    {
+        if (_playbackTimingSettingsCache != null) return _playbackTimingSettingsCache;
+        if (!File.Exists(PlaybackTimingSettingsPath)) return _playbackTimingSettingsCache = PlaybackTimingSettings.Default;
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<PlaybackTimingSettings>(File.ReadAllText(PlaybackTimingSettingsPath), JsonOptions);
+            return _playbackTimingSettingsCache = loaded ?? PlaybackTimingSettings.Default;
+        }
+        catch
+        {
+            return _playbackTimingSettingsCache = PlaybackTimingSettings.Default;
+        }
+    }
+
+    public static void SavePlaybackTimingSettings(PlaybackTimingSettings settings)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(PlaybackTimingSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        _playbackTimingSettingsCache = settings;
+    }
+
+    static readonly string AppWindowSettingsPath = Path.Combine(UserDataRoot, "app_window_settings.json");
+
+    /// <summary>AlwaysOnTop used to be in-memory only (WebMainForm.TopMost, set once from the old
+    /// native SettingsForm's checkbox, never persisted).</summary>
+    public record AppWindowSettings(bool AlwaysOnTop)
+    {
+        public static readonly AppWindowSettings Default = new(false);
+    }
+
+    static AppWindowSettings? _appWindowSettingsCache;
+
+    public static AppWindowSettings LoadAppWindowSettings()
+    {
+        if (_appWindowSettingsCache != null) return _appWindowSettingsCache;
+        if (!File.Exists(AppWindowSettingsPath)) return _appWindowSettingsCache = AppWindowSettings.Default;
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<AppWindowSettings>(File.ReadAllText(AppWindowSettingsPath), JsonOptions);
+            return _appWindowSettingsCache = loaded ?? AppWindowSettings.Default;
+        }
+        catch
+        {
+            return _appWindowSettingsCache = AppWindowSettings.Default;
+        }
+    }
+
+    public static void SaveAppWindowSettings(AppWindowSettings settings)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(AppWindowSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        _appWindowSettingsCache = settings;
+    }
+
     /// <summary>Owner report: volume sliders (Master/Home/Away/PA/Whistle) reset to 100% every
     /// launch -- AudioPlayer.cs's entire volume surface is plain in-memory static state with zero
     /// disk persistence (confirmed via Session 34's investigation: grepped ConfigStore.cs for
@@ -173,9 +281,15 @@ internal static class ConfigStore
     /// the JSON stays human-readable and matches what the UI sliders actually show.</summary>
     static readonly string AudioSettingsPath = Path.Combine(UserDataRoot, "audio_settings.json");
 
-    public record AudioSettings(int MasterVolume, int HomeVolume, int AwayVolume, int PaVolume, int WhistleVolume)
+    // Punch-list item 4: configurable delay (ms, 0-5000) between an event firing and its
+    // assigned sound actually starting playback. Added as an optional trailing param with a
+    // default so the existing 5-arg AudioSettings(...) call sites elsewhere (if any) keep
+    // compiling unchanged; JSON deserialization of an old settings file missing this property
+    // also falls back to the same 0 default (no delay), preserving today's behavior for
+    // everyone until they explicitly opt in.
+    public record AudioSettings(int MasterVolume, int HomeVolume, int AwayVolume, int PaVolume, int WhistleVolume, int SoundStartDelayMs = 0)
     {
-        public static readonly AudioSettings Default = new(72, 100, 100, 100, 100);
+        public static readonly AudioSettings Default = new(72, 100, 100, 100, 100, 0);
     }
 
     static AudioSettings? _audioSettingsCache;
@@ -323,7 +437,7 @@ internal static class ConfigStore
     static string DefaultSongsIndexPath => Path.Combine(DefaultSongsFolder, "index.json");
 
     public static string LoadScorebugPresetName() =>
-        File.Exists(ScorebugPresetPath) ? File.ReadAllText(ScorebugPresetPath).Trim() : ScorebugPreset.KamsCbsScorebugV3.Name;
+        File.Exists(ScorebugPresetPath) ? File.ReadAllText(ScorebugPresetPath).Trim() : ScorebugPreset.CollegeFootball27.Name;
 
     public static void SaveScorebugPresetName(string name)
     {
@@ -1344,16 +1458,38 @@ internal static class ConfigStore
 
     static readonly HashSet<string> RetiredEventKeys = new(StringComparer.OrdinalIgnoreCase)
     {
+        // Added 2026-08-11: bare legacy "1st/2nd/3rd/4th Down" cards (BuildDefault's
+        // down:1st/2nd/3rd/4th rows) -- these were never pruned like their "Offense: Nth Down"
+        // siblings below, so every profile showed 4 permanently-"Unassigned" duplicate cards at
+        // the top of the Offense list even after the owner had already assigned real songs to the
+        // canonical "Offense: Second/Third Down Short" etc cards. Owner report: confusing, look
+        // broken/dead. They're not actually dead -- LegacyDownEventAlias in WebMainForm.cs still
+        // falls back to these by Trigger ("down:1st" etc) directly against the saved profile data,
+        // independent of whether EnsureAllEvents keeps the row visible here -- so any team that
+        // already has a real legacy assignment keeps it working; this only stops re-seeding empty
+        // ones for everyone else.
+        "1st Down",
+        "2nd Down",
+        "3rd Down",
+        "4th Down",
         "Offense: Earned First Down",
         "Offense: Second Down",
         "Offense: Third Down",
-        // Added 2026-08-08 alongside OffenseDownHelper now emitting this (STATE_MACHINE_ANALYSIS.md
-        // Discrepancy #10) -- same simplification bucket as Second/Third Down above: fires at
-        // runtime, reachable via LegacyDownEventAlias's new down:4th mapping (see WebMainForm.cs),
-        // just no separate UI card.
+        // CORRECTED 2026-08-11 (audit finding): despite the "OffenseDownHelper now emitting
+        // this" claim this comment used to make, OffenseDownHelper.cs's switch only ever emits
+        // "Defense: Fourth Down" for down==4 (by design -- 4th down is always Defense regardless
+        // of distance, see that file's header comment). Nothing in the codebase emits
+        // "Offense: Fourth Down" at runtime. Kept retired (not deleted) only because the
+        // LegacyDownEventAlias down:4th mapping still exists for any pre-engine profile that has
+        // a real legacy song assignment saved under this exact key.
         "Offense: Fourth Down",
-        "Offense: Drive Starter",
-        "Defense: Drive Starter",
+        // REMOVED 2026-08-11 (audit finding + owner call): these fire every game (any fresh
+        // drive that isn't from a kickoff or turnover -- in practice, almost always the first
+        // snap after a punt) but had no assignable UI card here AND no LegacyDownEventAlias
+        // fallback, so nobody could ever assign a song to them -- a silent dead-on-arrival event,
+        // same bug class as Discrepancy #14/#15. Moved back into AllEngineEventKeys below.
+        // "Offense: Drive Starter",
+        // "Defense: Drive Starter",
         // Added 2026-08-10: KickoffHelper no longer emits either of these (see its own comment) --
         // every kickoff after the opening/second-half ones now relies on "Offense: PAT Made"
         // firing right beforehand instead of its own dedicated cue, per the owner's call that the
@@ -1370,6 +1506,11 @@ internal static class ConfigStore
 
     public static readonly string[] AllEngineEventKeys =
     {
+        // Re-added 2026-08-11 (moved down from RetiredEventKeys) -- fires on every fresh drive
+        // that isn't a kickoff or turnover (in practice: almost always the first snap after a
+        // punt). Was never assignable and had no legacy fallback, so was a silent dead cue.
+        "Offense: Drive Starter",
+        "Defense: Drive Starter",
         // Added 2026-08-10 alongside OffenseDownHelper's rewrite -- 2nd/3rd down now split by
         // distance instead of firing one distance-blind card. Short = offense (this card); long
         // reuses the pre-existing "Defense: Second/Third Down" cards below, unchanged.

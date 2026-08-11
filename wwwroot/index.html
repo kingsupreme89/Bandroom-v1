@@ -86,6 +86,7 @@
              The big ESPN-style bottom ticker is for upload activity, not this. -->
         <span id="presence-dot" class="presence-dot" title="Connecting…"></span>
         <button id="btn-jump-favorite-team" class="icon-btn" title="Jump to favorite team" hidden>⭐</button>
+        <button id="btn-band-director" class="pill pill-marketplace" title="Band Director streamer dashboard">🎬 Band Director</button>
         <button id="btn-profile" class="icon-btn" title="Profile">👤</button>
         <button id="btn-update" class="btn-update dim" title="You're on the latest version">Up to date</button>
         <button id="btn-settings" class="icon-btn" title="Settings">&#9881;</button>
@@ -192,6 +193,10 @@
                 <span class="event-log-hint">Live feed of what Bandroom just played or skipped, and why.</span>
                 <button id="btn-export-event-log" class="btn-ghost">Save Log File</button>
               </div>
+              <!-- Punch-list item 7: client-side substring filter over the already-fetched log
+                   entries (team name or event key) -- see refreshEventActivityLog/filterEventLog
+                   in app.js. No backend change; the full buffer is already polled every 2s. -->
+              <input type="text" id="event-log-search" class="event-log-search" placeholder="Filter by team or event (e.g. &quot;Alabama&quot; or &quot;3rd and short&quot;)&hellip;" />
               <div id="event-log-list" class="event-log-list"><!-- populated by app.js --></div>
             </div>
           </div>
@@ -613,6 +618,16 @@
           <input type="range" id="slider-sensitivity" min="0" max="30" value="10" step="1" class="slider" />
           <div class="slider-value"><span id="sensitivity-value">10</span>s until fade-out &mdash; no fade-in</div>
         </div>
+        <!-- Punch-list item 4: delay between an event actually firing and its assigned sound
+             starting playback -- e.g. to line up with a broadcast delay. Separate from Fire
+             Sensitivity above (that's the fade-out timer, not a start delay) and from Fade above
+             it in Sound Booth (post-play fade). See WebMainForm._soundStartDelayMs. -->
+        <div class="panel-section">
+          <div class="panel-title">Sound Start Delay</div>
+          <p class="leadin-whistle-hint">Wait this long after an event fires before its sound actually starts playing -- handy for lining up with a broadcast delay.</p>
+          <input type="range" id="slider-sound-start-delay" min="0" max="5" value="0" step="0.1" class="slider" />
+          <div class="slider-value"><span id="sound-start-delay-value">0</span>s</div>
+        </div>
         <!-- Big Game toggle -- REDEFINED 2026-08-10 (was an auto-detect "quarter 4, score within
              8 points" volume-boost rule; see ConfigStore.BigGameSettings's doc comment). Now a
              manual per-matchup flag for "both bands are physically here" (e.g. a real Bama @ LSU
@@ -826,6 +841,19 @@
       <!-- Profile close button in header, matching every other overlay in the app.
            Previously missing -- user had to scroll to the bottom to find "Close". -->
       <button id="btn-close-profile-top" class="icon-btn" title="Close" style="position:absolute;top:12px;right:12px;">&times;</button>
+
+      <!-- Left-side tab rail (Profile / Settings) -- Settings used to be a separate, unthemed
+           native SettingsForm.cs dialog opened via the header gear icon; merged in here so the
+           whole identity+config surface is one themed modal. Layout borrows the rail idea from an
+           owner-supplied reference dashboard mockup, rendered in this app's existing dark glass
+           palette rather than that reference's light theme. -->
+      <div class="profile-tab-rail" role="tablist">
+        <button id="btn-profile-tab-profile" class="profile-rail-tab active" data-profile-tab="profile" role="tab" aria-selected="true">👤<span>Profile</span></button>
+        <button id="btn-profile-tab-settings" class="profile-rail-tab" data-profile-tab="settings" role="tab" aria-selected="false">⚙<span>Settings</span></button>
+      </div>
+
+      <div id="profile-body">
+      <div class="profile-tab-panel" data-profile-panel="profile">
       <!-- Avatar -- local custom upload (works signed-out) shown if set, else the Google picture
            if signed in, else the team badge fallback. Separate from the Google avatar so
            signed-out users still get a personalized picture. -->
@@ -938,6 +966,64 @@
       <div class="save-profile-actions">
         <button id="btn-close-profile" class="btn-ghost">Close</button>
       </div>
+      </div><!-- /profile-tab-panel[profile] -->
+
+      <div class="profile-tab-panel" data-profile-panel="settings" hidden>
+        <div class="save-profile-header">Audio Timing</div>
+        <div class="profile-settings-row">
+          <label for="settings-pre-roll">Pre-roll delay (sec)</label>
+          <input type="number" id="settings-pre-roll" min="0" max="10" step="0.1" />
+        </div>
+        <div class="profile-settings-row">
+          <label for="settings-fade-start">Fade-out starts at (sec)</label>
+          <input type="number" id="settings-fade-start" min="0" max="120" step="0.5" />
+        </div>
+        <div class="profile-settings-row">
+          <label for="settings-fade-duration">Fade-out duration (sec)</label>
+          <input type="number" id="settings-fade-duration" min="0" max="30" step="0.5" />
+        </div>
+        <div class="profile-settings-row">
+          <label for="settings-cooldown">Re-fire cooldown (sec)</label>
+          <input type="number" id="settings-cooldown" min="0" max="30" step="0.5" />
+        </div>
+        <div class="save-profile-actions">
+          <button id="btn-apply-timing-settings" class="btn-ghost">Apply Timing</button>
+        </div>
+
+        <div class="save-profile-header">Volume / Reverb</div>
+        <div class="profile-settings-row">
+          <label for="settings-volume">Volume</label>
+          <input type="range" id="settings-volume" min="0" max="100" value="72" class="slider" />
+          <span id="settings-volume-value">72%</span>
+        </div>
+        <div class="profile-settings-row">
+          <label for="settings-reverb">Reverb preset</label>
+          <select id="settings-reverb"></select>
+        </div>
+        <div class="profile-settings-row">
+          <label for="settings-scorebug">Scorebug position</label>
+          <select id="settings-scorebug"></select>
+        </div>
+
+        <div class="save-profile-header">App</div>
+        <label class="profile-settings-row">
+          <input type="checkbox" id="settings-always-on-top" />
+          Always on top
+        </label>
+        <div class="save-profile-actions">
+          <button id="btn-settings-stop-playback" class="btn-ghost">Stop Playback</button>
+          <button id="btn-settings-open-songs-folder" class="btn-ghost">Open Songs Folder</button>
+        </div>
+        <div class="save-profile-actions">
+          <button id="btn-settings-clear-all" class="btn-ghost btn-danger">Clear All Assignments</button>
+          <button id="btn-settings-reset-team" class="btn-ghost btn-danger">Reset This Team's Assignments</button>
+        </div>
+
+        <div class="save-profile-actions">
+          <button id="btn-close-profile-settings" class="btn-ghost">Close</button>
+        </div>
+      </div><!-- /profile-tab-panel[settings] -->
+      </div><!-- /profile-body -->
     </div>
   </div>
 
@@ -963,6 +1049,124 @@
       <div id="public-profile-notfound" hidden>This player's profile isn't public.</div>
       <div class="save-profile-actions">
         <button id="btn-close-public-profile" class="btn-ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Band Director streamer dashboard (Phase 1: mock/static data shell only -- see
+       BANDROOM_STREAMER_MASTER_PROMPT.md SYSTEM 2 for the full eventual spec of real Twitch/
+       YouTube OAuth, chat commands, channel points, bits, guest DJ, OBS overlay, and polls).
+       Master Volume is real (bridge.GetVolume/SetVolume, same plumbing as everywhere else in the
+       app); the quick-trigger slot mapping is real and persisted (WebBridge Get/SaveBandDirector
+       DashboardSettings); everything Twitch/YouTube-specific is static markup pending OAuth. -->
+  <div id="band-director-overlay" hidden>
+    <div id="band-director" class="glass">
+      <div class="team-picker-header">
+        <div class="bandroom-album-title">
+          <span>🎬 Band Director</span>
+        </div>
+        <button id="btn-band-director-settings" class="icon-btn" title="Quick trigger settings">&#9881;</button>
+        <button id="btn-close-band-director" class="icon-btn">&times;</button>
+      </div>
+
+      <!-- Setup / Live tab split (owner feedback: the flat single-screen layout "looked
+           complicated"). Same tab mechanism as Sound Booth's Mixer/Reverb&EQ/Toggles strip
+           (.soundbooth-tabstrip/.soundbooth-tab/.soundbooth-tab-panel), new instances here. -->
+      <div class="soundbooth-tabstrip" role="tablist">
+        <button class="soundbooth-tab active" data-bd-tab="setup" role="tab" aria-selected="true">Setup</button>
+        <button class="soundbooth-tab" data-bd-tab="live" role="tab" aria-selected="false">Live</button>
+      </div>
+
+      <div class="soundbooth-tab-panel" data-bd-panel="setup">
+        <div class="bd-quick-triggers-row">
+          <div class="bd-section-label">🎚️ Quick Triggers</div>
+          <div id="bd-quick-triggers" class="bd-trigger-grid">
+            <button class="soundboard-btn bd-trigger-btn" data-trigger-slot="1">🏈 TD ▶</button>
+            <button class="soundboard-btn bd-trigger-btn" data-trigger-slot="2">🦶 Kickoff ▶</button>
+            <button class="soundboard-btn bd-trigger-btn" data-trigger-slot="3">🛡️ DEF Stop ▶</button>
+            <button class="soundboard-btn bd-trigger-btn" data-trigger-slot="4">⏱️ Timeout ▶</button>
+            <button class="soundboard-btn bd-trigger-btn" data-trigger-slot="5">🔥 Hype ▶</button>
+            <button class="soundboard-btn bd-trigger-btn" data-trigger-slot="6">👎 Boo ▶</button>
+            <button class="soundboard-btn bd-trigger-btn" data-trigger-slot="7">🎺 Fight Song ▶</button>
+            <button class="soundboard-btn bd-trigger-btn" data-trigger-slot="8">📣 PA ▶</button>
+          </div>
+        </div>
+
+        <div class="bd-status-row">
+          <span class="pill bd-conn-pill" id="bd-twitch-status" data-connected="false">🟣 Twitch: Not Connected</span>
+          <span class="pill bd-conn-pill" id="bd-youtube-status" data-connected="false">🔴 YouTube: Not Connected</span>
+          <label class="bd-status-item bd-toggle">
+            🔀 Multi-Platform
+            <input type="checkbox" id="bd-multi-platform-toggle">
+          </label>
+          <span class="bd-status-item">
+            👥 Guest DJ Code: <span id="bd-guest-dj-code">------</span>
+            <button id="btn-bd-generate-guest-code" class="icon-btn" title="Generate code (coming soon)">&#8635;</button>
+          </span>
+        </div>
+      </div>
+
+      <div class="soundbooth-tab-panel" data-bd-panel="live" hidden>
+        <div class="bd-panel-row">
+          <div class="bd-panel glass">
+            <div class="bd-panel-title">Chat Commands</div>
+            <div id="bd-chat-commands-list" class="bd-panel-list"><!-- populated by app.js --></div>
+          </div>
+          <div class="bd-panel glass">
+            <div class="bd-panel-title">Live Log</div>
+            <div id="bd-live-log-list" class="bd-panel-list"><!-- populated by app.js --></div>
+          </div>
+          <div class="bd-panel glass">
+            <div class="bd-panel-title">Queue</div>
+            <div id="bd-queue-list" class="bd-panel-list"><!-- populated by app.js --></div>
+          </div>
+          <div class="bd-panel glass">
+            <div class="bd-panel-title">Polls</div>
+            <div id="bd-polls-panel"><!-- populated by app.js --></div>
+          </div>
+        </div>
+
+        <div class="bd-status-row">
+          <div class="bd-status-item">
+            🔊 <span>Master</span>
+            <input type="range" id="bd-master-volume" min="0" max="100" value="72">
+            <span id="bd-master-volume-value">72%</span>
+          </div>
+          <label class="bd-status-item bd-toggle">
+            🎤 Mic Duck
+            <input type="checkbox" id="bd-mic-duck-toggle">
+          </label>
+        </div>
+
+        <div class="bd-overlay-preview glass">
+          <div class="bd-panel-title">Stream Overlay Preview</div>
+          <div id="bd-overlay-preview-box" class="bd-overlay-preview-box">
+            <div class="bd-overlay-preview-now-playing">🎺 Now Playing: —</div>
+            <div class="bd-overlay-preview-situation">No live game data</div>
+            <div class="bd-overlay-preview-requester"></div>
+          </div>
+          <div class="bd-overlay-preview-actions">
+            <button id="btn-bd-copy-overlay-url" class="pill">Copy Overlay URL</button>
+            <button id="btn-bd-edit-overlay" class="pill">Edit Overlay</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Band Director quick-trigger settings sub-overlay -- maps each of the 8 Quick Trigger slots
+       above to a real engine EventKey, persisted via WebBridge Get/SaveBandDirectorDashboardSettings. -->
+  <div id="band-director-settings-overlay" hidden>
+    <div id="band-director-settings-dialog" class="glass">
+      <div class="save-profile-header">
+        <span>Band Director Quick Trigger Settings</span>
+        <button id="btn-close-band-director-settings" class="icon-btn">&times;</button>
+      </div>
+      <p class="save-profile-instructions">Assign an event to each Quick Trigger slot. Unassigned slots do nothing when clicked.</p>
+      <div id="bd-settings-slots"><!-- 8 label+select rows populated by app.js --></div>
+      <div class="save-profile-actions">
+        <button id="btn-save-band-director-settings" class="btn-ghost">Save</button>
+        <button id="btn-cancel-band-director-settings" class="btn-ghost">Cancel</button>
       </div>
     </div>
   </div>

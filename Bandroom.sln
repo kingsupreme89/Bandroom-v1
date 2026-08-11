@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bandroom.Core", "src\Bandro
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bandroom.Mac", "src\Bandroom.Mac\Bandroom.Mac.csproj", "{CDA2C054-7CCA-4B25-BD15-6F1A761F7443}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bandroom.Core.Tests", "src\Bandroom.Core.Tests\Bandroom.Core.Tests.csproj", "{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -43,6 +45,18 @@ Global
 		{CDA2C054-7CCA-4B25-BD15-6F1A761F7443}.Release|x64.Build.0 = Release|Any CPU
 		{CDA2C054-7CCA-4B25-BD15-6F1A761F7443}.Release|x86.ActiveCfg = Release|Any CPU
 		{CDA2C054-7CCA-4B25-BD15-6F1A761F7443}.Release|x86.Build.0 = Release|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Debug|x64.Build.0 = Debug|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Debug|x86.Build.0 = Debug|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Release|Any CPU.Build.0 = Release|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Release|x64.ActiveCfg = Release|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Release|x64.Build.0 = Release|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Release|x86.ActiveCfg = Release|Any CPU
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -50,5 +64,6 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{5A4B8BF5-5348-4A2D-9F8B-6B982F6522B5} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{CDA2C054-7CCA-4B25-BD15-6F1A761F7443} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{98499A9E-E465-4D7F-9B9A-AFF0941AFC02} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

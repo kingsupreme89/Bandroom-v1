@@ -15,22 +15,53 @@ namespace Bandroom.Core.Helpers;
 ///
 /// NOTE: firing alongside Offense: Third Down Short on the same tick means WebMainForm's
 /// per-tick fire loop must not let the second event's interruptPrevious cut the first one off
-/// -- see ResolveEventRouting/OnEngineEventsDetected's same-tick layering fix.</summary>
+/// -- see ResolveEventRouting/OnEngineEventsDetected's same-tick layering fix.
+///
+/// UPDATED 2026-08-11: OffenseDownHelper picked up a buffered-pending window (STATE_MACHINE_
+/// ANALYSIS Discrepancy #12's fix, applied here too the same session after an audit caught this
+/// file hadn't gotten it) because "down" and "yards to go" are independent OCR reads that don't
+/// always land on the same tick -- classifying short-vs-long off Current.YardsToGo on the exact
+/// down-change tick could read a stale value, causing this evaluator to misfire or never fire.
+/// Mirrors OffenseDownHelper's buffer exactly (down/tick-count/baseline fields) so the two keep
+/// firing on the SAME tick as each other, preserving the same-tick pairing this file's own
+/// header comment depends on.</summary>
 public sealed class DefenseThirdDownShortHelper : IRuleEvaluator
 {
-    public bool CanFire(GameState state) => state.Current.Down != state.Previous.Down;
+    readonly DownDistanceBuffer _buffer = new();
+
+    public bool CanFire(GameState state) => true;
 
     public TriggerEvent? Evaluate(GameState state)
     {
-        if (state.Current.Down != 3)
+        if (state.Current.Down != state.Previous.Down)
+        {
+            if (state.Delta.NewPossession)
+            {
+                _buffer.Clear();
+                return null;
+            }
+
+            _buffer.Start(state.Current.Down, state.Previous.YardsToGo);
+            return null; // wait for the yards-to-go OCR read to catch up before classifying
+        }
+
+        if (!_buffer.IsPending)
             return null;
 
-        if (state.Delta.NewPossession)
+        bool timedOut = _buffer.Advance();
+        if (!timedOut && state.Current.YardsToGo == _buffer.BaselineYardsToGo)
+            return null; // yards-to-go hasn't updated yet -- keep waiting
+
+        int down = _buffer.PendingDown!.Value;
+        int baselineYardsToGo = _buffer.BaselineYardsToGo;
+        _buffer.Clear();
+
+        if (down != 3)
             return null;
 
         // Same Loss deferral as OffenseDownHelper -- a down that got LONGER (tackle for loss)
         // reads as long here too, DefenseHelper's "(Loss)" branch already owns that specific cue.
-        if (state.Current.YardsToGo > state.Previous.YardsToGo)
+        if (state.Current.YardsToGo > baselineYardsToGo)
             return null;
 
         if (state.Current.YardsToGo > 3)
