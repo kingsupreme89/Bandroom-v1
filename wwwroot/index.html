@@ -197,6 +197,14 @@
                    entries (team name or event key) -- see refreshEventActivityLog/filterEventLog
                    in app.js. No backend change; the full buffer is already polled every 2s. -->
               <input type="text" id="event-log-search" class="event-log-search" placeholder="Filter by team or event (e.g. &quot;Alabama&quot; or &quot;3rd and short&quot;)&hellip;" />
+              <!-- Simplest possible read: hide everything except "X fired, Y song played, for
+                   Z team" and drop skip/blocked/duplicate/near-miss noise entirely -- every real
+                   fire's message already contains "played" (see RecordFireResult in
+                   WebMainForm.cs), so this is a pure client-side substring filter, no new data. -->
+              <label class="toggle-row event-log-simple-toggle">
+                <input type="checkbox" id="event-log-simple-toggle" checked />
+                <span>Only show what actually played (hide skipped/blocked/near-miss)</span>
+              </label>
               <div id="event-log-list" class="event-log-list"><!-- populated by app.js --></div>
             </div>
           </div>
@@ -365,9 +373,7 @@
               <select id="ti-reverb-preset">
                 <option value="">Not set</option>
                 <option value="Stadium">Stadium</option>
-                <option value="Dome">Dome</option>
                 <option value="NightGame">Night Game</option>
-                <option value="StadiumRain">Stadium Rain</option>
                 <option value="NightGamePrimeTime">Night Game Prime Time</option>
               </select>
             </label>
@@ -393,8 +399,21 @@
              other, instead of having to hunt for the small header badge or the full team grid. -->
         <div id="matchup-side-bar" class="glass" hidden>
           <span class="matchup-side-label">Assigning songs for:</span>
-          <button class="matchup-side-btn" id="btn-side-away" data-side="away"></button>
-          <button class="matchup-side-btn" id="btn-side-home" data-side="home"></button>
+          <!-- Logo + arrow added for Game Day mode's VS-styled header (see .gameday-mode in
+               style.css and enterGameDayMode/updateMatchupSideBar in app.js) -- these buttons
+               already handled the actual side-switch click logic, so no new logic here, just
+               richer content inside the same working buttons. The arrow spans are decorative in
+               the normal (non-gameday) sidebar context, just a visual hint these are clickable. -->
+          <button class="matchup-side-btn" id="btn-side-away" data-side="away">
+            <span class="matchup-side-arrow matchup-side-arrow-left" aria-hidden="true">&#9664;</span>
+            <img class="matchup-side-logo" id="matchup-side-away-logo" alt="" />
+            <span class="matchup-side-name" id="matchup-side-away-name"></span>
+          </button>
+          <button class="matchup-side-btn" id="btn-side-home" data-side="home">
+            <span class="matchup-side-name" id="matchup-side-home-name"></span>
+            <img class="matchup-side-logo" id="matchup-side-home-logo" alt="" />
+            <span class="matchup-side-arrow matchup-side-arrow-right" aria-hidden="true">&#9654;</span>
+          </button>
           <!-- Auto-Assign -- confirms, then overwrites every slot for this team with the default
                pack (ApplyDefaultProfileForTeamOverwrite). Prompts to download/import the pack
                first if it isn't present yet (see handleAutoAssignClick). -->
@@ -617,16 +636,6 @@
           <div class="panel-title">Fire Sensitivity (Delay)</div>
           <input type="range" id="slider-sensitivity" min="0" max="30" value="10" step="1" class="slider" />
           <div class="slider-value"><span id="sensitivity-value">10</span>s until fade-out &mdash; no fade-in</div>
-        </div>
-        <!-- Punch-list item 4: delay between an event actually firing and its assigned sound
-             starting playback -- e.g. to line up with a broadcast delay. Separate from Fire
-             Sensitivity above (that's the fade-out timer, not a start delay) and from Fade above
-             it in Sound Booth (post-play fade). See WebMainForm._soundStartDelayMs. -->
-        <div class="panel-section">
-          <div class="panel-title">Sound Start Delay</div>
-          <p class="leadin-whistle-hint">Wait this long after an event fires before its sound actually starts playing -- handy for lining up with a broadcast delay.</p>
-          <input type="range" id="slider-sound-start-delay" min="0" max="5" value="0" step="0.1" class="slider" />
-          <div class="slider-value"><span id="sound-start-delay-value">0</span>s</div>
         </div>
         <!-- Big Game toggle -- REDEFINED 2026-08-10 (was an auto-detect "quarter 4, score within
              8 points" volume-boost rule; see ConfigStore.BigGameSettings's doc comment). Now a
@@ -1304,6 +1313,11 @@
        surrounding shell (rack head + tabstrip) and the Reverb tiles (moved in from the Adjust
        panel) are new. Only real, backend-wired params get a knob or tile here -- no filter/LFO
        controls like the reference screenshot, since AudioEngine has no continuous equivalent. -->
+  <!-- Reopen tab for the docked Sound Booth in Game Day mode -- only visible when gameday-mode
+       is active AND #sound-booth-overlay is closed (see the :has() rule in style.css), so closing
+       Sound Booth via its own X button doesn't leave the user with no way back in short of
+       re-triggering GAMETIME. -->
+  <button id="gameday-reopen-soundbooth" title="Reopen the Sound Booth">&#9668; Sound Booth</button>
   <div id="sound-booth-overlay" hidden>
     <div id="sound-booth" class="glass">
       <div class="team-picker-header">
@@ -1388,9 +1402,7 @@
           <div class="reverb-tiles sb-tile-row" id="reverb-tiles">
             <button class="reverb-tile sb-tile" data-reverb="off">Off</button>
             <button class="reverb-tile sb-tile" data-reverb="stadium">Stadium</button>
-            <button class="reverb-tile sb-tile" data-reverb="dome">Dome</button>
             <button class="reverb-tile sb-tile" data-reverb="nightgame">Night Game</button>
-            <button class="reverb-tile sb-tile" data-reverb="stadiumrain">Rain</button>
             <button class="reverb-tile sb-tile" data-reverb="nightgameprimetime">Prime Time</button>
           </div>
         </div>
@@ -1508,6 +1520,10 @@
         Press <strong>Stop Watching</strong> at the top when the game ends to unlock and start a
         new one.
       </p>
+      <!-- Owner request: one-click re-select of last game's teams -- fetched via
+           bridge.GetLastMatchup() on dialog open (see initMatchupLastPill in app.js), hidden
+           entirely if nothing's been recorded yet (fresh install / never confirmed a matchup). -->
+      <button type="button" class="pill matchup-last-pill" id="matchup-last-pill" hidden></button>
       <!-- Owner request: not every game is a Big Game (both bands physically present) -- this
            needs to be flippable right here per-matchup instead of only buried in the Adjust
            sidebar's Big Game panel. Same underlying ConfigStore.BigGameSettings flag as
@@ -1577,6 +1593,17 @@
         </div>
       </div>
       <div class="save-profile-subtext" id="matchup-subtext"></div>
+      <!-- CFB27 draws teams by the GAME's own home/away stadium assignment, not by which one the
+           user is rooting for -- possession detection (SamplePossessionByUnderline) only reads
+           LEFT/RIGHT screen position, so if the user's own team is the visitor this game (drawn
+           on the left), every possession read is inverted for the whole game unless this is
+           checked. See GameWatcher.UserTeamOnLeftSide's doc comment. -->
+      <div class="matchup-biggame-row">
+        <label class="toggle-row" title="Check this if your team is the visiting team in CFB27's own matchup this game (shown on the LEFT of the scorebug) -- otherwise every possession read comes out backwards for the whole game.">
+          <input type="checkbox" id="matchup-screen-side-left" />
+          <span>My team is on the LEFT (visiting side) of the scorebug this game</span>
+        </label>
+      </div>
       <div class="save-profile-actions">
         <button id="btn-matchup-cancel" class="btn-ghost">Cancel</button>
         <button id="btn-matchup-confirm" class="gametime-btn" disabled>GAMETIME</button>

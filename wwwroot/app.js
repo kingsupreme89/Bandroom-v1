@@ -862,10 +862,21 @@ function updateMatchupSideBar() {
   bar.hidden = false;
   const awayBtn = document.getElementById("btn-side-away");
   const homeBtn = document.getElementById("btn-side-home");
-  awayBtn.textContent = `Away: ${state.matchupAway}`;
-  homeBtn.textContent = `Home: ${state.matchupHome}`;
+  // FIXED: used to set awayBtn/homeBtn.textContent directly, which wipes out the logo/arrow
+  // markup added for Game Day mode's VS-styled header (textContent replaces ALL children with
+  // plain text) -- now populates the named inner elements instead.
+  const awayTeam = state.teams.find((t) => t.name === state.matchupAway);
+  const homeTeam = state.teams.find((t) => t.name === state.matchupHome);
+  document.getElementById("matchup-side-away-name").textContent = `Away: ${state.matchupAway}`;
+  document.getElementById("matchup-side-home-name").textContent = `Home: ${state.matchupHome}`;
+  const awayLogo = document.getElementById("matchup-side-away-logo");
+  const homeLogo = document.getElementById("matchup-side-home-logo");
+  if (awayTeam?.logoUrl) { awayLogo.src = awayTeam.logoUrl; awayLogo.hidden = false; } else { awayLogo.hidden = true; }
+  if (homeTeam?.logoUrl) { homeLogo.src = homeTeam.logoUrl; homeLogo.hidden = false; } else { homeLogo.hidden = true; }
   awayBtn.classList.toggle("active", state.activeTeam === state.matchupAway);
   homeBtn.classList.toggle("active", state.activeTeam === state.matchupHome);
+  awayBtn.style.setProperty("--side-glow", awayTeam?.secondary || awayTeam?.primary || "");
+  homeBtn.style.setProperty("--side-glow", homeTeam?.secondary || homeTeam?.primary || "");
 }
 
 /// Events-page Auto-Assign (matchup-side-bar): overwrites EVERY slot for state.activeTeam with
@@ -1268,6 +1279,7 @@ function setWatching(mode) {
   if (mode === "off" && state.matchupLocked) {
     state.matchupLocked = false;
     revertVsBackdrop();
+    exitGameDayMode();
     updateMatchupLabel();
   }
   // Toast only on the WATCHING -> WAITING transition (the game window disappeared mid-session,
@@ -1429,9 +1441,7 @@ function switchProfileTab(tab) {
 const REVERB_PRESET_OPTIONS = [
   { value: "off", label: "Off" },
   { value: "stadium", label: "Stadium" },
-  { value: "dome", label: "Dome" },
   { value: "nightgame", label: "Night Game" },
-  { value: "stadiumrain", label: "Rain" },
   { value: "nightgameprimetime", label: "Prime Time" },
 ];
 
@@ -1872,6 +1882,19 @@ function initHelpGuide() {
 
   const logSearchInput = document.getElementById("event-log-search");
   if (logSearchInput) logSearchInput.addEventListener("input", renderEventLogList);
+
+  const simpleToggle = document.getElementById("event-log-simple-toggle");
+  if (simpleToggle) simpleToggle.addEventListener("change", renderEventLogList);
+}
+
+// Reduces a full log line down to just "Event (Team): song.mp3" -- every real fire's message is
+// built by RecordFireResult (WebMainForm.cs) as "<time> -- <Event> (<Team>) -- played '<file>'",
+// so this is a pure string trim, not new data. Returns null for anything that isn't an actual
+// fire (skipped/blocked/duplicate/near-miss entries all lack " -- played '"), which is what lets
+// the simple-mode filter below drop them instead of just reformatting them.
+function simplifyLogLine(text) {
+  const m = /^.*? -- (.+?) -- played '(.+)'$/.exec(text || "");
+  return m ? `${m[1]}: ${m[2]}` : null;
 }
 
 // Live "why didn't my song play" feed inside Help & Guide's Event Log tab. Polls only while
@@ -1898,18 +1921,25 @@ function renderEventLogList() {
   const list = document.getElementById("event-log-list");
   if (!list) return;
   const query = (document.getElementById("event-log-search")?.value || "").trim().toLowerCase();
-  const filtered = query ? _eventLogEntries.filter((e) => (e.text || "").toLowerCase().includes(query)) : _eventLogEntries;
+  const simpleMode = document.getElementById("event-log-simple-toggle")?.checked ?? false;
+
+  let rows = _eventLogEntries.map((e) => ({ raw: e.text, simple: simplifyLogLine(e.text) }));
+  if (simpleMode) rows = rows.filter((r) => r.simple !== null);
+  if (query) rows = rows.filter((r) => (r.raw || "").toLowerCase().includes(query));
+
   if (_eventLogEntries.length === 0) {
     list.innerHTML = `<div class="event-log-empty">Nothing logged yet -- this fills in as Bandroom plays or skips cues during a game.</div>`;
     return;
   }
-  if (filtered.length === 0) {
-    list.innerHTML = `<div class="event-log-empty">No log entries match "${sanitizeHTML(query)}".</div>`;
+  if (rows.length === 0) {
+    list.innerHTML = query
+      ? `<div class="event-log-empty">No log entries match "${sanitizeHTML(query)}".</div>`
+      : `<div class="event-log-empty">Nothing's actually played yet -- uncheck "Only show what actually played" to see skipped/blocked events too.</div>`;
     return;
   }
   // Newest first, so the most recent "why didn't that play" answer is right at the top.
-  list.innerHTML = filtered.slice().reverse().map((e) =>
-    `<div class="event-log-row">${sanitizeHTML(e.text)}</div>`
+  list.innerHTML = rows.slice().reverse().map((r) =>
+    `<div class="event-log-row">${sanitizeHTML(simpleMode ? r.simple : r.raw)}</div>`
   ).join("");
 }
 async function refreshEventActivityLog() {
@@ -2202,19 +2232,6 @@ async function refreshVolumeSliders() {
     } catch (err) { console.error(`refreshVolumeSliders: ${sliderId} failed`, err); }
   }
 
-  // Punch-list item 4: sound-start-delay slider, same hydrate-on-startup treatment as the
-  // volume sliders above -- separate from `map` since it's ms-on-the-wire/seconds-in-the-UI
-  // instead of a plain 0-100 passthrough.
-  try {
-    const delayMs = await bridge.GetSoundStartDelayMs();
-    if (typeof delayMs === "number") {
-      const slider = document.getElementById("slider-sound-start-delay");
-      const label = document.getElementById("sound-start-delay-value");
-      const secs = delayMs / 1000;
-      if (slider) slider.value = secs;
-      if (label) label.textContent = secs.toFixed(1);
-    }
-  } catch (err) { console.error("refreshVolumeSliders: sound-start-delay failed", err); }
 }
 
 // Sound Booth's knobs and the sidebar sliders both drive the same underlying bridge values
@@ -2255,8 +2272,9 @@ const SB_INFO_TEXT = {
 
   // Reverb -- each preset is a fixed (room size, damping, wet mix, stereo width) recipe, not a
   // user-adjustable knob. Numbers match ReverbPresets.Get in ReverbProvider.cs so this stays
-  // truthful if the recipe ever gets retuned.
-  "reverb": "Off: dry, no room sound added.\n\nStadium: a big open-air tail -- some top end soaked up along the way, like a real crowd absorbing sound, so it's big but not glassy.\n\nDome: enclosed, bright, longest-ringing tail -- hard walls reflecting sound back. The most \"live\" of the six.\n\nNight Game: tighter and warmer than Stadium, more top end damped down -- cooler night air.\n\nRain: like Stadium but muffled and close -- rain eats high frequencies fast, so this damps hardest and keeps the tail shortest. A wet November game.\n\nPrime Time: Night Game's warmth with a wider stereo image -- the big-game-under-the-lights version.",
+  // truthful if the recipe ever gets retuned. Dome/Rain removed 2026-08-11 (owner call, both
+  // read as washy/muddy) alongside a general tightening pass on the remaining three.
+  "reverb": "Off: dry, no room sound added.\n\nStadium: a tight, open-air tail -- some top end soaked up along the way, like a real crowd absorbing sound.\n\nNight Game: tighter and warmer than Stadium, more top end damped down -- cooler night air.\n\nPrime Time: Night Game's warmth with a wider stereo image -- the big-game-under-the-lights version.",
 
   // Sub-Bass -- how much low-end "thump" gets layered under big tackle-for-loss hits.
   "sub-bass": "Off: no added low-end thump.\n\nSubtle: a light thump under big hits -- felt more than heard.\n\nStadium: a noticeably bigger thump -- reads as \"that was a real hit\" without overpowering the song.\n\nEarthquake: the heaviest setting, strong enough to rattle a subwoofer. Can overpower quieter songs -- try Stadium first if unsure.",
@@ -2592,6 +2610,7 @@ function wireControls() {
   // overlay on top of #clipper-assign rather than replacing it, so closing it drops you right
   // back into the assignment you were on.
   document.getElementById("btn-clipper-assign-soundbooth")?.addEventListener("click", openSoundBooth);
+  document.getElementById("gameday-reopen-soundbooth")?.addEventListener("click", openSoundBooth);
   initSoundBoothRack();
   document.getElementById("btn-discord-chat").addEventListener("click", openDiscordChat);
   document.getElementById("btn-close-discord-chat").addEventListener("click", closeDiscordChat);
@@ -2688,15 +2707,6 @@ function wireControls() {
     document.getElementById("sensitivity-value").textContent = e.target.value;
     bridge?.SetFadeDelay(Number(e.target.value));
   });
-  // Punch-list item 4: 0-5s delay between an event firing and its assigned sound actually
-  // starting playback (WebMainForm._soundStartDelayMs/FireEvent). The slider works in seconds
-  // (0-5, 0.1 steps) for a friendlier UI; the bridge stores/reads milliseconds.
-  document.getElementById("slider-sound-start-delay").addEventListener("input", (e) => {
-    const seconds = Number(e.target.value);
-    document.getElementById("sound-start-delay-value").textContent = seconds.toFixed(1);
-    bridge?.SetSoundStartDelayMs(Math.round(seconds * 1000));
-  });
-
   document.querySelectorAll(".reverb-tile").forEach((tile) => {
     tile.addEventListener("click", () => {
       document.querySelectorAll(".reverb-tile").forEach((t) => t.classList.remove("active"));
@@ -7008,6 +7018,7 @@ async function loadMatchup() {
 document.getElementById("btn-unlock-matchup")?.addEventListener("click", async () => {
   await bridge?.UnlockMatchup();
   state.matchupLocked = false;
+  exitGameDayMode();
   updateMatchupLabel();
   showToast("Matchup unlocked -- watching is still running.");
 });
@@ -7032,6 +7043,32 @@ function openMatchupDialog() {
   // No re-fetch needed here -- applyBigGameEnabled (see wireBigGameSection) already keeps
   // #toggle-matchup-big-game in sync with the real setting the moment it's loaded at startup
   // (refreshBigGameSection) or changed by any of the three Big Game controls.
+  initMatchupLastPill();
+}
+
+// Owner request: one-click re-select of the previous game's teams. Queries
+// WebBridge.GetLastMatchup() (backed by ConfigStore.SaveLastMatchup, written every time
+// ConfirmGametimeFromWeb locks in a matchup) fresh on every dialog open rather than caching --
+// cheap single JSON read, and guarantees the pill never shows a stale pair from earlier in the
+// session. Hidden entirely (not just disabled) when nothing's been recorded yet.
+async function initMatchupLastPill() {
+  const pill = document.getElementById("matchup-last-pill");
+  if (!pill || !bridge) return;
+  pill.hidden = true;
+  try {
+    const raw = await bridge.GetLastMatchup();
+    const last = raw ? JSON.parse(raw) : null;
+    if (!last || !last.home || !last.away) return;
+    pill.textContent = `Last: ${last.away} @ ${last.home}`;
+    pill.hidden = false;
+    pill.onclick = () => {
+      state.matchupHome = last.home;
+      state.matchupAway = last.away;
+      renderMatchupCoverflow("home", document.getElementById("matchup-home-search")?.value || "");
+      renderMatchupCoverflow("away", document.getElementById("matchup-away-search")?.value || "");
+      updateMatchupSubtext();
+    };
+  } catch (err) { console.error("GetLastMatchup failed", err); }
 }
 
 /// Fast vertical scrub list beside each side's coverflow (owner request) -- same click-to-select
@@ -7727,6 +7764,8 @@ async function confirmMatchup() {
     // than blocking GAMETIME entirely over a broken informational prompt.
   }
 
+  const userTeamOnLeft = document.getElementById("matchup-screen-side-left")?.checked ?? false;
+  await bridge?.SetUserTeamScreenSide(userTeamOnLeft);
   await bridge?.ConfirmGametime(state.matchupHome, state.matchupAway);
   state.matchupLocked = true;
   updateMatchupLabel();
@@ -7735,10 +7774,18 @@ async function confirmMatchup() {
   // GAMETIME now locks the matchup AND starts watching in one press (WebMainForm.ConfirmGametimeFromWeb)
   // -- reflect that immediately instead of requiring a separate Start Watching click.
   setWatching("waiting");
+  // "Game Day" fullscreen layout: replaces the old "Sound Booth pops up as a centered modal
+  // dimming everything behind it" behavior with event cards/assignments docked on one side and
+  // the Sound Booth permanently docked on the other, VS-style header up top -- see the
+  // .gameday-mode CSS block in style.css and enterGameDayMode below. Turned off in setWatching's
+  // "off" branch (Stop Watching / Unlock Matchup), the same real "this game is over" boundary
+  // that already reverts the VS backdrop.
+  enterGameDayMode();
   // Punch-list item 2: locking in used to just close the dialog and drop the user back on the
   // Band Room's Assignments panel (already the base screen underneath), leaving Sound Booth a
-  // separate extra click away. Open it right on top now so both are visible together instead of
-  // requiring that extra navigation step.
+  // separate extra click away. Open it right on top now (docked, not a centered modal, while
+  // Game Day mode is active) so both are visible together instead of requiring that extra
+  // navigation step.
   openSoundBooth();
   showToast(`GAMETIME! ${state.matchupAway} @ ${state.matchupHome} -- watching started`);
 }
@@ -7795,6 +7842,22 @@ async function applyVsBackdrop() {
 
 function revertVsBackdrop() {
   document.getElementById("backdrop-vs").hidden = true;
+}
+
+/// "Game Day" fullscreen layout -- replaces the old "Sound Booth pops up as a centered modal
+/// dimming the Assignment panel behind it" post-GAMETIME behavior with event cards/assignments
+/// docked on one side and the Sound Booth permanently docked on the other, VS-style header up
+/// top. Pure CSS-driven (see .gameday-mode in style.css): this toggles one class on <body> and
+/// hides #adjust-panel (the older, plainer mixer sidebar Sound Booth's rack UI supersedes while
+/// docked) -- no DOM nodes move, so every existing #sound-booth-overlay/#sound-booth id-based
+/// selector, tab-switching, and knob-binding logic elsewhere in this file keeps working unchanged.
+function enterGameDayMode() {
+  document.body.classList.add("gameday-mode");
+  updateMatchupSideBar(); // repopulate logos/names/glow now that the bar renders VS-prominent
+}
+
+function exitGameDayMode() {
+  document.body.classList.remove("gameday-mode");
 }
 
 function openSaveProfileDialog() {

@@ -2,20 +2,25 @@ using NAudio.Wave;
 
 namespace SupremeStadiumSoundSelector;
 
-internal enum ReverbPreset { Off, Stadium, Dome, NightGame, StadiumRain, NightGamePrimeTime }
+// REMOVED 2026-08-11 (owner call): Dome and StadiumRain retired entirely, not just hidden --
+// owner found both washy/muddy and asked for the remaining presets tightened instead. Any
+// profile with a saved "dome"/"stadiumrain" reverb key falls back to Off (see WebMainForm.
+// SetReverbFromWeb's `_ => ReverbPreset.Off`), same as any other unrecognized key.
+internal enum ReverbPreset { Off, Stadium, NightGame, NightGamePrimeTime }
 
 internal static class ReverbPresets
 {
     // roomSize/damp/wet tuned per "space" -- bigger room = longer tail, less damping =
     // brighter/longer tail, more wet = more obviously "in the room" vs. dry/direct.
+    // TIGHTENED 2026-08-11 (owner call, same session Dome/Rain were removed): roomSize and wet
+    // both trimmed down across the board -- the old values left an audibly loose/washy tail on
+    // short trigger clips, especially back-to-back cues where the previous tail hadn't decayed
+    // before the next one started.
     public static (float roomSize, float damp, float wet, float width) Get(ReverbPreset preset) => preset switch
     {
-        ReverbPreset.Stadium => (0.75f, 0.35f, 0.28f, 1.0f),         // big open-air tail, some absorption from the crowd
-        ReverbPreset.Dome => (0.85f, 0.15f, 0.35f, 1.0f),            // enclosed, bright, long reflective tail
-        ReverbPreset.NightGame => (0.55f, 0.55f, 0.20f, 0.8f),       // tighter, warmer, more damped -- cooler night air
-        // Sound Booth weather variants (item #10):
-        ReverbPreset.StadiumRain => (0.60f, 0.70f, 0.22f, 0.85f),    // rain absorbs highs -- muffled, close, "wet November game"
-        ReverbPreset.NightGamePrimeTime => (0.65f, 0.40f, 0.24f, 1.0f), // big-game-under-the-lights: wider stereo image than NightGame
+        ReverbPreset.Stadium => (0.55f, 0.40f, 0.16f, 0.9f),         // open-air tail, tightened from 0.75/0.28
+        ReverbPreset.NightGame => (0.40f, 0.60f, 0.12f, 0.75f),      // tighter, warmer, more damped -- cooler night air
+        ReverbPreset.NightGamePrimeTime => (0.48f, 0.45f, 0.14f, 0.9f), // big-game-under-the-lights: wider image than NightGame
         _ => (0f, 0f, 0f, 0f),
     };
 }

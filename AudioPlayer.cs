@@ -174,7 +174,16 @@ internal static class AudioPlayer
     /// while the global toggle is on. Defaults true so every call site that doesn't have a
     /// TriggerEntry to check (previews with no song context, UI chimes) keeps the old
     /// global-toggle-only behavior.</param>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true)
+    /// <param name="liveVolumeSource">FIXED 2026-08-11 (live bug: dragging the Home/Away/PA/
+    /// Whistle knob while previewing that specific layer had no audible effect -- only the
+    /// Master knob updated live). The preview loop below used to hard-code `MasterVolume` as
+    /// the value it re-read every tick regardless of what this clip actually started at, so a
+    /// PA preview (started at PaVolume) silently played at Master's level the whole time and
+    /// ignored the PA slider entirely -- explains both "slider doesn't update live" AND "volume
+    /// seems too loud for the level it's set at" (Master is typically higher than PA/Away).
+    /// Optional: defaults to MasterVolume for isPreview calls that didn't need anything else
+    /// (raw-file preview, soundboard hit), preserving old behavior for those.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true, Func<float>? liveVolumeSource = null)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
@@ -276,14 +285,13 @@ internal static class AudioPlayer
                     {
                         double elapsed = audio.CurrentTime.TotalSeconds;
                         float duckMul = isHighPriorityEvent ? 1f : AudioDuckingController.GetGainMultiplier();
-                        // Previews always track the live master volume slider instead of the
-                        // value captured when Play() started -- `volume` above is a one-time
-                        // snapshot (PreviewLocalFileFromWeb/PreviewEventFromWeb pass
-                        // AudioPlayer.MasterVolume as volumeOverride at call time), so dragging
-                        // the slider mid-preview had no audible effect until the NEXT preview
-                        // started. Real game fires keep the snapshot -- an event's volume
-                        // shouldn't drift mid-clip just because the slider moved.
-                        float liveVolume = isPreview ? MasterVolume : volume;
+                        // Previews always track whichever slider this clip actually started
+                        // at instead of the one-time `volume` snapshot -- see liveVolumeSource's
+                        // doc comment above for the bug this fixes (PA/Home/Away previews used
+                        // to silently ignore their own slider and track Master instead). Real
+                        // game fires keep the snapshot -- an event's volume shouldn't drift
+                        // mid-clip just because a slider moved.
+                        float liveVolume = isPreview ? (liveVolumeSource?.Invoke() ?? MasterVolume) : volume;
 
                         if (elapsed >= FadeStartSeconds)
                         {

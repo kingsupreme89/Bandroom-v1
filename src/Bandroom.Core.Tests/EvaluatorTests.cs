@@ -69,9 +69,9 @@ public class EvaluatorTests
         evaluator.Evaluate(t1);
 
         // YardsToGo never increases across the whole confirmation window -- MaxPendingTicks
-        // default is 3, so 4 more same-down ticks exhausts it.
+        // default is 2 (tightened 2026-08-11), so 3 more same-down ticks exhausts it.
         GameState? last = null;
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 3; i++)
         {
             last = State(Snap.With(down: 4, yardsToGo: 5), Snap.With(down: 4, yardsToGo: 5));
             var result = evaluator.Evaluate(last);
@@ -130,7 +130,7 @@ public class EvaluatorTests
         evaluator.Evaluate(t1);
 
         GameState? last = null;
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 3; i++)
         {
             last = State(Snap.With(down: 2, yardsToGo: 10), Snap.With(down: 2, yardsToGo: 10));
             Assert.Null(evaluator.Evaluate(last));

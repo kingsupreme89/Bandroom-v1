@@ -2723,12 +2723,26 @@ input, select, textarea, [contenteditable] {
   font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .matchup-side-btn:hover { color: var(--text-primary); }
 .matchup-side-btn.active {
   border-color: rgba(34, 211, 238, 0.7);
   background: rgba(34, 211, 238, 0.14);
   color: var(--text-primary);
+}
+.matchup-side-logo { width: 20px; height: 20px; object-fit: contain; flex: none; }
+.matchup-side-logo[hidden] { display: none; }
+.matchup-side-arrow {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: color 0.2s;
+}
+.matchup-side-btn:hover .matchup-side-arrow,
+.matchup-side-btn.active .matchup-side-arrow {
+  color: var(--side-glow, var(--accent));
 }
 
 #situations-panel[hidden] { display: none; }
@@ -3128,6 +3142,7 @@ input, select, textarea, [contenteditable] {
   font-size: 13.5px;
 }
 .event-log-search::placeholder { color: var(--text-muted); }
+.event-log-simple-toggle { margin-bottom: 10px; }
 .event-log-search:focus {
   outline: none;
   border-color: var(--team-glow, var(--accent));
@@ -3506,6 +3521,90 @@ input, select, textarea, [contenteditable] {
   background: rgba(0, 0, 0, 0.55);
 }
 #sound-booth-overlay[hidden] { display: none; }
+
+/* ================================================================
+   GAME DAY FULLSCREEN MODE -- replaces the old "Sound Booth pops up as a
+   centered modal dimming the Assignment panel behind it" post-GAMETIME
+   behavior with event cards/assignments docked on one side and the Sound
+   Booth permanently docked on the other, VS-style header up top. Toggled
+   via .gameday-mode on <body> (see enterGameDayMode/exitGameDayMode in
+   app.js) -- pure CSS repositioning, no DOM nodes move, so every existing
+   #sound-booth-overlay/#sound-booth id-based selector, tab-switching, and
+   knob-binding logic elsewhere keeps working completely unchanged.
+   ================================================================ */
+:root { --soundbooth-dock-w: min(440px, 38vw); }
+
+body.gameday-mode #adjust-panel { display: none; }
+
+body.gameday-mode #sound-booth-overlay {
+  position: fixed;
+  inset: auto 0 0 auto;
+  top: var(--header-h);
+  width: var(--soundbooth-dock-w);
+  background: none;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 10px 10px 10px 0;
+}
+body.gameday-mode #sound-booth {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border-radius: var(--radius-panel);
+}
+
+/* Reserve room on the right for the docked panel so assignment content doesn't render
+   underneath it -- but only while it's actually visible, so closing it (the X button, unchanged
+   behavior) reclaims the full width instead of leaving a permanent empty gap. #body is the flex
+   row holding the nav rack / center column / adjust panel. */
+body.gameday-mode:has(#sound-booth-overlay:not([hidden])) #body {
+  padding-right: calc(var(--soundbooth-dock-w) + 10px);
+}
+
+/* Small reopen tab, shown only when Sound Booth is closed while docked -- otherwise there'd be
+   no way back in short of re-triggering GAMETIME. Same launcher-pill visual language as
+   .soundbooth-launcher (the Adjust panel's own entry point, hidden in gameday-mode). */
+#gameday-reopen-soundbooth {
+  display: none;
+  position: fixed;
+  top: calc(var(--header-h) + 16px);
+  right: 0;
+  z-index: 59;
+  padding: 10px 16px 10px 20px;
+  border-radius: 999px 0 0 999px;
+  border: 1px solid color-mix(in srgb, var(--team-glow, var(--accent)) 35%, var(--glass-border));
+  border-right: none;
+  background: var(--glass-fill);
+  backdrop-filter: blur(20px) saturate(150%);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+body.gameday-mode:has(#sound-booth-overlay[hidden]) #gameday-reopen-soundbooth {
+  display: block;
+}
+
+/* VS-prominent restyle of the (already-functional) matchup-side-bar switch buttons while in
+   Game Day mode -- bigger, glowing, more like a scoreboard header than a small utility bar. */
+body.gameday-mode #matchup-side-bar {
+  padding: 16px 24px;
+  gap: 16px;
+  justify-content: center;
+}
+body.gameday-mode .matchup-side-btn {
+  padding: 10px 22px;
+  font-size: 16px;
+  gap: 10px;
+}
+body.gameday-mode .matchup-side-logo { width: 32px; height: 32px; }
+body.gameday-mode .matchup-side-btn.active {
+  border-color: color-mix(in srgb, var(--side-glow, var(--accent)) 70%, var(--glass-border));
+  background: color-mix(in srgb, var(--side-glow, var(--accent)) 16%, rgba(255, 255, 255, 0.04));
+  box-shadow: 0 0 18px -4px color-mix(in srgb, var(--side-glow, var(--accent)) 55%, transparent);
+}
+body.gameday-mode .matchup-side-arrow { font-size: 15px; }
+
 #sound-booth {
   width: min(720px, 95vw);
   max-height: 85vh;
@@ -4443,6 +4542,19 @@ input, select, textarea, [contenteditable] {
   border: 1px solid var(--glass-border);
   background: rgba(255, 255, 255, 0.03);
 }
+.matchup-last-pill {
+  display: block;
+  margin: 2px 4px 6px auto;
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-bright);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.matchup-last-pill:hover { filter: brightness(1.25); }
 .matchup-biggame-row .toggle-row:has(input:checked) {
   border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 55%, var(--glass-border));
   background: color-mix(in srgb, var(--team-glow, var(--accent)) 14%, rgba(255, 255, 255, 0.03));

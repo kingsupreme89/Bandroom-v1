@@ -164,6 +164,38 @@ internal static class ConfigStore
         _bigGameSettingsCache = settings;
     }
 
+    /// <summary>The most recently confirmed GAMETIME matchup (home/away team names), so the
+    /// matchup dialog can offer a one-click "Last: Away @ Home" pill instead of re-picking both
+    /// teams from scratch every time -- same "static class, simple lock, JSON file under
+    /// UserDataRoot" shape as BigGameSettings above. Null until the first GAMETIME of all time.</summary>
+    static readonly string LastMatchupPath = Path.Combine(UserDataRoot, "last_matchup.json");
+
+    public record LastMatchup(string HomeName, string AwayName);
+
+    static LastMatchup? _lastMatchupCache;
+
+    public static LastMatchup? LoadLastMatchup()
+    {
+        if (_lastMatchupCache != null) return _lastMatchupCache;
+        if (!File.Exists(LastMatchupPath)) return null;
+        try
+        {
+            return _lastMatchupCache = JsonSerializer.Deserialize<LastMatchup>(File.ReadAllText(LastMatchupPath), JsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static void SaveLastMatchup(string homeName, string awayName)
+    {
+        var settings = new LastMatchup(homeName, awayName);
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(LastMatchupPath, JsonSerializer.Serialize(settings, JsonOptions));
+        _lastMatchupCache = settings;
+    }
+
     static readonly string BandDirectorDashboardSettingsPath = Path.Combine(UserDataRoot, "band_director_dashboard_settings.json");
 
     /// <summary>Phase 1 of the Band Director streamer dashboard (see
@@ -281,15 +313,14 @@ internal static class ConfigStore
     /// the JSON stays human-readable and matches what the UI sliders actually show.</summary>
     static readonly string AudioSettingsPath = Path.Combine(UserDataRoot, "audio_settings.json");
 
-    // Punch-list item 4: configurable delay (ms, 0-5000) between an event firing and its
-    // assigned sound actually starting playback. Added as an optional trailing param with a
-    // default so the existing 5-arg AudioSettings(...) call sites elsewhere (if any) keep
-    // compiling unchanged; JSON deserialization of an old settings file missing this property
-    // also falls back to the same 0 default (no delay), preserving today's behavior for
-    // everyone until they explicitly opt in.
-    public record AudioSettings(int MasterVolume, int HomeVolume, int AwayVolume, int PaVolume, int WhistleVolume, int SoundStartDelayMs = 0)
+    // REMOVED 2026-08-11: the "Sound Start Delay" feature (ms, 0-5000, between an event firing
+    // and its assigned sound actually starting) was dropped entirely -- owner's explicit call.
+    // No migration needed: System.Text.Json ignores unknown JSON properties by default, so an
+    // existing settings file on disk with a leftover "SoundStartDelayMs" key just gets ignored on
+    // next load rather than erroring.
+    public record AudioSettings(int MasterVolume, int HomeVolume, int AwayVolume, int PaVolume, int WhistleVolume)
     {
-        public static readonly AudioSettings Default = new(72, 100, 100, 100, 100, 0);
+        public static readonly AudioSettings Default = new(72, 100, 100, 100, 100);
     }
 
     static AudioSettings? _audioSettingsCache;

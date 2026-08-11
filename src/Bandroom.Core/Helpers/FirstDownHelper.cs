@@ -7,14 +7,63 @@ namespace Bandroom.Core.Helpers;
 /// on the resulting first down, matching the 2nd/3rd down pattern -- 1st & 5-or-less credits a
 /// new "Short" key, else plain "1st & 10". The old Big Gain branch is dropped entirely (owner's
 /// explicit, accepted tradeoff): whatever used to trigger it now just falls through to plain
-/// "1st & 10" -- there's no reliable signal left to keep it distinct from the new split.</summary>
+/// "1st & 10" -- there's no reliable signal left to keep it distinct from the new split.
+///
+/// FIXED 2026-08-11 (live bug: "Offense: Earned First Down" fired after a PUNT, not a real
+/// conversion): Delta.NewPossession and Down are independently-timed OCR-derived signals -- same
+/// root cause as GameWatcher's structural-turnover/_awaitingPostKickoffSnap fix and
+/// DriveStarterHelper's kickoff-return fix, just never caught here because a punt isn't a
+/// "kickoff." On the tick Down first resets to 1 after a 4th-down punt, Delta.NewPossession can
+/// still read false (possession-side confirmation is now 2-tick-debounced, see GameWatcher.
+/// ConfirmPossessionFlip, which widened this exact timing gap), so the plain !NewPossession guard
+/// below passed when it shouldn't have. A genuine 4th-down CONVERSION (same team keeps the ball)
+/// is a real earned first down and must still fire -- only Previous.Down==4 is ambiguous (could be
+/// a conversion OR a punt/turnover-on-downs), so only that case buffers briefly for NewPossession
+/// to resolve before deciding; every other down transition (2nd/3rd -> 1st) can't be a possession
+/// change and still fires immediately. Mirrors DownDistanceBuffer's short-timeout-then-decide
+/// shape used elsewhere in this file's sibling evaluators.</summary>
 public sealed class FirstDownHelper : IRuleEvaluator
 {
-    // Cheap early-out: Evaluate's own first guard.
-    public bool CanFire(GameState state) => state.Delta.WasFirstDown && state.Previous.Down != 0;
+    bool _awaitingFourthDownPossessionConfirm;
+    int _pendingTicksRemaining;
+    // FIXED 2026-08-11 (live bug recurred: "Earned First Down" still fired after a punt): this
+    // was 3 ticks (~750ms), way too short. GameWatcher's own possession commit isn't instant --
+    // ConfirmPossessionFlip alone needs 2 consecutive matching ticks (~500ms), AND a flip is
+    // dropped entirely if it lands inside GameWatcher.Cooldown's post-commit lockout window from
+    // the prior possession event, which a punt's flip routinely does. So NewPossession was still
+    // reading false when this buffer gave up and fired -- same false-positive, just delayed.
+    // REBALANCED same day (owner call: 3s felt too slow) alongside trimming GameWatcher.Cooldown
+    // itself from 2.0s to 1.2s -- MaxPendingTicks must stay in sync with THAT value's worst case
+    // (~0.5s confirm + 1.2s cooldown + margin), not an independent number. 7 ticks (~1750ms)
+    // covers it with the same safety margin as before, just shorter because the cooldown it's
+    // covering for is shorter now.
+    const int MaxPendingTicks = 7; // ~1750ms at the 250ms OCR poll interval
+
+    // Always true while a buffered decision might still be pending -- Evaluate needs to keep
+    // running on ticks where WasFirstDown is no longer true (Down hasn't changed further).
+    public bool CanFire(GameState state) => true;
 
     public TriggerEvent? Evaluate(GameState state)
     {
+        if (_awaitingFourthDownPossessionConfirm)
+        {
+            if (state.Delta.NewPossession)
+            {
+                // Confirmed a real possession change -- this is DriveStarterHelper's moment
+                // (it fires correctly once NewPossession resolves, regardless of WasFirstDown),
+                // not an earned first down. Abandon the pending fire permanently.
+                _awaitingFourthDownPossessionConfirm = false;
+                return null;
+            }
+            if (--_pendingTicksRemaining > 0)
+                return null; // keep waiting
+
+            // Timed out with no possession change ever confirmed -- genuinely a 4th-down
+            // conversion by the same team. Fire now, delayed by up to MaxPendingTicks.
+            _awaitingFourthDownPossessionConfirm = false;
+            return MakeFirstDownEvent(state);
+        }
+
         // Must be a fresh first down (not the opening snap)
         if (!state.Delta.WasFirstDown || state.Previous.Down == 0)
             return null;
@@ -29,6 +78,23 @@ public sealed class FirstDownHelper : IRuleEvaluator
         if (state.Delta.NewPossession)
             return null;
 
+        // Ambiguous case: Down just reset to 1 immediately after a 4th down, but NewPossession
+        // hasn't been confirmed yet THIS tick. Could be a genuine 4th-down conversion (fire) or a
+        // punt/turnover-on-downs whose possession flip just hasn't caught up in the OCR pipeline
+        // yet (defer -- DriveStarterHelper owns that moment once NewPossession resolves). Buffer
+        // briefly instead of trusting this tick's possibly-stale NewPossession=false blindly.
+        if (state.Previous.Down == 4)
+        {
+            _awaitingFourthDownPossessionConfirm = true;
+            _pendingTicksRemaining = MaxPendingTicks;
+            return null;
+        }
+
+        return MakeFirstDownEvent(state);
+    }
+
+    static TriggerEvent MakeFirstDownEvent(GameState state)
+    {
         // Short: 5 yards or less to go on the new set of downs (only really happens near the
         // goal line or after certain penalties -- most 1st downs are a plain 1st & 10).
         if (state.Current.YardsToGo <= 5)

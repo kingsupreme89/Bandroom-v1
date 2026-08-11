@@ -1262,10 +1262,6 @@ public sealed class WebBridge
     public bool BrowseAndSetLeadInWhistle() => _host.BrowseAndSetLeadInWhistleFromWeb();
     public void SetFadeDelay(int seconds) => _host.SetFadeDelayFromWeb(seconds);
     public int GetFadeDelay() => _host.GetFadeDelayFromWeb();
-    // Punch-list item 4: configurable 0-5000ms delay between an event firing and its sound
-    // actually starting playback -- see WebMainForm._soundStartDelayMs / FireEvent.
-    public void SetSoundStartDelayMs(int ms) => _host.SetSoundStartDelayMsFromWeb(ms);
-    public int GetSoundStartDelayMs() => _host.GetSoundStartDelayMsFromWeb();
     public void SetReverb(string key) => _host.SetReverbFromWeb(key);
     public string GetReverb() => _host.GetReverbFromWeb();
 
@@ -1329,7 +1325,12 @@ public sealed class WebBridge
     public bool DuplicateProfile(string fromTeam, string toTeam) => _host.DuplicateProfileFromWeb(fromTeam, toTeam);
     public void SetGameTeams(string home, string away) => _host.SetGameTeamsFromWeb(home, away);
     public string? GetGameTeams() => _host.GetGameTeamsFromWeb();
+    public string GetLastMatchup() => _host.GetLastMatchupFromWeb();
     public void ConfirmGametime(string home, string away) => _host.ConfirmGametimeFromWeb(home, away);
+    /// <summary>Must be called BEFORE ConfirmGametime for the flag to be in effect for the whole
+    /// game -- see GameWatcher.UserTeamOnLeftSide's doc comment. Matchup dialog's checkbox calls
+    /// this immediately before ConfirmGametime (see confirmMatchup in app.js).</summary>
+    public void SetUserTeamScreenSide(bool onLeftSide) => _host.SetUserTeamScreenSideFromWeb(onLeftSide);
 
     /// <summary>Task queue item 6 -- returns JSON (not the raw List&lt;string&gt;) for the same
     /// reason every other structured return in this class does: WebView2's host-object marshaling

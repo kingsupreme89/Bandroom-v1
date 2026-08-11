@@ -32,7 +32,12 @@ public sealed class DownDistanceBuffer
 
     public bool IsPending => PendingDown != null;
 
-    public DownDistanceBuffer(int maxPendingTicks = 3)
+    // TIGHTENED 2026-08-11 (owner call: felt too slow on every buffered down cue, not just the
+    // 4th-down-conversion case -- 3 ticks (~750ms) was the shared default every caller
+    // (TflHelper, OffenseDownHelper, DefenseHelper, BigEventHelper, DefenseThirdDownShortHelper)
+    // used. Cut to 2 (~500ms): still enough for the yards-to-go OCR read to catch up on the
+    // very next tick in the common case, just less of a wait on the timeout path.
+    public DownDistanceBuffer(int maxPendingTicks = 2)
     {
         _maxPendingTicks = maxPendingTicks;
     }

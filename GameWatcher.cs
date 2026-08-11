@@ -137,6 +137,21 @@ internal sealed class GameWatcher
     /// for built-in roster teams (their canonical Name already matches what the game shows).</summary>
     public string? HomeTeamMascot { get; set; }
     public string? AwayTeamMascot { get; set; }
+
+    /// <summary>Whether the user's own team (Bandroom's "home", per UserIsHome always being true
+    /// -- see SetGameTeamsFromWeb) is drawn on the LEFT side of CFB27's own scorebug this game.
+    /// SamplePossessionByUnderline only ever reads screen POSITION (a brightness comparison
+    /// between a left-side crop and a right-side crop, see AwayUnderlineFx*/HomeUnderlineFx*'s
+    /// field names) -- it has no way to check which actual team occupies which slot. CFB27 draws
+    /// teams by the GAME's own home/away assignment (whichever team's home stadium it is), which
+    /// is completely independent of which team the user picked as "their side" in Bandroom's own
+    /// matchup picker. Defaulting this false (assume the user's team is on the right/"home" slot,
+    /// matching every preset's AwayUnderlineFx=left/HomeUnderlineFx=right field naming) preserves
+    /// the existing behavior for the common case (user playing as the true home team); set true
+    /// whenever the user is the visiting team in-game instead, or every possession read comes out
+    /// backwards for the whole game -- reported live as "wrong side's song played," a full-game
+    /// systematic inversion, not a per-tick flicker (2026-08-11).</summary>
+    public bool UserTeamOnLeftSide { get; set; }
     // FIXED 2026-08-11 (found from live screenshots, not caught by the code-only audit earlier
     // this session): "3rd & inches" and "1st & Goal" both render with no digit at all -- the
     // original digit-only pattern simply never matched either, silently leaving YardsToGo frozen
@@ -168,11 +183,43 @@ internal sealed class GameWatcher
 
     string? _lastPossession;
     DateTime _possessionCooldownUntil;
+    // FIXED 2026-08-11 (live bug: false "Turnover Forced" mid-3rd-and-long, no kickoff, no real
+    // turnover involved -- confirmed via Event Log). Every other OCR-derived sticky field in this
+    // file (_lastKnownDown, _lastKnownAwayScore/_lastKnownHomeScore, _lastKnownQuarter) already
+    // requires the SAME value on 2 consecutive ticks before committing (see CommitValueIfConfirmed)
+    // because a single bad OCR frame was previously found to cause phantom score/quarter events.
+    // Possession never got the same treatment -- SamplePossessionByUnderline/SamplePossession used
+    // to commit and fire PossessionChanged off ONE frame's brightness/color read. Worse than an
+    // ordinary one-tick blip: once a bad frame commits, _possessionCooldownUntil locks for 2
+    // seconds, which blocks the VERY NEXT (correct) frame from correcting it back -- so a single
+    // flicker got stuck wrong for up to 2 seconds, misrouting every event fired in that window
+    // (matches the observed live sequence: a real "Defense: Third Down" fired correctly, then a
+    // spurious structural-turnover fired right after off the same bad flip). Same confirm-before-
+    // commit shape as CommitValueIfConfirmed, just tracked inline here since possession's commit
+    // path also needs to fire PossessionChanged/reset the cooldown, which that shared helper
+    // doesn't do.
+    string? _pendingPossession;
+
+    /// <summary>How many CONSECUTIVE ticks the structural-turnover heuristic's full condition has
+    /// held -- see its own comment in RouteEngineTick for why this exists (2 required, not 1).</summary>
+    int _structuralTurnoverPendingTicks;
 
     /// <summary>-1 = not yet sampled (TimeoutHelper's own range check, `&lt; 0`, means it
     /// correctly just won't fire until a real reading comes in, rather than defaulting to a
     /// value that could misfire). Updated every tick by SampleTimeoutSegments.</summary>
     int _lastAwayTimeoutsRemaining = -1;
+    // FIXED 2026-08-11 (systemic audit finding, same bug class as the possession-debounce fix):
+    // this used to commit straight from SampleTimeoutSegments's per-tick brightness read with no
+    // confirmation at all -- a single frame reading one segment dim when it's actually lit
+    // (anti-aliasing, camera pan, compression artifact near the 128-luminance threshold) could
+    // commit a wrong count immediately, and TimeoutHelper.cs fires "Defense: Timeout (N Remaining)"
+    // on any Previous->Current decrement, so a one-tick dip (e.g. 3->2->3) fires a real phantom/
+    // wrong-count event on the 3->2 tick alone. Same confirm-before-commit shape as
+    // ConfirmPossessionFlip below, minus the PossessionChanged-event/cooldown bookkeeping this
+    // doesn't need. -1 ("not calibrated for this preset," see SampleTimeoutSegments) passes
+    // through immediately rather than needing confirmation -- it's a constant not-sampled state,
+    // not a flicker risk.
+    int? _pendingAwayTimeoutsRemaining;
 
     // --- Bandroom.Core engine state ---
     EventRouter? _eventRouter;
@@ -197,8 +244,13 @@ internal sealed class GameWatcher
 
     /// <summary>Minimum time between fires for the SAME region, guarding against a
     /// flickery OCR read (e.g. "2nd" -&gt; blank -&gt; "2nd" within one second) spam-firing
-    /// the same trigger repeatedly. Exposed in the UI's Settings panel, so not readonly.</summary>
-    public static TimeSpan Cooldown = TimeSpan.FromSeconds(2);
+    /// the same trigger repeatedly. Exposed in the UI's Settings panel, so not readonly.
+    /// TRIMMED 2026-08-11 (owner call: this is also what forced FirstDownHelper's punt-vs-
+    /// conversion buffer up to 3s -- see that file's MaxPendingTicks comment, which must stay
+    /// in sync with this value's worst case). 2.0s -> 1.2s: still long enough to absorb a
+    /// couple seconds of OCR flicker right at a possession change, just not as punishing on
+    /// the legitimate-conversion wait it forces downstream.</summary>
+    public static TimeSpan Cooldown = TimeSpan.FromSeconds(1.2);
 
     // See the pause/unpause re-fire fix in RunAsync below -- these regions only clear their
     // "Last" value (re-arming them to fire again) when the down/distance region actually
@@ -216,6 +268,17 @@ internal sealed class GameWatcher
     // silently killing every "Offense: Earned First Down" detection. Track the last actually-read
     // down value here, separately from the edge-triggering region.Last, and never null it out.
     string? _lastKnownDown;
+
+    // Structural-turnover guard state: the "kickoff"/IsKickoff signal is transient (only true
+    // on the tick(s) the situation ribbon actually shows "KICK OFF"), but a real kick return can
+    // span several OCR ticks before the first down/distance ribbon settles on "1st & 10" for the
+    // receiving team. By the time that first-down tick lands, `situation` has usually gone blank
+    // and `_snapshotPrevious.IsKickoff` is already false, so the structural-turnover backstop's
+    // per-tick kickoff check (below) doesn't see it and wrongly reads the receiving team getting
+    // the ball as a possession-flip turnover. Track "we're still inside a kickoff-to-first-snap
+    // sequence" as sticky state instead of a single-tick flag: set true the moment a kickoff is
+    // observed, cleared only once a real down (1-4) is read for the first time afterward.
+    bool _awaitingPostKickoffSnap;
 
     // Same "sticky, never nulled on a blank read" pattern as _lastKnownDown above, applied to
     // score/quarter after a real live bug: FieldGoalPATHelper/FieldGoalMissedHelper/SafetyHelper
@@ -415,6 +478,10 @@ internal sealed class GameWatcher
         _snapshotPrevious = new();
         _snapshotCurrent = new();
         _isFirstEngineTick = true;
+        _awaitingPostKickoffSnap = false;
+        _pendingPossession = null;
+        _pendingAwayTimeoutsRemaining = null;
+        _structuralTurnoverPendingTicks = 0;
         _ = RunAsync(_cts.Token);
     }
 
@@ -575,8 +642,19 @@ internal sealed class GameWatcher
                     {
                         var distanceMatch = DistancePattern.Match(text);
                         string? distanceRaw = distanceMatch.Success ? NormalizeDistanceRaw(distanceMatch.Groups[1].Value) : null;
-                        CheckForLossOfYards(distanceRaw);
+                        // FIXED 2026-08-11 (systemic audit finding, same bug class as the
+                        // possession-debounce fix): this used to call CheckForLossOfYards with
+                        // the RAW per-tick distanceRaw, firing TackleForLossDetected off a single
+                        // unconfirmed OCR frame -- a single misread digit/sign (e.g. "& 4" ->
+                        // "& -4") could fire a phantom tackle-for-loss immediately, cooldown-only
+                        // protected (which stops re-fires, not the initial false one). Swapped to
+                        // read the already-debounced _lastDistanceRaw (committed by
+                        // CommitDownAndDistance right below, which requires the SAME distance to
+                        // resolve via its own pending/timeout buffer) instead of the raw value, so
+                        // loss detection now shares the same confirmed data every other evaluator
+                        // already relies on rather than a separate unconfirmed read of its own.
                         CommitDownAndDistance(currentValue, distanceRaw);
+                        CheckForLossOfYards(_lastDistanceRaw);
                     }
                     if (region.Name == "awayscore" && currentValue != null)
                         CommitValueIfConfirmed(currentValue, ref _pendingAwayScore, ref _lastKnownAwayScore);
@@ -716,9 +794,20 @@ internal sealed class GameWatcher
         return litCount;
     }
 
+    /// <summary>Requires the SAME sampled count on two consecutive ticks before committing to
+    /// _lastAwayTimeoutsRemaining -- see that field's doc comment for the phantom-timeout bug
+    /// this closes. -1 ("not calibrated") always passes through immediately.</summary>
+    void CommitTimeoutsRemainingIfConfirmed(int sample)
+    {
+        if (sample < 0) { _lastAwayTimeoutsRemaining = sample; _pendingAwayTimeoutsRemaining = null; return; }
+        if (sample == _lastAwayTimeoutsRemaining) { _pendingAwayTimeoutsRemaining = null; return; }
+        if (sample == _pendingAwayTimeoutsRemaining) { _lastAwayTimeoutsRemaining = sample; _pendingAwayTimeoutsRemaining = null; return; }
+        _pendingAwayTimeoutsRemaining = sample;
+    }
+
     void SamplePossessionFromWindow(Bitmap fullBmp, int winW, int winH)
     {
-        _lastAwayTimeoutsRemaining = SampleTimeoutSegments(fullBmp, winW, winH);
+        CommitTimeoutsRemainingIfConfirmed(SampleTimeoutSegments(fullBmp, winW, winH));
 
         // Underline-brightness method takes priority when the active preset has it calibrated
         // (see ScorebugPreset.AwayUnderlineFx*/HomeUnderlineFx*) -- correction 2026-08-07: the
@@ -753,46 +842,70 @@ internal sealed class GameWatcher
     /// "don't fire on uncertain data" philosophy as the rest of GameWatcher.</summary>
     void SamplePossessionByUnderline(Bitmap fullBmp, int winW, int winH)
     {
-        double awayBrightness = SampleCropBrightness(fullBmp, winW, winH,
+        // Despite the field names, these are physically LEFT and RIGHT screen crops -- every
+        // preset calibrated "AwayUnderlineFx" to the left slot and "HomeUnderlineFx" to the right
+        // slot because that's how CFB27 (and broadcast convention generally) lays out the two
+        // teams, not because they know which one is Bandroom's own "home" team. See
+        // UserTeamOnLeftSide's doc comment for why that distinction matters.
+        double leftBrightness = SampleCropBrightness(fullBmp, winW, winH,
             _activePreset.AwayUnderlineFxX, _activePreset.AwayUnderlineFxY,
             _activePreset.AwayUnderlineFxW, _activePreset.AwayUnderlineFxH);
-        double homeBrightness = SampleCropBrightness(fullBmp, winW, winH,
+        double rightBrightness = SampleCropBrightness(fullBmp, winW, winH,
             _activePreset.HomeUnderlineFxX, _activePreset.HomeUnderlineFxY,
             _activePreset.HomeUnderlineFxW, _activePreset.HomeUnderlineFxH);
 
         const double minMargin = 15; // luminance points (0-255 scale) -- ignore too-close-to-call frames
-        string? side = (awayBrightness - homeBrightness) switch
+        string? physicalSide = (leftBrightness - rightBrightness) switch
         {
-            > minMargin => "away",
-            < -minMargin => "home",
+            > minMargin => "left",
+            < -minMargin => "right",
             _ => null,
         };
-        if (side == null) return;
+        if (physicalSide == null) return;
 
-        if (side != _lastPossession)
+        // Translate screen position to Bandroom's home/away labels via UserTeamOnLeftSide --
+        // the whole reason this indirection exists instead of returning "left"/"right" directly.
+        string side = UserTeamOnLeftSide
+            ? (physicalSide == "left" ? "home" : "away")
+            : (physicalSide == "left" ? "away" : "home");
+
+        if (!ConfirmPossessionFlip(side)) return;
+
+        // FIXED: this used to set _lastPossession = side unconditionally, THEN check the
+        // cooldown and bail before firing PossessionChanged -- so a flip during the cooldown
+        // window updated the snapshot's PossessionAway (which evaluators read fresh every
+        // tick) while WebMainForm._possession (which only updates via the PossessionChanged
+        // event, and is what routes "Defense:"/"Offense:" cues to home vs away) silently kept
+        // the STALE side. That desync meant an evaluator could correctly detect "user is on
+        // defense" and fire "Defense: Second Down", but the routing layer still thought the
+        // OLD team had the ball and sent it to that team's wrong (often Offense) audio slot --
+        // exactly the "home offense sound plays on defense" / "home first down always fires"
+        // reports. Now a flip within the cooldown window is ignored entirely (neither
+        // _lastPossession nor the event updates), so the two stay in lockstep -- the next real
+        // flip after cooldown expires updates both together.
+        if (DateTime.UtcNow < _possessionCooldownUntil)
         {
-            // FIXED: this used to set _lastPossession = side unconditionally, THEN check the
-            // cooldown and bail before firing PossessionChanged -- so a flip during the cooldown
-            // window updated the snapshot's PossessionAway (which evaluators read fresh every
-            // tick) while WebMainForm._possession (which only updates via the PossessionChanged
-            // event, and is what routes "Defense:"/"Offense:" cues to home vs away) silently kept
-            // the STALE side. That desync meant an evaluator could correctly detect "user is on
-            // defense" and fire "Defense: Second Down", but the routing layer still thought the
-            // OLD team had the ball and sent it to that team's wrong (often Offense) audio slot --
-            // exactly the "home offense sound plays on defense" / "home first down always fires"
-            // reports. Now a flip within the cooldown window is ignored entirely (neither
-            // _lastPossession nor the event updates), so the two stay in lockstep -- the next real
-            // flip after cooldown expires updates both together.
-            if (DateTime.UtcNow < _possessionCooldownUntil)
-            {
-                Log?.Invoke($"[possession] suppressed re-fire of \"{side}\" (cooldown)");
-                return;
-            }
-            _lastPossession = side;
-            _possessionCooldownUntil = DateTime.UtcNow + Cooldown;
-            Log?.Invoke($"[possession] now: {side} (underline brightness away={awayBrightness:F0} home={homeBrightness:F0})");
-            PossessionChanged?.Invoke(side);
+            Log?.Invoke($"[possession] suppressed re-fire of \"{side}\" (cooldown)");
+            return;
         }
+        _pendingPossession = null;
+        _lastPossession = side;
+        _possessionCooldownUntil = DateTime.UtcNow + Cooldown;
+        Log?.Invoke($"[possession] now: {side} (underline brightness left={leftBrightness:F0} right={rightBrightness:F0}, UserTeamOnLeftSide={UserTeamOnLeftSide})");
+        PossessionChanged?.Invoke(side);
+    }
+
+    /// <summary>Requires the SAME side to be sampled on two consecutive ticks before returning
+    /// true -- see _pendingPossession's own doc comment for the live bug this closes. A stray
+    /// frame that disagrees with the currently-pending value resets the confirmation instead of
+    /// committing, same "same value twice in a row" rule CommitValueIfConfirmed already applies
+    /// to down/score/quarter.</summary>
+    bool ConfirmPossessionFlip(string side)
+    {
+        if (side == _lastPossession) { _pendingPossession = null; return false; }
+        if (side == _pendingPossession) return true;
+        _pendingPossession = side;
+        return false;
     }
 
     static double SampleCropBrightness(Bitmap fullBmp, int winW, int winH, double fxX, double fxY, double fxW, double fxH)
@@ -842,8 +955,9 @@ internal sealed class GameWatcher
         // FIXED: same desync as SamplePossessionByUnderline -- see its comment. _lastPossession
         // must only update together with the PossessionChanged event, or the snapshot
         // (PossessionAway) and WebMainForm's routing side (_possession) drift apart during the
-        // cooldown window.
-        if (side != null && side != _lastPossession)
+        // cooldown window. Also requires 2-consecutive-tick confirmation via ConfirmPossessionFlip
+        // -- see _pendingPossession's doc comment.
+        if (side != null && ConfirmPossessionFlip(side))
         {
             if (DateTime.UtcNow < _possessionCooldownUntil)
             {
@@ -851,6 +965,7 @@ internal sealed class GameWatcher
             }
             else
             {
+                _pendingPossession = null;
                 _lastPossession = side;
                 _possessionCooldownUntil = DateTime.UtcNow + Cooldown;
                 Log?.Invoke($"[possession] now: {side}");
@@ -1068,10 +1183,61 @@ internal sealed class GameWatcher
         // by the owner's own definition); Down != 0 excludes the pregame/not-yet-read state;
         // excluding any kickoff-adjacent tick excludes the ordinary receiving-team-gets-the-ball
         // "flip" after a score, which is not a turnover either.
+        // Read the guard's value as it stood entering this tick BEFORE updating it -- the tick
+        // where `down` first resolves to a real 1-4 value after a return is exactly the tick a
+        // late-arriving possession-flip sample is most likely to land on, so the guard must still
+        // be in effect for THIS tick's structuralTurnover check. Clearing it first (so the very
+        // tick meant to be protected reads the guard as already off) would silently reopen the
+        // same live bug this flag exists to close. Disarm for the NEXT tick only, after use.
+        // FIXED 2026-08-11 (live bug: "Turnover Forced" fired mid-drive on an ordinary 2nd & long,
+        // no real turnover, possession never actually changed): this backstop never actually
+        // verified the one fact every real turnover guarantees -- the NEW offense always starts
+        // at 1st down. A real interception/fumble/turnover-on-downs resets Down to 1; an ordinary
+        // down progression (1st -> 2nd, 2nd -> 3rd, etc.) never does. Without this check, a
+        // possession misread that's wrong for 2+ CONSECUTIVE ticks (a sustained bad read, not the
+        // single-frame flicker ConfirmPossessionFlip's debounce already guards against -- e.g. a
+        // brief graphic/camera transition fooling the underline-brightness sample for more than
+        // one frame) could still fire a phantom turnover with zero corroborating evidence from the
+        // down/distance ribbon at all. Requiring `down == 1` doesn't replace the debounce (still
+        // needed to avoid a delayed/wrong PossessionChanged event even when this guard blocks the
+        // phantom event itself) -- it's an independent, stronger check: even a fully-confirmed
+        // possession flip shouldn't be trusted as a turnover unless the down ribbon agrees.
+        // FIXED 2026-08-11 (owner's call, after 4 distinct false-positive reports in one live
+        // session): this is an INFERENCE from indirect signals (possession + down), not direct
+        // evidence -- unlike `situation == "turnover"` above, which reads the HUD's actual
+        // INTERCEPTED/FUMBLE/TURNOVER text and fires instantly, unaffected by any of this. Every
+        // false positive fixed today came from the inferred conditions below aligning for exactly
+        // ONE tick. Now requires the full condition (possession flipped, down==1, all existing
+        // guards) to hold on 2 CONSECUTIVE ticks before firing -- ~250ms of added latency, but only
+        // on the inferred path. A real turnover with matching HUD text is completely unaffected
+        // (still fires the same tick via the OCR-text OR-branch below); this only slows down the
+        // fallback path for when that text isn't calibrated/missed, trading a little speed for a
+        // real reduction in inferring a turnover from noisy indirect signals that happened to
+        // agree for a single frame.
         bool possessionFlipped = _lastPossession != null && _snapshotPrevious.PossessionAway != (_lastPossession == "away");
-        bool structuralTurnover = possessionFlipped
+        bool structuralTurnoverCandidate = possessionFlipped
+            && down == 1
             && _snapshotPrevious.Down != 4 && _snapshotPrevious.Down != 0
-            && situation != "kickoff" && !_snapshotPrevious.IsKickoff;
+            && situation != "kickoff" && !_snapshotPrevious.IsKickoff && !_awaitingPostKickoffSnap;
+        _structuralTurnoverPendingTicks = structuralTurnoverCandidate ? _structuralTurnoverPendingTicks + 1 : 0;
+        bool structuralTurnover = _structuralTurnoverPendingTicks >= 2;
+
+        if (situation == "kickoff")
+            _awaitingPostKickoffSnap = true;
+        // FIXED 2026-08-11 (audit finding, downstream of the possession-debounce fix above):
+        // clearing this purely off `down` resolving used to be safe because possession used to
+        // commit off a single frame, so a kickoff-return flip essentially always landed at or
+        // before the tick down first resolved. Now that possession requires 2-tick confirmation
+        // (ConfirmPossessionFlip), down and possession are two independently-timed confirm gates
+        // with no guaranteed resolution order -- if down resolves to a real value WHILE a
+        // possession flip is still mid-confirmation (_pendingPossession != null), clearing the
+        // guard here would drop it a tick or two before the flip actually commits, reopening the
+        // exact false "Turnover Forced" bug this flag exists to prevent, just triggered by
+        // kickoff returns instead of 3rd-and-long. Requiring _pendingPossession == null keeps the
+        // guard armed until any in-flight possession confirmation has resolved one way or the
+        // other (commits, or reverts back to matching _lastPossession and clears itself).
+        else if (_awaitingPostKickoffSnap && down is >= 1 and <= 4 && _pendingPossession == null)
+            _awaitingPostKickoffSnap = false;
 
         var snapshot = new PlaySnapshot
         {

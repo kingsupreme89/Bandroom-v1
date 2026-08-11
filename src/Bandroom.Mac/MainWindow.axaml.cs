@@ -71,7 +71,6 @@ public partial class MainWindow : Window
         AudioPlayer.FadeStartSeconds = timing.FadeStartSeconds;
         AudioPlayer.FadeOutDuration = timing.FadeOutDuration;
         Topmost = ConfigStore.LoadAppWindowSettings().AlwaysOnTop;
-        _soundStartDelayMs = Math.Clamp(ConfigStore.LoadAudioSettings().SoundStartDelayMs, 0, 5000);
 
         Opened += OnOpened;
         Closing += (_, _) =>
@@ -452,8 +451,6 @@ public partial class MainWindow : Window
 
     static DateTime _lastSongTriggerCloudSync = DateTime.MinValue;
 
-    long _soundFireGeneration;
-
     void FireEvent(TriggerEntry entry, float? volumeOverride = null)
     {
         float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
@@ -463,22 +460,11 @@ public partial class MainWindow : Window
             float mainVolume = (volumeOverride ?? AudioPlayer.MasterVolume) * eventVolumeScale;
             RecordSongTriggered(entry.Event);
 
-            // Mac port of WebMainForm.FireEvent's _soundStartDelayMs handling (2026-08-11 audit
-            // parity gap), including the same-session staleness guard: a delayed play only fires
-            // if no newer interrupting event has superseded it in the meantime.
-            int delayMs = _soundStartDelayMs;
-            long myGeneration = System.Threading.Interlocked.Increment(ref _soundFireGeneration);
-            void PlayNow()
-            {
-                if (myGeneration != System.Threading.Interlocked.Read(ref _soundFireGeneration)) return;
-                AudioPlayer.Play(entry.AudioFile, mainVolume, interruptPrevious: true);
-                if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
-                    AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false);
-            }
-            if (delayMs > 0)
-                _ = Task.Delay(delayMs).ContinueWith(_ => PlayNow(), TaskScheduler.Default);
-            else
-                PlayNow();
+            // REMOVED 2026-08-11: Sound Start Delay dropped entirely (owner's call) -- see
+            // WebMainForm.FireEvent's matching removal. Back to firing synchronously.
+            AudioPlayer.Play(entry.AudioFile, mainVolume, interruptPrevious: true);
+            if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
+                AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false);
         }
     }
 
