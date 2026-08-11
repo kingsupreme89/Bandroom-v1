@@ -259,6 +259,35 @@ internal sealed class MegaphoneEqProvider : ISampleProvider
     }
 }
 
+/// <summary>Passthrough tap that updates a shared peak-level field as samples flow through it --
+/// used to drive the Sound Booth's live IN/OUT meters without altering the signal. Two instances
+/// wrap the same clip's chain (dry, and post-effects) so the UI can show both.</summary>
+internal sealed class PeakMeterProvider : ISampleProvider
+{
+    readonly ISampleProvider _source;
+    readonly Action<float> _setLevel;
+    public WaveFormat WaveFormat => _source.WaveFormat;
+
+    public PeakMeterProvider(ISampleProvider source, Action<float> setLevel)
+    {
+        _source = source;
+        _setLevel = setLevel;
+    }
+
+    public int Read(float[] buffer, int offset, int count)
+    {
+        int read = _source.Read(buffer, offset, count);
+        float peak = 0f;
+        for (int i = 0; i < read; i++)
+        {
+            float abs = Math.Abs(buffer[offset + i]);
+            if (abs > peak) peak = abs;
+        }
+        _setLevel(Math.Clamp(peak, 0f, 1f));
+        return read;
+    }
+}
+
 /// <summary>Dual envelope-follower transient shaper: a fast follower detects the attack
 /// (first few ms of a hit) and boosts it, a slow follower tracks sustain and can trim it.
 /// Musically useful mainly on percussion-heavy marching band tracks.</summary>

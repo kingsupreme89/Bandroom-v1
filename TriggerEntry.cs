@@ -19,4 +19,21 @@ public class TriggerEntry
     /// use. Missing from old saved JSON deserializes to the default (100 = unchanged), so no
     /// migration step is needed for existing profiles.</summary>
     public int Volume { get; set; } = 100;
+
+    /// <summary>Optional CONDITIONAL alternate clip for this same card, used INSTEAD of
+    /// AudioFile (not layered alongside it, unlike PaAudioFile above) whenever the game is
+    /// currently flagged as a Big Game (GameWatcher.IsBigGame / ConfigStore.BigGameSettings).
+    /// Added 2026-08-10 for the owner's "gameplan" redesign -- e.g. a home defense card can play
+    /// a quieter/different clip normally and a bigger one specifically when both bands are
+    /// physically present. Empty = no Big Game variant assigned, falls back to AudioFile same as
+    /// every other card. Missing from old saved JSON deserializes to "" automatically, no
+    /// migration step needed.</summary>
+    public string BigGameAudioFile { get; set; } = "";
+
+    /// <summary>Per-song override for the global lead-in whistle (AudioPlayer's
+    /// LeadInWhistleEnabled / #toggle-leadin-whistle) -- true (default) means this card's clip
+    /// still gets the whistle when the global toggle is on, false always skips it for this card
+    /// regardless of the global toggle. Missing from old saved JSON deserializes to true (default),
+    /// so every existing assignment keeps behaving exactly as it did before this field existed.</summary>
+    public bool PlayLeadInWhistle { get; set; } = true;
 }

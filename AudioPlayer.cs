@@ -21,9 +21,22 @@ internal static class AudioPlayer
     /// (not instead of) the main AudioFile for the same event.</summary>
     public static float PaVolume = 1.0f;
 
+    /// <summary>Independent volume for the lead-in whistle clip -- previously reused whatever
+    /// volume the main clip's own call happened to pass in (see BuildLeadInProvider below), same
+    /// gap PaVolume was added to close for the PA layer: no way to turn the whistle up/down
+    /// without it tracking Master/Home/Away.</summary>
+    public static float WhistleVolume = 1.0f;
+
     /// <summary>Which "room" preset (if any) triggered clips are played through. Off = dry,
     /// no processing overhead.</summary>
     public static ReverbPreset CurrentReverb = ReverbPreset.Off;
+
+    /// <summary>Live IN (dry, pre-effects) / OUT (post-effects, what actually reaches the
+    /// speakers) peak levels, 0-1, updated by PeakMeterProvider taps in Play() below. Polled by
+    /// the Sound Booth's meters via WebBridge.GetCurrentLevels -- decays toward 0 on its own
+    /// between reads so the bars fall back down between clips instead of sticking at the last hit.</summary>
+    public static float CurrentInputLevel = 0f;
+    public static float CurrentOutputLevel = 0f;
 
     // All exposed in the UI's Settings panel now, so no longer const.
     // Sound Booth overhaul: was 1.0s -- that full second between a game event and the sound
@@ -156,7 +169,12 @@ internal static class AudioPlayer
     /// <param name="isPregameEvent">True for the pregame walkout trigger ("Other: Pregame
     /// Ready") -- applies the Tunnel bandpass/reverb/saturation treatment instead of the
     /// normal reverb preset for this one clip.</param>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false)
+    /// <param name="playLeadInWhistle">Per-song override for the global LeadInEnabled toggle
+    /// (TriggerEntry.PlayLeadInWhistle) -- false skips the whistle for this specific clip even
+    /// while the global toggle is on. Defaults true so every call site that doesn't have a
+    /// TriggerEntry to check (previews with no song context, UI chimes) keeps the old
+    /// global-toggle-only behavior.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
@@ -195,6 +213,8 @@ internal static class AudioPlayer
                     ISampleProvider source = audio.WaveFormat.Channels == 1
                         ? new MonoToStereoSampleProvider(audio.Sample)
                         : audio.Sample;
+
+                    source = new PeakMeterProvider(source, lvl => CurrentInputLevel = lvl);
 
                     bool bypass = NoEffectsBypass; // "No Effects" button: skip every DSP stage, dry signal only
 
@@ -236,6 +256,7 @@ internal static class AudioPlayer
                     // Owner request: applies to preview playback too (isPreview only skips the
                     // pre-roll delay/cooldown gate, not the whistle -- previews should sound like
                     // the real in-game cue).
+                    if (playLeadInWhistle)
                     {
                         var leadIn = BuildLeadInProvider(source.WaveFormat, volume, out leadInReader);
                         if (leadIn != null) source = new SequencedSampleProvider(leadIn, source);
@@ -245,6 +266,8 @@ internal static class AudioPlayer
                     // when multiple clips overlap. Not affected by the "No Effects" bypass since
                     // it's a safety net, not a creative effect.
                     if (LimiterEnabled) source = new LimiterProvider(source);
+
+                    source = new PeakMeterProvider(source, lvl => CurrentOutputLevel = lvl);
 
                     output.Init(source.ToWaveProvider());
                     output.Play();
@@ -271,13 +294,13 @@ internal static class AudioPlayer
                                 break;
                             }
                             audio.Volume = liveVolume * (float)(1.0 - fadeProgress) * duckMul;
-                            if (leadInReader != null) leadInReader.Volume = audio.Volume;
+                            if (leadInReader != null) leadInReader.Volume = audio.Volume * WhistleVolume;
                             Thread.Sleep(30); // finer steps during the fade for a smooth ramp
                         }
                         else
                         {
                             audio.Volume = liveVolume * duckMul;
-                            if (leadInReader != null) leadInReader.Volume = audio.Volume;
+                            if (leadInReader != null) leadInReader.Volume = audio.Volume * WhistleVolume;
                             Thread.Sleep(15); // fast enough to track the ~20ms duck attack smoothly
                         }
                     }
@@ -313,7 +336,7 @@ internal static class AudioPlayer
 
         try
         {
-            reader = new AudioFileReader(LeadInClipPath) { Volume = volume };
+            reader = new AudioFileReader(LeadInClipPath) { Volume = volume * WhistleVolume };
             ISampleProvider src = reader.WaveFormat.Channels == 1
                 ? new MonoToStereoSampleProvider(reader)
                 : reader;

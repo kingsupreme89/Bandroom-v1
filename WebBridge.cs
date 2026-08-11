@@ -1089,7 +1089,6 @@ public sealed class WebBridge
     /// ExportEventActivityLogFromWeb for the plain-English "why didn't my song play" feed.</summary>
     public string GetEventActivityLog() => _host.GetEventActivityLogFromWeb();
     public string ExportEventActivityLog() => _host.ExportEventActivityLogFromWeb();
-    public void ShowHelp() => _host.OpenHelpFromWeb();
     public void ShowUpdate() => _host.ShowUpdateDialogFromWeb();
 
     /// <summary>True once a default song pack (bundled with an older full installer, or
@@ -1151,10 +1150,18 @@ public sealed class WebBridge
     }
     public void RestartForUpdate() => _host.RestartForUpdateFromWeb();
     public void ResetTeamProfile() => _host.ResetTeamProfileFromWeb();
-    public void OpenHelp() => _host.OpenHelpFromWeb();
     public void OpenExternalUrl(string url) => _host.OpenExternalUrlFromWeb(url);
     public void TriggerEffectsTest() => _host.TriggerEffectsTestFromWeb();
     public string FireTestEvent(string side, string eventKey) => _host.FireTestEventFromWeb(side, eventKey);
+    // Routed variant -- takes POSSESSION side, not fire side, and runs the event through the real
+    // Defense:*-prefix side-flip + Big Game away-volume gate (see WebMainForm.ResolveEventRouting)
+    // instead of bypassing them like FireTestEvent above does. Lets the test hook actually verify
+    // routing/gating logic without a live game.
+    public string FireTestEventRouted(string possessionSide, string eventKey, bool isEarnedBigEvent) =>
+        _host.FireTestEventRoutedFromWeb(possessionSide, eventKey, isEarnedBigEvent);
+    // Same-tick double-fire test -- see WebMainForm.FireTestEventPairFromWeb.
+    public string FireTestEventPair(string possessionSide, string eventKeyA, string eventKeyB, bool isEarnedBigEvent) =>
+        _host.FireTestEventPairFromWeb(possessionSide, eventKeyA, eventKeyB, isEarnedBigEvent);
     public void UnlockMatchup() => _host.UnlockMatchupFromWeb();
     public string GetAllEventKeys() => _host.GetAllEventKeysFromWeb();
 
@@ -1181,6 +1188,7 @@ public sealed class WebBridge
             fileName = string.IsNullOrWhiteSpace(e.AudioFile) ? null : Path.GetFileNameWithoutExtension(e.AudioFile),
             paFileName = string.IsNullOrWhiteSpace(e.PaAudioFile) ? null : Path.GetFileNameWithoutExtension(e.PaAudioFile),
             confirmed = ConfirmedTriggers.Contains(e.Trigger),
+            playLeadInWhistle = e.PlayLeadInWhistle,
         }));
 
     public void AssignEvent(string trigger) => _host.OpenAssignTrackFromWeb(trigger);
@@ -1192,13 +1200,20 @@ public sealed class WebBridge
     // assign path (see initClipperIsland in app.js). Trim still opens the real TrimmerForm.
     public string GetTrackLibrary() => _host.GetTrackLibraryFromWeb();
     public string GetDefaultPackSongsForTeam(string teamName) => _host.GetDefaultPackSongsForTeamFromWeb(teamName);
+    // Sound Bank browsing redesign -- lists every team with a pack slice on disk, for the
+    // Assignment screen's "Browse another team's Sound Bank" picker.
+    public string GetDefaultPackTeams() => _host.GetDefaultPackTeamsFromWeb();
     public void PreviewLocalFile(string path) => _host.PreviewLocalFileFromWeb(path);
     public void PlaySoundboardSlot(string key, string path) => _host.PlaySoundboardSlotFromWeb(key, path);
     public Task<string?> ScanDynastySave() => _host.ScanDynastySaveFromWeb();
     public void AssignTrackFile(string trigger, bool isPa, string path) => _host.AssignTrackFileFromWeb(trigger, isPa, path);
     public void ClearTrackAssignment(string trigger, bool isPa) => _host.ClearTrackAssignmentFromWeb(trigger, isPa);
+    // Big Game conditional-alternate slot -- see WebMainForm.AssignBigGameTrackFileFromWeb.
+    public bool AssignBigGameTrackFile(string trigger, string path) => _host.AssignBigGameTrackFileFromWeb(trigger, path);
+    public void ClearBigGameTrackAssignment(string trigger) => _host.ClearBigGameTrackAssignmentFromWeb(trigger);
     public bool AddLibraryFileToDownloads(string path) => _host.AddLibraryFileToDownloadsFromWeb(path);
     public string? BrowseForAudioFile() => _host.BrowseForAudioFileFromWeb();
+    public string AddSongsBatch() => _host.AddSongsBatchFromWeb();
     public void OpenTrimmer(string trigger, bool isPa) => _host.OpenTrimmerFromWeb(trigger, isPa);
     public string PrepareTrim(string trigger, bool isPa) => _host.PrepareTrimFromWeb(trigger, isPa);
     public string PrepareTrimForWhistle(string path) => _host.PrepareTrimForWhistleFromWeb(path);
@@ -1206,20 +1221,32 @@ public sealed class WebBridge
     public string SaveTrimAsLeadInWhistle(double startSec, double endSec) => _host.SaveTrimAsLeadInWhistleFromWeb(startSec, endSec);
     public int GetEventVolume(string trigger) => _host.GetEventVolumeFromWeb(trigger);
     public void SetEventVolume(string trigger, int percent) => _host.SetEventVolumeFromWeb(trigger, percent);
+    // Per-song override for the global lead-in whistle toggle (TriggerEntry.PlayLeadInWhistle) --
+    // GetEventsForCategory already includes the current value per row, these exist for the toggle
+    // click itself.
+    public void SetEventPlayLeadInWhistle(string trigger, bool enabled) => _host.SetEventPlayLeadInWhistleFromWeb(trigger, enabled);
 
     public void SetVolume(int percent) => _host.SetVolumeFromWeb(percent);
+    public int GetVolume() => _host.GetVolumeFromWeb();
     public void SetHomeVolume(int percent) => _host.SetHomeVolumeFromWeb(percent);
     public void SetAwayVolume(int percent) => _host.SetAwayVolumeFromWeb(percent);
     public int GetHomeVolume() => _host.GetHomeVolumeFromWeb();
     public int GetAwayVolume() => _host.GetAwayVolumeFromWeb();
     public void SetPaVolume(int percent) => _host.SetPaVolumeFromWeb(percent);
     public int GetPaVolume() => _host.GetPaVolumeFromWeb();
+    public void SetWhistleVolume(int percent) => _host.SetWhistleVolumeFromWeb(percent);
+    public int GetWhistleVolume() => _host.GetWhistleVolumeFromWeb();
     public bool GetLeadInWhistleAvailable() => _host.GetLeadInWhistleAvailableFromWeb();
     public bool GetLeadInWhistleEnabled() => _host.GetLeadInWhistleEnabledFromWeb();
     public void SetLeadInWhistleEnabled(bool enabled) => _host.SetLeadInWhistleEnabledFromWeb(enabled);
     public bool BrowseAndSetLeadInWhistle() => _host.BrowseAndSetLeadInWhistleFromWeb();
     public void SetFadeDelay(int seconds) => _host.SetFadeDelayFromWeb(seconds);
+    public int GetFadeDelay() => _host.GetFadeDelayFromWeb();
     public void SetReverb(string key) => _host.SetReverbFromWeb(key);
+    public string GetReverb() => _host.GetReverbFromWeb();
+
+    // ---- Sound Booth rack-head live meters (Session 32 plugin-rack redesign) ----
+    public string GetCurrentLevels() => _host.GetCurrentLevelsFromWeb();
 
     // ---- The Sound Booth dashboard ----
     public string GetEqPreset() => _host.GetEqPresetFromWeb();

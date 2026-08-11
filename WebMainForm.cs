@@ -16,7 +16,7 @@ namespace SupremeStadiumSoundSelector;
 /// just the window + the JS&lt;-&gt;C# bridge (WebBridge.cs).</summary>
 public sealed class WebMainForm : Form
 {
-    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac" };
+    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".ogg" };
     static readonly string[] CategoryOrder = { "Offense", "Defense", "Situations" };
     const int ResizeMargin = 6; // shared between the Form's Padding and the WM_NCHITTEST edge test
 
@@ -135,6 +135,19 @@ public sealed class WebMainForm : Form
             AudioPlayer.LeadInEnabled = ConfigStore.LoadLeadInWhistleEnabled();
         }
 
+        // Volume sliders (Master/Home/Away/PA/Whistle) previously reset to 100% every launch --
+        // see ConfigStore.AudioSettings' own doc comment for the full gap. Apply the saved
+        // percentages (or defaults, first run) to AudioPlayer's in-memory volume state once here;
+        // each SetXVolumeFromWeb setter persists back on every change.
+        var savedAudio = ConfigStore.LoadAudioSettings();
+        AudioPlayer.MasterVolume = savedAudio.MasterVolume / 100f;
+        AudioPlayer.HomeVolume = savedAudio.HomeVolume / 100f;
+        AudioPlayer.AwayVolume = savedAudio.AwayVolume / 100f;
+        AudioPlayer.PaVolume = savedAudio.PaVolume / 100f;
+        AudioPlayer.WhistleVolume = savedAudio.WhistleVolume / 100f;
+
+        NormalizeExistingLibraryOnce();
+
         FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); FlushOcrLog(); };
 
         Load += async (_, _) =>
@@ -170,17 +183,80 @@ public sealed class WebMainForm : Form
         }
     }
 
+#if DEBUG
+    /// <summary>Kills any msedgewebview2.exe process whose command line references OUR OWN
+    /// WebView2Data folder -- i.e. an orphan left over from a previous Bandroom.exe that was
+    /// force-killed (dev-loop `taskkill` during a rebuild) rather than closed cleanly, so
+    /// WebView2's normal child-process cleanup on graceful exit never ran. An orphan like this
+    /// can keep the profile's cache files locked/serving stale content independent of a brand
+    /// new process's own Network.clearBrowserCache call, which is what actually caused a real
+    /// CSS edit not to show up after a full rebuild+relaunch (confirmed live). Matches ONLY
+    /// processes whose command line contains this exact folder path -- deliberately does NOT
+    /// touch other apps' msedgewebview2.exe processes (Windows Search/Widgets both run their
+    /// own, confirmed via Get-CimInstance during manual debugging this same session).</summary>
+    static void KillOrphanedWebView2Processes(string userDataFolder)
+    {
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher(
+                "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'msedgewebview2.exe'");
+            foreach (System.Management.ManagementObject proc in searcher.Get())
+            {
+                var cmdLine = proc["CommandLine"] as string;
+                if (string.IsNullOrEmpty(cmdLine) || !cmdLine.Contains(userDataFolder, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                try
+                {
+                    int pid = Convert.ToInt32(proc["ProcessId"]);
+                    System.Diagnostics.Process.GetProcessById(pid).Kill();
+                }
+                catch { /* already exited, or access denied -- not worth failing startup over */ }
+            }
+        }
+        catch (Exception ex)
+        {
+            // WMI can be unavailable/slow in some environments -- never block startup over this.
+            CrashLog.Write("KillOrphanedWebView2Processes failed", ex);
+        }
+    }
+#endif
+
     async Task InitWebViewAsync()
     {
         string userDataFolder = Path.Combine(AppContext.BaseDirectory, "WebView2Data");
+#if DEBUG
+        KillOrphanedWebView2Processes(userDataFolder);
+#endif
         Directory.CreateDirectory(userDataFolder);
         var env = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
         await _webView.EnsureCoreWebView2Async(env);
 
         var core = _webView.CoreWebView2;
+#if DEBUG
+        // BUG FIX: with context menus AND browser accelerator keys (F12) both disabled below,
+        // there was NO way to open DevTools in this app at all -- every live rendering mystery
+        // this session had to be diagnosed blind, by re-reading source and hoping. Debug-only:
+        // keep the right-click context menu (which includes "Inspect") so DevTools stays reachable.
+        core.Settings.AreDefaultContextMenusEnabled = true;
+#else
         core.Settings.AreDefaultContextMenusEnabled = false;
+#endif
         core.Settings.IsStatusBarEnabled = false;
         core.Settings.AreBrowserAcceleratorKeysEnabled = false;
+
+#if DEBUG
+        // BUG FIX: userDataFolder above is a persistent on-disk profile (WebView2Data next to the
+        // exe), so Chromium's HTTP disk cache survives across app relaunches. index.html's
+        // <link>/<script> tags for style.css/app.js have no cache-busting query string, and the
+        // virtual-host-mapped wwwroot doesn't set no-cache response headers -- so an edited
+        // style.css/app.js on disk could keep getting served stale after a rebuild+relaunch,
+        // intermittently depending on Chromium's freshness heuristics (confirmed live: a real CSS
+        // change to the Sound Booth knobs didn't show up after a full rebuild+relaunch until this
+        // fix). Debug-only: clearing the cache on every launch is wasted work for real users who
+        // aren't editing wwwroot files between launches.
+        try { await core.CallDevToolsProtocolMethodAsync("Network.clearBrowserCache", "{}"); }
+        catch (Exception ex) { CrashLog.Write("WebView2 cache clear failed", ex); }
+#endif
 
         string wwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
         core.SetVirtualHostNameToFolderMapping("appassets", wwwroot, CoreWebView2HostResourceAccessKind.Allow);
@@ -658,7 +734,18 @@ public sealed class WebMainForm : Form
     // band, per the owner's real band experience), away-side cues that do fire still play
     // quietly instead of at the same volume as a fully-present band. Defaults to 1 (no change)
     // so every other caller (home side, previews, tests) is unaffected.
-    string FireEventForSide(string side, string eventName, bool bypassCooldown = false, float volumeMultiplier = 1f)
+    // interruptPrevious added 2026-08-10 for the same-tick multi-fire fix (see
+    // OnEngineEventsDetected): two evaluators (e.g. Offense: Third Down Short and the new
+    // Defense: Third Down Short) can now legitimately fire on the same tick, routed to opposite
+    // sides. Since this app has one shared audio pipeline (AudioPlayer.StopAll, not separate
+    // home/away channels), firing both with the default interruptPrevious:true would have the
+    // second call's StopAll() kill the first clip almost immediately -- only the last-processed
+    // event would ever actually be audible. Defaults to true (unchanged behavior for every
+    // existing single-event-per-tick caller); OnEngineEventsDetected passes false for every
+    // event after the first successfully-fired one in a tick's batch, same trick already used
+    // for the PA announcer layer (FireEvent fires that with interruptPrevious:false so it
+    // layers instead of cutting the main cue off).
+    string FireEventForSide(string side, string eventName, bool bypassCooldown = false, float volumeMultiplier = 1f, bool interruptPrevious = true)
     {
         if ((side == "home" ? _homeConfig : _awayConfig) == null) return "no-profile";
         var entry = ResolveEntryForEvent(side, eventName);
@@ -667,7 +754,7 @@ public sealed class WebMainForm : Form
 
         if (bypassCooldown) AudioPlayer.ClearCooldown(entry.AudioFile);
         if (!File.Exists(entry.AudioFile)) return "file-missing";
-        FireEvent(entry, (side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume) * volumeMultiplier);
+        FireEvent(entry, (side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume) * volumeMultiplier, interruptPrevious);
         return "fired:" + Path.GetFileName(entry.AudioFile);
     }
 
@@ -904,7 +991,6 @@ public sealed class WebMainForm : Form
         PushCategories();
     }
 
-    public void OpenHelpFromWeb() => new ShortcutsForm(this).ShowDialog(this);
 
     public void OpenExternalUrlFromWeb(string url) =>
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
@@ -946,7 +1032,7 @@ public sealed class WebMainForm : Form
         if (entry == null) return;
         float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
-            AudioPlayer.Play(entry.AudioFile, AudioPlayer.MasterVolume * eventVolumeScale, interruptPrevious: true, isPreview: true);
+            AudioPlayer.Play(entry.AudioFile, AudioPlayer.MasterVolume * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle);
         if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
             AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isPreview: true);
     }
@@ -958,6 +1044,14 @@ public sealed class WebMainForm : Form
         var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
         if (entry == null) return;
         entry.Volume = Math.Clamp(percent, 0, 100);
+        SaveCurrentTeamProfile();
+    }
+
+    public void SetEventPlayLeadInWhistleFromWeb(string trigger, bool enabled)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        entry.PlayLeadInWhistle = enabled;
         SaveCurrentTeamProfile();
     }
 
@@ -1065,6 +1159,64 @@ public sealed class WebMainForm : Form
         });
     }
 
+    /// <summary>Owner request: "all songs the same volume" retroactively, not just for songs
+    /// assigned going forward (NormalizeAssignmentInBackground already covers those). Sweeps
+    /// every saved team profile once, normalizing every AudioFile/PaAudioFile/BigGameAudioFile
+    /// that isn't already a normalized copy, and re-saves any profile it touched. Guarded by
+    /// ConfigStore.LibraryNormalizedMarkerPath so this only ever runs once per install --
+    /// LoudnessNormalizationService's own per-file sidecar cache would make repeat sweeps cheap
+    /// anyway, but there's no reason to re-scan every profile on every launch. Runs entirely off
+    /// the UI thread; a failure on one file/profile never blocks the rest (both this loop and
+    /// NormalizeToTarget itself catch-and-continue).</summary>
+    void NormalizeExistingLibraryOnce()
+    {
+        if (File.Exists(ConfigStore.LibraryNormalizedMarkerPath)) return;
+
+        Task.Run(() =>
+        {
+            try
+            {
+                foreach (var teamName in ConfigStore.ListProfiles())
+                {
+                    try
+                    {
+                        var entries = ConfigStore.LoadProfile(teamName);
+                        bool changed = false;
+                        foreach (var entry in entries)
+                        {
+                            if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
+                            {
+                                string normalized = LoudnessNormalizationService.NormalizeToTarget(entry.AudioFile, LoudnessKind.Song);
+                                if (normalized != entry.AudioFile) { entry.AudioFile = normalized; changed = true; }
+                            }
+                            if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
+                            {
+                                string normalized = LoudnessNormalizationService.NormalizeToTarget(entry.PaAudioFile, LoudnessKind.Pa);
+                                if (normalized != entry.PaAudioFile) { entry.PaAudioFile = normalized; changed = true; }
+                            }
+                            if (!string.IsNullOrWhiteSpace(entry.BigGameAudioFile) && File.Exists(entry.BigGameAudioFile))
+                            {
+                                string normalized = LoudnessNormalizationService.NormalizeToTarget(entry.BigGameAudioFile, LoudnessKind.Song);
+                                if (normalized != entry.BigGameAudioFile) { entry.BigGameAudioFile = normalized; changed = true; }
+                            }
+                        }
+                        if (changed) ConfigStore.SaveProfile(teamName, entries);
+                    }
+                    catch (Exception ex)
+                    {
+                        CrashLog.Write($"NormalizeExistingLibraryOnce: profile '{teamName}' failed", ex);
+                    }
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(ConfigStore.LibraryNormalizedMarkerPath)!);
+                File.WriteAllText(ConfigStore.LibraryNormalizedMarkerPath, DateTime.UtcNow.ToString("O"));
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("NormalizeExistingLibraryOnce failed", ex);
+            }
+        });
+    }
+
     /// <summary>Web equivalent of AssignTrackForm's library list -- same source (everything
     /// under ConfigStore.SongsFolder), just JSON instead of a ListBox. Backs the clipping
     /// island's inline song picker (see initClipperIsland in app.js), which replaces the native
@@ -1135,7 +1287,7 @@ public sealed class WebMainForm : Form
                 string name = Path.GetFileNameWithoutExtension(p);
                 string category = System.Text.RegularExpressions.Regex.Replace(name, @"[\s_]+\d+$", "").Trim();
                 if (category.Length == 0) category = "Other";
-                return new { name, path = p, category };
+                return new { name, path = p, category, title = ReadAudioTitleTag(p) };
             });
         return System.Text.Json.JsonSerializer.Serialize(items);
     }
@@ -1157,10 +1309,38 @@ public sealed class WebMainForm : Form
                 string name = Path.GetFileNameWithoutExtension(p);
                 string category = System.Text.RegularExpressions.Regex.Replace(name, @"[\s_]+\d+$", "").Trim();
                 if (category.Length == 0) category = "Other";
-                return new { name, path = p, category };
+                return new { name, path = p, category, title = ReadAudioTitleTag(p) };
             });
         return System.Text.Json.JsonSerializer.Serialize(items);
     }
+
+    /// <summary>Sound Bank browsing redesign: pack filenames are EventKey-shaped
+    /// ("Defense_Third Down_5.mp3", see DefaultSongPackService's EventKeyToFileStem), which tells
+    /// you nothing about the actual song -- but the files themselves generally carry a real ID3
+    /// Title tag (owner-confirmed via Explorer's Title column, e.g. "sec socar '21 D stop") that's
+    /// far more useful to show. Returns null (never throws) for files with no tag, a blank tag, or
+    /// any read failure (corrupt file, locked, unsupported format) -- callers fall back to
+    /// `category` in that case, same as before this existed.</summary>
+    static string? ReadAudioTitleTag(string path)
+    {
+        try
+        {
+            using var file = TagLib.File.Create(path);
+            string title = file.Tag.Title?.Trim() ?? "";
+            return title.Length > 0 ? title : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Sound Bank browsing redesign: every team that actually has a Default Song Pack
+    /// slice on disk, with its conference, for the Assignment screen's "Browse another team's
+    /// Sound Bank" picker -- see ConfigStore.GetDefaultPackTeamsWithConference for why this is a
+    /// live folder scan rather than trusting index.json.</summary>
+    public string GetDefaultPackTeamsFromWeb() =>
+        System.Text.Json.JsonSerializer.Serialize(ConfigStore.GetDefaultPackTeamsWithConference());
 
     /// <summary>Preview an arbitrary local library file from the clipping island's song list --
     /// distinct from PreviewEventFromWeb (which previews whatever's already assigned to a
@@ -1214,6 +1394,26 @@ public sealed class WebMainForm : Form
 
     public void ClearTrackAssignmentFromWeb(string trigger, bool isPa) => AssignTrackFileFromWeb(trigger, isPa, "");
 
+    /// <summary>Big Game conditional-alternate slot (TriggerEntry.BigGameAudioFile, added
+    /// 2026-08-10) -- deliberately a separate pair of methods rather than folding into
+    /// AssignTrackFileFromWeb's isPa bool, since BigGameAudioFile isn't a layered PA clip, it's a
+    /// full alternate for AudioFile (see FireEvent's IsBigGame fallback). Skips
+    /// NormalizeAssignmentInBackground's loudness pass that the main/PA slots get -- acceptable
+    /// simplification for a first pass, revisit if Big Game clips come in noticeably louder/
+    /// quieter than their normalized counterparts.</summary>
+    public bool AssignBigGameTrackFileFromWeb(string trigger, string path)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return false;
+        entry.BigGameAudioFile = path;
+        ConfigStore.Save(_config);
+        SaveCurrentTeamProfile();
+        PushCategories();
+        return true;
+    }
+
+    public void ClearBigGameTrackAssignmentFromWeb(string trigger) => AssignBigGameTrackFileFromWeb(trigger, "");
+
     /// <summary>DL button on a song-picker row in the clipping island -- files there already
     /// live in ConfigStore.SongsFolder, so this doesn't copy/move anything, it just registers
     /// the file in the My Downloads manifest (same one local imports use, see
@@ -1241,6 +1441,41 @@ public sealed class WebMainForm : Form
         using var dlg = new OpenFileDialog { Filter = "Audio Files|*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac|All Files|*.*", Title = "Choose Audio File" };
         if (dlg.ShowDialog(this) != DialogResult.OK) return null;
         return ConfigStore.ImportIntoSongsLibrary(dlg.FileName) ?? dlg.FileName;
+    }
+
+    /// <summary>Multi-select counterpart to BrowseForAudioFileFromWeb -- owner request for a
+    /// batch "Add Songs" pill in the Clipper song list, for adding several files at once instead
+    /// of repeating Browse-for-file one at a time. Same ImportIntoSongsLibrary copy-in per file
+    /// (so every added song shows up in the library the same way a single Browse would), reports
+    /// which ones failed rather than silently dropping them.</summary>
+    public string AddSongsBatchFromWeb()
+    {
+        using var dlg = new OpenFileDialog
+        {
+            Filter = "Audio Files|*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac|All Files|*.*",
+            Title = "Add Songs (choose one or more)",
+            Multiselect = true,
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK)
+            return JsonSerializer.Serialize(new { addedCount = 0, failedNames = Array.Empty<string>() });
+
+        int addedCount = 0;
+        var failedNames = new List<string>();
+        foreach (var path in dlg.FileNames)
+        {
+            try
+            {
+                var imported = ConfigStore.ImportIntoSongsLibrary(path);
+                if (imported != null) addedCount++;
+                else failedNames.Add(Path.GetFileName(path));
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write($"AddSongsBatchFromWeb failed for \"{path}\"", ex);
+                failedNames.Add(Path.GetFileName(path));
+            }
+        }
+        return JsonSerializer.Serialize(new { addedCount, failedNames });
     }
 
     /// <summary>Native folder picker -- backs WebBridge.RelocateDefaultSongsFolder (task queue
@@ -1351,8 +1586,9 @@ public sealed class WebMainForm : Form
                 }
 
                 string msgJson = System.Text.Json.JsonSerializer.Serialize(resultMessage);
+                string teamsJson = System.Text.Json.JsonSerializer.Serialize(result.TeamNames);
                 RunOnUi(() => _ = _webView.ExecuteScriptAsync(result.Success
-                    ? $"window.dispatchEvent(new CustomEvent('bandroom:songpackready', {{ detail: {{ message: {msgJson} }} }}))"
+                    ? $"window.dispatchEvent(new CustomEvent('bandroom:songpackready', {{ detail: {{ message: {msgJson}, teamNames: {teamsJson} }} }}))"
                     : $"window.dispatchEvent(new CustomEvent('bandroom:songpackimportfailed', {{ detail: {{ message: {msgJson} }} }}))"));
             }
             catch (Exception ex)
@@ -1564,20 +1800,49 @@ public sealed class WebMainForm : Form
         }
     }
 
-    public void SetVolumeFromWeb(int percent) => AudioPlayer.MasterVolume = percent / 100f;
+    // Owner report: volume sliders reset to 100% every launch -- persist to ConfigStore.AudioSettings
+    // on every change. Debounced: the UI sliders fire SetXVolumeFromWeb on every `input` tick while
+    // being dragged (dozens of calls/second), and a synchronous File.WriteAllText on every one of
+    // those would be wasteful disk thrashing for a value that only needs to be durable once the user
+    // stops moving the slider. 400ms settle, same ballpark as the Sound Booth knobs' own JS-side
+    // commit debounce.
+    System.Threading.Timer? _audioSettingsSaveTimer;
+    void PersistAudioSettingsDebounced()
+    {
+        _audioSettingsSaveTimer ??= new System.Threading.Timer(_ =>
+        {
+            try
+            {
+                ConfigStore.SaveAudioSettings(new ConfigStore.AudioSettings(
+                    (int)(AudioPlayer.MasterVolume * 100), (int)(AudioPlayer.HomeVolume * 100),
+                    (int)(AudioPlayer.AwayVolume * 100), (int)(AudioPlayer.PaVolume * 100),
+                    (int)(AudioPlayer.WhistleVolume * 100)));
+            }
+            catch (Exception ex) { CrashLog.Write("PersistAudioSettingsDebounced failed", ex); }
+        }, null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+        _audioSettingsSaveTimer.Change(400, System.Threading.Timeout.Infinite);
+    }
+
+    public void SetVolumeFromWeb(int percent) { AudioPlayer.MasterVolume = percent / 100f; PersistAudioSettingsDebounced(); }
+    public int GetVolumeFromWeb() => (int)(AudioPlayer.MasterVolume * 100);
 
     /// <summary>Matchup-mode independent side volumes -- lets the home and away team's cues be
     /// balanced (or one muted) separately, since both sides' events can legitimately fire close
     /// together in a real game now that possession detection routes each to its own side.</summary>
-    public void SetHomeVolumeFromWeb(int percent) => AudioPlayer.HomeVolume = percent / 100f;
-    public void SetAwayVolumeFromWeb(int percent) => AudioPlayer.AwayVolume = percent / 100f;
+    public void SetHomeVolumeFromWeb(int percent) { AudioPlayer.HomeVolume = percent / 100f; PersistAudioSettingsDebounced(); }
+    public void SetAwayVolumeFromWeb(int percent) { AudioPlayer.AwayVolume = percent / 100f; PersistAudioSettingsDebounced(); }
     public int GetHomeVolumeFromWeb() => (int)(AudioPlayer.HomeVolume * 100);
     public int GetAwayVolumeFromWeb() => (int)(AudioPlayer.AwayVolume * 100);
 
     /// <summary>PA Announcer layer volume -- independent of Master/Home/Away since PA clips play
     /// concurrently with (not instead of) the main song for the same event. See AudioPlayer.PaVolume.</summary>
-    public void SetPaVolumeFromWeb(int percent) => AudioPlayer.PaVolume = percent / 100f;
+    public void SetPaVolumeFromWeb(int percent) { AudioPlayer.PaVolume = percent / 100f; PersistAudioSettingsDebounced(); }
     public int GetPaVolumeFromWeb() => (int)(AudioPlayer.PaVolume * 100);
+
+    /// <summary>Lead-in whistle volume -- independent of Master/Home/Away/PA, same reasoning as
+    /// SetPaVolumeFromWeb. See AudioPlayer.WhistleVolume.</summary>
+    public void SetWhistleVolumeFromWeb(int percent) { AudioPlayer.WhistleVolume = percent / 100f; PersistAudioSettingsDebounced(); }
+    public int GetWhistleVolumeFromWeb() => (int)(AudioPlayer.WhistleVolume * 100);
 
     public bool GetLeadInWhistleAvailableFromWeb() => !string.IsNullOrWhiteSpace(AudioPlayer.LeadInClipPath) && File.Exists(AudioPlayer.LeadInClipPath);
     public bool GetLeadInWhistleEnabledFromWeb() => AudioPlayer.LeadInEnabled;
@@ -1632,6 +1897,7 @@ public sealed class WebMainForm : Form
     /// out. No fade-in: AudioPlayer.Play already jumps straight to full volume, only the
     /// fade-OUT ramp exists, so this only ever tunes when that ramp begins.</summary>
     public void SetFadeDelayFromWeb(int seconds) => AudioPlayer.FadeStartSeconds = seconds;
+    public int GetFadeDelayFromWeb() => (int)AudioPlayer.FadeStartSeconds;
 
     public void SetReverbFromWeb(string key) => AudioPlayer.CurrentReverb = key switch
     {
@@ -1643,6 +1909,28 @@ public sealed class WebMainForm : Form
         "nightgameprimetime" => ReverbPreset.NightGamePrimeTime,
         _ => ReverbPreset.Off,
     };
+    public string GetReverbFromWeb() => AudioPlayer.CurrentReverb switch
+    {
+        ReverbPreset.Stadium => "stadium",
+        ReverbPreset.Dome => "dome",
+        ReverbPreset.NightGame => "nightgame",
+        ReverbPreset.StadiumRain => "stadiumrain",
+        ReverbPreset.NightGamePrimeTime => "nightgameprimetime",
+        _ => "off",
+    };
+
+    /// <summary>Live IN/OUT peak levels for the Sound Booth's meters (0-1). Decays each poll so
+    /// the bars fall back toward 0 between clips instead of sticking at the last hit -- there's
+    /// no continuous "currently playing" signal to key off, so decay-per-read is the simplest
+    /// way to get meters that look alive without a dedicated silence-detection path.</summary>
+    public string GetCurrentLevelsFromWeb()
+    {
+        float inLvl = AudioPlayer.CurrentInputLevel;
+        float outLvl = AudioPlayer.CurrentOutputLevel;
+        AudioPlayer.CurrentInputLevel *= 0.6f;
+        AudioPlayer.CurrentOutputLevel *= 0.6f;
+        return $"{{\"in\":{inLvl.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"out\":{outLvl.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}";
+    }
 
     // ---- Sound Booth toggles (Sound Booth dashboard -> WebBridge -> here, mirrors the
     // existing SetReverbFromWeb/SetFadeDelayFromWeb pattern above). ----
@@ -2025,14 +2313,22 @@ public sealed class WebMainForm : Form
 
     // --- Backend event wiring (unchanged from native MainForm) ---
 
-    void FireEvent(TriggerEntry entry, float? volumeOverride = null)
+    void FireEvent(TriggerEntry entry, float? volumeOverride = null, bool interruptPrevious = true)
     {
         // Per-event volume (TriggerEntry.Volume, 0-100) is a multiplier on top of whichever base
         // volume this call would already use -- lets one card be balanced quieter/louder without
         // touching Master/Home/Away/PA.
         float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
 
-        if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
+        // Big Game conditional alternate (TriggerEntry.BigGameAudioFile, added 2026-08-10) --
+        // used INSTEAD of AudioFile, not layered like PaAudioFile below, only when both a Big
+        // Game is currently flagged and a variant is actually assigned. Falls back to the
+        // ordinary AudioFile otherwise, same as if no variant existed.
+        string audioFile = (_watcher.IsBigGame && !string.IsNullOrWhiteSpace(entry.BigGameAudioFile))
+            ? entry.BigGameAudioFile
+            : entry.AudioFile;
+
+        if (!string.IsNullOrWhiteSpace(audioFile) && File.Exists(audioFile))
         {
             float mainVolume = (volumeOverride ?? AudioPlayer.MasterVolume) * eventVolumeScale;
             // Sound Booth item #9: Touchdown/Turnover/Safety are the "big moment" events that
@@ -2042,7 +2338,7 @@ public sealed class WebMainForm : Form
                 || entry.Event.Contains("Safety", StringComparison.OrdinalIgnoreCase);
             bool isBigHit = entry.Event.Contains("Tackle for Loss", StringComparison.OrdinalIgnoreCase);
             bool isPregame = entry.Event.Contains("Pregame Ready", StringComparison.OrdinalIgnoreCase);
-            AudioPlayer.Play(entry.AudioFile, mainVolume, interruptPrevious: true, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame);
+            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle);
             RecordSongTriggered(entry.Event);
 
             // PA Announcer layer: plays concurrently with the main cue above, not instead of it,
@@ -2103,6 +2399,114 @@ public sealed class WebMainForm : Form
     /// <summary>Receives a list of matched evaluator events from GameWatcher's rule engine
     /// and routes each to the correct side's audio pipeline via FireEventForSide.
     /// "Offense:*" events fire for the possession side; "Defense:*" fires for the opposite.</summary>
+    /// <summary>Home-only-always tier (REDESIGN 2026-08-10, replaces the old two-tier gating):
+    /// these Defense:*-prefixed cues never play for away, period -- not even during a Big Game.
+    /// Distinct from the ordinary Defense tier below, which DOES unlock for away during a Big
+    /// Game. Owner's explicit call for these two specifically ("3rd & Long" and the new
+    /// "Defense: First Down" post-kickoff cue) -- rare/subtle enough that even a full away band
+    /// wouldn't bother, per the owner's real band experience.</summary>
+    static readonly HashSet<string> HomeOnlyAlwaysEventKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Defense: Third Down",
+        "Defense: First Down",
+    };
+
+    /// <summary>The actual routing rules for one engine event -- side-flip (Defense:*/Penalty:
+    /// Offense route to the opposite of possession) and the Big Game away-volume gate. Pulled out
+    /// of OnEngineEventsDetected's loop body so FireTestEventRoutedFromWeb (the Ctrl+Shift+T test
+    /// hook's "routed" fire button) exercises the *exact same* logic instead of a hand-copied
+    /// reimplementation that could silently drift from the real path.
+    ///
+    /// REDESIGN 2026-08-10: the old version gated ANY event routed to "away" (checked
+    /// routedSide=="away" regardless of prefix), which wrongly throttled an away team's own
+    /// Offense:*-prefixed cues too -- very likely the root cause behind a live dev-build report
+    /// ("I'm on offense and a defensive song played, wrong side of the ball"; not fully traced
+    /// before this rewrite, re-verify against a live build). Real model, worked out with the
+    /// owner: Big Game gating should ONLY ever apply to Defense:*-prefixed cues (celebrating
+    /// stopping the opponent -- a small travel band plausibly skips those). Offense:*-prefixed
+    /// cues (hyping your OWN team's play) always fire full volume for whoever's driving, home or
+    /// away, Big Game irrelevant -- scoped to just the down/distance cards discussed this
+    /// session, not touching Offense: Touchdown/PAT/Field Goal/etc, which already have sensible
+    /// existing IsEarnedBigEvent 25%/100% behavior nobody flagged as wrong.
+    ///
+    /// Three tiers now (was two):
+    /// 1. Home-only-always (HomeOnlyAlwaysEventKeys) -- never plays for away, Big Game or not.
+    /// 2. Un-gated Offense:* -- always full volume for whoever's driving.
+    /// 3. Ordinary Defense:* -- home always; away only during Big Game (full volume then),
+    ///    otherwise away only for IsEarnedBigEvent cues at 25%. Same as the old single tier.</summary>
+    (string routedSide, float volumeMultiplier, bool allowed, string skipReason) ResolveEventRouting(
+        string eventKey, bool isEarnedBigEvent, string possessionSide)
+    {
+        bool routesLikeDefense = (eventKey.StartsWith("Defense:") && eventKey != "Defense: Touchdown Scored")
+            || eventKey == "Penalty: Offense";
+        string routedSide = routesLikeDefense
+            ? (possessionSide == "home" ? "away" : "home")
+            : possessionSide;
+
+        bool sideAllowed = HomeOnlyEventsForNow ? routedSide == "home" : true;
+        float volumeMultiplier = 1f;
+        string reason = HomeOnlyEventsForNow && routedSide != "home"
+            ? "away-team events are turned off right now"
+            : "";
+
+        if (sideAllowed && routedSide == "away")
+        {
+            if (HomeOnlyAlwaysEventKeys.Contains(eventKey))
+            {
+                sideAllowed = false;
+                reason = "this event is home-only, even during a Big Game";
+            }
+            else if (eventKey.StartsWith("Offense:", StringComparison.OrdinalIgnoreCase))
+            {
+                // Un-gated -- your own team's hype cue always plays for whoever's driving.
+            }
+            else if (!_watcher.IsBigGame)
+            {
+                if (!isEarnedBigEvent)
+                {
+                    sideAllowed = false;
+                    reason = "not a Big Game -- away only plays big/earned events";
+                }
+                volumeMultiplier = 0.25f;
+            }
+        }
+
+        return (routedSide, volumeMultiplier, sideAllowed, reason);
+    }
+
+    /// <summary>Test-hook path (see FireTestEventFromWeb for the simpler unrouted version) --
+    /// takes a POSSESSION side (which team currently has the ball) rather than a fire side, and
+    /// runs it through the real ResolveEventRouting so the Defense:*-prefix side-flip and the Big
+    /// Game away-volume gate are actually exercised, not bypassed. isEarnedBigEvent is a manual
+    /// checkbox in the test panel since it's normally set per-play by whichever helper fired the
+    /// event, not derivable from the EventKey string alone.</summary>
+    public string FireTestEventRoutedFromWeb(string possessionSide, string eventKey, bool isEarnedBigEvent)
+    {
+        var (routedSide, volumeMultiplier, allowed, reason) = ResolveEventRouting(eventKey, isEarnedBigEvent, possessionSide);
+        if (!allowed) return $"blocked:{reason}";
+        return $"{routedSide}|" + FireEventForSide(routedSide, eventKey, bypassCooldown: true, volumeMultiplier: volumeMultiplier);
+    }
+
+    /// <summary>Test-hook path for the same-tick double-fire scenario (e.g. Offense: Third Down
+    /// Short + the new Defense: Third Down Short firing together, routed to opposite sides) --
+    /// fires both through ResolveEventRouting exactly like a real tick's batch would, first
+    /// event interrupting, second layering, so the fix in FireEventForSide/OnEngineEventsDetected
+    /// (see their own comments) can be heard/verified without a live game.</summary>
+    public string FireTestEventPairFromWeb(string possessionSide, string eventKeyA, string eventKeyB, bool isEarnedBigEvent)
+    {
+        var results = new List<string>();
+        bool firedYet = false;
+        foreach (var eventKey in new[] { eventKeyA, eventKeyB })
+        {
+            var (routedSide, volumeMultiplier, allowed, reason) = ResolveEventRouting(eventKey, isEarnedBigEvent, possessionSide);
+            if (!allowed) { results.Add($"{eventKey}={routedSide}|blocked:{reason}"); continue; }
+            string result = FireEventForSide(routedSide, eventKey, bypassCooldown: true, volumeMultiplier: volumeMultiplier, interruptPrevious: !firedYet);
+            if (result.StartsWith("fired:")) firedYet = true;
+            results.Add($"{eventKey}={routedSide}|{result}");
+        }
+        return string.Join(";", results);
+    }
+
     void OnEngineEventsDetected(IReadOnlyList<TriggerEvent> events)
     {
         RunOnUi(() =>
@@ -2136,15 +2540,25 @@ public sealed class WebMainForm : Form
                 // still returns above and waits for a real read, preserving the STATE_MACHINE_
                 // ANALYSIS.md Race #3 fix (guessing "home" there misroutes a defensive/offensive
                 // cue to the wrong team -- that risk doesn't apply to a side-agnostic cue).
+                bool otherFiredYet = false;
                 foreach (var evt in events.Where(e => e.EventKey.StartsWith("Other:")))
                 {
-                    string result = FireEventForSide("home", evt.EventKey);
+                    string result = FireEventForSide("home", evt.EventKey, interruptPrevious: !otherFiredYet);
+                    if (result.StartsWith("fired:")) otherFiredYet = true;
                     OnLog($"[engine] {evt.EventKey} -> home (no possession read yet): {result}");
                     RecordFireResult(evt.EventKey, "home", result);
                 }
                 return;
             }
             string side = _possession;
+
+            // Same-tick multi-fire fix (see FireEventForSide's interruptPrevious doc comment):
+            // only the FIRST event actually fired this tick clears out leftover audio from
+            // before this tick; every subsequent one in the same batch layers instead of cutting
+            // the first off. Two evaluators (e.g. Offense: Third Down Short + the new
+            // Defense: Third Down Short) can legitimately both fire on one tick, routed to
+            // opposite sides -- without this, only the last-processed one would ever be audible.
+            bool firedYet = false;
 
             foreach (var evt in events)
             {
@@ -2166,40 +2580,17 @@ public sealed class WebMainForm : Form
                 // the scoring team. Flipping it (like every other "Defense:" key) routed the pick-
                 // six celebration cue to the team that got scored on instead of the team that
                 // scored -- reported live as "home TD linking to away" (or vice versa).
-                bool routesLikeDefense = (evt.EventKey.StartsWith("Defense:") && evt.EventKey != "Defense: Touchdown Scored")
-                    || evt.EventKey == "Penalty: Offense";
-                string routedSide = routesLikeDefense
-                    ? (side == "home" ? "away" : "home")
-                    : side;
-
-                bool sideAllowed = HomeOnlyEventsForNow ? routedSide == "home" : true;
-
-                // Big Game away-side rule, added 2026-08-10 (see ConfigStore.BigGameSettings's
-                // doc comment for the full "both bands physically present" rationale): home
-                // always plays every event at full volume, unaffected by this toggle. Away only
-                // plays every event at full volume when it's a real Big Game (both bands here);
-                // otherwise away is limited to IsEarnedBigEvent cues (the "big moment" events,
-                // e.g. touchdowns/turnovers -- see each helper's own IsEarnedBigEvent flag) at
-                // 25% volume, standing in for a small travel pep band rather than a silent one.
-                float awayVolumeMultiplier = 1f;
-                if (routedSide == "away" && !_watcher.IsBigGame)
-                {
-                    if (!evt.IsEarnedBigEvent) sideAllowed = false;
-                    awayVolumeMultiplier = 0.25f;
-                }
+                var (routedSide, volumeMultiplier, sideAllowed, reason) = ResolveEventRouting(evt.EventKey, evt.IsEarnedBigEvent, side);
 
                 if (sideAllowed)
                 {
-                    float volumeMultiplier = routedSide == "away" ? awayVolumeMultiplier : 1f;
-                    string result = FireEventForSide(routedSide, evt.EventKey, volumeMultiplier: volumeMultiplier);
+                    string result = FireEventForSide(routedSide, evt.EventKey, volumeMultiplier: volumeMultiplier, interruptPrevious: !firedYet);
+                    if (result.StartsWith("fired:")) firedYet = true;
                     OnLog($"[engine] {evt.EventKey} -> {routedSide}: {result}");
                     RecordFireResult(evt.EventKey, routedSide, result);
                 }
                 else
                 {
-                    string reason = HomeOnlyEventsForNow && routedSide != "home"
-                        ? "away-team events are turned off right now"
-                        : "not a Big Game -- away only plays big/earned events";
                     OnLog($"[engine] {evt.EventKey} -> {routedSide}: blocked ({reason})");
                     EventActivityLog.Record(evt.EventKey, routedSide,
                         $"{EventActivityLog.FriendlyEventName(evt.EventKey)} ({DisplaySide(routedSide)}) -- skipped: {reason}");

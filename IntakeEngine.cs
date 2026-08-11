@@ -37,7 +37,7 @@ public static class IntakeEngine
     private static Dictionary<string, string[]>? _triggerToEventKeys;
     private static HashSet<string>? _validTriggers;
 
-    private sealed record TeamData(string Conference, string[] Abbreviations, string[] Variants);
+    private sealed record TeamData(string Name, string Conference, string[] Abbreviations, string[] Variants);
 
     private static void AddAlias(string alias, string team)
     {
@@ -54,7 +54,13 @@ public static class IntakeEngine
         var registryPath = Path.Combine(AppContext.BaseDirectory, "scripts", "team_registry.json");
         var triggerMapPath = Path.Combine(AppContext.BaseDirectory, "scripts", "trigger_event_map.json");
 
-        _teams = new Dictionary<string, TeamData>(StringComparer.Ordinal);
+        // BUG FIX: was StringComparer.Ordinal -- a default-pack folder named "uga" (any casing
+        // that didn't byte-for-byte match team_registry.json's own casing, e.g. "UGA") missed
+        // this exact-match lookup entirely and fell through to the much weaker fuzzy Contains()
+        // match below, which DefaultSongPackService explicitly excludes from the bulk
+        // CopyTeamFolder import path -- the whole team's folder got silently routed through
+        // slower per-file filename classification instead, purely because of folder-name casing.
+        _teams = new Dictionary<string, TeamData>(StringComparer.OrdinalIgnoreCase);
         _aliasIndex = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         _triggerToEventKeys = new Dictionary<string, string[]>(StringComparer.Ordinal);
         _validTriggers = new HashSet<string>(StringComparer.Ordinal);
@@ -72,7 +78,7 @@ public static class IntakeEngine
                         ? a.EnumerateArray().Select(x => x.GetString() ?? "").ToArray() : Array.Empty<string>();
                     var variants = t.Value.TryGetProperty("variants", out var v)
                         ? v.EnumerateArray().Select(x => x.GetString() ?? "").ToArray() : Array.Empty<string>();
-                    _teams[t.Name] = new TeamData(conf, abbrevs, variants);
+                    _teams[t.Name] = new TeamData(t.Name, conf, abbrevs, variants);
                 }
             }
             if (root.TryGetProperty("alias_index", out var aliasEl))
@@ -175,7 +181,13 @@ public static class IntakeEngine
         var nameClean = name.Trim();
 
         if (_teams!.TryGetValue(nameClean, out var exact))
-            return (nameClean, exact.Conference, "exact");
+            // Return the registry's own canonical casing (exact.Name), not the input's -- a
+            // case-insensitive dictionary hit for "uga" must still resolve to whatever casing
+            // team_registry.json actually uses ("UGA"/"Georgia"/etc), or every downstream
+            // consumer keying off this string (ConfigStore folder lookups, the saved-profile
+            // filename, GetDefaultPackTeams' index.json) ends up with an inconsistent, possibly
+            // duplicate, per-import casing for the same real team.
+            return (exact.Name, exact.Conference, "exact");
 
         if (_aliasIndex!.TryGetValue(nameClean.ToUpperInvariant(), out var candidates) && candidates.Count > 0)
         {

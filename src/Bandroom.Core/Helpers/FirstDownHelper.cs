@@ -1,8 +1,13 @@
 namespace Bandroom.Core.Helpers;
 
 /// <summary>Fires earned-first-down events. The base event fires any time a new 1st down
-/// is earned (not the opening kickoff's 1st & 10). Variants fire based on yardage gained
-/// or field position to let users assign different sounds per situation.</summary>
+/// is earned (not the opening kickoff's 1st & 10). REWRITTEN 2026-08-10 (owner's "gameplan
+/// simplification" pass, same session as the 2nd/3rd down short/long split): used to split by
+/// yards gained to earn the down (Big Gain 15+, else base). Replaced with a pure YardsToGo check
+/// on the resulting first down, matching the 2nd/3rd down pattern -- 1st & 5-or-less credits a
+/// new "Short" key, else plain "1st & 10". The old Big Gain branch is dropped entirely (owner's
+/// explicit, accepted tradeoff): whatever used to trigger it now just falls through to plain
+/// "1st & 10" -- there's no reliable signal left to keep it distinct from the new split.</summary>
 public sealed class FirstDownHelper : IRuleEvaluator
 {
     // Cheap early-out: Evaluate's own first guard.
@@ -24,16 +29,15 @@ public sealed class FirstDownHelper : IRuleEvaluator
         if (state.Delta.NewPossession)
             return null;
 
-        int yardsGained = state.Delta.YardsGained;
-
-        // Big Gain: 15+ yard pickup
-        if (yardsGained >= 15)
+        // Short: 5 yards or less to go on the new set of downs (only really happens near the
+        // goal line or after certain penalties -- most 1st downs are a plain 1st & 10).
+        if (state.Current.YardsToGo <= 5)
         {
             return new TriggerEvent
             {
-                EventKey = "Offense: Earned First Down (Big Gain)",
-                Volume = 100,
-                IsEarnedBigEvent = true
+                EventKey = "Offense: Earned First Down Short",
+                Volume = 90,
+                IsEarnedBigEvent = false
             };
         }
 

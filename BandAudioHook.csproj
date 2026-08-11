@@ -24,7 +24,18 @@
     <ProjectReference Include="src\Bandroom.Core\Bandroom.Core.csproj" />
     <PackageReference Include="Clowd.Squirrel" Version="2.11.1" />
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- Reads the ID3 Title tag off Default Song Pack files (Sound Bank browsing redesign):
+         pack filenames are EventKey-shaped ("Defense_Third Down_5.mp3"), but the files themselves
+         carry a real Title tag ("sec socar '21 D stop") that's far more useful to show in the
+         picker. See WebMainForm's GetDefaultPackSongsForTeamFromWeb/GetConferencePackSongsForTeamFromWeb. -->
+    <PackageReference Include="TagLibSharp" Version="2.3.0" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
+    <!-- Debug-only: lets InitWebViewAsync's orphan-cleanup step (see WebMainForm.cs) query
+         msedgewebview2.exe command lines via WMI to find/kill ones bound to OUR OWN
+         WebView2Data profile folder left over from a previous session that was force-killed
+         (e.g. via a dev-loop taskkill) rather than closed cleanly, since those can keep holding
+         cache files locked/stale independent of a fresh process's own cache-clear call. -->
+    <PackageReference Include="System.Management" Version="8.0.0" Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>
 
   <ItemGroup>

@@ -65,6 +65,23 @@ public sealed class ScorebugPreset
     public double HomeUnderlineFxW { get; init; }
     public double HomeUnderlineFxH { get; init; }
 
+    /// <summary>Crop for the "PENALTY" decision overlay's "Against &lt;Team Name&gt;" text, and
+    /// for the big full-screen scoring ribbon ("TOUCHDOWN"/"FIELD GOAL"/"SAFETY"). Promoted from
+    /// hardcoded constants in GameWatcher.cs's _regions initializer to per-preset fields 2026-08-11
+    /// -- both were calibrated only from CBS-skin screenshots and, unlike awayscore/homescore/clock,
+    /// were never wired into ApplyScorebugPreset at all, so every non-CBS preset was silently
+    /// reading CBS's screen coordinates for penalty and scoring-banner detection regardless of
+    /// which skin was actually active. Every preset below defaults to the original CBS-calibrated
+    /// numbers so none of them regress from this change.</summary>
+    public double PenaltyAgainstFxX { get; init; } = 0.65;
+    public double PenaltyAgainstFxY { get; init; } = 0.62;
+    public double PenaltyAgainstFxW { get; init; } = 0.32;
+    public double PenaltyAgainstFxH { get; init; } = 0.22;
+    public double BannerFxX { get; init; } = 0.35;
+    public double BannerFxY { get; init; } = 0.87;
+    public double BannerFxW { get; init; } = 0.3;
+    public double BannerFxH { get; init; } = 0.08;
+
     /// <summary>A revised scorebug layout ("v3") the owner identified from a fresh batch of live
     /// screenshots 2026-08-07 -- kept as its own preset rather than overwriting KamsCbsScorebug,
     /// per this file's whole point (swap presets, don't hand-edit coordinates every time the game
@@ -76,6 +93,16 @@ public sealed class ScorebugPreset
     {
         Name = "Kam's CBSv3",
         BandFxY = 0.83, BandFxH = 0.14,
+        // Score/clock/penalty/banner values below were previously left unset and silently inherited
+        // from this class's field defaults (which happen to equal these exact numbers, since CBS is
+        // what those defaults were originally calibrated from). Made explicit 2026-08-11 so CBS
+        // doesn't depend on an implicit fallback that could change out from under it -- see the
+        // AwayScoreFx*/PenaltyAgainstFx*/BannerFx* doc comments above for why.
+        AwayScoreFxX = 0.35, AwayScoreFxW = 0.05,
+        HomeScoreFxX = 0.58, HomeScoreFxW = 0.05,
+        ClockFxX = 0.65, ClockFxW = 0.08,
+        PenaltyAgainstFxX = 0.65, PenaltyAgainstFxY = 0.62, PenaltyAgainstFxW = 0.32, PenaltyAgainstFxH = 0.22,
+        BannerFxX = 0.35, BannerFxY = 0.87, BannerFxW = 0.3, BannerFxH = 0.08,
         AwayUnderlineFxX = 0.145, AwayUnderlineFxY = 0.975, AwayUnderlineFxW = 0.075, AwayUnderlineFxH = 0.012,
         HomeUnderlineFxX = 0.395, HomeUnderlineFxY = 0.975, HomeUnderlineFxW = 0.11, HomeUnderlineFxH = 0.012,
         AwayTimeoutFxX = 0.15, AwayTimeoutFxY = 0.895, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
@@ -132,6 +159,13 @@ public sealed class ScorebugPreset
         AwayScoreFxX = 0.395, AwayScoreFxW = 0.035,
         HomeScoreFxX = 0.595, HomeScoreFxW = 0.035,
         ClockFxX = 0.465, ClockFxW = 0.06,
+        // PenaltyAgainstFx*/BannerFx* -- NOT calibrated from a CFB 27 screenshot (none seen showing
+        // either overlay yet). Left equal to the CBS-calibrated numbers as an explicit placeholder
+        // (same "clone as a starting point, flag it" convention as CollegeFootball26Console below)
+        // rather than inventing new coordinates with no basis -- get a live CFB 27 penalty-overlay
+        // and TOUCHDOWN/FIELD GOAL/SAFETY-banner screenshot to replace these for real.
+        PenaltyAgainstFxX = 0.65, PenaltyAgainstFxY = 0.62, PenaltyAgainstFxW = 0.32, PenaltyAgainstFxH = 0.22,
+        BannerFxX = 0.35, BannerFxY = 0.87, BannerFxW = 0.3, BannerFxH = 0.08,
         AwayUnderlineFxX = 0.430, AwayUnderlineFxY = 0.876, AwayUnderlineFxW = 0.045, AwayUnderlineFxH = 0.024,
         HomeUnderlineFxX = 0.550, HomeUnderlineFxY = 0.876, HomeUnderlineFxW = 0.045, HomeUnderlineFxH = 0.024,
         AwayTimeoutFxX = 0.253, AwayTimeoutFxY = 0.925, AwayTimeoutFxW = 0.091, AwayTimeoutFxH = 0.012,

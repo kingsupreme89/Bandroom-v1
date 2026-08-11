@@ -3,7 +3,17 @@
 <head>
 <meta charset="utf-8" />
 <title>Bandroom</title>
-<link rel="stylesheet" href="style.css" />
+<link rel="icon" href="data:," />
+<!-- BUG FIX: WebView2's virtual-host-mapped (SetVirtualHostNameToFolderMapping) resource
+     serving for <link>/<script>-loaded subresources has its own internal cache that survives
+     Network.clearBrowserCache, Page.reload(ignoreCache:true), and even a full cross-navigation
+     away and back -- confirmed live via CDP: a raw fetch('style.css', {cache:'no-store'}) always
+     returns the current on-disk content, but the browser's own stylesheet-loading pipeline kept
+     serving a stale, truncated-looking parse (missing every rule added after a certain point)
+     across multiple full rebuild+relaunch cycles this session. A per-load cache-busting query
+     string is the one thing that reliably defeats it, since the requested URL is genuinely
+     different every time -- same trick used for app.js/ui-bot.js at the bottom of this file. -->
+<script>document.write('<link rel="stylesheet" href="style.css?v=' + Date.now() + '">');</script>
 </head>
 <body>
   <div id="backdrop"></div>
@@ -61,40 +71,13 @@
              vertical rail-item buttons. -->
         <button class="pill pill-marketplace" data-action="focus-teams" title="Choose a team">Teams</button>
         <button class="pill pill-marketplace" data-action="save-profile" title="Save this team's profile">Save</button>
-        <!-- Dummies-guide entry point for profile sharing, requested to sit right by Save since
-             that's where users look for "how do I send my setup to someone" -- opens Help & Guide
-             pre-scrolled to the Share Profile / Load Profile from Others section instead of a new
-             overlay, see openProfileShareGuide() in app.js. -->
-        <button id="btn-share-guide" class="help-pill" title="How does sharing a profile work?">
-          <span class="help-pill-icon">?</span>
-          <span>Sharing Guide</span>
-        </button>
-        <button class="pill pill-marketplace" data-action="help" title="Keyboard shortcuts">Shortcuts</button>
-        <!-- Help & Guide pill (task queue item 2, Session 11; relocated here Session 16 out of
-             the left sidebar, which was blocking the team grid) -- subtle team-color glow via
-             the existing .help-pill border rule, opens #help-guide-overlay. -->
-        <button id="btn-help-pill" class="help-pill" title="Help &amp; Guide">
-          <span class="help-pill-icon">?</span>
-          <span>Help &amp; Guide</span>
-        </button>
         <button id="btn-stop-watching" class="btn-ghost" title="End this game and unlock the matchup" hidden>Stop Watching</button>
-        <!-- Marketplace island tabs -- "The Bandroom" opens the full team-browser; Sound Bank
-             jumps straight into the ACTIVE team's album (songs + background images together,
-             see bandroom-album below -- Trophy Room was folded into this same album instead of
-             being a separate destination), skipping the team-picker step since you're usually
-             already working on one team. Background images you've grabbed still show up in My
-             Downloads, indexed the same way as songs. -->
-        <div class="marketplace-tabs">
-          <button id="btn-bandroom-cloud" class="pill pill-rainbow" title="Browse The Bandroom">The Bandroom</button>
-          <button id="btn-sound-bank" class="pill pill-marketplace" title="This team's Sound Bank">Sound Bank</button>
-          <button id="btn-my-downloads" class="pill pill-marketplace" title="Songs and images you've downloaded">My Downloads</button>
-          <button id="btn-discord-chat" class="pill pill-marketplace" title="Live Discord chat feed">Discord</button>
-        </div>
-        <!-- Header-level Auto-Assign -- same handleAutoAssignClick() flow as the matchup-side-bar
-             button, just reachable from any landing page (Sound Bank/My Downloads/etc.) instead
-             of only after a full home/away matchup is set. Operates on whichever team is
-             currently active (state.activeTeam). -->
-        <button id="btn-auto-assign-header" class="pill pill-auto-assign" title="Auto-assign songs for the active team">Auto-Assign</button>
+        <!-- Hidden for now (owner request, Session 33) -- pulled from the toolbar as part of the
+             pill-overload cleanup that replaced this row + the marketplace-tabs pills with
+             #nav-rack (see #body below). Left in the DOM rather than deleted since app.js's
+             click/state listeners (openDiscordChat, setWatching's pill-active toggle) aren't
+             null-guarded against it being gone. -->
+        <button id="btn-discord-chat" class="pill pill-marketplace" title="Live Discord chat feed" hidden>Discord</button>
         <!-- Favorite-team badge -- shows the currently active team at a glance, click opens
              the full team picker. Sits right next to the update button on purpose. -->
         <div id="header-team-badge" class="team-swatch header-team-badge" title="Switch which team's sound profile you're editing (use Set Matchup to pick home/away)"></div>
@@ -115,6 +98,40 @@
     </div>
 
     <div id="body">
+      <!-- Nav rack (Session 33) -- replaces the old toolbar pill row (marketplace-tabs +
+           help-pills) with a Spotify-sidebar-style icon+label column, per owner reference. Every
+           button below keeps the exact id it had in the toolbar, so app.js's existing listeners
+           (openDiscordChat, handleAutoAssignClick, runRailAction's data-action dispatch, etc.)
+           needed zero changes -- only their container and class moved. -->
+      <div class="nav-rack glass" id="nav-rack">
+        <button id="btn-bandroom-cloud" class="nav-rack-item nav-rack-primary" title="Browse The Bandroom">
+          <span class="nav-rack-icon">🎵</span><span>The Bandroom</span>
+        </button>
+        <button id="btn-sound-bank" class="nav-rack-item" title="This team's Sound Bank">
+          <span class="nav-rack-icon">🏆</span><span>Sound Bank</span>
+        </button>
+        <button id="btn-my-downloads" class="nav-rack-item" title="Songs and images you've downloaded">
+          <span class="nav-rack-icon">⬇️</span><span>My Downloads</span>
+        </button>
+        <button id="btn-auto-assign-header" class="nav-rack-item" title="Auto-assign songs for the active team">
+          <span class="nav-rack-icon">⚡</span><span>Auto-Assign</span>
+        </button>
+        <div class="nav-rack-divider"></div>
+        <!-- Expandable Help group -- same tree pattern as the reference's "Playlist" section.
+             Starts expanded (no state to remember; these are low-traffic, fine to always show). -->
+        <div class="nav-rack-group">
+          <div class="nav-rack-group-label">Help</div>
+          <button id="btn-share-guide" class="nav-rack-item nav-rack-sub" title="How does sharing a profile work?">
+            <span class="nav-rack-icon">🔗</span><span>Sharing Guide</span>
+          </button>
+          <button class="nav-rack-item nav-rack-sub" data-action="help" title="Keyboard shortcuts">
+            <span class="nav-rack-icon">⌨️</span><span>Shortcuts</span>
+          </button>
+          <button id="btn-help-pill" class="nav-rack-item nav-rack-sub" title="Help &amp; Guide">
+            <span class="nav-rack-icon">❓</span><span>Help &amp; Guide</span>
+          </button>
+        </div>
+      </div>
       <!-- Left panel: team grid + profiles -->
       <div class="side-panel glass" id="left-panel">
         <div class="panel-section">
@@ -467,6 +484,32 @@
                   <button id="btn-clipper-assign-stop" class="preview-bar-btn" title="Stop">⏹</button>
                   <input type="text" id="clipper-assign-search" class="team-picker-search" placeholder="Search songs..." />
                   <span class="info-i" title="Searches your own uploads/downloads AND this team's Default Song Pack, if loaded.">i</span>
+                  <button id="btn-clipper-assign-soundbooth" class="btn-ghost" title="Open the Sound Booth to preview the highlighted song with reverb/EQ/effects applied">🎚 Sound Booth</button>
+                </div>
+                <!-- Owner request: opening an event should show just that team's Sound Bank by
+                     default (the list was "too cluttered" with every source dumped together) --
+                     other sources stay one click away instead of hidden. Same pill-filter pattern
+                     as .my-downloads-filter (see initClipperAssignFilters in app.js). -->
+                <div class="clipper-assign-filters" id="clipper-assign-filters">
+                  <button class="pill clipper-assign-filter bandroom-filter-pill active" data-filter="default">Sound Bank</button>
+                  <button class="pill clipper-assign-filter bandroom-filter-pill" data-filter="all">All Songs</button>
+                  <button class="pill clipper-assign-filter bandroom-filter-pill" data-filter="marketplace">Marketplace</button>
+                  <button class="pill clipper-assign-filter bandroom-filter-pill" data-filter="trimmed">Trimmed</button>
+                  <button class="pill clipper-assign-filter bandroom-filter-pill" data-filter="local">Your Imports</button>
+                  <button class="pill clipper-assign-filter bandroom-filter-pill" data-filter="uploaded">Imported Files</button>
+                  <span class="clipper-assign-filters-spacer"></span>
+                  <!-- Owner request: the Sound Bank pill above only ever shows YOUR active team's
+                       pack songs, named after the situational slot they auto-filled (e.g.
+                       "Defense_Third Down_5") -- there was no way to browse a DIFFERENT team's
+                       ~68-team pack to find a differently-vibed song for the same event. This
+                       opens a small team picker (see wireBrowseOtherTeamSoundBank in app.js);
+                       picking a team merges that team's pack songs into the list below under
+                       their own section, using the exact same row/select/Trim/Assign flow. -->
+                  <button class="btn-ghost" id="btn-clipper-browse-other-team" title="Browse a different team's Sound Bank for this same event">🔀 Browse Team...</button>
+                </div>
+                <div class="clipper-browse-team-popover" id="clipper-browse-team-popover" hidden>
+                  <input type="text" id="clipper-browse-team-search" class="team-picker-search" placeholder="Search all teams..." />
+                  <div class="clipper-browse-team-list" id="clipper-browse-team-list"></div>
                 </div>
                 <div id="clipper-assign-list" class="clipper-assign-list"></div>
 
@@ -478,6 +521,16 @@
                   <div class="clipper-trim-meta">
                     <span id="clipper-trim-filename"></span>
                     <span id="clipper-trim-times"><span id="clipper-trim-start-label">0:00.0</span> &ndash; <span id="clipper-trim-end-label">0:00.0</span></span>
+                    <!-- Owner request: precise handle dragging on a long file was cramped into a
+                         fixed 900px canvas -- zoom widens the canvas (viewport scrolls
+                         horizontally) so the same time range spans more pixels to drag against.
+                         See setTrimZoom in app.js. -->
+                    <div class="clipper-trim-zoom">
+                      <button id="btn-trim-zoom-out" class="icon-btn" title="Zoom out">&minus;</button>
+                      <span id="clipper-trim-zoom-label">100%</span>
+                      <button id="btn-trim-zoom-in" class="icon-btn" title="Zoom in">+</button>
+                      <button id="btn-trim-zoom-reset" class="icon-btn" title="Reset zoom to fit">&#8635;</button>
+                    </div>
                   </div>
                   <div id="clipper-trim-viewport">
                     <canvas id="clipper-trim-canvas" width="900" height="120"></canvas>
@@ -488,6 +541,7 @@
             <div class="clipper-assign-actions" id="clipper-assign-actions-default">
               <button id="btn-clipper-assign-select" class="btn-primary" disabled>Assign Selected</button>
               <button id="btn-clipper-assign-browse" class="btn-ghost">Browse for file...</button>
+              <button id="btn-clipper-assign-add-songs" class="btn-ghost" title="Add several songs at once -- they'll show up in the list below, same as Browse for file...">Add Songs...</button>
               <button id="btn-clipper-assign-trim" class="btn-ghost" title="Opens the highlighted song (or this event's current song, if none highlighted) in the waveform editor so you can cut it down and save it back to this event.">Trim...</button>
               <button id="btn-clipper-assign-import-pack" class="btn-ghost" title="Import the default song pack from a .zip or folder">Import Song Pack</button>
               <button id="btn-clipper-assign-skip" class="btn-ghost" title="Leave this event unassigned and move to the next unassigned event in this category">Skip Event</button>
@@ -547,6 +601,11 @@
             <input type="checkbox" id="toggle-leadin-whistle" />
             <span>Play before every triggered clip</span>
           </label>
+          <!-- Independent of Master/Home/Away/PA, same reasoning as PA Announcer Volume above --
+               the whistle used to just track whatever volume the main clip's own call passed in.
+               See AudioPlayer.WhistleVolume. -->
+          <input type="range" id="slider-whistle-volume" min="0" max="100" value="100" class="slider" />
+          <div class="slider-value"><span id="whistle-volume-value">100</span>%</div>
           <button id="btn-leadin-whistle-upload" class="btn-ghost">Choose / Replace Whistle...</button>
         </div>
         <div class="panel-section">
@@ -574,17 +633,9 @@
           </label>
           <button id="btn-big-game-save" class="btn-ghost btn-block">Save Big Game Setting</button>
         </div>
-        <div class="panel-section">
-          <div class="panel-title">Reverb</div>
-          <div class="reverb-tiles" id="reverb-tiles">
-            <button class="reverb-tile" data-reverb="off">Off</button>
-            <button class="reverb-tile" data-reverb="stadium">Stadium</button>
-            <button class="reverb-tile" data-reverb="dome">Dome</button>
-            <button class="reverb-tile" data-reverb="nightgame">Night Game</button>
-            <button class="reverb-tile" data-reverb="stadiumrain">Rain</button>
-            <button class="reverb-tile" data-reverb="nightgameprimetime">Prime Time</button>
-          </div>
-        </div>
+        <!-- Reverb moved into the Sound Booth modal's "Reverb & EQ" tab (Session 32 plugin-rack
+             redesign) alongside EQ/Sub-Bass, which is where it's actually used from now -- this
+             panel-section used to duplicate it here as a quick-access shortcut. -->
         <!-- The Sound Booth now lives in its own full modal (#sound-booth-overlay, near
              #my-downloads-overlay) matching the Sound Bank / My Downloads shell instead of being
              buried as a section inside this side panel. This is just the launcher. -->
@@ -1043,10 +1094,12 @@
     </div>
   </div>
 
-  <!-- The Sound Booth -- its own full modal now, same glass shell (header/close, hero card,
-       content) as Sound Bank / My Downloads instead of a section buried in the Adjust side
-       panel. Every id inside is unchanged from the old inline section so refreshSoundBoothSection
-       / wireSoundBooth in app.js keep working untouched -- only the surrounding shell moved. -->
+  <!-- The Sound Booth -- plugin-rack redesign (Session 32), same glass shell as Sound Bank / My
+       Downloads. Every id from the old inline section is unchanged so refreshSoundBoothSection /
+       wireSoundBooth's existing tile/toggle handlers keep working untouched -- only the
+       surrounding shell (rack head + tabstrip) and the Reverb tiles (moved in from the Adjust
+       panel) are new. Only real, backend-wired params get a knob or tile here -- no filter/LFO
+       controls like the reference screenshot, since AudioEngine has no continuous equivalent. -->
   <div id="sound-booth-overlay" hidden>
     <div id="sound-booth" class="glass">
       <div class="team-picker-header">
@@ -1060,15 +1113,83 @@
         Every effect below is off by default. Tap the (i) on any row for a plain-language
         explanation of what it does.
       </p>
-      <div class="bandroom-album-hero soundbooth-hero">
-        <span class="soundbooth-hero-icon">&#127911;</span>
-        <div>
-          <div class="bandroom-album-hero-title">No Effects &mdash; Hear It Raw</div>
-          <div class="bandroom-album-hero-meta">One tap turns everything below off at once.</div>
+
+      <!-- Rack head: persistent across every tab below, mirrors a plugin's always-visible IN/OUT
+           meters + hero control. The Master Volume knob never rebinds -- it's the one control the
+           owner asked to always be present regardless of which tab is open. -->
+      <div class="soundbooth-rack-head">
+        <div class="sb-meter" id="sb-meter-in" data-meter="in">
+          <div class="sb-meter-fill"></div>
+          <span class="sb-meter-label">IN</span>
         </div>
-        <button id="btn-soundbooth-no-effects" class="btn-ghost soundbooth-no-effects">Reset All</button>
+        <div class="sb-knob sb-knob-hero" id="sb-knob-master" tabindex="0" role="slider"
+             aria-label="Master Volume" aria-valuemin="0" aria-valuemax="100">
+          <svg viewBox="0 0 100 100" width="100" height="100" class="sb-knob-svg">
+            <circle class="sb-knob-track" cx="50" cy="50" r="42"></circle>
+            <path class="sb-knob-arc" d=""></path>
+            <line class="sb-knob-indicator" x1="50" y1="50" x2="50" y2="14"></line>
+          </svg>
+          <div class="sb-knob-readout"><span class="sb-knob-value">72</span><span class="sb-knob-unit">%</span></div>
+          <div class="sb-knob-label">Master</div>
+          <button class="sb-info sb-knob-info" data-info="knob-master-volume" aria-label="What does this control?">i</button>
+        </div>
+        <div class="sb-meter" id="sb-meter-out" data-meter="out">
+          <div class="sb-meter-fill"></div>
+          <span class="sb-meter-label">OUT</span>
+        </div>
       </div>
-      <div class="panel-section soundbooth" id="soundbooth-section">
+      <button id="btn-soundbooth-no-effects" class="btn-ghost soundbooth-no-effects">Reset All</button>
+
+      <!-- Tab strip: groups the real backend surface into Mixer (continuous), Reverb & EQ
+           (presets), Toggles (booleans) -- not the reference image's Verb/Chorus/Sat/Spread/Phase,
+           since none of those exist in the audio engine. -->
+      <div class="soundbooth-tabstrip" role="tablist">
+        <button class="soundbooth-tab active" data-sb-tab="mixer" role="tab" aria-selected="true">Mixer</button>
+        <button class="soundbooth-tab" data-sb-tab="reverb-eq" role="tab" aria-selected="false">Reverb &amp; EQ</button>
+        <button class="soundbooth-tab" data-sb-tab="toggles" role="tab" aria-selected="false">Toggles</button>
+      </div>
+
+      <div class="soundbooth-tab-panel" data-sb-panel="mixer">
+        <div class="knob-context" id="sb-knob-context-wrap">
+          <div class="sb-knob knob-context-knob" id="sb-knob-context" tabindex="0" role="slider"
+               aria-label="Home Volume" aria-valuemin="0" aria-valuemax="100">
+            <svg viewBox="0 0 100 100" width="100" height="100" class="sb-knob-svg">
+              <circle class="sb-knob-track" cx="50" cy="50" r="42"></circle>
+              <path class="sb-knob-arc" d=""></path>
+              <line class="sb-knob-indicator" x1="50" y1="50" x2="50" y2="14"></line>
+            </svg>
+            <div class="sb-knob-readout"><span class="sb-knob-value">100</span><span class="sb-knob-unit">%</span></div>
+            <div class="sb-knob-label">Home</div>
+            <button class="sb-info sb-knob-info" id="sb-knob-context-info" data-info="knob-home-volume" aria-label="What does this control?">i</button>
+          </div>
+          <div class="knob-context-pills" id="sb-knob-context-pills">
+            <button class="sb-tile active" data-param="home-volume">Home</button>
+            <button class="sb-tile" data-param="away-volume">Away</button>
+            <button class="sb-tile" data-param="pa-volume">PA</button>
+            <button class="sb-tile" data-param="whistle-volume">Whistle</button>
+            <button class="sb-tile" data-param="fade-delay">Fade</button>
+          </div>
+        </div>
+        <div class="soundbooth-preview-row">
+          <button class="btn-ghost soundbooth-preview-btn" data-preview-trigger="score">Preview</button>
+        </div>
+      </div>
+
+      <div class="soundbooth-tab-panel" data-sb-panel="reverb-eq" hidden>
+        <div class="soundbooth-row">
+          <div class="soundbooth-label">
+            Reverb
+            <button class="sb-info" data-info="reverb" aria-label="What does each preset do?">i</button>
+          </div>
+          <div class="reverb-tiles sb-tile-row" id="reverb-tiles">
+            <button class="reverb-tile sb-tile" data-reverb="off">Off</button>
+            <button class="reverb-tile sb-tile" data-reverb="stadium">Stadium</button>
+            <button class="reverb-tile sb-tile" data-reverb="dome">Dome</button>
+            <button class="reverb-tile sb-tile" data-reverb="nightgame">Night Game</button>
+            <button class="reverb-tile sb-tile" data-reverb="stadiumrain">Rain</button>
+            <button class="reverb-tile sb-tile" data-reverb="nightgameprimetime">Prime Time</button>
+          </div>
+        </div>
         <div class="soundbooth-row">
           <div class="soundbooth-label">
             Marching Band EQ
@@ -1080,6 +1201,27 @@
             <button class="sb-tile" data-eq="megaphone">Megaphone</button>
           </div>
         </div>
+        <div class="soundbooth-row">
+          <div class="soundbooth-label">
+            Sub-Bass Thump on Big Hits
+            <button class="sb-info" data-info="sub-bass" aria-label="What does this do?">i</button>
+          </div>
+          <div class="soundbooth-eq-tiles" id="soundbooth-subbass-tiles">
+            <button class="sb-tile" data-subbass="off">Off</button>
+            <button class="sb-tile" data-subbass="subtle">Subtle</button>
+            <button class="sb-tile" data-subbass="stadium">Stadium</button>
+            <button class="sb-tile" data-subbass="earthquake">Earthquake</button>
+          </div>
+        </div>
+        <div class="knob-context disabled" aria-hidden="true">
+          <span class="knob-context-disabled-caption">No adjustable level on this tab -- presets only</span>
+        </div>
+        <div class="soundbooth-preview-row">
+          <button class="btn-ghost soundbooth-preview-btn" data-preview-trigger="score">Preview</button>
+        </div>
+      </div>
+
+      <div class="soundbooth-tab-panel" data-sb-panel="toggles" hidden>
         <label class="toggle-row soundbooth-row">
           <input type="checkbox" id="toggle-transient-shaper" />
           <span>Punchier Drums</span>
@@ -1100,18 +1242,6 @@
           <span>Controller Rumble in Close Games</span>
           <button class="sb-info" data-info="controller-rumble" aria-label="What does this do?">i</button>
         </label>
-        <div class="soundbooth-row">
-          <div class="soundbooth-label">
-            Sub-Bass Thump on Big Hits
-            <button class="sb-info" data-info="sub-bass" aria-label="What does this do?">i</button>
-          </div>
-          <div class="soundbooth-eq-tiles" id="soundbooth-subbass-tiles">
-            <button class="sb-tile" data-subbass="off">Off</button>
-            <button class="sb-tile" data-subbass="subtle">Subtle</button>
-            <button class="sb-tile" data-subbass="stadium">Stadium</button>
-            <button class="sb-tile" data-subbass="earthquake">Earthquake</button>
-          </div>
-        </div>
         <div class="soundbooth-row" id="crowdbus-section">
           <label class="toggle-row" style="flex: 1 1 auto;">
             <input type="checkbox" id="toggle-crowd-bus" />
@@ -1120,10 +1250,14 @@
           </label>
           <button id="btn-crowdbus-upload" class="btn-ghost">Set Crowd Clip...</button>
         </div>
-        <div class="soundbooth-info-popover" id="soundbooth-info-popover" hidden>
-          <div class="soundbooth-info-text" id="soundbooth-info-text"></div>
-          <button class="soundbooth-info-close" id="soundbooth-info-close">Got it</button>
+        <div class="knob-context disabled" aria-hidden="true">
+          <span class="knob-context-disabled-caption">No adjustable level on this tab -- toggles only</span>
         </div>
+      </div>
+
+      <div class="soundbooth-info-popover" id="soundbooth-info-popover" hidden>
+        <div class="soundbooth-info-text" id="soundbooth-info-text"></div>
+        <button class="soundbooth-info-close" id="soundbooth-info-close">Got it</button>
       </div>
     </div>
   </div>
@@ -1170,6 +1304,17 @@
         Press <strong>Stop Watching</strong> at the top when the game ends to unlock and start a
         new one.
       </p>
+      <!-- Owner request: not every game is a Big Game (both bands physically present) -- this
+           needs to be flippable right here per-matchup instead of only buried in the Adjust
+           sidebar's Big Game panel. Same underlying ConfigStore.BigGameSettings flag as
+           #toggle-big-game-enabled (see wireMatchupBigGameToggle in app.js); toggling either one
+           keeps the other in sync and saves immediately, no separate Save step needed here. -->
+      <div class="matchup-biggame-row">
+        <label class="toggle-row">
+          <input type="checkbox" id="toggle-matchup-big-game" />
+          <span>Big Game (both bands here)</span>
+        </label>
+      </div>
       <div class="matchup-columns">
         <!-- Cover-flow team select, same idea as CFB 27's own team-select screen: center tile
              large/sharp, neighbors tilted+faded, arrows or click-a-tile to cycle. Browsing IS
@@ -1180,14 +1325,22 @@
              renderMatchupCoverflow the same way applyVsBackdrop tints the in-game VS backdrop
              halves via --half-color -- same mechanism, different element. -->
         <div class="matchup-column matchup-column-away">
-          <div class="matchup-column-title">Away</div>
-          <input type="text" id="matchup-away-search" placeholder="Search teams..." class="team-picker-search" />
-          <div class="coverflow-stage">
-            <button class="coverflow-arrow coverflow-arrow-left" data-side="away" data-dir="-1" title="Previous team">&#8249;</button>
-            <div class="coverflow-track" id="matchup-away-track"></div>
-            <button class="coverflow-arrow coverflow-arrow-right" data-side="away" data-dir="1" title="Next team">&#8250;</button>
+          <!-- Owner request: a fast vertical scrub list on the outer edge of each side, alongside
+               (not replacing) the coverflow -- same small-icon look as the left sidebar's team
+               grid (#team-grid), just laid out as a single scrollable column. Click an icon to
+               pick that team outright (same click-to-select convention as the sidebar), which
+               re-centers this side's coverflow on it too. See wireMatchupSideGrid in app.js. -->
+          <div class="matchup-side-grid" id="matchup-away-side-grid"></div>
+          <div class="matchup-column-main">
+            <div class="matchup-column-title">Away</div>
+            <input type="text" id="matchup-away-search" placeholder="Search teams..." class="team-picker-search" />
+            <div class="coverflow-stage">
+              <button class="coverflow-arrow coverflow-arrow-left" data-side="away" data-dir="-1" title="Previous team">&#8249;</button>
+              <div class="coverflow-track" id="matchup-away-track"></div>
+              <button class="coverflow-arrow coverflow-arrow-right" data-side="away" data-dir="1" title="Next team">&#8250;</button>
+            </div>
+            <div class="coverflow-name" id="matchup-away-name"></div>
           </div>
-          <div class="coverflow-name" id="matchup-away-name"></div>
         </div>
         <!-- Gameday logo centerpiece -- owner's explicit choice 2026-08-09 to keep using the real
              ESPN-style asset (assets/gameday-logo.png) despite the trademark flag raised in chat.
@@ -1206,14 +1359,17 @@
           <img src="https://appassets/assets/gameday-logo.png" alt="Gameday" class="matchup-gameday-logo" id="matchup-gameday-logo">
         </div>
         <div class="matchup-column matchup-column-home">
-          <div class="matchup-column-title">Home</div>
-          <input type="text" id="matchup-home-search" placeholder="Search teams..." class="team-picker-search" />
-          <div class="coverflow-stage">
-            <button class="coverflow-arrow coverflow-arrow-left" data-side="home" data-dir="-1" title="Previous team">&#8249;</button>
-            <div class="coverflow-track" id="matchup-home-track"></div>
-            <button class="coverflow-arrow coverflow-arrow-right" data-side="home" data-dir="1" title="Next team">&#8250;</button>
+          <div class="matchup-column-main">
+            <div class="matchup-column-title">Home</div>
+            <input type="text" id="matchup-home-search" placeholder="Search teams..." class="team-picker-search" />
+            <div class="coverflow-stage">
+              <button class="coverflow-arrow coverflow-arrow-left" data-side="home" data-dir="-1" title="Previous team">&#8249;</button>
+              <div class="coverflow-track" id="matchup-home-track"></div>
+              <button class="coverflow-arrow coverflow-arrow-right" data-side="home" data-dir="1" title="Next team">&#8250;</button>
+            </div>
+            <div class="coverflow-name" id="matchup-home-name"></div>
           </div>
-          <div class="coverflow-name" id="matchup-home-name"></div>
+          <div class="matchup-side-grid" id="matchup-home-side-grid"></div>
         </div>
       </div>
       <div class="save-profile-subtext" id="matchup-subtext"></div>
@@ -1403,14 +1559,14 @@
     <div class="update-dialog glass">
       <div class="update-header"><span><span class="songpack-led"></span>Ready to Import?</span><button id="btn-songpack-import-close" class="icon-btn">&times;</button></div>
       <p class="update-sub">
-        Once your download has finished, click <strong>Locate &amp; Import</strong> below and pick
+        Once your download has finished, click <strong>Import from Zip</strong> below and pick
         the .zip file from your Downloads folder &mdash; or, if you already unzipped it (or someone
         handed you a folder instead), use <strong>Import from Folder</strong>. Either way Bandroom
         fills in every team's Sound Bank for you automatically.
       </p>
       <ol class="songpack-steps">
         <li>Make sure the download from the last step has fully finished.</li>
-        <li>Click <strong>Locate &amp; Import</strong> (.zip) or <strong>Import from Folder</strong> (already unzipped) below.</li>
+        <li>Click <strong>Import from Zip</strong> (.zip) or <strong>Import from Folder</strong> (already unzipped) below.</li>
         <li>In the window that pops up, find and select the .zip file or the folder.</li>
         <li>Wait for the progress bar &mdash; when it's done, every team will have songs ready to go.</li>
       </ol>
@@ -1418,7 +1574,7 @@
         <button id="btn-songpack-import-later" class="btn-ghost">I'll Import Later</button>
         <button id="btn-songpack-import-folder" class="btn-ghost">Import from Folder</button>
         <button id="btn-songpack-import-folder-all" class="btn-ghost" title="Import from a folder, overwriting any already-imported songs with matching names and re-assigning every event slot for every team found">Load All (Overwrite)</button>
-        <button id="btn-songpack-import" class="btn-primary">Locate & Import</button>
+        <button id="btn-songpack-import" class="btn-primary" title="Pick the .zip you downloaded from the Google Drive link above">Import from Zip</button>
       </div>
     </div>
   </div>
@@ -1440,6 +1596,7 @@
           <input type="checkbox" id="songpack-progress-skip-future" />
           Don't show this popup next time (just notify me quietly)
         </label>
+        <button id="btn-songpack-progress-locate" class="btn-ghost" hidden>Go to Sound Bank</button>
         <button id="btn-songpack-progress-done" class="btn-primary">Got it</button>
       </div>
     </div>
@@ -1477,6 +1634,44 @@
       <div class="test-hook-actions">
         <button id="btn-test-hook-fire" class="btn-primary">Fire Event</button>
         <button id="btn-test-hook-stop" class="btn-ghost">Stop</button>
+      </div>
+      <!-- Routed fire -- unlike "Side" above (which plays directly for whichever side you pick,
+           bypassing routing), this runs the event through the real Defense:*-prefix side-flip and
+           Big Game away-volume gate (WebMainForm.ResolveEventRouting), so you can verify that
+           logic without a live game. "Possession" = which team currently has the ball, not which
+           side hears the cue -- e.g. picking Home + "Defense: Second Down" fires on AWAY, same as
+           it would live. -->
+      <div class="test-hook-routed">
+        <div class="test-hook-routed-title">Routed fire (tests side-flip + Big Game gating)</div>
+        <label>Possession
+          <select id="test-hook-possession">
+            <option value="home">Home</option>
+            <option value="away">Away</option>
+          </select>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" id="test-hook-earned" />
+          <span>Big/earned event (touchdown, turnover, etc.)</span>
+        </label>
+        <div class="test-hook-actions">
+          <button id="btn-test-hook-fire-routed" class="btn-primary">Fire Routed</button>
+        </div>
+      </div>
+      <!-- Fire Together -- verifies the same-tick double-fire fix (e.g. Offense: Third Down
+           Short + Defense: Third Down Short firing on the same tick, routed to opposite sides):
+           the first event interrupts leftover audio, the second layers instead of cutting the
+           first off. See WebMainForm.FireTestEventPairFromWeb. -->
+      <div class="test-hook-routed">
+        <div class="test-hook-routed-title">Fire together (tests same-tick layering)</div>
+        <label>Event A
+          <select id="test-hook-event-a"></select>
+        </label>
+        <label>Event B
+          <select id="test-hook-event-b"></select>
+        </label>
+        <div class="test-hook-actions">
+          <button id="btn-test-hook-fire-pair" class="btn-primary">Fire Together</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1599,7 +1794,11 @@
     <button class="btn-ghost" id="btn-resume-no">Start Fresh</button>
   </div>
 
-  <script src="app.js"></script>
-  <script src="ui-bot.js"></script>
+  <!-- Cache-busted the same way as style.css above -- app.js hit the exact same stale-serving
+       issue (confirmed live: edits to it stopped showing up after a certain point too). -->
+  <script>
+    document.write('<script src="app.js?v=' + Date.now() + '"><\/script>');
+    document.write('<script src="ui-bot.js?v=' + Date.now() + '"><\/script>');
+  </script>
 </body>
 </html>

@@ -39,6 +39,13 @@ internal static class ConfigStore
     /// same "single global setting" model as AudioPlayer.CurrentReverb/PreRollSeconds).</summary>
     public static readonly string LeadInWhistlePath = Path.Combine(SongsFolder, "leadin_whistle.wav");
     public static readonly string ProfilesFolder = Path.Combine(UserDataRoot, "Profiles");
+    /// <summary>One-time marker for the library-wide loudness-normalization sweep (owner request:
+    /// "all songs the same volume", applied retroactively to everything assigned before
+    /// LoudnessNormalizationService existed/was wired into the assign flow -- see
+    /// WebMainForm.NormalizeExistingLibraryOnce). Presence alone means "already ran"; content is
+    /// unused. New assignments going forward are already normalized on the spot via
+    /// NormalizeAssignmentInBackground, so this only ever needs to run once per install.</summary>
+    public static readonly string LibraryNormalizedMarkerPath = Path.Combine(UserDataRoot, "library_normalized_v1.marker");
     public static readonly string TeamBackgroundsFolder = Path.Combine(UserDataRoot, "TeamBackgrounds");
     public static readonly string TeamLogosFolder = Path.Combine(UserDataRoot, "TeamLogos");
     /// <summary>Images downloaded from the marketplace via the "My Downloads" tab land here --
@@ -155,6 +162,44 @@ internal static class ConfigStore
         Directory.CreateDirectory(UserDataRoot);
         File.WriteAllText(BigGameSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
         _bigGameSettingsCache = settings;
+    }
+
+    /// <summary>Owner report: volume sliders (Master/Home/Away/PA/Whistle) reset to 100% every
+    /// launch -- AudioPlayer.cs's entire volume surface is plain in-memory static state with zero
+    /// disk persistence (confirmed via Session 34's investigation: grepped ConfigStore.cs for
+    /// "Volume", zero hits before this). Same JSON-file-in-UserDataRoot pattern as
+    /// BigGameSettings above. All five ship as percentages (0-100 ints, matching the *FromWeb
+    /// bridge methods' own units) rather than the 0.0-1.0 floats AudioPlayer uses internally, so
+    /// the JSON stays human-readable and matches what the UI sliders actually show.</summary>
+    static readonly string AudioSettingsPath = Path.Combine(UserDataRoot, "audio_settings.json");
+
+    public record AudioSettings(int MasterVolume, int HomeVolume, int AwayVolume, int PaVolume, int WhistleVolume)
+    {
+        public static readonly AudioSettings Default = new(72, 100, 100, 100, 100);
+    }
+
+    static AudioSettings? _audioSettingsCache;
+
+    public static AudioSettings LoadAudioSettings()
+    {
+        if (_audioSettingsCache != null) return _audioSettingsCache;
+        if (!File.Exists(AudioSettingsPath)) return _audioSettingsCache = AudioSettings.Default;
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<AudioSettings>(File.ReadAllText(AudioSettingsPath), JsonOptions);
+            return _audioSettingsCache = loaded ?? AudioSettings.Default;
+        }
+        catch
+        {
+            return _audioSettingsCache = AudioSettings.Default;
+        }
+    }
+
+    public static void SaveAudioSettings(AudioSettings settings)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        File.WriteAllText(AudioSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        _audioSettingsCache = settings;
     }
 
     /// <summary>Where the installer would have bundled the default song pack, if this build
@@ -566,6 +611,35 @@ internal static class ConfigStore
         }
     }
 
+    public sealed record DefaultPackTeamEntry(string Team, string Conference);
+
+    /// <summary>Sound Bank browsing redesign: lists every team actually present in the pack, with
+    /// its conference, for a "browse another team's Sound Bank" picker. Deliberately does NOT read
+    /// index.json (unlike GetDefaultPackTeams above) -- that file is only ever written by
+    /// DefaultSongPackService's own download flow (DownloadedDefaultSongsFolder), so a build that
+    /// ships the pack bundled instead (BundledDefaultSongsFolder, preferred by DefaultSongsFolder
+    /// when present) would silently report zero teams even though the real per-team folders are
+    /// right there. A live two-level scan (conference dir -> team dir) works for both cases and
+    /// costs nothing meaningful for ~68 directories. "General" (a flat folder of generic fallback
+    /// songs, see GetGenericProfile) has no team-shaped subfolders of its own, so it naturally
+    /// contributes nothing here without needing to be special-cased out.</summary>
+    public static List<DefaultPackTeamEntry> GetDefaultPackTeamsWithConference()
+    {
+        var result = new List<DefaultPackTeamEntry>();
+        if (!Directory.Exists(DefaultSongsFolder)) return result;
+
+        foreach (var confDir in Directory.GetDirectories(DefaultSongsFolder))
+        {
+            string conference = Path.GetFileName(confDir);
+            foreach (var teamDir in Directory.GetDirectories(confDir))
+            {
+                if (!Directory.EnumerateFiles(teamDir).Any()) continue;
+                result.Add(new DefaultPackTeamEntry(Path.GetFileName(teamDir), conference));
+            }
+        }
+        return result.OrderBy(t => t.Team, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     /// <summary>
     /// Returns a "Generic" profile that any team falls back to when they don't have
     /// their own song for a specific event. Populated from Songs\Default\General\
@@ -679,7 +753,7 @@ internal static class ConfigStore
 
     public static void MarkFirstRunDone() => File.WriteAllText(FirstRunFlagPath, DateTime.UtcNow.ToString("O"));
 
-    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac" };
+    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".ogg" };
 
     /// <summary>Copies a dropped/browsed audio file into Songs\ with its display name
     /// normalized to ALL CAPS, for a consistent library (drag-and-drop import never actually
@@ -1286,16 +1360,30 @@ internal static class ConfigStore
         // two were colliding in the scorebug's shared situation slot.
         "Other: Kickoff on Kick (Receiving)",
         "Other: Kickoff on Kick (Kicking)",
+        // Added 2026-08-10: FirstDownHelper's short/long rewrite dropped the yards-gained
+        // "Big Gain" branch entirely (see that file's comment) -- this key is never emitted
+        // anymore. Retired like the kickoff keys above: still fires if a user already has a song
+        // assigned to it (RemoveAll below only prunes empty rows), just no longer offered as an
+        // assignable card for anyone starting fresh.
+        "Offense: Earned First Down (Big Gain)",
     };
 
     public static readonly string[] AllEngineEventKeys =
     {
-        "Offense: Earned First Down (Big Gain)",
         // Added 2026-08-10 alongside OffenseDownHelper's rewrite -- 2nd/3rd down now split by
         // distance instead of firing one distance-blind card. Short = offense (this card); long
         // reuses the pre-existing "Defense: Second/Third Down" cards below, unchanged.
         "Offense: Second Down Short",
         "Offense: Third Down Short",
+        // Added 2026-08-10 alongside FirstDownHelper's short/long split -- replaces the old
+        // "Offense: Earned First Down (Big Gain)" card (now retired above).
+        "Offense: Earned First Down Short",
+        // Added 2026-08-10: two new Defense-side evaluators (DefenseFirstDownHelper,
+        // DefenseThirdDownShortHelper) -- see their own file comments for the exact trigger
+        // moment and WebMainForm.ResolveEventRouting's tier-3 (First Down) / tier-2 (Third Down
+        // Short) gating.
+        "Defense: First Down",
+        "Defense: Third Down Short",
         "Offense: PAT Made",
         "Offense: 2-Point Conversion Made",
         "Offense: Field Goal Made",
@@ -1325,8 +1413,6 @@ internal static class ConfigStore
         "Other: Pregame Take the Field",
         "Other: Opening Kickoff",
         "Other: Second-Half Kickoff",
-        "Other: Kickoff on Kick (Receiving)",
-        "Other: Kickoff on Kick (Kicking)",
         "Penalty: Offense",
         "Penalty: Defense",
         "Defense: No Punt Return",

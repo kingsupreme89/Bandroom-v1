@@ -85,6 +85,20 @@ internal sealed class GameWatcher
                 region.FxX = preset.ClockFxX; region.FxW = preset.ClockFxW;
                 region.FxY = preset.BandFxY; region.FxH = preset.BandFxH;
             }
+            // penaltyagainst/banner added 2026-08-11 -- previously hardcoded once in the _regions
+            // initializer below and never repositioned per preset at all, so every non-CBS preset
+            // silently read CBS's screen coordinates for penalty and scoring-banner detection. See
+            // ScorebugPreset.PenaltyAgainstFx*/BannerFx* doc comment.
+            else if (region.Name == "penaltyagainst")
+            {
+                region.FxX = preset.PenaltyAgainstFxX; region.FxY = preset.PenaltyAgainstFxY;
+                region.FxW = preset.PenaltyAgainstFxW; region.FxH = preset.PenaltyAgainstFxH;
+            }
+            else if (region.Name == "banner")
+            {
+                region.FxX = preset.BannerFxX; region.FxY = preset.BannerFxY;
+                region.FxW = preset.BannerFxW; region.FxH = preset.BannerFxH;
+            }
         }
     }
 
@@ -125,7 +139,21 @@ internal sealed class GameWatcher
     public string? AwayTeamMascot { get; set; }
     static readonly Regex DistancePattern = new(@"&\s*(-?\d+)", RegexOptions.IgnoreCase);
     string? _lastDistanceRaw;
+    string? _lastFiredDistanceRaw;
     DateTime _lossCooldownUntil;
+
+    // Down and YardsToGo are OCR'd from the same "down" crop text but can independently succeed/
+    // fail per 250ms poll (partial/garbled digits vs a clean ordinal read, or vice versa). If they
+    // committed to _lastKnownDown/_lastDistanceRaw independently, a real down+distance change could
+    // land on two different snapshot ticks, making DefenseHelper/TflHelper see a Down change with a
+    // stale YardsToGo (or vice versa) and fire the wrong cue instead of the "(Loss)" variant --
+    // STATE_MACHINE_ANALYSIS Discrepancy #13. Staged here and committed together once both resolve,
+    // with a short timeout fallback so a field that never actually changes (e.g. distance parses
+    // fine but never differs) doesn't block Down from updating forever.
+    string? _pendingDown;
+    string? _pendingDistanceRaw;
+    DateTime _pendingDownDistanceDeadline;
+    static readonly TimeSpan PendingDownDistanceTimeout = TimeSpan.FromMilliseconds(750);
 
     string? _lastPossession;
     DateTime _possessionCooldownUntil;
@@ -164,7 +192,7 @@ internal sealed class GameWatcher
     // See the pause/unpause re-fire fix in RunAsync below -- these regions only clear their
     // "Last" value (re-arming them to fire again) when the down/distance region actually
     // changes, not just whenever their own OCR read goes blank.
-    static readonly HashSet<string> EventGatedRegions = new(StringComparer.OrdinalIgnoreCase) { "situation", "banner", "quarter" };
+    static readonly HashSet<string> EventGatedRegions = new(StringComparer.OrdinalIgnoreCase) { "situation", "banner", "quarter", "penaltyagainst", "pregameready" };
     bool _downChangedThisTick;
 
     // The "down" WatchedRegion's raw OCR crop is the whole play-by-play ticker line, which goes
@@ -504,13 +532,18 @@ internal sealed class GameWatcher
                         // cover "situation" being active closes that gap.
                         bool situationActive = _regions.FirstOrDefault(r => r.Name == "situation")?.Last != null;
                         if (!flagActive && !situationActive) SamplePossessionFromWindow(fullBmp, winW, winH);
-                        CheckForLossOfYards(text);
                     }
 
                     var match = region.Pattern.Match(text);
                     string? currentValue = match.Success ? NormalizeMatch(region.Name, match.Value) : null;
 
-                    if (region.Name == "down" && currentValue != null) _lastKnownDown = currentValue;
+                    if (region.Name == "down")
+                    {
+                        var distanceMatch = DistancePattern.Match(text);
+                        string? distanceRaw = distanceMatch.Success ? distanceMatch.Groups[1].Value : null;
+                        CheckForLossOfYards(distanceRaw);
+                        CommitDownAndDistance(currentValue, distanceRaw);
+                    }
                     if (region.Name == "awayscore" && currentValue != null) _lastKnownAwayScore = currentValue;
                     if (region.Name == "homescore" && currentValue != null) _lastKnownHomeScore = currentValue;
                     if (region.Name == "quarter" && currentValue != null) _lastKnownQuarter = currentValue;
@@ -793,17 +826,10 @@ internal sealed class GameWatcher
     /// (e.g. "3rd &amp; -4") and edge-triggers TackleForLossDetected when it goes negative --
     /// confirmed via live screenshot that down+distance render as one string, so no separate
     /// region/calibration was needed.</summary>
-    void CheckForLossOfYards(string text)
+    void CheckForLossOfYards(string? distanceRaw)
     {
-        var match = DistancePattern.Match(text);
-        string? distanceRaw = match.Success ? match.Groups[1].Value : null;
-        if (distanceRaw == _lastDistanceRaw) return;
-        // Sticky, same pattern as _lastKnownDown/_lastKnownAwayScore/etc: a blank OCR read
-        // (pause menu, replay overlay) must not zero out YardsToGo for RouteEngineTick -- that
-        // was creating a stale-vs-fresh mismatch on resume (STATE_MACHINE_ANALYSIS.md
-        // Discrepancy #7) where TflHelper and friends could see a spurious YardsToGo jump.
-        if (distanceRaw != null) _lastDistanceRaw = distanceRaw;
-        if (distanceRaw == null) return;
+        if (distanceRaw == null || distanceRaw == _lastFiredDistanceRaw) return;
+        _lastFiredDistanceRaw = distanceRaw;
 
         if (int.TryParse(distanceRaw, out int distance) && distance < 0)
         {
@@ -816,6 +842,32 @@ internal sealed class GameWatcher
             Log?.Invoke($"[loss] tackle for loss detected (& {distanceRaw})");
             TackleForLossDetected?.Invoke();
         }
+    }
+
+    /// <summary>Stages a Down and/or YardsToGo change and commits both to _lastKnownDown/
+    /// _lastDistanceRaw together once both have resolved from OCR, so RouteEngineTick's snapshot
+    /// never sees one field advance a tick ahead of the other (see the field comments on
+    /// _pendingDown above). Falls back to committing whatever is pending after a short timeout.</summary>
+    void CommitDownAndDistance(string? currentDown, string? distanceRaw)
+    {
+        bool wasPending = _pendingDown != null || _pendingDistanceRaw != null;
+
+        if (currentDown != null && currentDown != _lastKnownDown) _pendingDown = currentDown;
+        if (distanceRaw != null && distanceRaw != _lastDistanceRaw) _pendingDistanceRaw = distanceRaw;
+
+        bool isPending = _pendingDown != null || _pendingDistanceRaw != null;
+        if (!isPending) return;
+
+        if (!wasPending) _pendingDownDistanceDeadline = DateTime.UtcNow + PendingDownDistanceTimeout;
+
+        bool bothReady = _pendingDown != null && _pendingDistanceRaw != null;
+        bool timedOut = DateTime.UtcNow >= _pendingDownDistanceDeadline;
+        if (!bothReady && !timedOut) return;
+
+        if (_pendingDown != null) _lastKnownDown = _pendingDown;
+        if (_pendingDistanceRaw != null) _lastDistanceRaw = _pendingDistanceRaw;
+        _pendingDown = null;
+        _pendingDistanceRaw = null;
     }
 
     /// <summary>Collapses OCR-noisy variants ("PATGOOD", "PAT  GOOD") of "situation"/"banner"
@@ -1014,7 +1066,9 @@ internal sealed class GameWatcher
         var rules = new IRuleEvaluator[]
         {
             new BigEventHelper(),
+            new DefenseFirstDownHelper(),
             new DefenseHelper(),
+            new DefenseThirdDownShortHelper(),
             new DownFieldPositionHelper(),
             new DriveStarterHelper(),
             new FieldGoalMissedHelper(),

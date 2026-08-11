@@ -1180,7 +1180,13 @@ input, select, textarea, [contenteditable] {
 #resume-session-bar {
   position: fixed;
   top: 60px; left: 50%; transform: translateX(-50%);
-  z-index: 80;
+  /* BUG FIX (Session 33): was z-index 80, ABOVE every modal scrim except a handful (90/100/110) --
+     any dialog opened at the lower end of the app's ad hoc z-index scale (e.g.
+     #auto-assign-confirm-overlay / #team-picker-overlay at 60/40) got this banner floating
+     visibly on top of its dark scrim instead of being covered by it, since the banner isn't part
+     of any overlay's own stacking context. 35 sits below every full-screen modal in the app
+     (lowest is #team-picker-overlay at 40) while staying above ordinary page content. */
+  z-index: 35;
   display: flex; align-items: center; gap: 10px;
   padding: 8px 16px;
   border-radius: 999px;
@@ -1474,8 +1480,15 @@ input, select, textarea, [contenteditable] {
 #clipper-trim-times { flex: none; font-size: 13.5px; color: var(--text-muted-2); font-variant-numeric: tabular-nums; }
 #clipper-trim-start-label { color: var(--success, #3ddc84); }
 #clipper-trim-end-label { color: var(--warning, #f5a524); }
-#clipper-trim-viewport { position: relative; }
+.clipper-trim-zoom { display: flex; align-items: center; gap: 4px; flex: none; }
+.clipper-trim-zoom .icon-btn { width: 22px; height: 22px; font-size: 13px; }
+#clipper-trim-zoom-label { font-size: 12px; color: var(--text-muted-2); min-width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
+/* overflow-x: auto is what makes zoom actually work -- setTrimZoom widens the canvas past the
+   viewport's own width, this is what turns the overflow into a horizontal scroll instead of a
+   squashed/clipped canvas. */
+#clipper-trim-viewport { position: relative; overflow-x: auto; overflow-y: hidden; border-radius: 10px; }
 #clipper-trim-canvas {
+  display: block;
   width: 100%; height: 120px;
   border-radius: 10px;
   background: rgba(6, 7, 8, 0.82);
@@ -1678,6 +1691,43 @@ input, select, textarea, [contenteditable] {
 }
 .my-downloads-toolbar #my-downloads-search { flex: 1 1 200px; margin-bottom: 0; }
 .my-downloads-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.clipper-assign-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 0 4px; }
+.clipper-assign-filter { padding: 6px 12px; font-size: 13px; }
+.clipper-assign-filters-spacer { flex: 1 1 auto; min-width: 8px; }
+#btn-clipper-browse-other-team { padding: 6px 12px; font-size: 13px; }
+
+/* "Browse another team's Sound Bank" popover -- same floating-card look as
+   .situation-volume-popover, same row/list look as .clipper-assign-row/-list below it, just a
+   team picker instead of a song picker so it reads as the same design language, not a new one. */
+.clipper-browse-team-popover {
+  position: relative;
+  margin: 0 0 8px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--panel-bg, #1a1d24);
+  border: 1px solid color-mix(in srgb, var(--team-glow, var(--accent)) 40%, var(--glass-border));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.clipper-browse-team-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+.clipper-browse-team-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.clipper-browse-team-row:hover { background: rgba(255, 255, 255, 0.06); }
+.clipper-browse-team-row-conf { margin-left: auto; font-size: 11.5px; color: var(--text-muted); }
+.clipper-browse-team-empty { padding: 10px; text-align: center; color: var(--text-muted); font-size: 13px; }
 /* Shared pill styling (Music Library UX Brief v2 §4) -- see .bandroom-filter-pill below, the
    single source of truth for filter-pill look across hub/album/downloads. This selector is kept
    only for JS's existing .my-downloads-filter dataset/click hooks; index.html now also carries
@@ -2739,6 +2789,13 @@ input, select, textarea, [contenteditable] {
   font-size: 12.5px;
 }
 .situation-transport .bandroom-item-action:disabled { opacity: 0.4; cursor: default; }
+/* Per-song lead-in whistle toggle -- dim/desaturated when this card has opted out of the global
+   whistle, same "off = quiet, on = accent-colored" convention as .situation-led-* above it. */
+.situation-whistle-toggle { opacity: 0.35; filter: grayscale(1); }
+.situation-whistle-toggle.active {
+  opacity: 1; filter: none;
+  border-color: color-mix(in srgb, var(--team-primary, var(--accent)) 65%, var(--glass-border));
+}
 .situation-volume-popover {
   position: absolute;
   bottom: calc(100% + 6px);
@@ -2961,6 +3018,58 @@ input, select, textarea, [contenteditable] {
   margin: 0 0 8px;
 }
 
+/* Nav rack (Session 33) -- Spotify-sidebar-style icon+label column, replaces the old toolbar
+   pill row (marketplace-tabs + help-pills). Sits to the left of #left-panel inside #body, same
+   flex row, so it just adds a second fixed-width column rather than needing a layout rewrite. */
+.nav-rack {
+  width: 168px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  overflow-y: auto;
+}
+.nav-rack-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted-2);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.nav-rack-item:hover { background: rgba(255, 255, 255, 0.06); color: var(--text-primary); }
+.nav-rack-icon { font-size: 15px; line-height: 1; flex: 0 0 auto; }
+/* "The Bandroom" is the hub entry point -- gets the same standout treatment .pill-rainbow gave
+   it in the old toolbar, just as a solid fill instead of a pill outline. */
+.nav-rack-primary {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text-primary);
+}
+.nav-rack-primary:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+.nav-rack-divider {
+  height: 1px;
+  background: var(--glass-border);
+  margin: 8px 4px;
+}
+.nav-rack-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 4px 10px 6px;
+}
+.nav-rack-sub { padding-left: 10px; font-size: 12.5px; }
+
 #body {
   flex: 1 1 auto;
   display: flex;
@@ -3124,7 +3233,7 @@ input, select, textarea, [contenteditable] {
   cursor: pointer;
 }
 .reverb-tile:hover { background: rgba(255,255,255,0.06); }
-.reverb-tile.active { background: var(--accent); color: #06222a; border-color: transparent; }
+.reverb-tile.active { background: var(--team-glow, var(--accent)); color: #06222a; border-color: transparent; }
 
 /* ================================================================
    THE SOUND BOOTH -- pill/glass dashboard for the Sound Booth
@@ -3135,7 +3244,13 @@ input, select, textarea, [contenteditable] {
    than a bolted-on new screen.
    ================================================================ */
 .soundbooth {
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--glass-border));
+  /* BUG FIX: this whole section's inner controls (knobs, active tiles, meters) already pick up
+     var(--team-glow, var(--accent)) -- the currently active team's color -- but the modal's own
+     outer chrome (this border, the title LED, "Reset All", the info popover, the launcher pill)
+     was hardcoded to the fixed generic --accent, so the frame around all that team-colored inner
+     UI never itself matched the team. Same var(--team-glow, var(--accent)) fallback pattern as
+     everywhere else now applied here too. */
+  border: 1px solid color-mix(in srgb, var(--team-glow, var(--accent)) 35%, var(--glass-border));
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.02);
   position: relative;
@@ -3143,15 +3258,15 @@ input, select, textarea, [contenteditable] {
 .soundbooth-title { display: flex; align-items: center; gap: 8px; }
 .soundbooth-led {
   width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent);
+  background: var(--team-glow, var(--accent));
+  box-shadow: 0 0 6px var(--team-glow, var(--accent));
   animation: streamer-pulse 2s ease-in-out infinite;
 }
 .soundbooth-no-effects {
   margin: 6px 0 10px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--glass-border));
+  border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 50%, var(--glass-border));
 }
 .soundbooth-row {
   display: flex;
@@ -3172,7 +3287,25 @@ input, select, textarea, [contenteditable] {
   cursor: pointer;
 }
 .sb-tile:hover { background: rgba(255,255,255,0.06); }
-.sb-tile.active { background: var(--accent); color: #06222a; border-color: transparent; }
+/* LED tile look, same language as .soundbooth-tab.active above -- glowing outline + a small lit
+   dot instead of a flat filled pill, matching the reference's illuminated-badge convention. */
+.sb-tile.active {
+  position: relative;
+  padding-left: 18px;
+  background: color-mix(in srgb, var(--team-glow, var(--accent)) 14%, rgba(255,255,255,0.03));
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 60%, var(--glass-border));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--team-glow, var(--accent)) 30%, transparent);
+}
+.sb-tile.active::before {
+  content: "";
+  position: absolute;
+  left: 7px; top: 50%; transform: translateY(-50%);
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--team-glow, var(--accent));
+  box-shadow: 0 0 4px var(--team-glow, var(--accent));
+}
 .sb-info {
   width: 16px; height: 16px;
   border-radius: 50%;
@@ -3185,7 +3318,7 @@ input, select, textarea, [contenteditable] {
   cursor: pointer;
   flex-shrink: 0;
 }
-.sb-info:hover { background: var(--accent); color: #06222a; border-color: transparent; }
+.sb-info:hover { background: var(--team-glow, var(--accent)); color: #06222a; border-color: transparent; }
 .soundbooth-info-popover {
   position: absolute;
   top: calc(100% + 4px);
@@ -3195,13 +3328,13 @@ input, select, textarea, [contenteditable] {
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--panel-bg, #1a1d24);
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--glass-border));
+  border: 1px solid color-mix(in srgb, var(--team-glow, var(--accent)) 40%, var(--glass-border));
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 .soundbooth-info-popover[hidden] { display: none; }
-.soundbooth-info-text { font-size: 12.5px; line-height: 1.5; color: var(--text-primary); margin-bottom: 8px; }
+.soundbooth-info-text { font-size: 12.5px; line-height: 1.5; color: var(--text-primary); margin-bottom: 8px; white-space: pre-line; }
 .soundbooth-info-close {
-  background: var(--accent); color: #06222a; border: none;
+  background: var(--team-glow, var(--accent)); color: #06222a; border: none;
   border-radius: 999px; padding: 4px 12px;
   font-size: 11.5px; font-weight: 700; cursor: pointer;
 }
@@ -3212,12 +3345,12 @@ input, select, textarea, [contenteditable] {
   justify-content: flex-start;
   cursor: pointer;
   background: rgba(255, 255, 255, 0.02);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--glass-border));
+  border: 1px solid color-mix(in srgb, var(--team-glow, var(--accent)) 35%, var(--glass-border));
   border-radius: 12px;
   padding: 10px 12px;
 }
 .soundbooth-launcher-arrow { margin-left: auto; color: var(--text-muted); }
-.soundbooth-launcher:hover .soundbooth-launcher-arrow { color: var(--accent); }
+.soundbooth-launcher:hover .soundbooth-launcher-arrow { color: var(--team-glow, var(--accent)); }
 
 /* Sound Booth modal shell -- same glass/overlay pattern as #my-downloads-overlay / #my-downloads. */
 #sound-booth-overlay {
@@ -3234,10 +3367,231 @@ input, select, textarea, [contenteditable] {
   padding: 20px;
   border-radius: 16px;
   overflow-y: auto;
+  /* Containing block for .soundbooth-info-popover -- without this, the popover's
+     position:absolute resolved against #sound-booth-overlay (the fixed, full-viewport
+     backdrop) instead of this panel, so every (i) button's tooltip landed in the same
+     wrong spot regardless of which row it came from. See refreshSoundBoothInfoPopover. */
+  position: relative;
 }
 .soundbooth-hero { align-items: center; }
 .soundbooth-hero-icon { font-size: 28px; line-height: 1; }
 .soundbooth-hero .btn-ghost { margin-left: auto; }
+
+/* ================================================================
+   SOUND BOOTH PLUGIN RACK (Session 32) -- rotary knob, live IN/OUT
+   meters, and a tab strip restyled to match a hardware effects-rack
+   reference the owner shared, but themed entirely off the app's own
+   --accent / --team- / --glass- vars (not the reference's pink/teal)
+   and wired only to params that actually exist in AudioPlayer.
+   ================================================================ */
+.soundbooth-rack-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 14px 8px 10px;
+}
+
+.sb-meter {
+  width: 14px;
+  height: 84px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+.sb-meter-fill {
+  width: 100%;
+  height: 0%;
+  background: linear-gradient(to top,
+    var(--team-glow, var(--accent)) 0%,
+    color-mix(in srgb, var(--team-secondary, var(--accent)) 70%, var(--accent)) 70%,
+    #ff5f57 92%);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--team-glow, var(--accent)) 55%, transparent);
+  transition: height 90ms linear;
+}
+.sb-meter-label {
+  position: absolute;
+  bottom: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.sb-meter.meter-idle .sb-meter-fill { opacity: 0.25; }
+
+.sb-knob {
+  width: 96px;
+  min-width: 96px;
+  max-width: 96px;
+  height: 96px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  user-select: none;
+  touch-action: none;
+  outline: none;
+  position: relative;
+  overflow: hidden;
+}
+/* Hardware-rack bezel (owner reference: 1774_large@2x.jpg) -- a dark radial "housing" behind
+   the SVG ring, same trick a real plugin UI uses to make a flat 2D circle read as a physical
+   knob. Sits behind the SVG (z-index via paint order -- ::before is the first painted child). */
+.sb-knob::before {
+  content: "";
+  position: absolute;
+  top: 4px; left: 50%; transform: translateX(-50%);
+  width: 68px; height: 68px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.07), rgba(0,0,0,0.35) 70%);
+  box-shadow: inset 0 0 0 1px var(--glass-border), 0 2px 8px rgba(0,0,0,0.4);
+}
+.sb-knob-hero::before { width: 90px; height: 90px; }
+.sb-knob-hero { width: 118px; min-width: 118px; max-width: 118px; height: 118px; }
+.sb-knob-svg {
+  width: 65px;
+  height: 65px;
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: block;
+  overflow: visible;
+}
+.sb-knob-hero .sb-knob-svg { width: 87px; height: 87px; }
+/* Dashed, not solid -- reads as the reference's segmented/chunked dial ring instead of a
+   single flat circle, without needing a real multi-path segment renderer in JS. */
+.sb-knob-track {
+  fill: rgba(255, 255, 255, 0.02);
+  stroke: var(--glass-border);
+  stroke-width: 7;
+  stroke-dasharray: 5 4;
+}
+.sb-knob-arc {
+  fill: none;
+  stroke: var(--team-glow, var(--accent));
+  stroke-width: 7;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--team-glow, var(--accent)) 85%, transparent))
+          drop-shadow(0 0 2px color-mix(in srgb, var(--team-glow, var(--accent)) 95%, transparent));
+}
+.sb-knob-indicator {
+  stroke: var(--text-primary);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transform-origin: 50px 50px;
+  filter: drop-shadow(0 0 2px rgba(0,0,0,0.6));
+}
+.sb-knob-readout {
+  margin-top: 46px;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--team-glow, var(--accent)) 40%, transparent);
+}
+.sb-knob-hero .sb-knob-readout { margin-top: 54px; font-size: 19px; }
+.sb-knob-unit { font-size: 11px; color: var(--text-muted); margin-left: 1px; }
+.sb-knob-label {
+  margin-top: 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+.sb-knob:focus-visible .sb-knob-track { stroke: var(--team-glow, var(--accent)); }
+.sb-knob.dragging .sb-knob-arc {
+  filter: drop-shadow(0 0 12px var(--team-glow, var(--accent)))
+          drop-shadow(0 0 4px var(--team-glow, var(--accent)));
+}
+.sb-knob-info { position: absolute; top: 0; right: 0; cursor: pointer; }
+
+.knob-context {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 4px;
+  transition: opacity 150ms ease;
+}
+.knob-context.disabled {
+  opacity: 0.35;
+  pointer-events: none;
+  padding: 14px 0;
+}
+.knob-context-disabled-caption {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.knob-context-pills { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+.knob-context-knob.rebinding { opacity: 0; transform: scale(0.85); }
+
+.soundbooth-preview-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+.soundbooth-preview-btn.previewing {
+  background: var(--team-glow, var(--accent));
+  color: #06222a;
+  border-color: transparent;
+}
+
+.soundbooth-tabstrip {
+  display: flex;
+  gap: 6px;
+  margin: 14px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.soundbooth-tab {
+  position: relative;
+  flex: 1 1 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted-2);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.soundbooth-tab:hover { background: rgba(255, 255, 255, 0.06); }
+/* LED tab look (owner reference: 1774_large@2x.jpg's colored-badge tab row) -- dark background
+   with a glowing team-color border/text and an underline bar, instead of the old flat filled
+   pill, so the active tab reads as "lit up" like a hardware unit rather than a plain toggle. */
+.soundbooth-tab.active {
+  background: color-mix(in srgb, var(--team-glow, var(--accent)) 14%, rgba(255,255,255,0.03));
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 60%, var(--glass-border));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--team-glow, var(--accent)) 35%, transparent);
+}
+.soundbooth-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 14%; right: 14%; bottom: -9px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--team-glow, var(--accent));
+  box-shadow: 0 0 6px var(--team-glow, var(--accent));
+}
+
+.soundbooth-tab-panel[hidden] { display: none; }
+.sb-tile-row { display: flex; gap: 4px; flex-wrap: wrap; }
 
 .changelog-list {
   font-size: 13px;
@@ -3454,25 +3808,39 @@ input, select, textarea, [contenteditable] {
 #btn-profile-close:hover { background: rgba(255,69,58,0.2); color: #ff6b6b; }
 
 .matchup-btn {
-  padding: 4px 10px;
+  /* Only custom-styled button in the header without an appearance reset -- every input this file
+     resets appearance on (3150/3157) gets one because native chrome (Windows Fluent button
+     styling, or a full swap to native colors under Windows Forced Colors/High Contrast mode)
+     can paint over author background/border/color on a <button> left at the UA default
+     appearance: auto. Matches every other custom pill/icon-btn in this app, which either reset
+     it directly or are non-<button> elements that never had native chrome to begin with. */
+  -webkit-appearance: none;
+  appearance: none;
+  forced-color-adjust: none;
+  padding: 7px 16px;
   border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-muted-2);
-  font-size: 12.5px;
-  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--team-primary, var(--accent)) 55%, var(--glass-border));
+  background: color-mix(in srgb, var(--team-secondary, var(--accent)) 18%, rgba(255, 255, 255, 0.04));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
   cursor: pointer;
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Unlocked = still needs the owner's attention before GAMETIME can start, so it stays lit
+     with the same persistent pill-glow-pulse every other actionable pill in the app uses
+     (.situation-btn), instead of the old plain/inert-looking outline. */
+  animation: pill-glow-pulse 3s ease-in-out infinite;
 }
-.matchup-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.matchup-btn:hover { background: color-mix(in srgb, var(--team-secondary, var(--accent)) 30%, rgba(255, 255, 255, 0.08)); }
 .matchup-btn.locked {
   border-color: rgba(61, 220, 132, 0.6);
   background: rgba(61, 220, 132, 0.10);
   color: #3ddc84;
   cursor: default;
+  animation: none;
 }
 .matchup-btn.locked:hover { background: rgba(61, 220, 132, 0.10); border-color: rgba(61, 220, 132, 0.6); }
 
@@ -3878,6 +4246,21 @@ input, select, textarea, [contenteditable] {
 /* Full-bleed split screen: two halves tinted toward whichever team is centered in that side's
    coverflow (--side-color, set in renderMatchupCoverflow -- same pattern as applyVsBackdrop's
    --half-color on the in-game VS backdrop), divided by a pulsing VS badge. */
+.matchup-biggame-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 4px 6px;
+}
+.matchup-biggame-row .toggle-row {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+}
+.matchup-biggame-row .toggle-row:has(input:checked) {
+  border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 55%, var(--glass-border));
+  background: color-mix(in srgb, var(--team-glow, var(--accent)) 14%, rgba(255, 255, 255, 0.03));
+}
 .matchup-columns {
   position: relative;
   display: flex;
@@ -3891,9 +4274,10 @@ input, select, textarea, [contenteditable] {
   flex: 1 1 50%;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  flex-direction: row;
+  align-items: stretch;
   justify-content: center;
+  gap: 10px;
   position: relative;
   padding: clamp(12px, 2.4vw, 32px);
   overflow: hidden;
@@ -3916,6 +4300,38 @@ input, select, textarea, [contenteditable] {
 }
 .matchup-column-away { border-right: 1px solid color-mix(in srgb, var(--side-color) 35%, var(--glass-border)); }
 .matchup-column-home { border-left: 1px solid color-mix(in srgb, var(--side-color) 35%, var(--glass-border)); }
+.matchup-column-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+/* Fast vertical scrub list on the outer edge of each side (owner request) -- native
+   overflow-y:auto for the same smooth/momentum scroll feel as #team-grid, just a single column
+   of smaller icons instead of a 5-wide grid. Sits beside the coverflow, not instead of it. */
+.matchup-side-grid {
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  align-content: start;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2px;
+  z-index: 2;
+}
+/* BUG FIX: forcing an explicit 44px width here fought the grid's own 1fr track (44px minus this
+   container's own 2px*2 padding = 40px available), so every tile rendered ~4px wider than its
+   track and got clipped by overflow-x -- worst at the strip's outer edge where there's nothing
+   to visually hide the cut. Letting width fall through to .team-swatch's own `width: 100%` (it
+   already derives height from that via aspect-ratio: 1) keeps every tile exactly track-sized. */
+.matchup-side-grid .team-swatch { font-size: 11px; }
+.matchup-side-grid::-webkit-scrollbar { width: 5px; }
 .matchup-column-title {
   font-size: clamp(11px, 1.1vw, 13px);
   font-weight: 700;
@@ -4356,6 +4772,13 @@ input, select, textarea, [contenteditable] {
 }
 .test-hook-body label {
   display: flex; flex-direction: column; gap: 4px; font-size: 15px;
+}
+.test-hook-routed {
+  margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border-subtle, rgba(255,255,255,0.1));
+  display: flex; flex-direction: column; gap: 10px;
+}
+.test-hook-routed-title {
+  font-size: 12px; font-weight: 600; color: var(--text-muted-2);
 }
 
 #whats-new-modal {

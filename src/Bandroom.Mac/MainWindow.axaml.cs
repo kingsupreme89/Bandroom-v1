@@ -24,7 +24,7 @@ namespace Bandroom.Mac;
 /// </summary>
 public partial class MainWindow : Window
 {
-    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac" };
+    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".ogg" };
 
     // ---- State (mirrors WebMainForm.cs exactly) ----
     private List<TriggerEntry> _config = new();

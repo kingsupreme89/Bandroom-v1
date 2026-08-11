@@ -163,6 +163,9 @@ async function init() {
       await refreshLeadInWhistleSection();
     } catch (err) { console.error("GetLeadInWhistleAvailable/Enabled failed", err); }
     try {
+      await refreshVolumeSliders();
+    } catch (err) { console.error("refreshVolumeSliders failed", err); }
+    try {
       await refreshBigGameSection();
     } catch (err) { console.error("refreshBigGameSection failed", err); }
     try {
@@ -517,6 +520,7 @@ async function openSituations(category) {
           <button class="bandroom-item-action" data-act="preview" title="Play" ${ev.fileName ? "" : "disabled"}>&#9654;</button>
           <button class="bandroom-item-action" data-act="stop" title="Stop">&#9209;</button>
           <button class="bandroom-item-action" data-act="volume" title="Adjust this event's own volume">&#128266;</button>
+          <button class="bandroom-item-action situation-whistle-toggle${ev.playLeadInWhistle === false ? "" : " active"}" data-act="whistle" title="${ev.playLeadInWhistle === false ? "Lead-in whistle off for this song -- click to turn it back on" : "Lead-in whistle on for this song (when the global toggle is on) -- click to skip it for just this one"}">&#128239;</button>
           <button class="bandroom-item-action" data-act="track-info" title="Track Info" ${ev.fileName ? "" : "disabled"}>&#8505;</button>
         </span>
         <div class="situation-volume-popover" hidden>
@@ -530,6 +534,15 @@ async function openSituations(category) {
     row.querySelector('[data-act="preview"]').addEventListener("click", () => { _previewAudio?.pause(); bridge?.PreviewEvent(ev.trigger); });
     row.querySelector('[data-act="stop"]').addEventListener("click", () => bridge?.StopPreview());
     row.querySelector('[data-act="track-info"]').addEventListener("click", () => openTrackInfoDrawer(ev.trigger, ev.fileName));
+    row.querySelector('[data-act="whistle"]').addEventListener("click", (e) => {
+      const btn = e.currentTarget;
+      const nowOn = !btn.classList.contains("active");
+      btn.classList.toggle("active", nowOn);
+      btn.title = nowOn
+        ? "Lead-in whistle on for this song (when the global toggle is on) -- click to skip it for just this one"
+        : "Lead-in whistle off for this song -- click to turn it back on";
+      bridge?.SetEventPlayLeadInWhistle(ev.trigger, nowOn);
+    });
     wireSituationVolumePopover(row, ev.trigger);
     list.appendChild(row);
   }
@@ -1960,6 +1973,41 @@ const HELP_GUIDE_HTML = `
 </div>
 `;
 
+/// The sidebar volume sliders (home/away/pa/whistle/master) only ever wrote to the bridge on
+/// "input" -- nothing ever read the persisted value back on startup, so every launch showed the
+/// HTML's default 100%/72% regardless of what was actually saved/playing. Sound Booth's own knobs
+/// (SOUNDBOOTH_KNOBS) already had a working get()/set() pair for the same underlying values; this
+/// just hydrates the sidebar sliders from the same bridge getters at startup.
+async function refreshVolumeSliders() {
+  if (!bridge) return;
+  const map = [
+    ["slider-volume", "volume-value", bridge.GetVolume],
+    ["slider-home-volume", "home-volume-value", bridge.GetHomeVolume],
+    ["slider-away-volume", "away-volume-value", bridge.GetAwayVolume],
+    ["slider-pa-volume", "pa-volume-value", bridge.GetPaVolume],
+    ["slider-whistle-volume", "whistle-volume-value", bridge.GetWhistleVolume],
+  ];
+  for (const [sliderId, labelId, getter] of map) {
+    try {
+      const v = await getter.call(bridge);
+      if (typeof v !== "number") continue;
+      const slider = document.getElementById(sliderId);
+      const label = document.getElementById(labelId);
+      if (slider) slider.value = v;
+      if (label) label.textContent = String(v);
+    } catch (err) { console.error(`refreshVolumeSliders: ${sliderId} failed`, err); }
+  }
+}
+
+// Sound Booth's knobs and the sidebar sliders both drive the same underlying bridge values
+// through two entirely separate widgets -- without this, moving one left the other stale until
+// its own next open/rebind. Keyed off SOUNDBOOTH_KNOBS' param names (master-volume/home-volume/
+// away-volume/pa-volume/whistle-volume), same ids used by SB_KNOB_PARAMS.
+function syncSoundBoothKnobDisplay(paramKey) {
+  if (_sbHeroKnob?.getParamKey() === paramKey) _sbHeroKnob.rebind(paramKey);
+  if (_sbContextKnob?.getParamKey() === paramKey) _sbContextKnob.rebind(paramKey);
+}
+
 /// Task queue item 5 (Session 11) -- the panel section is now always visible (see index.html's
 /// comment on #leadin-whistle-section), but the enable/disable toggle row only makes sense once a
 /// clip actually exists; the hint text swaps to reflect which state we're in. Pulled out of
@@ -1986,17 +2034,58 @@ const SB_INFO_TEXT = {
   "controller-rumble": "If you have an Xbox or PlayStation-style controller plugged in, this gives it a light buzz when the game is close and the clock is running out -- the last 2 minutes of the 4th quarter or overtime, with the score within a touchdown either way. Needs a controller connected to do anything.",
   "sub-bass": "Adds a low rumbly 'thump' under the sound on big tackle-for-loss plays -- like feeling a hit in your chest, not just hearing it. Off by default since it's a newer effect; try Subtle first.",
   "crowd-bus": "Plays a looping crowd-noise sound in the background that gets louder automatically when the game is close, it's the 4th quarter, or time is running out -- and stays quieter the rest of the time. You have to pick your own crowd-noise sound file first (Set Crowd Clip button) since Bandroom doesn't come with one built in.",
+
+  // Reverb -- each preset is a fixed (room size, damping, wet mix, stereo width) recipe, not a
+  // user-adjustable knob. Numbers match ReverbPresets.Get in ReverbProvider.cs so this stays
+  // truthful if the recipe ever gets retuned.
+  "reverb": "Off: dry, no room sound added.\n\nStadium: a big open-air tail -- some top end soaked up along the way, like a real crowd absorbing sound, so it's big but not glassy.\n\nDome: enclosed, bright, longest-ringing tail -- hard walls reflecting sound back. The most \"live\" of the six.\n\nNight Game: tighter and warmer than Stadium, more top end damped down -- cooler night air.\n\nRain: like Stadium but muffled and close -- rain eats high frequencies fast, so this damps hardest and keeps the tail shortest. A wet November game.\n\nPrime Time: Night Game's warmth with a wider stereo image -- the big-game-under-the-lights version.",
+
+  // Sub-Bass -- how much low-end "thump" gets layered under big tackle-for-loss hits.
+  "sub-bass": "Off: no added low-end thump.\n\nSubtle: a light thump under big hits -- felt more than heard.\n\nStadium: a noticeably bigger thump -- reads as \"that was a real hit\" without overpowering the song.\n\nEarthquake: the heaviest setting, strong enough to rattle a subwoofer. Can overpower quieter songs -- try Stadium first if unsure.",
+
+  // Knob params -- what each continuous control actually changes.
+  "knob-master-volume": "The overall volume for every triggered song and event, unless a matchup is set (then Home/Away volume take over for in-game cues instead).",
+  "knob-home-volume": "Volume for the home team's own event cues once a matchup is set -- independent of Away, so one side can be louder or quieter than the other.",
+  "knob-away-volume": "Volume for the away team's event cues once a matchup is set -- independent of Home.",
+  "knob-pa-volume": "Volume for the separate PA Announcer layer, which plays alongside (not instead of) the main song for the same event.",
+  "knob-fade-delay": "How many seconds a triggered clip plays at full volume before it starts fading out. There's no fade-in -- clips always start at full volume immediately; this only controls when the fade-OUT ramp begins.",
 };
 
-function refreshSoundBoothInfoPopover(key) {
+// BUG FIX: this popover is a single shared element (one #soundbooth-info-popover for every (i)
+// button in the modal, see index.html), but it only ever got `hidden = false` -- CSS gave it a
+// fixed top/right position relative to #sound-booth-overlay (the fixed, full-viewport backdrop,
+// the nearest positioned ancestor since #sound-booth itself never set `position`), so every (i)
+// button across every tab popped the exact same box in the exact same spot instead of anchoring
+// near whichever row you actually clicked -- reads as a stray box overlapping unrelated content.
+// Now positions itself next to the clicked button, clamped to stay inside the panel.
+function refreshSoundBoothInfoPopover(key, anchorBtn) {
   const popover = document.getElementById("soundbooth-info-popover");
   const text = document.getElementById("soundbooth-info-text");
   text.textContent = SB_INFO_TEXT[key] || "";
   popover.hidden = false;
+
+  const panel = document.getElementById("sound-booth");
+  if (anchorBtn && panel) {
+    const panelRect = panel.getBoundingClientRect();
+    const btnRect = anchorBtn.getBoundingClientRect();
+    const popW = popover.offsetWidth || 240;
+    let left = btnRect.left - panelRect.left + panel.scrollLeft - popW + btnRect.width;
+    left = Math.max(8, Math.min(left, panel.clientWidth - popW - 8));
+    let top = btnRect.bottom - panelRect.top + panel.scrollTop + 6;
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+    popover.style.right = "auto";
+  }
 }
 
 async function refreshSoundBoothSection() {
   if (!bridge) return;
+  try {
+    const reverb = await bridge.GetReverb();
+    document.querySelectorAll("#reverb-tiles .reverb-tile").forEach((t) => {
+      t.classList.toggle("active", t.dataset.reverb === reverb);
+    });
+  } catch (err) { console.error("GetReverb failed", err); }
   try {
     const eqPreset = await bridge.GetEqPreset();
     document.querySelectorAll("#soundbooth-eq-tiles .sb-tile").forEach((t) => {
@@ -2042,22 +2131,26 @@ async function refreshCrowdBusSection() {
 
 // Big Game panel (Adjust sidebar) -- REDEFINED 2026-08-10: was an editable auto-detect volume
 // rule ("quarter 4, score within 8"); now a manual per-matchup flag for "both bands are
-// physically here" (see ConfigStore.BigGameSettings's doc comment). _bigGameBannerEnabled is a
-// separate, purely-cosmetic flag (persisted client-side only) controlling whether
-// #matchup-big-game-badge shows on the matchup screen -- independent of the real gating flag.
+// physically here" (see ConfigStore.BigGameSettings's doc comment).
+//
+// BUG FIX: this used to be TWO independently-settable states -- the real gating flag
+// (toggle-big-game-enabled/SaveBigGameSettings, affects actual away-volume/routing behavior)
+// and a separate, purely-cosmetic "banner" flag (toggle-big-game-banner/_bigGameBannerEnabled,
+// only controlled whether the Gameday logo glows). They could silently disagree: unchecking one
+// control left the other's UI (and the logo) looking unchanged, so "did this actually turn off"
+// was never obvious. All three controls (sidebar checkbox, sidebar banner checkbox, matchup
+// pill) now always agree -- toggling ANY of them flips the real flag, the logo glow, and the
+// other two controls together via applyBigGameEnabled below.
 let _bigGameBannerEnabled = false;
 
 async function refreshBigGameSection() {
   if (!bridge) return;
+  let enabled = false;
   try {
     const s = JSON.parse(await bridge.GetBigGameSettings());
-    document.getElementById("toggle-big-game-enabled").checked = s.Enabled === true;
+    enabled = s.Enabled === true;
   } catch (err) { console.error("GetBigGameSettings failed", err); }
-  try {
-    _bigGameBannerEnabled = localStorage.getItem("bandroom-biggame-banner") === "true";
-  } catch (_) { _bigGameBannerEnabled = false; }
-  document.getElementById("toggle-big-game-banner").checked = _bigGameBannerEnabled;
-  updateMatchupBigGameBadge();
+  applyBigGameEnabled(enabled, { save: false });
 }
 
 function updateMatchupBigGameBadge() {
@@ -2065,11 +2158,32 @@ function updateMatchupBigGameBadge() {
   if (badge) badge.classList.toggle("big-game-active", _bigGameBannerEnabled);
 }
 
+/// Single source of truth for all three Big Game controls + the Gameday logo glow. `save: true`
+/// (used by every user-driven toggle) also persists the real flag immediately -- no separate
+/// "Save Big Game Setting" step needed anymore for the checkbox to take effect, that button now
+/// just exists for anyone used to clicking it (re-saves whatever's already showing as checked).
+function applyBigGameEnabled(isBigGame, { save }) {
+  _bigGameBannerEnabled = isBigGame;
+  try { localStorage.setItem("bandroom-biggame-banner", isBigGame ? "true" : "false"); } catch (_) {}
+  document.getElementById("toggle-big-game-enabled").checked = isBigGame;
+  document.getElementById("toggle-big-game-banner").checked = isBigGame;
+  const matchupToggle = document.getElementById("toggle-matchup-big-game");
+  if (matchupToggle) matchupToggle.checked = isBigGame;
+  updateMatchupBigGameBadge();
+  if (save) {
+    bridge?.SaveBigGameSettings(isBigGame).catch((err) => {
+      console.error("SaveBigGameSettings failed", err);
+      showToast("Couldn't save Big Game setting -- try again.");
+    });
+  }
+}
+
 function wireBigGameSection() {
   document.getElementById("toggle-big-game-banner").addEventListener("change", (e) => {
-    _bigGameBannerEnabled = e.target.checked;
-    try { localStorage.setItem("bandroom-biggame-banner", _bigGameBannerEnabled ? "true" : "false"); } catch (_) {}
-    updateMatchupBigGameBadge();
+    applyBigGameEnabled(e.target.checked, { save: true });
+  });
+  document.getElementById("toggle-big-game-enabled").addEventListener("change", (e) => {
+    applyBigGameEnabled(e.target.checked, { save: true });
   });
   document.getElementById("btn-big-game-save").addEventListener("click", async () => {
     const isBigGame = document.getElementById("toggle-big-game-enabled").checked;
@@ -2080,6 +2194,13 @@ function wireBigGameSection() {
       console.error("SaveBigGameSettings failed", err);
       showToast("Couldn't save Big Game setting -- try again.");
     }
+  });
+
+  // Matchup-screen Big Game pill -- same ConfigStore.BigGameSettings flag as the sidebar
+  // checkbox above, just reachable without leaving the "pick your two teams" screen right before
+  // GAMETIME, since that's the moment you actually know whether both bands showed up.
+  document.getElementById("toggle-matchup-big-game").addEventListener("change", (e) => {
+    applyBigGameEnabled(e.target.checked, { save: true });
   });
 }
 
@@ -2244,6 +2365,11 @@ function wireControls() {
   document.getElementById("btn-back-my-downloads").addEventListener("click", backFromMyDownloads);
   document.getElementById("btn-open-soundbooth").addEventListener("click", openSoundBooth);
   document.getElementById("btn-close-soundbooth").addEventListener("click", closeSoundBooth);
+  // Reachable straight from the Assignment screen (owner request) -- Sound Booth opens as an
+  // overlay on top of #clipper-assign rather than replacing it, so closing it drops you right
+  // back into the assignment you were on.
+  document.getElementById("btn-clipper-assign-soundbooth")?.addEventListener("click", openSoundBooth);
+  initSoundBoothRack();
   document.getElementById("btn-discord-chat").addEventListener("click", openDiscordChat);
   document.getElementById("btn-close-discord-chat").addEventListener("click", closeDiscordChat);
   document.getElementById("btn-import-local-song")?.addEventListener("click", importLocalSong);
@@ -2300,18 +2426,27 @@ function wireControls() {
     // was always stuck at full volume regardless of what the pill showed.
     if (_previewAudio) _previewAudio.volume = Number(e.target.value) / 100;
     if (_trimAudio) _trimAudio.volume = Number(e.target.value) / 100;
+    syncSoundBoothKnobDisplay("master-volume", Number(e.target.value));
   });
   document.getElementById("slider-home-volume").addEventListener("input", (e) => {
     document.getElementById("home-volume-value").textContent = e.target.value;
     bridge?.SetHomeVolume(Number(e.target.value));
+    syncSoundBoothKnobDisplay("home-volume", Number(e.target.value));
   });
   document.getElementById("slider-away-volume").addEventListener("input", (e) => {
     document.getElementById("away-volume-value").textContent = e.target.value;
     bridge?.SetAwayVolume(Number(e.target.value));
+    syncSoundBoothKnobDisplay("away-volume", Number(e.target.value));
   });
   document.getElementById("slider-pa-volume").addEventListener("input", (e) => {
     document.getElementById("pa-volume-value").textContent = e.target.value;
     bridge?.SetPaVolume(Number(e.target.value));
+    syncSoundBoothKnobDisplay("pa-volume", Number(e.target.value));
+  });
+  document.getElementById("slider-whistle-volume").addEventListener("input", (e) => {
+    document.getElementById("whistle-volume-value").textContent = e.target.value;
+    bridge?.SetWhistleVolume(Number(e.target.value));
+    syncSoundBoothKnobDisplay("whistle-volume", Number(e.target.value));
   });
   document.getElementById("toggle-leadin-whistle").addEventListener("change", (e) => {
     bridge?.SetLeadInWhistleEnabled(e.target.checked);
@@ -2395,7 +2530,7 @@ function wireControls() {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      refreshSoundBoothInfoPopover(btn.dataset.info);
+      refreshSoundBoothInfoPopover(btn.dataset.info, btn);
     });
   });
   document.getElementById("soundbooth-info-close").addEventListener("click", () => {
@@ -2533,11 +2668,20 @@ function wireControls() {
   document.getElementById("matchup-overlay").addEventListener("click", (e) => {
     if (e.target.id === "matchup-overlay") closeMatchupDialog();
   });
-  document.getElementById("matchup-home-search").addEventListener("input", (e) => renderMatchupCoverflow("home", e.target.value));
-  document.getElementById("matchup-away-search").addEventListener("input", (e) => renderMatchupCoverflow("away", e.target.value));
+  document.getElementById("matchup-home-search").addEventListener("input", (e) => {
+    renderMatchupCoverflow("home", e.target.value);
+    renderMatchupSideGrid("home", e.target.value);
+  });
+  document.getElementById("matchup-away-search").addEventListener("input", (e) => {
+    renderMatchupCoverflow("away", e.target.value);
+    renderMatchupSideGrid("away", e.target.value);
+  });
   document.querySelectorAll(".coverflow-arrow").forEach((btn) => {
     btn.addEventListener("click", () => shiftCoverflow(btn.dataset.side, parseInt(btn.dataset.dir, 10)));
   });
+  wireCoverflowWheel(document.getElementById("matchup-home-track"), (dir) => shiftCoverflow("home", dir));
+  wireCoverflowWheel(document.getElementById("matchup-away-track"), (dir) => shiftCoverflow("away", dir));
+  wireCoverflowWheel(document.getElementById("team-picker-track"), (dir) => shiftTeamPicker(dir));
   document.getElementById("btn-side-away").addEventListener("click", () => selectTeam(state.matchupAway));
   document.getElementById("btn-side-home").addEventListener("click", () => selectTeam(state.matchupHome));
   document.getElementById("btn-auto-assign").addEventListener("click", handleAutoAssignClick);
@@ -2561,7 +2705,13 @@ function wireControls() {
     if (e.key === "Enter") confirmSaveProfile();
   });
 
-  document.getElementById("btn-help").addEventListener("click", () => bridge?.OpenHelp());
+  // Owner request: the native "How to Use Bandroom" popup (WinForms ShortcutsForm) is gone --
+  // it was a plain unthemed dialog duplicating what the in-app Help & Guide overlay already
+  // covers, more thoroughly, in the app's own theme. Both Help entry points now open that same
+  // overlay (see btn-help-pill's click handler in initHelpGuide).
+  document.getElementById("btn-help").addEventListener("click", () => {
+    document.getElementById("btn-help-pill")?.click();
+  });
 
   document.addEventListener("keydown", (e) => {
     // Creator-only batch logo/icon import (item 20) -- deliberately NOT a menu item or button
@@ -2590,6 +2740,22 @@ function wireControls() {
     else if (!document.getElementById("logo-crop-overlay").hidden) closeLogoCropTool();
     else if (!document.getElementById("profile-overlay").hidden) closeProfile();
     else if (!document.getElementById("discord-chat-overlay").hidden) closeDiscordChat();
+  });
+
+  // Owner request: Tab previews the highlighted song on the Assignment screen instead of tabbing
+  // focus off into the page -- same action as clicking btn-clipper-assign-play. Only intercepts
+  // Tab while #clipper-assign is actually open and the trimmer isn't (Tab there would fight with
+  // the zoom/handle controls), and never while a text input/textarea has focus so normal
+  // browser-native field-to-field tabbing (e.g. clipper-assign-search) still works.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const assignPanel = document.getElementById("clipper-assign");
+    if (!assignPanel || assignPanel.hidden) return;
+    if (_trimTrigger || _trimForWhistle) return;
+    const active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
+    e.preventDefault();
+    document.getElementById("btn-clipper-assign-play")?.click();
   });
 }
 
@@ -3179,11 +3345,252 @@ function closeMyDownloads() {
 
 function openSoundBooth() {
   document.getElementById("sound-booth-overlay").hidden = false;
+  refreshSoundBoothSection();
+  refreshSoundBoothKnobs();
+  setSoundBoothPreviewButtonsIdle();
+  startSoundBoothMeters();
 }
 
 function closeSoundBooth() {
   document.getElementById("sound-booth-overlay").hidden = true;
   document.getElementById("soundbooth-info-popover").hidden = true;
+  stopSoundBoothMeters();
+}
+
+// ================================================================
+// SOUND BOOTH PLUGIN RACK (Session 32) -- rotary knob component, live IN/OUT
+// meters, tab strip, and Preview audition, restyled from an owner-supplied
+// plugin-UI reference but wired only to real AudioPlayer params. See the
+// Session 32 handoff doc for what's real vs. decorative in the reference.
+// ================================================================
+
+// Binding table: which bridge getter/setter/range each knob "param" maps to.
+// The hero knob is always "master-volume"; the context knob rebinds to
+// whichever of these the active pill selects.
+const SB_KNOB_PARAMS = {
+  "master-volume": { min: 0, max: 100, get: () => bridge.GetVolume(), set: (v) => bridge.SetVolume(v), label: "Master", unit: "%" },
+  "home-volume": { min: 0, max: 100, get: () => bridge.GetHomeVolume(), set: (v) => bridge.SetHomeVolume(v), label: "Home", unit: "%" },
+  "away-volume": { min: 0, max: 100, get: () => bridge.GetAwayVolume(), set: (v) => bridge.SetAwayVolume(v), label: "Away", unit: "%" },
+  "pa-volume": { min: 0, max: 100, get: () => bridge.GetPaVolume(), set: (v) => bridge.SetPaVolume(v), label: "PA", unit: "%" },
+  "whistle-volume": { min: 0, max: 100, get: () => bridge.GetWhistleVolume(), set: (v) => bridge.SetWhistleVolume(v), label: "Whistle", unit: "%" },
+  "fade-delay": { min: 0, max: 30, get: () => bridge.GetFadeDelay(), set: (v) => bridge.SetFadeDelay(v), label: "Fade", unit: "s" },
+};
+
+// -135deg to +135deg sweep, matching the reference's ~270 degree arc.
+const SB_KNOB_MIN_ANGLE = -135;
+const SB_KNOB_MAX_ANGLE = 135;
+
+function sbKnobAngleForValue(value, min, max) {
+  const t = max === min ? 0 : (value - min) / (max - min);
+  return SB_KNOB_MIN_ANGLE + t * (SB_KNOB_MAX_ANGLE - SB_KNOB_MIN_ANGLE);
+}
+
+function sbKnobArcPath(angleDeg) {
+  // Arc drawn from SB_KNOB_MIN_ANGLE up to the current angle, radius 42 centered at (50,50).
+  const r = 42;
+  const toXY = (deg) => {
+    const rad = ((deg - 90) * Math.PI) / 180;
+    return [50 + r * Math.cos(rad), 50 + r * Math.sin(rad)];
+  };
+  const [x1, y1] = toXY(SB_KNOB_MIN_ANGLE);
+  const [x2, y2] = toXY(angleDeg);
+  const largeArc = angleDeg - SB_KNOB_MIN_ANGLE > 180 ? 1 : 0;
+  return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+}
+
+function sbKnobRender(el, value, min, max, unit) {
+  const angle = sbKnobAngleForValue(value, min, max);
+  el.querySelector(".sb-knob-arc").setAttribute("d", sbKnobArcPath(angle));
+  el.querySelector(".sb-knob-indicator").style.transform = `rotate(${angle}deg)`;
+  el.querySelector(".sb-knob-value").textContent = Math.round(value);
+  if (unit !== undefined) el.querySelector(".sb-knob-unit").textContent = unit;
+  el.setAttribute("aria-valuenow", String(Math.round(value)));
+}
+
+// Turns a static .sb-knob element into a working drag/keyboard control bound to `paramKey`
+// (an SB_KNOB_PARAMS key). Returns a rebind(paramKey) function so context knobs can swap params.
+function initSoundBoothKnob(el, initialParamKey) {
+  let paramKey = initialParamKey;
+  let cfg = SB_KNOB_PARAMS[paramKey];
+  let value = cfg.min;
+  // BUG FIX: previously the arc/indicator stayed at their raw HTML `d=""`/unrotated state until
+  // the first async rebind() resolved -- if that rebind ever failed silently (or just hadn't
+  // finished yet), the knob showed as an unrendered blob instead of a valid (if default-valued)
+  // dial. Render immediately with the param's own min so there's always a real, visible knob.
+  sbKnobRender(el, value, cfg.min, cfg.max, cfg.unit);
+
+  const commit = debounce((v) => { try { cfg.set(v); } catch (err) { console.error("sb-knob set failed", err); } }, 70);
+
+  function setValue(v, { commitNow } = {}) {
+    value = Math.min(cfg.max, Math.max(cfg.min, v));
+    sbKnobRender(el, value, cfg.min, cfg.max);
+    if (commitNow) { try { cfg.set(value); } catch (err) { console.error("sb-knob set failed", err); } }
+    else commit(value);
+  }
+
+  async function rebind(newParamKey) {
+    paramKey = newParamKey;
+    cfg = SB_KNOB_PARAMS[paramKey];
+    el.setAttribute("aria-label", cfg.label);
+    el.setAttribute("aria-valuemax", String(cfg.max));
+    const label = el.parentElement?.querySelector(".sb-knob-label") || el.querySelector(".sb-knob-label");
+    if (label) label.textContent = cfg.label;
+    const infoBtn = el.querySelector(".sb-knob-info");
+    if (infoBtn) infoBtn.dataset.info = `knob-${paramKey}`;
+    try {
+      value = cfg.min;
+      const v = await cfg.get();
+      value = typeof v === "number" ? v : cfg.min;
+    } catch (err) { console.error("sb-knob get failed", err); }
+    sbKnobRender(el, value, cfg.min, cfg.max, cfg.unit);
+  }
+
+  let dragStartY = 0, dragStartValue = 0;
+  el.addEventListener("pointerdown", (e) => {
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("dragging");
+    dragStartY = e.clientY;
+    dragStartValue = value;
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!el.classList.contains("dragging")) return;
+    const deltaY = dragStartY - e.clientY; // drag up = increase
+    const range = cfg.max - cfg.min;
+    const next = dragStartValue + (deltaY / 160) * range;
+    setValue(next);
+  });
+  const endDrag = (e) => {
+    if (!el.classList.contains("dragging")) return;
+    el.classList.remove("dragging");
+    setValue(value, { commitNow: true });
+  };
+  el.addEventListener("pointerup", endDrag);
+  el.addEventListener("pointercancel", endDrag);
+  el.addEventListener("keydown", (e) => {
+    const step = e.key === "PageUp" || e.key === "PageDown" ? (cfg.max - cfg.min) / 10 : 1;
+    if (e.key === "ArrowUp" || e.key === "ArrowRight" || e.key === "PageUp") { setValue(value + step, { commitNow: true }); e.preventDefault(); }
+    else if (e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "PageDown") { setValue(value - step, { commitNow: true }); e.preventDefault(); }
+    else if (e.key === "Home") { setValue(cfg.min, { commitNow: true }); e.preventDefault(); }
+    else if (e.key === "End") { setValue(cfg.max, { commitNow: true }); e.preventDefault(); }
+  });
+
+  return { rebind, getParamKey: () => paramKey };
+}
+
+let _sbHeroKnob = null;
+let _sbContextKnob = null;
+
+function initSoundBoothRack() {
+  const contextEl = document.getElementById("sb-knob-context");
+  try {
+    const heroEl = document.getElementById("sb-knob-master");
+    if (!heroEl || !contextEl) { console.error("initSoundBoothRack: knob elements missing from DOM"); return; }
+    _sbHeroKnob = initSoundBoothKnob(heroEl, "master-volume");
+    _sbContextKnob = initSoundBoothKnob(contextEl, "home-volume");
+  } catch (err) {
+    // Whatever broke the knobs before this fix likely threw somewhere in here -- log it instead
+    // of letting it die silently (F12 DevTools is suppressed app-wide, see
+    // AreBrowserAcceleratorKeysEnabled in WebMainForm.cs, so this console.error is the only trace).
+    console.error("initSoundBoothRack failed", err);
+    return;
+  }
+
+  document.querySelectorAll("#sb-knob-context-pills .sb-tile").forEach((pill) => {
+    pill.addEventListener("click", async () => {
+      if (pill.classList.contains("active")) return;
+      document.querySelectorAll("#sb-knob-context-pills .sb-tile").forEach((p) => p.classList.remove("active"));
+      pill.classList.add("active");
+      contextEl.classList.add("rebinding");
+      await _sbContextKnob.rebind(pill.dataset.param);
+      contextEl.classList.remove("rebinding");
+    });
+  });
+
+  document.querySelectorAll(".soundbooth-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".soundbooth-tab").forEach((t) => {
+        t.classList.remove("active");
+        t.setAttribute("aria-selected", "false");
+      });
+      tab.classList.add("active");
+      tab.setAttribute("aria-selected", "true");
+      const target = tab.dataset.sbTab;
+      document.querySelectorAll(".soundbooth-tab-panel").forEach((panel) => {
+        panel.hidden = panel.dataset.sbPanel !== target;
+      });
+      document.getElementById("soundbooth-info-popover").hidden = true;
+    });
+  });
+
+  document.querySelectorAll(".soundbooth-preview-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const playing = btn.classList.contains("previewing");
+      if (playing) {
+        bridge?.StopPreview();
+        setSoundBoothPreviewButtonsIdle();
+        return;
+      }
+      setSoundBoothPreviewButtonsIdle();
+      btn.classList.add("previewing");
+      btn.textContent = _clipperAssignSelectedName ? `⏹ Stop (${_clipperAssignSelectedName})` : "⏹ Stop";
+      try {
+        // Prefer whatever song is highlighted on the Assignment screen (same selection
+        // btn-clipper-assign-play uses) so people can hear their own clip run through the
+        // reverb/EQ/effects rack instead of only the canned "score" test cue -- falls back to
+        // the fixed test event when Sound Booth is opened with nothing selected.
+        if (_clipperAssignSelectedPath) await bridge?.PreviewLocalFile(_clipperAssignSelectedPath);
+        else await bridge?.PreviewEvent(btn.dataset.previewTrigger || "score");
+      } catch (err) { console.error("Sound Booth preview failed", err); }
+    });
+  });
+}
+
+function setSoundBoothPreviewButtonsIdle() {
+  document.querySelectorAll(".soundbooth-preview-btn").forEach((b) => {
+    b.classList.remove("previewing");
+    b.textContent = _clipperAssignSelectedName ? `▶ Preview (${_clipperAssignSelectedName})` : "▶ Preview";
+  });
+}
+
+async function refreshSoundBoothKnobs() {
+  if (!bridge || !_sbHeroKnob || !_sbContextKnob) return;
+  try { await _sbHeroKnob.rebind("master-volume"); } catch (err) { console.error("hero knob refresh failed", err); }
+  try { await _sbContextKnob.rebind(_sbContextKnob.getParamKey()); } catch (err) { console.error("context knob refresh failed", err); }
+}
+
+let _sbMeterPollHandle = null;
+
+function startSoundBoothMeters() {
+  stopSoundBoothMeters();
+  const inEl = document.getElementById("sb-meter-in")?.querySelector(".sb-meter-fill");
+  const outEl = document.getElementById("sb-meter-out")?.querySelector(".sb-meter-fill");
+  if (!inEl || !outEl || !bridge) return;
+  const poll = async () => {
+    try {
+      const raw = await bridge.GetCurrentLevels();
+      const lv = JSON.parse(raw);
+      inEl.style.height = `${Math.round(Math.min(1, lv.in) * 100)}%`;
+      outEl.style.height = `${Math.round(Math.min(1, lv.out) * 100)}%`;
+      document.getElementById("sb-meter-in")?.classList.remove("meter-idle");
+      document.getElementById("sb-meter-out")?.classList.remove("meter-idle");
+    } catch (err) {
+      // GetCurrentLevels missing/failing (e.g. an older build without the metering bridge
+      // method) -- fall back to a dimmed, static "no live signal" state instead of erroring.
+      document.getElementById("sb-meter-in")?.classList.add("meter-idle");
+      document.getElementById("sb-meter-out")?.classList.add("meter-idle");
+      inEl.style.height = "4%";
+      outEl.style.height = "4%";
+    }
+  };
+  poll();
+  _sbMeterPollHandle = setInterval(poll, 100);
+}
+
+function stopSoundBoothMeters() {
+  if (_sbMeterPollHandle) {
+    clearInterval(_sbMeterPollHandle);
+    _sbMeterPollHandle = null;
+  }
 }
 
 // Owner report: My Downloads had no way back to The Bandroom except closing everything and
@@ -4266,6 +4673,108 @@ let _clipperAssignLibrary = null; // cached [{name, path}], same list for every 
 let _clipperAssignSelectedPath = null;
 let _clipperAssignSelectedName = null;
 let _clipperAssignMode = "event"; // "event" (assign/trim a situation's clip) | "whistle" (pick+trim the lead-in whistle)
+// Owner request: default to just this team's Sound Bank (source "default") instead of every
+// source dumped together -- "all" and the individual source names (see CLIPPER_ASSIGN_SOURCE_*
+// below) are one pill-click away, not hidden. Resets to "default" every time the panel opens
+// (openClipperAssign) so leaving it on "All Songs" for one event doesn't silently carry over and
+// hide the Sound Bank on the next.
+let _clipperAssignFilter = "default";
+let _clipperAssignFiltersBound = false;
+
+// "Browse another team's Sound Bank" -- separate from the pill filter above (which only ever
+// scopes to state.activeTeam's own pack). Only one browsed team stacks at a time; picking a new
+// one replaces the last so the list doesn't grow unbounded across a long session. Rendered as its
+// own always-visible section (see renderClipperAssignList) regardless of which pill is active,
+// since browsing a team is an explicit action independent of the source filter.
+let _clipperBrowsedTeam = null;
+let _clipperBrowsedSongs = [];
+let _clipperPackTeams = null; // cached [{Team, Conference}], loaded once from bridge.GetDefaultPackTeams()
+let _clipperBrowseTeamBound = false;
+
+function initClipperAssignFilters() {
+  if (_clipperAssignFiltersBound) return;
+  _clipperAssignFiltersBound = true;
+  document.getElementById("clipper-assign-filters").addEventListener("click", (e) => {
+    const btn = e.target.closest(".clipper-assign-filter");
+    if (!btn) return;
+    document.querySelectorAll(".clipper-assign-filter").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    _clipperAssignFilter = btn.dataset.filter;
+    renderClipperAssignList(document.getElementById("clipper-assign-search")?.value || "");
+  });
+}
+
+/// "Browse another team's Sound Bank" popover -- lists every team with a pack slice on disk
+/// (bridge.GetDefaultPackTeams, cached after first load) so a song can be found in a different
+/// school's collection for the event currently being assigned. Picking a team fetches that team's
+/// songs the same way the default pill already does (bridge.GetDefaultPackSongsForTeam) and folds
+/// them into the Assign list as their own section -- see renderClipperAssignList.
+function wireBrowseOtherTeamSoundBank() {
+  if (_clipperBrowseTeamBound) return;
+  _clipperBrowseTeamBound = true;
+
+  const btn = document.getElementById("btn-clipper-browse-other-team");
+  const popover = document.getElementById("clipper-browse-team-popover");
+  const search = document.getElementById("clipper-browse-team-search");
+
+  btn.addEventListener("click", async () => {
+    const opening = popover.hidden;
+    popover.hidden = !opening;
+    if (!opening) return;
+    search.value = "";
+    search.focus();
+    if (!_clipperPackTeams) {
+      try {
+        _clipperPackTeams = bridge ? JSON.parse(await bridge.GetDefaultPackTeams()) : [];
+      } catch (err) {
+        console.error("GetDefaultPackTeams failed", err);
+        _clipperPackTeams = [];
+      }
+    }
+    renderClipperBrowseTeamList("");
+  });
+  search.addEventListener("input", (e) => renderClipperBrowseTeamList(e.target.value));
+}
+
+function renderClipperBrowseTeamList(filter) {
+  const list = document.getElementById("clipper-browse-team-list");
+  const q = filter.toLowerCase().trim();
+  const teams = (_clipperPackTeams || []).filter((t) => !q || t.Team.toLowerCase().includes(q));
+  list.innerHTML = "";
+  if (!teams.length) {
+    list.innerHTML = `<div class="clipper-browse-team-empty">No teams found${q ? " for that search" : " -- the Default Song Pack may not be downloaded yet"}.</div>`;
+    return;
+  }
+  for (const t of teams) {
+    const row = document.createElement("div");
+    row.className = "clipper-browse-team-row";
+    row.innerHTML = `<span>${t.Team}</span><span class="clipper-browse-team-row-conf">${t.Conference}</span>`;
+    row.addEventListener("click", () => pickBrowseTeam(t.Team));
+    list.appendChild(row);
+  }
+}
+
+async function pickBrowseTeam(teamName) {
+  document.getElementById("clipper-browse-team-popover").hidden = true;
+  if (!bridge) return;
+  try {
+    const songs = (JSON.parse(await bridge.GetDefaultPackSongsForTeam(teamName)) || [])
+      .map((s) => ({ ...s, source: "browsed" }));
+    _clipperBrowsedTeam = teamName;
+    _clipperBrowsedSongs = songs;
+  } catch (err) {
+    console.error("GetDefaultPackSongsForTeam (browse) failed", err);
+    showToast(`Couldn't load ${teamName}'s Sound Bank -- try again.`);
+    return;
+  }
+  renderClipperAssignList(document.getElementById("clipper-assign-search")?.value || "");
+}
+
+function clearBrowsedTeam() {
+  _clipperBrowsedTeam = null;
+  _clipperBrowsedSongs = [];
+  renderClipperAssignList(document.getElementById("clipper-assign-search")?.value || "");
+}
 
 async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode = "event") {
   // Switching events (or into whistle mode) while the inline trimmer was left open for a
@@ -4289,6 +4798,10 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode
   document.getElementById("clipper-assign-current").textContent =
     mode === "whistle" ? "Pick a song below, then Trim... it down to your whistle sound." : currentFileName ? `Current: ${currentFileName}` : "Current: (none assigned)";
   document.getElementById("clipper-assign-search").value = "";
+  initClipperAssignFilters();
+  wireBrowseOtherTeamSoundBank();
+  _clipperAssignFilter = "default";
+  document.querySelectorAll(".clipper-assign-filter").forEach((b) => b.classList.toggle("active", b.dataset.filter === "default"));
   document.getElementById("btn-clipper-assign-select").disabled = true;
   document.getElementById("btn-clipper-assign-select").hidden = mode === "whistle";
   document.getElementById("btn-clipper-assign-clear").hidden = mode === "whistle";
@@ -4361,11 +4874,17 @@ const CLIPPER_ASSIGN_SOURCE_ORDER = ["marketplace", "trimmed", "local", "uploade
 function buildClipperAssignRow(item, list) {
   const row = document.createElement("div");
   row.className = "clipper-assign-row";
-  row.title = item.path;
+  // Sound Bank songs are named after the EventKey slot they auto-filled ("Defense_Third Down_5"),
+  // not the actual song -- but pack files generally carry a real ID3 Title tag (see
+  // ReadAudioTitleTag in WebMainForm.cs) that's far more useful to show. Falls back to the
+  // filename-derived name/category for files with no tag or non-pack sources that never had one.
+  // The real filename always stays in the tooltip so it's still identifiable/searchable.
+  const displayLabel = item.title || item.name;
+  row.title = item.title ? `${item.title}\n${item.name}` : item.path;
 
   const name = document.createElement("span");
   name.className = "clipper-assign-row-name";
-  name.textContent = item.name;
+  name.textContent = displayLabel;
   row.appendChild(name);
 
   // Condensed per-row transport -- same Play/Stop the toolbar above already does (just
@@ -4439,20 +4958,52 @@ function renderClipperAssignList(filter) {
   const list = document.getElementById("clipper-assign-list");
   list.innerHTML = "";
   const q = filter.toLowerCase().trim();
-  const items = (_clipperAssignLibrary || []).filter((it) => !q || it.name.toLowerCase().includes(q));
+  let items = (_clipperAssignLibrary || []).filter((it) => !q || it.name.toLowerCase().includes(q));
+  if (_clipperAssignFilter !== "all") {
+    items = items.filter((it) => (it.source || "uploaded") === _clipperAssignFilter);
+  }
   if (!items.length) {
-    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No songs found${q ? " for that search" : " in the Songs library"}.</div>`;
-    return;
+    // Sound Bank pill specifically empty (vs. a real "no songs anywhere" or "no search matches")
+    // gets its own nudge toward "All Songs" instead of just reading as broken -- this is the
+    // pill someone lands on by default every time they open an event.
+    const hint = _clipperAssignFilter === "default" && !q
+      ? ` -- this team's Sound Bank may not be loaded yet. Try "All Songs".`
+      : q ? " for that search" : " in the Songs library";
+    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No songs found${hint}.</div>`;
+  } else {
+    const sources = _clipperAssignFilter === "all" ? CLIPPER_ASSIGN_SOURCE_ORDER : [_clipperAssignFilter];
+    for (const source of sources) {
+      const group = items.filter((it) => (it.source || "uploaded") === source);
+      if (!group.length) continue;
+      if (sources.length > 1) {
+        const header = document.createElement("div");
+        header.className = "clipper-assign-section-label";
+        header.textContent = `${CLIPPER_ASSIGN_SOURCE_LABELS[source]} (${group.length})`;
+        list.appendChild(header);
+      }
+      for (const item of group) list.appendChild(buildClipperAssignRow(item, list));
+    }
   }
 
-  for (const source of CLIPPER_ASSIGN_SOURCE_ORDER) {
-    const group = items.filter((it) => (it.source || "uploaded") === source);
-    if (!group.length) continue;
+  // Browsed-team section (see wireBrowseOtherTeamSoundBank) -- always rendered when present,
+  // independent of the pill filter above, since browsing another team is an explicit separate
+  // action. Still respects the search box so typing narrows this section too.
+  if (_clipperBrowsedTeam) {
+    const browsedItems = _clipperBrowsedSongs.filter((it) => !q || it.name.toLowerCase().includes(q) || (it.title || "").toLowerCase().includes(q));
     const header = document.createElement("div");
     header.className = "clipper-assign-section-label";
-    header.textContent = `${CLIPPER_ASSIGN_SOURCE_LABELS[source]} (${group.length})`;
+    header.innerHTML = `Default Song Pack -- ${_clipperBrowsedTeam} (${browsedItems.length}) <button class="icon-btn" id="btn-clear-browsed-team" title="Stop browsing ${_clipperBrowsedTeam}'s Sound Bank" style="float:right;">&times;</button>`;
     list.appendChild(header);
-    for (const item of group) list.appendChild(buildClipperAssignRow(item, list));
+    header.querySelector("#btn-clear-browsed-team").addEventListener("click", (e) => { e.stopPropagation(); clearBrowsedTeam(); });
+    if (browsedItems.length) {
+      for (const item of browsedItems) list.appendChild(buildClipperAssignRow(item, list));
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "clipper-assign-row";
+      empty.style.cursor = "default";
+      empty.textContent = q ? "No songs found for that search." : `${_clipperBrowsedTeam} has no Sound Bank songs.`;
+      list.appendChild(empty);
+    }
   }
 }
 
@@ -4476,6 +5027,14 @@ let _trimEndSec = 0;
 let _trimAudio = null;
 let _trimAudioCtx = null;
 let _trimDragHandle = null; // "start" | "end" | null
+// Zoom (owner request): canvas.width attribute stays the drawing-buffer resolution, but its
+// CSS width scales with zoom while #clipper-trim-viewport scrolls -- widening the same 0..duration
+// range across more on-screen pixels is what makes handle-dragging more precise, no re-decode
+// of the audio needed since trimHandleAt/trimSecAt already work purely off getBoundingClientRect
+// fractions, which stay correct at any canvas width.
+const TRIM_CANVAS_BASE_WIDTH = 900;
+const TRIM_MAX_ZOOM = 8;
+let _trimZoom = 1;
 
 async function openInlineTrimmer(trigger, isPa, overridePath) {
   if (!bridge) return;
@@ -4506,7 +5065,7 @@ async function openInlineTrimmer(trigger, isPa, overridePath) {
   _trimSourceName = result.fileName;
   document.getElementById("clipper-trim-filename").textContent = result.fileName;
   updateTrimLabels();
-  drawTrimCanvas();
+  setTrimZoom(1);
 
   loadTrimWaveform(result.url);
 }
@@ -4540,7 +5099,7 @@ async function openInlineTrimmerForWhistle(path, fileName) {
   _trimSourceName = result.fileName || fileName;
   document.getElementById("clipper-trim-filename").textContent = result.fileName || fileName;
   updateTrimLabels();
-  drawTrimCanvas();
+  setTrimZoom(1);
 
   loadTrimWaveform(result.url);
 }
@@ -4553,6 +5112,13 @@ function closeInlineTrimmer() {
   _trimUrl = null;
   _trimPeaks = null;
   _trimDecodeFailed = false;
+  // Leftover start/end/zoom from the closed session used to survive until the NEXT openInlineTrimmer
+  // call reset them -- harmless while nothing else read them, but the new Tab-to-preview shortcut and
+  // any other code that might fire between close and the next open should never see a stale range.
+  _trimStartSec = 0;
+  _trimEndSec = 0;
+  _trimDragHandle = null;
+  setTrimZoom(1);
   document.getElementById("clipper-assign-list").hidden = false;
   document.getElementById("clipper-trim-panel").hidden = true;
   document.getElementById("clipper-assign-actions-default").hidden = false;
@@ -4641,6 +5207,30 @@ function drawTrimCanvas() {
   ctx.fillRect(Math.min(w - 2, endX - 1), 0, 2, h);
 }
 
+function setTrimZoom(zoom) {
+  _trimZoom = Math.max(1, Math.min(TRIM_MAX_ZOOM, zoom));
+  const canvas = document.getElementById("clipper-trim-canvas");
+  const label = document.getElementById("clipper-trim-zoom-label");
+  if (!canvas) return;
+  const px = Math.round(TRIM_CANVAS_BASE_WIDTH * _trimZoom);
+  canvas.width = px; // drawing buffer -- keeps waveform bars crisp instead of CSS-upscaling a 900px buffer
+  canvas.style.width = _trimZoom === 1 ? "100%" : `${px}px`;
+  if (label) label.textContent = `${Math.round(_trimZoom * 100)}%`;
+  drawTrimCanvas();
+}
+
+/// Keeps whichever handle was just dragged in view after a zoom change -- without this, zooming
+/// in centers on the viewport's current scroll position (usually the start of the clip) and the
+/// end handle you were trying to get more precision on can scroll off-screen.
+function scrollTrimHandleIntoView(handle) {
+  const viewport = document.getElementById("clipper-trim-viewport");
+  const canvas = document.getElementById("clipper-trim-canvas");
+  if (!viewport || !canvas || _trimDurationSec <= 0) return;
+  const sec = handle === "end" ? _trimEndSec : _trimStartSec;
+  const targetX = (sec / _trimDurationSec) * canvas.getBoundingClientRect().width;
+  viewport.scrollLeft = Math.max(0, targetX - viewport.clientWidth / 2);
+}
+
 function trimHandleAt(canvas, clientX) {
   const rect = canvas.getBoundingClientRect();
   const x = clientX - rect.left;
@@ -4687,10 +5277,30 @@ function stopTrimPreview() {
 
 function wireInlineTrimmer() {
   const canvas = document.getElementById("clipper-trim-canvas");
-  if (!canvas) return;
+  const viewport = document.getElementById("clipper-trim-viewport");
+  if (!canvas || !viewport) return;
 
-  const startDrag = (clientX) => { _trimDragHandle = trimHandleAt(canvas, clientX); };
+  // Panning (owner request): dragging empty waveform space (not a start/end handle) scrolls the
+  // viewport horizontally when zoomed in, same convention as a DAW waveform -- click a handle to
+  // trim, click-drag anywhere else to pan. Only kicks in once zoom > 1 makes panning meaningful.
+  let _trimPanning = false;
+  let _trimPanStartX = 0;
+  let _trimPanStartScroll = 0;
+
+  const startDrag = (clientX) => {
+    _trimDragHandle = trimHandleAt(canvas, clientX);
+    if (!_trimDragHandle && _trimZoom > 1) {
+      _trimPanning = true;
+      _trimPanStartX = clientX;
+      _trimPanStartScroll = viewport.scrollLeft;
+      canvas.style.cursor = "grabbing";
+    }
+  };
   const moveDrag = (clientX) => {
+    if (_trimPanning) {
+      viewport.scrollLeft = _trimPanStartScroll - (clientX - _trimPanStartX);
+      return;
+    }
     if (!_trimDragHandle) return;
     const sec = trimSecAt(canvas, clientX);
     if (_trimDragHandle === "start") _trimStartSec = Math.max(0, Math.min(sec, _trimEndSec - 0.1));
@@ -4701,6 +5311,7 @@ function wireInlineTrimmer() {
   const endDrag = () => {
     const wasEnd = _trimDragHandle === "end";
     _trimDragHandle = null;
+    if (_trimPanning) { _trimPanning = false; canvas.style.cursor = "pointer"; }
     if (wasEnd) previewTrimEndTail();
   };
 
@@ -4713,6 +5324,25 @@ function wireInlineTrimmer() {
 
   document.getElementById("btn-trim-preview").addEventListener("click", () => playTrimRange(_trimStartSec, _trimEndSec));
   document.getElementById("btn-trim-stop").addEventListener("click", stopTrimPreview);
+
+  document.getElementById("btn-trim-zoom-in").addEventListener("click", () => {
+    setTrimZoom(_trimZoom * 2);
+    scrollTrimHandleIntoView(_trimDragHandle === "end" ? "end" : "start");
+  });
+  document.getElementById("btn-trim-zoom-out").addEventListener("click", () => setTrimZoom(_trimZoom / 2));
+  document.getElementById("btn-trim-zoom-reset").addEventListener("click", () => {
+    setTrimZoom(1);
+    viewport.scrollLeft = 0;
+  });
+  // Ctrl+wheel zooms (same convention as every other zoomable canvas in this app). Plain wheel
+  // pans horizontally -- overflow-x:auto alone only responds to a real horizontal scroll device
+  // (shift+wheel/trackpad), so a normal vertical mouse wheel would otherwise do nothing useful
+  // here since the viewport has no vertical overflow to scroll.
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    if (e.ctrlKey) setTrimZoom(_trimZoom * (e.deltaY < 0 ? 1.4 : 1 / 1.4));
+    else viewport.scrollLeft += e.deltaY;
+  }, { passive: false });
 
   document.getElementById("btn-trim-save").addEventListener("click", async () => {
     if (!_trimTrigger || !bridge) return;
@@ -4790,6 +5420,48 @@ function initClipperAssign() {
     await refreshCategories();
     if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
     await afterClipperAssignAction(trigger, true, songName);
+  });
+
+  // Batch "Add Songs..." -- owner request: pick several files at once instead of repeating
+  // Browse for file... one at a time. Just adds them to the library (same
+  // ConfigStore.ImportIntoSongsLibrary copy-in Browse uses); doesn't assign any of them to the
+  // current trigger -- the user still picks from the (now-updated) list below like normal.
+  document.getElementById("btn-clipper-assign-add-songs")?.addEventListener("click", async () => {
+    if (!bridge) return;
+    const btn = document.getElementById("btn-clipper-assign-add-songs");
+    btn.disabled = true;
+    try {
+      const raw = await bridge.AddSongsBatch();
+      const result = JSON.parse(raw);
+      if (result.addedCount === 0 && (!result.failedNames || result.failedNames.length === 0)) return; // cancelled picker
+      // Refetch + re-render the list only -- NOT the full openClipperAssign, which would
+      // overwrite the "for <event name>"/"Current: <file>" labels with blanks since this handler
+      // has no data for either of those (same bug class as the songpackready live-refresh above).
+      _clipperAssignLibrary = null;
+      const team = state.activeTeam;
+      const [localJson, packJson, conferenceJson] = await Promise.all([
+        bridge.GetTrackLibrary(),
+        team ? bridge.GetDefaultPackSongsForTeam(team) : Promise.resolve("[]"),
+        team ? bridge.GetConferencePackSongsForTeam(team) : Promise.resolve("[]"),
+      ]);
+      const local = JSON.parse(localJson) || [];
+      const pack = (JSON.parse(packJson) || []).map((s) => ({ ...s, source: "default" }));
+      const conference = (JSON.parse(conferenceJson) || []).map((s) => ({ ...s, source: "default" }));
+      const seenPaths = new Set(local.map((it) => it.path));
+      const packAndConference = [...pack, ...conference].filter((it) => !seenPaths.has(it.path));
+      for (const it of packAndConference) seenPaths.add(it.path);
+      _clipperAssignLibrary = [...local, ...packAndConference];
+      renderClipperAssignList(document.getElementById("clipper-assign-search")?.value || "");
+      const failed = result.failedNames?.length
+        ? ` (${result.failedNames.length} failed: ${result.failedNames.join(", ")})`
+        : "";
+      showToast(`Added ${result.addedCount} song${result.addedCount === 1 ? "" : "s"}.${failed}`);
+    } catch (err) {
+      console.error("AddSongsBatch failed", err);
+      showToast("Couldn't add those songs -- try again.");
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   document.getElementById("btn-clipper-assign-trim").addEventListener("click", async () => {
@@ -4870,6 +5542,7 @@ function initDefaultSongPackPrompt() {
   const progressSub = document.getElementById("songpack-progress-sub");
   const fileLog = document.getElementById("songpack-progress-filelog");
   const doneActions = document.getElementById("songpack-progress-done-actions");
+  const locateBtn = document.getElementById("btn-songpack-progress-locate");
   const skipFutureCheckbox = document.getElementById("songpack-progress-skip-future");
   // try/catch, not a bare call -- every other localStorage usage in this file is guarded the same
   // way (WebView2's storage can throw depending on profile/permissions setup), and this one sits
@@ -4878,10 +5551,26 @@ function initDefaultSongPackPrompt() {
   let popupsSkipped = false;
   try { popupsSkipped = localStorage.getItem(SONGPACK_POPUP_SKIP_KEY) === "1"; } catch (err) { console.error("localStorage read failed", err); }
 
+  // Which team(s) the most recent import actually populated -- set right before doneActions
+  // shows in the bandroom:songpackready handler below, so "Go to Sound Bank" can jump straight
+  // there instead of just reporting a folder path in text (owner report: imports gave no way to
+  // actually see what landed).
+  let lastImportedTeams = [];
+
   document.getElementById("btn-songpack-progress-done").addEventListener("click", () => {
     progressOverlay.hidden = true;
     popupsSkipped = skipFutureCheckbox.checked;
     try { localStorage.setItem(SONGPACK_POPUP_SKIP_KEY, popupsSkipped ? "1" : "0"); } catch (err) { console.error("localStorage write failed", err); }
+  });
+  locateBtn.addEventListener("click", async () => {
+    progressOverlay.hidden = true;
+    // NOT openTeamSoundBank -- that's the marketplace-uploads grid, a different data source from
+    // what a default-pack import actually touches (see the songpackready handler's comment on
+    // this). The imported songs land directly in this team's event slots, so switching to the
+    // team and letting selectTeam's refreshCategories() run is what actually shows them.
+    if (lastImportedTeams.length >= 1) {
+      await selectTeam(lastImportedTeams[0]);
+    }
   });
 
   (async () => {
@@ -5014,6 +5703,36 @@ function initDefaultSongPackPrompt() {
       ? `${specific}${folderLine}`
       : `Every team can now auto-fill any situation you haven't already assigned a song to yourself -- it never overwrites your own picks.${folderLine}`;
     refreshCategories?.();
+    // BUG FIX: _clipperAssignLibrary is fetched once and cached (see openClipperAssign) --
+    // previously only invalidated on a team switch, never after an import. A song pack imported
+    // via "Import from Folder"/"Load All" would never show up in the Assign panel's song list
+    // (even after searching) until the user happened to switch teams and back. Null it here so
+    // the next openClipperAssign call re-fetches the library fresh, picking up the new files.
+    _clipperAssignLibrary = null;
+    // If the Assign panel happens to already be open (import triggered from inside it via
+    // "Import Song Pack"), refetch and re-render its list live instead of leaving stale/missing
+    // results on screen until the panel is closed and reopened. Re-render only -- doesn't touch
+    // openClipperAssign's other meta text (event name/current-assignment labels), which this
+    // event has no data for.
+    if (!document.getElementById("clipper-assign")?.hidden && bridge) {
+      try {
+        const team = state.activeTeam;
+        const [localJson, packJson, conferenceJson] = await Promise.all([
+          bridge.GetTrackLibrary(),
+          team ? bridge.GetDefaultPackSongsForTeam(team) : Promise.resolve("[]"),
+          team ? bridge.GetConferencePackSongsForTeam(team) : Promise.resolve("[]"),
+        ]);
+        const local = JSON.parse(localJson) || [];
+        const pack = (JSON.parse(packJson) || []).map((s) => ({ ...s, source: "default" }));
+        const conference = (JSON.parse(conferenceJson) || []).map((s) => ({ ...s, source: "default" }));
+        const seenPaths = new Set(local.map((it) => it.path));
+        const packAndConference = [...pack, ...conference].filter((it) => !seenPaths.has(it.path));
+        for (const it of packAndConference) seenPaths.add(it.path);
+        _clipperAssignLibrary = [...local, ...packAndConference];
+        renderClipperAssignList(document.getElementById("clipper-assign-search")?.value || "");
+      } catch (err) { console.error("Live clipper library refresh after import failed", err); }
+    }
+    lastImportedTeams = Array.isArray(e.detail?.teamNames) ? e.detail.teamNames : [];
     if (popupsSkipped) {
       showToast(specific || "Song pack imported.");
       return;
@@ -5026,6 +5745,7 @@ function initDefaultSongPackPrompt() {
     progressSub.textContent = fullMessage;
     skipFutureCheckbox.checked = false;
     doneActions.hidden = false;
+    locateBtn.hidden = lastImportedTeams.length === 0;
     progressOverlay.hidden = false;
   });
   window.addEventListener("bandroom:songpackfailed", () => {
@@ -5876,8 +6596,25 @@ function openMatchupDialog() {
   overlay.hidden = false;
   renderMatchupCoverflow("home", "");
   renderMatchupCoverflow("away", "");
+  renderMatchupSideGrid("home", "");
+  renderMatchupSideGrid("away", "");
   updateMatchupSubtext();
   loadScorebugSwitcher();
+  // No re-fetch needed here -- applyBigGameEnabled (see wireBigGameSection) already keeps
+  // #toggle-matchup-big-game in sync with the real setting the moment it's loaded at startup
+  // (refreshBigGameSection) or changed by any of the three Big Game controls.
+}
+
+/// Fast vertical scrub list beside each side's coverflow (owner request) -- same click-to-select
+/// convention as the sidebar team grid (renderTeamGridInto), not the coverflow's browse-to-center
+/// pattern. Picking a team here re-centers that side's coverflow on it too, so both stay in sync
+/// no matter which one you used.
+function renderMatchupSideGrid(side, filter) {
+  renderTeamGridInto(`matchup-${side}-side-grid`, filter, (name) => {
+    if (side === "home") state.matchupHome = name; else state.matchupAway = name;
+    renderMatchupCoverflow(side, document.getElementById(`matchup-${side}-search`)?.value || "");
+    renderMatchupSideGrid(side, filter);
+  });
 }
 
 // ---- Scorebug switcher (matchup screen pill + arrows) -----------------------------------
@@ -6480,6 +7217,28 @@ function renderMatchupCoverflow(side, filter) {
   updateMatchupSubtext();
 }
 
+/// Owner request: mouse-wheel scrolling through the coverflow pickers (Set Matchup, Choose a
+/// Team), as smooth/responsive as the left-side team grid's native scroll. The coverflow itself
+/// isn't a real scroll container -- it's a fixed 5-tile window re-centered on an index (see
+/// renderMatchupCoverflow/renderTeamPickerCoverflow) -- so "scrolling" here means stepping that
+/// index one team per wheel notch via the same shift function the arrow buttons already call,
+/// throttled to the tiles' own 0.22s CSS transition (style.css .coverflow-track .team-swatch) so
+/// a fast trackpad fling steps cleanly through teams instead of skipping dozens at once.
+function wireCoverflowWheel(track, shiftFn) {
+  if (!track) return;
+  const container = track.closest(".matchup-column, .coverflow-stage") || track;
+  let lastShift = 0;
+  container.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const now = performance.now();
+    if (now - lastShift < 220) return; // one step per tile-transition, not one per wheel tick
+    lastShift = now;
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (delta === 0) return;
+    shiftFn(delta > 0 ? 1 : -1);
+  }, { passive: false });
+}
+
 function shiftCoverflow(side, dir) {
   const filter = document.getElementById(`matchup-${side}-search`)?.value || "";
   const teams = matchupCoverflowTeams(filter);
@@ -6772,8 +7531,56 @@ async function maybeShowWhatsNew() {
   if (seen === entries[0].title) return;
 
   _whatsNewEntries = entries;
-  setTimeout(showWhatsNew, 600);
+  setTimeout(showWhatsNewWhenClear, 600);
 }
+
+// Every other overlay in this app is opened by a direct user action (click a button), so two
+// of them landing open at once was never a real risk until this one: it's the only overlay that
+// pops itself open on a blind timer with no user action behind it. BUG FIX: if the user opened
+// something else (Save Profile, Matchup, etc.) in that 600ms window, both used to render stacked
+// on top of each other. Now it waits for whatever's open to close first, checking every 500ms,
+// rather than barging in on top of it.
+const WHATS_NEW_BLOCKING_OVERLAY_IDS = [
+  "save-profile-overlay", "matchup-overlay", "bandroom-upload-overlay", "load-profile-overlay",
+  "logo-crop-overlay", "bg-crop-overlay", "auto-assign-confirm-overlay", "auto-assign-summary-overlay",
+  "quick-load-confirm-overlay", "track-info-overlay", "team-picker-overlay", "bandroom-overlay",
+  "my-downloads-overlay", "sound-booth-overlay", "profile-overlay", "onboarding-overlay",
+  "add-school-overlay", "import-target-team-overlay", "songpack-prompt-overlay",
+  "songpack-import-overlay", "songpack-progress-overlay",
+];
+function showWhatsNewWhenClear() {
+  const anyOpen = WHATS_NEW_BLOCKING_OVERLAY_IDS.some((id) => {
+    const el = document.getElementById(id);
+    return el && !el.hidden;
+  });
+  if (anyOpen) { setTimeout(showWhatsNewWhenClear, 500); return; }
+  showWhatsNew();
+}
+
+// BUG FIX: the check above only stops What's New from opening ONTO something else -- it does
+// nothing for the reverse case, where What's New is ALREADY open (shown at launch, before the
+// user had touched anything, so nothing was "open" yet to block it) and the user hasn't
+// dismissed it yet when they open Save Profile or any other dialog. Every one of those ~20
+// dialogs sets `.hidden = false` directly at dozens of call sites across this file -- rather
+// than touch every one of them, watch the `hidden` attribute on each blocking overlay and
+// auto-close What's New the instant any of them becomes visible while it's still up.
+(() => {
+  const whatsNewOverlay = document.getElementById("whats-new-overlay");
+  if (!whatsNewOverlay) return;
+  const observer = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      const el = m.target;
+      if (el.id !== "whats-new-overlay" && !el.hidden && !whatsNewOverlay.hidden) {
+        dismissWhatsNew();
+        return;
+      }
+    }
+  });
+  for (const id of WHATS_NEW_BLOCKING_OVERLAY_IDS) {
+    const el = document.getElementById(id);
+    if (el) observer.observe(el, { attributes: true, attributeFilter: ["hidden"] });
+  }
+})();
 
 function showWhatsNew() {
   const overlay = document.getElementById("whats-new-overlay");
@@ -6808,13 +7615,27 @@ document.getElementById("btn-close-whats-new")?.addEventListener("click", dismis
 async function openTestHook() {
   const panel = document.getElementById("test-hook-panel");
   const select = document.getElementById("test-hook-event");
+  const selectA = document.getElementById("test-hook-event-a");
+  const selectB = document.getElementById("test-hook-event-b");
   if (!panel || !select) return;
   if (bridge && select.options.length === 0) {
-    const keys = JSON.parse(await bridge.GetAllEventKeys());
-    // Raw EventKey, not friendlyEventName -- this is a debug tool, and several distinct keys
-    // (e.g. "Offense: Second Down" / "Defense: Second Down") collapse to the identical friendly
-    // label, which made it impossible to tell which one you'd actually selected/fired.
-    select.innerHTML = keys.map(k => `<option value="${k}">${k}</option>`).join("");
+    // BUG FIX: this used to have no try/catch -- if GetAllEventKeys ever threw/rejected, the
+    // whole function aborted before `panel.hidden = false` ran, so Ctrl+Shift+T looked like it
+    // did nothing at all. Silent, too, since F12 DevTools is suppressed by
+    // AreBrowserAcceleratorKeysEnabled = false. Now falls through to still open the panel.
+    try {
+      const keys = JSON.parse(await bridge.GetAllEventKeys());
+      // Raw EventKey, not friendlyEventName -- this is a debug tool, and several distinct keys
+      // (e.g. "Offense: Second Down" / "Defense: Second Down") collapse to the identical friendly
+      // label, which made it impossible to tell which one you'd actually selected/fired.
+      const optionsHtml = keys.map(k => `<option value="${k}">${k}</option>`).join("");
+      select.innerHTML = optionsHtml;
+      if (selectA) selectA.innerHTML = optionsHtml;
+      if (selectB) selectB.innerHTML = optionsHtml;
+    } catch (err) {
+      console.error("openTestHook: GetAllEventKeys failed", err);
+      showToast("Test hook: couldn't load event list, dropdowns may be stale.");
+    }
   }
   panel.hidden = false;
 }
@@ -6840,13 +7661,47 @@ document.getElementById("btn-test-hook-fire")?.addEventListener("click", async (
 
 document.getElementById("btn-test-hook-stop")?.addEventListener("click", () => bridge?.StopPreview());
 
+document.getElementById("btn-test-hook-fire-routed")?.addEventListener("click", async () => {
+  const possessionSide = document.getElementById("test-hook-possession").value;
+  const eventKey = document.getElementById("test-hook-event").value;
+  const isEarnedBigEvent = document.getElementById("test-hook-earned").checked;
+  const result = await bridge?.FireTestEventRouted(possessionSide, eventKey, isEarnedBigEvent);
+  if (!result) return;
+  if (result.startsWith("blocked:")) { showToast(`Blocked: ${result.slice(8)}`); return; }
+  const [routedSide, fireResult] = result.split("|");
+  if (fireResult.startsWith("fired:")) showToast(`Routed to ${routedSide}, fired: ${fireResult.slice(6)}`);
+  else if (fireResult === "unassigned") showToast(`Routed to ${routedSide} -- no song assigned to "${friendlyEventName(eventKey)}".`);
+  else if (fireResult === "file-missing") showToast(`Routed to ${routedSide} -- assigned file is missing on disk.`);
+  else if (fireResult === "no-profile") showToast("No matchup/team profile loaded yet -- pick a team or Set Matchup first.");
+  else showToast(`Routed to ${routedSide}: ${fireResult}`);
+});
+
+document.getElementById("btn-test-hook-fire-pair")?.addEventListener("click", async () => {
+  const possessionSide = document.getElementById("test-hook-possession").value;
+  const eventKeyA = document.getElementById("test-hook-event-a").value;
+  const eventKeyB = document.getElementById("test-hook-event-b").value;
+  const isEarnedBigEvent = document.getElementById("test-hook-earned").checked;
+  const result = await bridge?.FireTestEventPair(possessionSide, eventKeyA, eventKeyB, isEarnedBigEvent);
+  if (!result) return;
+  // "EventKey=side|result;EventKey=side|result" -- see WebMainForm.FireTestEventPairFromWeb.
+  const parts = result.split(";").map(part => {
+    const [key, rest] = part.split("=");
+    const [routedSide, fireResult] = rest.split("|");
+    if (fireResult.startsWith("blocked:")) return `${friendlyEventName(key)} -> ${routedSide}: blocked`;
+    if (fireResult.startsWith("fired:")) return `${friendlyEventName(key)} -> ${routedSide}: fired`;
+    return `${friendlyEventName(key)} -> ${routedSide}: ${fireResult}`;
+  });
+  showToast(parts.join(" | "));
+});
+
 // Plain-English labels for EventKeys -- "Offense:"/"Defense:"/"Other:" prefixes and helper-name
 // jargon (Midfield, Iced Game, etc) mean nothing to someone assigning songs. EventKey stays the
 // real internal ID (zero risk to saved profiles) -- this is a display-only lookup, falls back to
 // the raw key untouched if a new EventKey shows up here before this map is updated.
 const EVENT_FRIENDLY_NAMES = {
-  "Offense: Earned First Down": "Got 1st Down",
+  "Offense: Earned First Down": "1st Down (1st & 10)",
   "Offense: Earned First Down (Big Gain)": "Got 1st Down - Big Gain",
+  "Offense: Earned First Down Short": "1st & Short",
   "Offense: Earned First Down (Midfield)": "Got 1st Down - Past Midfield",
   "Offense: Second Down": "2nd Down",
   "Offense: Second Down (Midfield)": "2nd Down - Past Midfield",
@@ -6860,7 +7715,9 @@ const EVENT_FRIENDLY_NAMES = {
   "Offense: Iced Game by First Down": "Game Sealed - Got 1st Down",
   "Offense: Victory in Hand": "Game Won",
   "Offense: Touchdown Scored": "Touchdown",
+  "Defense: First Down": "1st Down (Post-Kickoff)",
   "Defense: Third Down": "3rd & Long",
+  "Defense: Third Down Short": "3rd & Short (Defense)",
   "Defense: Fourth Down": "Stopped Them on 4th",
   "Defense: Third Down (Loss)": "3rd Down After a Loss",
   "Defense: Second Down": "2nd & Long",
@@ -7003,7 +7860,7 @@ const COMMANDS = [
   { icon: "📋", label: "Tips", hint: "show tip", action: () => showNextTip() },
   { icon: "👤", label: "Profile", hint: "dashboard", action: () => openProfile() },
   { icon: "⚙️", label: "Settings", hint: "preferences", action: () => document.getElementById("btn-settings")?.click() },
-  { icon: "ℹ️", label: "Help", hint: "guide", action: () => bridge?.ShowHelp() },
+  { icon: "ℹ️", label: "Help", hint: "guide", action: () => document.getElementById("btn-help-pill")?.click() },
   { icon: "🔄", label: "Reset Team Profile", hint: "reset", action: () => resetTeamProfile() },
   { icon: "📁", label: "Move Default Song Pack Folder", hint: "relocate", action: () => relocateDefaultSongsFolder() },
   { icon: "🎵", label: "Download / Import Default Song Pack", hint: "song pack", action: () => { document.getElementById("songpack-prompt-overlay").hidden = false; } },

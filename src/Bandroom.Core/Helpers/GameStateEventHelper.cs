@@ -51,7 +51,10 @@ public sealed class GameStateEventHelper : IRuleEvaluator
         }
 
         // --- Iced Game by First Down: 4th quarter, under 2 min, offense earned a 1st down ---
+        // Excludes turnover-driven down resets (e.g. a defensive INT resets Down to 1) -- those
+        // are TurnoverHelper's "Iced Game by Turnover" cue, not an earned offensive conversion.
         if (state.Delta.WasFirstDown
+            && !state.Delta.NewPossession
             && state.Current.Quarter >= 4
             && state.Current.TimeRemainingSeconds <= 120)
         {
