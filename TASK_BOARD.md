@@ -23,22 +23,30 @@ a newer key, see `ConfigStore.RetiredEventKeys`/`BlockedEventKeys` for the full 
   owner asked for a real embedded font (Anton/Racing Sans One/Bungee/Alfa Slab One shortlist) to
   replace the current Arial-Black-plus-CSS-transform approximation; not picked yet.
 
-**Possession-detection wrong-side-routing bug — investigated, root cause confirmed, NOT fixed:**
+**Possession-detection wrong-side-routing bug — root cause confirmed, minimal fix now applied:**
 Live reports (Tackle for Loss, Fourth Down) routed to the wrong team's audio. Traced to
 `GameWatcher.cs`: `SamplePossessionByUnderline`/`SamplePossession` require 2 consecutive matching
 ticks to commit a flip (`ConfirmPossessionFlip`), then lock a `Cooldown` (1.2s, NOT 2s as first
-estimated) during which no further possession updates are accepted at all — including correct
-ones. If a replay overlay or camera cut produces 2 bad consecutive ticks that commit a phantom
-flip right as the cooldown starts, `_lastPossession` stays wrong for the full 1.2s, and any
-routed event (`Defense:`/`Offense:` prefix) firing in that window goes to the wrong side.
-A 3-part fix was proposed (shorten/relax cooldown on strong corrective reads, relax margin during
-pending confirmation, add a stability-based tiebreaker) — **deliberately not implemented**. Reason:
-the confirm-gate and cooldown aren't incidental — they're the fix for two OTHER separately
-live-reported bugs (a single-frame phantom commit, and a repeating false-turnover loop during a
-CFB27 pause-menu freeze, both documented inline in `GameWatcher.cs` around `_pendingPossession`'s
-declaration). Loosening either one risks reopening those. Decision: leave as-is, watch for a
-repeat of wrong-side routing during live play, and only revisit with a narrowly-scoped fix if it
-actually recurs — not a preemptive rewrite of the debounce logic.
+estimated) during which no further possession updates were accepted at all — including correct
+ones. If a replay overlay or camera cut produced 2 bad consecutive ticks that committed a phantom
+flip right as the cooldown started, `_lastPossession` stayed wrong for the full 1.2s, and any
+routed event (`Defense:`/`Offense:` prefix) firing in that window went to the wrong side.
+A broader 3-part fix was proposed and considered too risky (loosening the margin or the
+confirm-gate itself, which exist to fix two OTHER separately live-reported bugs — a single-frame
+phantom commit, and a repeating false-turnover loop during a CFB27 pause-menu freeze, both
+documented inline in `GameWatcher.cs` around `_pendingPossession`'s declaration).
+**Fix actually applied (2026-08-12, `SamplePossessionByUnderline` only):** a late-cooldown
+correction is now allowed, but gated tightly enough not to touch either of those two prior fixes —
+requires (a) at least half the cooldown (0.6s) to have already elapsed, so an immediate flicker
+right after the first commit still can't undo it, and (b) a much stronger brightness margin (35
+points vs the normal 25) than a routine read, so an ordinary borderline frame still can't trigger
+it. Still funnels through the same single commit path that updates `_lastPossession` and fires
+`PossessionChanged` together, so the lockstep guarantee from the 2026-08-11 desync fix is
+unchanged. The color-match fallback (`SamplePossession`, legacy pre-underline presets, not what
+CFB27 uses) was deliberately left untouched — no equivalent brightness-margin signal exists there
+to gate a safe correction on. Build clean, 59/59 Core tests passing after the change — **not yet
+live-verified in an actual game**, watch for wrong-side-routing reports to confirm this resolves
+it (and doesn't reintroduce a flicker/pause-loop regression).
 
 No manual possession override exists (discussed as a fallback in Session 51, still not built).
 

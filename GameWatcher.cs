@@ -990,8 +990,28 @@ internal sealed class GameWatcher
         // flip after cooldown expires updates both together.
         if (DateTime.UtcNow < _possessionCooldownUntil)
         {
-            Log?.Invoke($"[possession] suppressed re-fire of \"{side}\" (cooldown)");
-            return;
+            // FIXED 2026-08-12 (live bug: TFL/Fourth Down routed to the wrong side): a phantom
+            // flip committed off 2 bad-but-agreeing ticks (replay overlay/camera cut over the
+            // underline crop) locks _lastPossession wrong for the WHOLE cooldown, and any event
+            // that fires in that window misroutes -- the correct read shows up 1-2 ticks later
+            // but was being unconditionally suppressed until the full Cooldown expired. Now a
+            // late-cooldown correction is allowed, but only when it's clearly not another
+            // borderline/noisy read: requires a much stronger margin than the normal 25-point
+            // bar (so an ordinary marginal frame still can't trigger it) AND at least half the
+            // cooldown must have already elapsed (so a same-tick flicker right after the first
+            // commit still can't immediately undo it). Still goes through the same single commit
+            // path below (both _lastPossession and PossessionChanged update together), so the
+            // lockstep guarantee above is preserved either way.
+            const double correctionMinMargin = 35;
+            double correctionElapsedSeconds = (Cooldown - (_possessionCooldownUntil - DateTime.UtcNow)).TotalSeconds;
+            double margin = Math.Abs(leftBrightness - rightBrightness);
+            bool allowCorrection = correctionElapsedSeconds >= Cooldown.TotalSeconds / 2 && margin >= correctionMinMargin;
+            if (!allowCorrection)
+            {
+                Log?.Invoke($"[possession] suppressed re-fire of \"{side}\" (cooldown)");
+                return;
+            }
+            Log?.Invoke($"[possession] correcting cooldown-locked flip to \"{side}\" (margin={margin:F0}, {correctionElapsedSeconds:F2}s into cooldown)");
         }
         _pendingPossession = null;
         _lastPossession = side;
