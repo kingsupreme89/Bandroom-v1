@@ -5217,6 +5217,16 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
      above) -- pulled up further here with a small negative margin now that the box itself is
      tighter, so the name reads as attached to the logo instead of floating separately. */
   margin-top: clamp(-6px, -0.4vw, 0px);
+  /* FIXED 2026-08-12 (owner report: font was getting cut off) -- .matchup-column (the direct
+     ancestor) has `overflow: hidden` for real reasons (it clips the team-photo backdrop to the
+     column edge), but the synthetic-italic + skewX + scaleY(1.16) stack below pushes the actual
+     glyph ink outside its normal line-box on every side: taller ascenders top/bottom from the
+     vertical stretch, and shifted left/right edges from the shear. With the default tight
+     line-height that overflow bled straight into the ancestor's clip and sliced through letters.
+     Explicit line-height plus vertical padding gives the transformed glyphs (and the 20px+ glow
+     blur around them) enough room inside the box to clear the ancestor's hidden edge. */
+  line-height: 1.35;
+  padding: 10px 6px 16px;
   /* Owner request 2026-08-11: replaced the earlier script-font reference with a second reference
      image ("SPORT") -- bold condensed all-caps block/slab letterforms, tight tracking, no
      flourish. Bigger than the script version it replaces (was clamp(26px,3.2vw,42px)). */
@@ -5237,7 +5247,7 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
      actually reads as the reference's sharp forward lean) and a touch more vertical stretch to
      emphasize the tall, narrow letterforms. */
   letter-spacing: -0.03em;
-  transform: skewX(-12deg) scaleY(1.16);
+  transform: skewX(-12deg) scaleY(1.1);
   /* Owner request: team names in the team's own primary/secondary colors instead of plain white --
      --side-primary/--side-secondary are set per column in renderMatchupCoverflow off the
      currently-centered team's own colors. Gradient text (top=secondary, bottom=primary) rather
@@ -5264,8 +5274,20 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
      shadow, then 4/10/20px glow layers) rather than jumping straight from a thin stroke to a wide
      blur, so the halo reads as one soft glow instead of a ring. */
   -webkit-font-smoothing: antialiased;
+  /* Owner request 2026-08-12 ("TROY" reference): a punchier variant than the flat neon-glow pass
+     above -- that reference has real extruded depth (a solid offset shadow behind the letters,
+     not just a soft blur around them), which is what actually reads as "pop" versus a flat glow.
+     Layers a short stack of tight, near-zero-blur, diagonally-offset dark drop-shadows (1px steps)
+     UNDER the existing soft glow blurs -- each one barely blurred so they stack into a solid
+     chiseled edge/extrusion rather than blending into more blur, same drop-shadow-off-the-alpha-
+     silhouette technique as the smoothing fix above so the extrusion stays perfectly aligned with
+     the skewed glyphs. Glow blurs kept on top for the neon-team-color read, extrusion adds the
+     3D block-letter weight underneath it. */
   filter:
-    drop-shadow(0 2px 2px rgba(0, 0, 0, 0.55))
+    drop-shadow(1px 1px 0 color-mix(in srgb, var(--side-primary, var(--accent)) 55%, black 45%))
+    drop-shadow(2px 2px 0 color-mix(in srgb, var(--side-primary, var(--accent)) 45%, black 55%))
+    drop-shadow(3px 3px 0 color-mix(in srgb, var(--side-primary, var(--accent)) 35%, black 65%))
+    drop-shadow(4px 4px 3px rgba(0, 0, 0, 0.65))
     drop-shadow(0 0 4px color-mix(in srgb, var(--side-secondary, var(--accent)) 80%, transparent))
     drop-shadow(0 0 10px color-mix(in srgb, var(--side-secondary, var(--accent)) 60%, transparent))
     drop-shadow(0 0 20px color-mix(in srgb, var(--side-secondary, var(--accent)) 40%, transparent));
@@ -5274,6 +5296,10 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 @keyframes matchup-name-glow {
   0%, 100% {
     filter:
+      drop-shadow(1px 1px 0 color-mix(in srgb, var(--side-primary, var(--accent)) 55%, black 45%))
+      drop-shadow(2px 2px 0 color-mix(in srgb, var(--side-primary, var(--accent)) 45%, black 55%))
+      drop-shadow(3px 3px 0 color-mix(in srgb, var(--side-primary, var(--accent)) 35%, black 65%))
+      drop-shadow(4px 4px 3px rgba(0, 0, 0, 0.65))
       drop-shadow(0 2px 2px rgba(0, 0, 0, 0.55))
       drop-shadow(0 0 4px color-mix(in srgb, var(--side-secondary, var(--accent)) 70%, transparent))
       drop-shadow(0 0 9px color-mix(in srgb, var(--side-secondary, var(--accent)) 45%, transparent))
@@ -5281,6 +5307,10 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   }
   50% {
     filter:
+      drop-shadow(1px 1px 0 color-mix(in srgb, var(--side-primary, var(--accent)) 55%, black 45%))
+      drop-shadow(2px 2px 0 color-mix(in srgb, var(--side-primary, var(--accent)) 45%, black 55%))
+      drop-shadow(3px 3px 0 color-mix(in srgb, var(--side-primary, var(--accent)) 35%, black 65%))
+      drop-shadow(4px 4px 3px rgba(0, 0, 0, 0.65))
       drop-shadow(0 2px 2px rgba(0, 0, 0, 0.55))
       drop-shadow(0 0 5px color-mix(in srgb, var(--side-secondary, var(--accent)) 90%, transparent))
       drop-shadow(0 0 14px color-mix(in srgb, var(--side-secondary, var(--accent)) 65%, transparent))

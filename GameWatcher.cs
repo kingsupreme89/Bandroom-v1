@@ -667,6 +667,10 @@ internal sealed class GameWatcher
                         // this guard exists to prevent.
                         bool bannerActive = _regions.FirstOrDefault(r => r.Name == "banner")?.Last != null;
                         if (!flagActive && !situationActive && !bannerActive) SamplePossessionFromWindow(fullBmp, winW, winH);
+                        // FIXED 2026-08-12: must NOT share the guard above -- see
+                        // SampleTimeoutsFromWindow's own doc comment for why the "Time Out" banner
+                        // being up is exactly the window this needs to keep sampling in.
+                        SampleTimeoutsFromWindow(fullBmp, winW, winH);
                     }
 
                     var match = region.Pattern.Match(text);
@@ -864,11 +868,29 @@ internal sealed class GameWatcher
         _pendingHomeTimeoutsRemaining = sample;
     }
 
-    void SamplePossessionFromWindow(Bitmap fullBmp, int winW, int winH)
+    /// <summary>FIXED 2026-08-12 (code-review finding on the IsTimeout gating change): this used
+    /// to run inside SamplePossessionFromWindow, which is itself skipped whenever
+    /// flagActive/situationActive/bannerActive is true (guards added to protect POSSESSION-COLOR
+    /// sampling from misreading during a non-team-colored banner frame). "situation" reading
+    /// "time_out" makes situationActive true for the ENTIRE window the "Time Out" banner is up --
+    /// and since "situation" is also in EventGatedRegions (doesn't clear on blank OCR, only on the
+    /// next down change), that block persisted well past the banner too. TimeoutHelper's new
+    /// IsTimeout-based gate (see that file) needs the timeout-remaining COUNT to actually update
+    /// during exactly that window to detect the decrement -- the two guards directly contradicted
+    /// each other, so the "fire off the real banner" fix could never actually see a confirmed
+    /// decrement and would fire for essentially no real timeout. Timeout-segment sampling has none
+    /// of the color-misread failure mode the flag/situation/banner guards exist for (it reads a
+    /// dash/segment lit-count in its own dedicated crop, not team color), so it's pulled out here
+    /// to run unconditionally every tick instead of being gated alongside possession-color
+    /// sampling.</summary>
+    void SampleTimeoutsFromWindow(Bitmap fullBmp, int winW, int winH)
     {
         CommitTimeoutsRemainingIfConfirmed(SampleTimeoutSegments(fullBmp, winW, winH));
         CommitHomeTimeoutsRemainingIfConfirmed(SampleHomeTimeoutSegments(fullBmp, winW, winH));
+    }
 
+    void SamplePossessionFromWindow(Bitmap fullBmp, int winW, int winH)
+    {
         // Underline-brightness method takes priority when the active preset has it calibrated
         // (see ScorebugPreset.AwayUnderlineFx*/HomeUnderlineFx*) -- correction 2026-08-07: the
         // real possession signal is a thin lit/dim underline under the team name, not a
