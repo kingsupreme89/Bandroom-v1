@@ -64,13 +64,20 @@ public sealed class DefenseThirdDownShortHelper : IRuleEvaluator
         if (state.Current.YardsToGo > baselineYardsToGo)
             return null;
 
-        if (state.Current.YardsToGo > 3)
+        // "Short" threshold corrected 2026-08-11 (owner audit call): 5 yards to go or less, not
+        // 3 -- must stay in sync with OffenseDownHelper.isShort's own threshold since both fire
+        // on the same tick for the same snap (see this file's header comment).
+        if (state.Current.YardsToGo > 5)
             return null; // long -- Defense: Third Down (via OffenseDownHelper) already covers it
 
+        // Owner rule 2026-08-11: 3rd & short should always have BOTH sides play together --
+        // Defense at full volume every time (not just during a Big Game), Offense's matching
+        // "Offense: Third Down Short" (OffenseDownHelper) ducked to 60 so it sits under this
+        // instead of competing with it.
         return new TriggerEvent
         {
             EventKey = "Defense: Third Down Short",
-            Volume = state.Current.BigGame ? 100 : 70,
+            Volume = 100,
             IsEarnedBigEvent = false
         };
     }

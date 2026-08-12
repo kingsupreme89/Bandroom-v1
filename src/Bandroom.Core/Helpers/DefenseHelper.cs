@@ -66,23 +66,14 @@ public sealed class DefenseHelper : IRuleEvaluator
         int down = _buffer.PendingDown.Value;
         _buffer.Clear();
 
-        // REMOVED 2026-08-10 (the "gameplan" rewrite): this used to also fire a plain, distance-
-        // blind "Defense: Third Down" here for every 3rd-down stop. That's now OffenseDownHelper's
-        // job -- it fires "Defense: Third Down" (this same, pre-existing key, so default song
-        // packs keep working unchanged) specifically for 3rd & LONG, and a new "Offense: Third
-        // Down Short" for 3rd & short instead of always crediting the defense. Kept the (Loss)
-        // branch here since a stuffed-for-a-loss down is always "long" too and needs to stay a
-        // distinct, more specific cue rather than colliding with the plain long-yardage one --
-        // OffenseDownHelper defers to this branch by skipping entirely whenever YardsToGo went up.
-        if (down == 3)
-        {
-            return new TriggerEvent
-            {
-                EventKey = "Defense: Third Down (Loss)",
-                Volume = state.Current.BigGame ? 100 : 75,
-                IsEarnedBigEvent = true
-            };
-        }
+        // REMOVED 2026-08-11 (owner audit call): "Defense: Third Down (Loss)" retired as its own
+        // card -- TflHelper's generic "Defense: Tackle for Loss" already fires on this exact same
+        // snap (see that file's own comment: it's intentionally NOT down-specific and fires
+        // alongside whatever the down-specific cue is), so having a separate 3rd-down-only Loss
+        // key was redundant. Down==3 losses now just get the one generic Tackle for Loss cue.
+        // (Was: "Defense: Third Down (Loss)", 2026-08-07 through 2026-08-11 -- moved to
+        // ConfigStore.RetiredEventKeys so an already-assigned song under the old key doesn't error,
+        // it just stops firing.)
 
         // REMOVED 2026-08-10: see the Down == 3 comment above -- "Defense: Second Down" (plain,
         // distance-blind) is now OffenseDownHelper's job too, fired only for 2nd & long.

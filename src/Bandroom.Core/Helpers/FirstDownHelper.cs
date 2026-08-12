@@ -78,6 +78,15 @@ public sealed class FirstDownHelper : IRuleEvaluator
         if (state.Delta.NewPossession)
             return null;
 
+        // Owner rule 2026-08-11: converting 3RD down specifically is ThirdDownConversionHelper's
+        // own, more specific moment ("Offense: 3rd Down Conversion") -- this generic "Earned First
+        // Down" cue used to fire ALONGSIDE it on the same tick (deliberately, per that file's own
+        // doc comment), but the owner wants only the more specific cue to play here, not both
+        // stacked together. 2nd-down conversions still fall through to the base event below
+        // unchanged -- only Previous.Down == 3 defers.
+        if (state.Previous.Down == 3)
+            return null;
+
         // Ambiguous case: Down just reset to 1 immediately after a 4th down, but NewPossession
         // hasn't been confirmed yet THIS tick. Could be a genuine 4th-down conversion (fire) or a
         // punt/turnover-on-downs whose possession flip just hasn't caught up in the OCR pipeline

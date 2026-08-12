@@ -46,45 +46,27 @@ public class EvaluatorTests
     }
 
     [Fact]
-    public void BigEventHelper_FourthDownLoss_FiresWithinBufferWindow()
+    public void BigEventHelper_FourthDownLoss_NoLongerFiresOwnKey_RetiredInFavorOfTflAndFourthDownStop()
     {
+        // Retired 2026-08-11 (owner audit call, same reasoning as Third Down (Loss) below):
+        // "Defense: Fourth Down (Loss)" merged into the generic "Defense: Tackle for Loss" cue
+        // (TflHelper) plus the plain "Defense: Fourth Down" stop cue instead of having its own
+        // key -- BigEventHelper's buffered down==4 Loss branch is gone entirely now.
         var evaluator = new BigEventHelper();
-        // Tick 1: down changes 3 -> 4, YardsToGo baseline latched from Previous (5).
         var t1 = State(Snap.With(down: 3, yardsToGo: 5), Snap.With(down: 4, yardsToGo: 5));
         Assert.Null(evaluator.Evaluate(t1));
-
-        // Tick 2: down unchanged, but YardsToGo OCR catches up to a higher value (a loss).
         var t2 = State(Snap.With(down: 4, yardsToGo: 5), Snap.With(down: 4, yardsToGo: 12));
-        var result = evaluator.Evaluate(t2);
-        Assert.NotNull(result);
-        Assert.Equal("Defense: Fourth Down (Loss)", result!.EventKey);
-    }
-
-    [Fact]
-    public void BigEventHelper_FourthDownLoss_TimesOutWithoutQualifyingChange_NoFireAndNearMissLogged()
-    {
-        var evaluator = new BigEventHelper();
-        var down = Snap.With(down: 3, yardsToGo: 5);
-        var t1 = State(down, Snap.With(down: 4, yardsToGo: 5));
-        evaluator.Evaluate(t1);
-
-        // YardsToGo never increases across the whole confirmation window -- MaxPendingTicks
-        // default is 2 (tightened 2026-08-11), so 3 more same-down ticks exhausts it.
-        GameState? last = null;
-        for (int i = 0; i < 3; i++)
-        {
-            last = State(Snap.With(down: 4, yardsToGo: 5), Snap.With(down: 4, yardsToGo: 5));
-            var result = evaluator.Evaluate(last);
-            Assert.Null(result);
-        }
-        Assert.Contains(last!.NearMisses, m => m.Contains("BigEventHelper") && m.Contains("4th-down"));
+        Assert.Null(evaluator.Evaluate(t2));
     }
 
     // ---------- DefenseHelper ----------
 
     [Fact]
-    public void DefenseHelper_ThirdDownLoss_FiresWhenNotUserPossession()
+    public void DefenseHelper_ThirdDownLoss_NoLongerFiresOwnKey_RetiredInFavorOfTflHelper()
     {
+        // Retired 2026-08-11 (owner audit call): "Defense: Third Down (Loss)" merged into the
+        // generic "Defense: Tackle for Loss" cue (TflHelper) instead of having its own key --
+        // DefenseHelper's down==3 branch no longer returns anything for this case.
         var evaluator = new DefenseHelper();
         var prev = Snap.With(down: 2, yardsToGo: 5, possessionAway: true);
         var cur = Snap.With(down: 3, yardsToGo: 5, possessionAway: true);
@@ -92,9 +74,7 @@ public class EvaluatorTests
 
         var next = State(Snap.With(down: 3, yardsToGo: 5, possessionAway: true),
                           Snap.With(down: 3, yardsToGo: 9, possessionAway: true), userIsHome: true);
-        var result = evaluator.Evaluate(next);
-        Assert.NotNull(result);
-        Assert.Equal("Defense: Third Down (Loss)", result!.EventKey);
+        Assert.Null(evaluator.Evaluate(next));
     }
 
     [Fact]
@@ -123,6 +103,26 @@ public class EvaluatorTests
     }
 
     [Fact]
+    public void TflHelper_FiresTackleForLoss_OwnerCall_SameTeamRecoveredFumbleWithLoss()
+    {
+        // Owner report, live big game: away fumbled, recovered by their OWN offense, 1st & 10 ->
+        // 2nd & 23 (no possession change). TurnoverHelper no longer fires "Turnover Forced" for
+        // this (see its own 2026-08-11 fix, requires an actual possession switch) -- this generic
+        // loss-detection cue is what should fire instead, doubling as the fumble cue so no
+        // separate "Fumble" card is needed.
+        var evaluator = new TflHelper();
+        var t1 = State(Snap.With(down: 1, yardsToGo: 10, possessionAway: true),
+                        Snap.With(down: 2, yardsToGo: 10, possessionAway: true));
+        Assert.Null(evaluator.Evaluate(t1));
+
+        var t2 = State(Snap.With(down: 2, yardsToGo: 10, possessionAway: true),
+                        Snap.With(down: 2, yardsToGo: 23, possessionAway: true));
+        var result = evaluator.Evaluate(t2);
+        Assert.NotNull(result);
+        Assert.Equal("Defense: Tackle for Loss", result!.EventKey);
+    }
+
+    [Fact]
     public void TflHelper_TimesOut_NotALoss_NearMissLogged_NoFire()
     {
         var evaluator = new TflHelper();
@@ -136,6 +136,20 @@ public class EvaluatorTests
             Assert.Null(evaluator.Evaluate(last));
         }
         Assert.Contains(last!.NearMisses, m => m.Contains("TflHelper"));
+    }
+
+    [Fact]
+    public void TflHelper_SuppressedOnFourthDown_OwnerCall_FourthDownCueOverridesIt()
+    {
+        // Owner call 2026-08-11: a 3rd-down loss that pushes the offense to 4th down should NOT
+        // also play the generic Tackle for Loss cue -- BigEventHelper's "Defense: Fourth Down"
+        // cue is about to cover the more important moment when that 4th-down snap resolves.
+        var evaluator = new TflHelper();
+        var t1 = State(Snap.With(down: 3, yardsToGo: 6), Snap.With(down: 4, yardsToGo: 6));
+        Assert.Null(evaluator.Evaluate(t1));
+
+        var t2 = State(Snap.With(down: 4, yardsToGo: 6), Snap.With(down: 4, yardsToGo: 12));
+        Assert.Null(evaluator.Evaluate(t2));
     }
 
     [Fact]
@@ -166,8 +180,12 @@ public class EvaluatorTests
     }
 
     [Fact]
-    public void OffenseDownHelper_LongThirdDown_FiresDefenseKey()
+    public void OffenseDownHelper_LongThirdDown_FiresOffenseThirdDownAt60()
     {
+        // Updated 2026-08-11 (owner, live game): 3rd & long now gets the same balanced dual-fire
+        // treatment as 3rd & short -- DefenseThirdDownHelper fires "Defense: Third Down" at 100
+        // (see that class's own tests below), and this helper now ALSO fires "Offense: Third
+        // Down" at 60 on the same long snap, instead of staying silent.
         var evaluator = new OffenseDownHelper();
         var t1 = State(Snap.With(down: 2, yardsToGo: 10), Snap.With(down: 3, yardsToGo: 10));
         Assert.Null(evaluator.Evaluate(t1));
@@ -175,7 +193,47 @@ public class EvaluatorTests
         var t2 = State(Snap.With(down: 3, yardsToGo: 10), Snap.With(down: 3, yardsToGo: 8));
         var result = evaluator.Evaluate(t2);
         Assert.NotNull(result);
+        Assert.Equal("Offense: Third Down", result!.EventKey);
+        Assert.Equal(60, result.Volume);
+    }
+
+    // ---------- DefenseThirdDownHelper ----------
+
+    [Fact]
+    public void DefenseThirdDownHelper_FiresOnLongThirdDown()
+    {
+        var evaluator = new DefenseThirdDownHelper();
+        var t1 = State(Snap.With(down: 2, yardsToGo: 10), Snap.With(down: 3, yardsToGo: 10));
+        Assert.Null(evaluator.Evaluate(t1));
+
+        var t2 = State(Snap.With(down: 3, yardsToGo: 10), Snap.With(down: 3, yardsToGo: 8));
+        var result = evaluator.Evaluate(t2);
+        Assert.NotNull(result);
         Assert.Equal("Defense: Third Down", result!.EventKey);
+    }
+
+    [Fact]
+    public void DefenseThirdDownHelper_FiresOnShortThirdDown_TooNotJustLong()
+    {
+        var evaluator = new DefenseThirdDownHelper();
+        var t1 = State(Snap.With(down: 2, yardsToGo: 10), Snap.With(down: 3, yardsToGo: 3));
+        Assert.Null(evaluator.Evaluate(t1));
+
+        var t2 = State(Snap.With(down: 3, yardsToGo: 3), Snap.With(down: 3, yardsToGo: 2));
+        var result = evaluator.Evaluate(t2);
+        Assert.NotNull(result);
+        Assert.Equal("Defense: Third Down", result!.EventKey);
+    }
+
+    [Fact]
+    public void DefenseThirdDownHelper_DefersToLossBranch_WhenYardsToGoIncreased()
+    {
+        var evaluator = new DefenseThirdDownHelper();
+        var t1 = State(Snap.With(down: 2, yardsToGo: 10), Snap.With(down: 3, yardsToGo: 10));
+        Assert.Null(evaluator.Evaluate(t1));
+
+        var t2 = State(Snap.With(down: 3, yardsToGo: 10), Snap.With(down: 3, yardsToGo: 15));
+        Assert.Null(evaluator.Evaluate(t2));
     }
 
     [Fact]
@@ -187,6 +245,38 @@ public class EvaluatorTests
 
         var t2 = State(Snap.With(down: 2, yardsToGo: 10), Snap.With(down: 2, yardsToGo: 15));
         Assert.Null(evaluator.Evaluate(t2)); // a loss -- DefenseHelper's Loss branch owns this, not this evaluator
+    }
+
+    [Fact]
+    public void OffenseDownHelper_BigGame_DoesNotDeferOnLoss_FiresLongCueAlongsideTfl()
+    {
+        // Owner call 2026-08-11 (live big game): unlike the ordinary-game case above, a big-game
+        // 2nd/3rd & long still deserves the long-yardage hype cue even when the long distance came
+        // from a loss -- fires alongside (not instead of) TflHelper's "Tackle for Loss" cue.
+        var evaluator = new OffenseDownHelper();
+        var t1 = State(Snap.With(down: 1, yardsToGo: 10, bigGame: true), Snap.With(down: 2, yardsToGo: 10, bigGame: true));
+        Assert.Null(evaluator.Evaluate(t1));
+
+        var t2 = State(Snap.With(down: 2, yardsToGo: 10, bigGame: true), Snap.With(down: 2, yardsToGo: 15, bigGame: true));
+        var result = evaluator.Evaluate(t2);
+        Assert.NotNull(result);
+        Assert.Equal("Defense: Second Down", result!.EventKey);
+    }
+
+    [Fact]
+    public void OffenseDownHelper_BigGame_ShortYardageAfterLoss_StillFiresOffenseCue()
+    {
+        // Owner call 2026-08-11: a small loss that still nets short yardage (e.g. 2nd & 5) keeps
+        // firing the Offense cue regardless of BigGame -- only the long-yardage classification
+        // changes between BigGame and not.
+        var evaluator = new OffenseDownHelper();
+        var t1 = State(Snap.With(down: 1, yardsToGo: 2, bigGame: true), Snap.With(down: 2, yardsToGo: 2, bigGame: true));
+        Assert.Null(evaluator.Evaluate(t1));
+
+        var t2 = State(Snap.With(down: 2, yardsToGo: 2, bigGame: true), Snap.With(down: 2, yardsToGo: 5, bigGame: true));
+        var result = evaluator.Evaluate(t2);
+        Assert.NotNull(result);
+        Assert.Equal("Offense: Second Down Short", result!.EventKey);
     }
 
     [Fact]
@@ -252,10 +342,22 @@ public class EvaluatorTests
     public void FirstDownHelper_Fires_OnFreshFirstDown()
     {
         var evaluator = new FirstDownHelper();
-        var state = State(Snap.With(down: 3, yardsToGo: 2), Snap.With(down: 1, yardsToGo: 10));
+        var state = State(Snap.With(down: 2, yardsToGo: 2), Snap.With(down: 1, yardsToGo: 10));
         var result = evaluator.Evaluate(state);
         Assert.NotNull(result);
         Assert.Equal("Offense: Earned First Down", result!.EventKey);
+    }
+
+    [Fact]
+    public void FirstDownHelper_DoesNotFire_OnThirdDownConversion()
+    {
+        // Owner rule 2026-08-11: converting 3rd down specifically is ThirdDownConversionHelper's
+        // own moment ("Offense: 3rd Down Conversion") -- this generic cue no longer stacks
+        // alongside it on the same tick.
+        var evaluator = new FirstDownHelper();
+        var state = State(Snap.With(down: 3, yardsToGo: 2), Snap.With(down: 1, yardsToGo: 10));
+        var result = evaluator.Evaluate(state);
+        Assert.Null(result);
     }
 
     [Fact]
@@ -287,26 +389,97 @@ public class EvaluatorTests
         Assert.Null(evaluator.Evaluate(state));
     }
 
+    [Fact]
+    public void TouchdownHelper_Fires_DefenseTouchdown_FromScoreDeltaAlone_NoBannerNeeded()
+    {
+        // CORRECTED 2026-08-11 (owner audit call): pick-six/fumble-return TD detected purely from
+        // the scoreboard (away had the ball, home's score jumps by 6) -- IsTouchdown stays false
+        // the whole time here, simulating the banner never getting caught by OCR.
+        var evaluator = new TouchdownHelper();
+        var state = State(
+            Snap.With(isTouchdown: false, possessionAway: true, homeScore: 7, awayScore: 7),
+            Snap.With(isTouchdown: false, possessionAway: true, homeScore: 13, awayScore: 7));
+        var result = evaluator.Evaluate(state);
+        Assert.NotNull(result);
+        Assert.Equal("Defense: Touchdown Scored", result!.EventKey);
+    }
+
+    [Fact]
+    public void TouchdownHelper_LateBanner_DoesNotDoubleFire_AfterScoreDeltaAlreadyAttributedIt()
+    {
+        var evaluator = new TouchdownHelper();
+        var t1 = State(
+            Snap.With(isTouchdown: false, possessionAway: true, homeScore: 7, awayScore: 7),
+            Snap.With(isTouchdown: false, possessionAway: true, homeScore: 13, awayScore: 7));
+        var r1 = evaluator.Evaluate(t1);
+        Assert.Equal("Defense: Touchdown Scored", r1!.EventKey);
+
+        // Banner finally catches up a tick later, same scoreboard total -- should NOT also fire
+        // "Offense: Touchdown Scored" for the same points.
+        var t2 = State(
+            Snap.With(isTouchdown: false, possessionAway: true, homeScore: 13, awayScore: 7),
+            Snap.With(isTouchdown: true, possessionAway: true, homeScore: 13, awayScore: 7));
+        Assert.Null(evaluator.Evaluate(t2));
+    }
+
     // ---------- TurnoverHelper ----------
 
     [Fact]
     public void TurnoverHelper_Fires_TurnoverForced()
     {
         var evaluator = new TurnoverHelper();
-        var state = State(Snap.With(isTurnover: false), Snap.With(isTurnover: true, quarter: 2, timeRemainingSeconds: 600));
+        var state = State(
+            Snap.With(isTurnover: false, possessionAway: true),
+            Snap.With(isTurnover: true, possessionAway: false, quarter: 2, timeRemainingSeconds: 600));
         var result = evaluator.Evaluate(state);
         Assert.NotNull(result);
         Assert.Equal("Defense: Turnover Forced", result!.EventKey);
     }
 
     [Fact]
-    public void TurnoverHelper_Fires_IcedGameVariant_LateFourthQuarter()
+    public void TurnoverHelper_DoesNotFire_WhenFumbleRecoveredBySameTeam_OwnerCall_NoPossessionSwitch()
     {
+        // Owner report, live big game: away fumbled, recovered by their OWN offense (1st & 10 ->
+        // 2nd & 23, no possession change) -- but this used to fire "Turnover Forced" anyway just
+        // because the HUD briefly showed FUMBLE text, covering up the TFL cue that should've
+        // played instead. IsTurnover is set from that on-screen text alone; possessionAway is
+        // unchanged here (still Away both snapshots) so NewPossession is false.
         var evaluator = new TurnoverHelper();
-        var state = State(Snap.With(isTurnover: false), Snap.With(isTurnover: true, quarter: 4, timeRemainingSeconds: 60));
+        var state = State(
+            Snap.With(isTurnover: false, possessionAway: true, down: 1, yardsToGo: 10),
+            Snap.With(isTurnover: true, possessionAway: true, down: 2, yardsToGo: 23));
+        var result = evaluator.Evaluate(state);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void TurnoverHelper_Fires_IcedGameVariant_LateFourthQuarter_WhenNewPossessorIsWinning()
+    {
+        // CORRECTED 2026-08-11 (owner audit call): iced-game now requires the team that just took
+        // over to actually be ahead on the scoreboard -- home leads 14-7 and just intercepted it
+        // back (possession flips away -> home) with 60 seconds left in Q4.
+        var evaluator = new TurnoverHelper();
+        var state = State(
+            Snap.With(isTurnover: false, possessionAway: true, homeScore: 14, awayScore: 7),
+            Snap.With(isTurnover: true, possessionAway: false, homeScore: 14, awayScore: 7, quarter: 4, timeRemainingSeconds: 60));
         var result = evaluator.Evaluate(state);
         Assert.NotNull(result);
         Assert.Equal("Defense: Iced Game by Turnover", result!.EventKey);
+    }
+
+    [Fact]
+    public void TurnoverHelper_Fires_TurnoverForced_NotIced_WhenNewPossessorIsStillLosing()
+    {
+        // Same late-4th-quarter turnover, but the team that just took over is STILL behind (7-14)
+        // -- they forced a takeaway, but nothing is "sealed" yet since they still need to score.
+        // Should fall through to the plain "Defense: Turnover Forced" cue instead.
+        var evaluator = new TurnoverHelper();
+        var state = State(
+            Snap.With(isTurnover: false, possessionAway: false, homeScore: 14, awayScore: 7),
+            Snap.With(isTurnover: true, possessionAway: true, homeScore: 14, awayScore: 7, quarter: 4, timeRemainingSeconds: 60));
+        var result = evaluator.Evaluate(state);
+        Assert.NotNull(result);
+        Assert.Equal("Defense: Turnover Forced", result!.EventKey);
     }
 
     // ---------- SafetyHelper ----------
@@ -356,7 +529,7 @@ public class EvaluatorTests
     {
         var evaluator = new TimeoutHelper();
         var state = State(Snap.With(possessionAway: true, timeRemainingSeconds: 200, awayTimeoutsRemaining: 3),
-                           Snap.With(possessionAway: true, timeRemainingSeconds: 195, awayTimeoutsRemaining: 2));
+                           Snap.With(possessionAway: true, timeRemainingSeconds: 195, awayTimeoutsRemaining: 2, isTimeout: true));
         // UserIsHome=true, PossessionAway=true => user does not have the ball => UserHasPossession=false.
         var result = evaluator.Evaluate(new GameState { Previous = state.Previous, Current = state.Current, UserIsHome = true });
         Assert.NotNull(result);
@@ -370,7 +543,42 @@ public class EvaluatorTests
         var state = new GameState
         {
             Previous = Snap.With(possessionAway: true, timeRemainingSeconds: 200, awayTimeoutsRemaining: 2),
-            Current = Snap.With(possessionAway: true, timeRemainingSeconds: 195, awayTimeoutsRemaining: 2),
+            Current = Snap.With(possessionAway: true, timeRemainingSeconds: 195, awayTimeoutsRemaining: 2, isTimeout: true),
+            UserIsHome = true,
+        };
+        Assert.Null(evaluator.Evaluate(state));
+    }
+
+    [Fact]
+    public void TimeoutHelper_Fires_OnHomeDecrement_WhenHomeHasBall()
+    {
+        // FIXED 2026-08-11 (owner report): a Home timeout used to never fire anything at all --
+        // only AwayTimeoutsRemaining was ever tracked. Mirror of the Away-side test above:
+        // UserIsHome=true, PossessionAway=false => UserHasPossession=true => Home branch checked.
+        var evaluator = new TimeoutHelper();
+        var state = new GameState
+        {
+            Previous = Snap.With(possessionAway: false, timeRemainingSeconds: 200, homeTimeoutsRemaining: 3),
+            Current = Snap.With(possessionAway: false, timeRemainingSeconds: 195, homeTimeoutsRemaining: 2, isTimeout: true),
+            UserIsHome = true,
+        };
+        var result = evaluator.Evaluate(state);
+        Assert.NotNull(result);
+        Assert.Equal("Defense: Timeout (2 Remaining)", result!.EventKey);
+    }
+
+    [Fact]
+    public void TimeoutHelper_DoesNotFire_OnHomeDecrement_WhenAwayHasBall()
+    {
+        // Home's count is only meaningful to react to while Home has the ball -- same convention
+        // the pre-existing Away-side guard already used, just mirrored. A Home decrement noticed
+        // while Away has the ball should not fire (matches the original design's restriction,
+        // not a new one introduced by adding Home tracking).
+        var evaluator = new TimeoutHelper();
+        var state = new GameState
+        {
+            Previous = Snap.With(possessionAway: true, timeRemainingSeconds: 200, homeTimeoutsRemaining: 3, awayTimeoutsRemaining: 3),
+            Current = Snap.With(possessionAway: true, timeRemainingSeconds: 195, homeTimeoutsRemaining: 2, awayTimeoutsRemaining: 3),
             UserIsHome = true,
         };
         Assert.Null(evaluator.Evaluate(state));
@@ -431,7 +639,7 @@ public class EvaluatorTests
                            userIsHome: true);
         var result = evaluator.Evaluate(state);
         Assert.NotNull(result);
-        Assert.Equal("Defense: Drive Starter", result!.EventKey);
+        Assert.Equal("Defense: After Punt", result!.EventKey);
     }
 
     [Fact]
@@ -511,27 +719,8 @@ public class EvaluatorTests
         Assert.Null(evaluator.Evaluate(state));
     }
 
-    // ---------- NoPuntReturnHelper ----------
-
-    [Fact]
-    public void NoPuntReturnHelper_Fires_ForDefenseOnEdge()
-    {
-        var evaluator = new NoPuntReturnHelper();
-        var state = State(Snap.With(isNoPuntReturn: false, possessionAway: true),
-                           Snap.With(isNoPuntReturn: true, possessionAway: true), userIsHome: true);
-        var result = evaluator.Evaluate(state);
-        Assert.NotNull(result);
-        Assert.Equal("Defense: No Punt Return", result!.EventKey);
-    }
-
-    [Fact]
-    public void NoPuntReturnHelper_DoesNotFire_WhenUserHasPossession()
-    {
-        var evaluator = new NoPuntReturnHelper();
-        var state = State(Snap.With(isNoPuntReturn: false, possessionAway: false),
-                           Snap.With(isNoPuntReturn: true, possessionAway: false), userIsHome: true);
-        Assert.Null(evaluator.Evaluate(state));
-    }
+    // NoPuntReturnHelper retired 2026-08-11 (owner audit call) -- "Defense: No Punt Return" removed
+    // entirely, no replacement cue requested.
 
     // ---------- GameStateEventHelper ----------
 
@@ -556,6 +745,27 @@ public class EvaluatorTests
         Assert.Equal("Other: Pregame Take the Field", result!.EventKey);
     }
 
+    [Fact]
+    public void GameStateEventHelper_PregameTakeTheField_OnlyFiresOnce_OwnerCall_BigGameOcrBlip()
+    {
+        // Owner report, live big game: "Pregame Take the Field" fired mid-game off an Away first
+        // down. A big game's extra overlays can blank the scorebug for a tick, misreading
+        // Quarter/Down back down to 0 -- the next tick where they resolve again then looks
+        // identical to the one real pregame transition. Reuse the same evaluator instance (its
+        // one-shot flag is per-instance, matching how one GameStateEventHelper lives for a whole
+        // GAMETIME session) across both ticks.
+        var evaluator = new GameStateEventHelper();
+        var real = State(Snap.With(quarter: 0, down: 0), Snap.With(quarter: 1, down: 1));
+        var result = evaluator.Evaluate(real);
+        Assert.NotNull(result);
+        Assert.Equal("Other: Pregame Take the Field", result!.EventKey);
+
+        // Later in the game: an OCR blip reads Quarter/Down back down to 0 for one tick, then back
+        // up -- structurally identical to the real pregame transition, must NOT refire.
+        var blip = State(Snap.With(quarter: 0, down: 0, awayScore: 14), Snap.With(quarter: 1, down: 1, awayScore: 14));
+        Assert.Null(evaluator.Evaluate(blip));
+    }
+
     // ---------- DefenseFirstDownHelper ----------
 
     [Fact]
@@ -568,7 +778,7 @@ public class EvaluatorTests
         var t2 = State(Snap.With(isKickoff: true, down: 0), Snap.With(isKickoff: false, down: 1));
         var result = evaluator.Evaluate(t2);
         Assert.NotNull(result);
-        Assert.Equal("Defense: First Down", result!.EventKey);
+        Assert.Equal("Defense: After Opening Kick", result!.EventKey);
     }
 
     [Fact]

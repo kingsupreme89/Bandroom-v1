@@ -1340,7 +1340,7 @@ internal static class ConfigStore
 
     static string ProfilePath(string name) => Path.Combine(ProfilesFolder, $"{SanitizeFileName(name)}.json");
 
-    static string SanitizeFileName(string name)
+    public static string SanitizeFileName(string name)
     {
         foreach (char c in Path.GetInvalidFileNameChars())
             name = name.Replace(c, '_');
@@ -1533,6 +1533,19 @@ internal static class ConfigStore
         // assigned to it (RemoveAll below only prunes empty rows), just no longer offered as an
         // assignable card for anyone starting fresh.
         "Offense: Earned First Down (Big Gain)",
+        // Retired 2026-08-11 (owner audit call): redundant with the generic "Defense: Tackle for
+        // Loss" cue, which already fires on the exact same snap (see DefenseHelper.cs's own
+        // comment and TflHelper.cs). A song already assigned to this old key just stops firing,
+        // same as every other retirement in this set.
+        "Defense: Third Down (Loss)",
+        // Retired 2026-08-11 (owner audit call, same reasoning as Third Down (Loss) above):
+        // redundant with the generic "Defense: Tackle for Loss" cue plus the plain "Defense:
+        // Fourth Down" stop cue, both of which already fire on the same snap (see
+        // BigEventHelper.cs's own comment). A song already assigned to this old key just stops
+        // firing, same as every other retirement in this set.
+        "Defense: Fourth Down (Loss)",
+        // Retired 2026-08-11 (owner audit call): no replacement cue requested, just removed.
+        "Defense: No Punt Return",
     };
 
     public static readonly string[] AllEngineEventKeys =
@@ -1540,13 +1553,22 @@ internal static class ConfigStore
         // Re-added 2026-08-11 (moved down from RetiredEventKeys) -- fires on every fresh drive
         // that isn't a kickoff or turnover (in practice: almost always the first snap after a
         // punt). Was never assignable and had no legacy fallback, so was a silent dead cue.
-        "Offense: Drive Starter",
-        "Defense: Drive Starter",
+        // Renamed same day (owner audit call) from "Offense: Drive Starter" to this clearer
+        // name -- see WebMainForm.RenamedEventKeyAliases for the old-key fallback.
+        "Offense: 1st Down After Punt",
+        // Renamed 2026-08-11 (owner audit call, same session as the offense key above) --
+        // see WebMainForm.RenamedEventKeyAliases for the old-key fallback and
+        // HomeOnlyAlwaysEventKeys for the new home-only gating.
+        "Defense: After Punt",
         // Added 2026-08-10 alongside OffenseDownHelper's rewrite -- 2nd/3rd down now split by
         // distance instead of firing one distance-blind card. Short = offense (this card); long
         // reuses the pre-existing "Defense: Second/Third Down" cards below, unchanged.
         "Offense: Second Down Short",
         "Offense: Third Down Short",
+        // Added 2026-08-11 (owner call, live game) -- DefenseSecondDownShortHelper's counterpart
+        // to "Offense: Second Down Short" above, same-tick dual-fire pairing (ducked to 60 while
+        // the offense side plays at full 100 -- inverse balance of the 3rd-down-short pairing).
+        "Defense: Second Down Short",
         // Added 2026-08-10 alongside FirstDownHelper's short/long split -- replaces the old
         // "Offense: Earned First Down (Big Gain)" card (now retired above).
         "Offense: Earned First Down Short",
@@ -1554,8 +1576,14 @@ internal static class ConfigStore
         // DefenseThirdDownShortHelper) -- see their own file comments for the exact trigger
         // moment and WebMainForm.ResolveEventRouting's tier-3 (First Down) / tier-2 (Third Down
         // Short) gating.
-        "Defense: First Down",
+        // Renamed 2026-08-11 (owner audit call) from "Defense: First Down" -- see
+        // WebMainForm.RenamedEventKeyAliases for the old-key fallback.
+        "Defense: After Opening Kick",
         "Defense: Third Down Short",
+        // Added 2026-08-11 (owner audit call) -- distinct cue for converting a 3rd down
+        // specifically, fires alongside the generic Earned First Down cue on the same snap.
+        // See ThirdDownConversionHelper.cs.
+        "Offense: 3rd Down Conversion",
         "Offense: PAT Made",
         "Offense: 2-Point Conversion Made",
         "Offense: Field Goal Made",
@@ -1564,10 +1592,8 @@ internal static class ConfigStore
         "Offense: Touchdown Scored",
         "Defense: Third Down",
         "Defense: Fourth Down",
-        "Defense: Third Down (Loss)",
         "Defense: Second Down",
         "Defense: Second Down (Loss)", // Implemented 2026-08-07 (DefenseHelper.cs)
-        "Defense: Fourth Down (Loss)", // Implemented 2026-08-07 (BigEventHelper.cs)
         "Defense: Field Goal Missed by Opponent",
         "Defense: Turnover Forced",
         "Defense: Iced Game by Turnover",
@@ -1585,9 +1611,12 @@ internal static class ConfigStore
         "Other: Pregame Take the Field",
         "Other: Opening Kickoff",
         "Other: Second-Half Kickoff",
+        // Added 2026-08-11 (owner report, live game): a generic "kickoff after any score" cue,
+        // independent of "Offense: PAT Made" firing -- see KickoffHelper.cs's own comment for why
+        // relying on PAT as the sole "kickoff's coming" signal went silent when PAT OCR was missed.
+        "Other: Kickoff",
         "Penalty: Offense",
         "Penalty: Defense",
-        "Defense: No Punt Return",
     };
 
     /// <summary>Appends a slot for any engine EventKey missing from `entries`, so every event the

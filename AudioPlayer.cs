@@ -71,7 +71,7 @@ internal static class AudioPlayer
     public static string? LeadInClipPath = null;
 
     static readonly object Lock = new();
-    static readonly List<WaveOutEvent> ActiveOutputs = new();
+    static readonly List<(WaveOutEvent Output, string? Channel)> ActiveOutputs = new();
 
     /// <summary>Cooldown between repeat fires of the SAME clip -- covers the real bug this was
     /// added for: GameWatcher's OCR re-detects the same on-screen state (e.g. "First Down")
@@ -141,9 +141,32 @@ internal static class AudioPlayer
     {
         lock (Lock)
         {
-            foreach (var o in ActiveOutputs)
+            foreach (var (o, _) in ActiveOutputs)
             {
                 try { o.Stop(); } catch { /* already stopping/disposed */ }
+            }
+        }
+    }
+
+    /// <summary>Stops only clips tagged with the given channel (e.g. "home"/"away"). Used by
+    /// Play's interruptPrevious so a same-side re-fire cuts off that side's own leftover audio
+    /// without also killing the OTHER side's cue that happens to still be playing -- live bug:
+    /// "Home BG fired but it cut off the Away BG defense [cue]" -- two side-specific events
+    /// landing on separate engine ticks (not the same-tick batch OnEngineEventsDetected already
+    /// handles) each called the old global StopAll() on interrupt, so whichever side fired
+    /// second always silenced the other regardless of side. Null channel falls back to global
+    /// StopAll (previews/UI chimes that never set a channel keep their old behavior).</summary>
+    static void StopChannel(string? channel)
+    {
+        if (channel == null) { StopAll(); return; }
+        lock (Lock)
+        {
+            foreach (var (o, c) in ActiveOutputs)
+            {
+                if (c == channel)
+                {
+                    try { o.Stop(); } catch { /* already stopping/disposed */ }
+                }
             }
         }
     }
@@ -183,7 +206,18 @@ internal static class AudioPlayer
     /// seems too loud for the level it's set at" (Master is typically higher than PA/Away).
     /// Optional: defaults to MasterVolume for isPreview calls that didn't need anything else
     /// (raw-file preview, soundboard hit), preserving old behavior for those.</param>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true, Func<float>? liveVolumeSource = null)
+    /// <param name="speed2x">TriggerEntry.PlaybackSpeed2x -- speeds playback up 1.09x on the final
+    /// mixed output right before it reaches the device (SoundTouchSpeedSampleProvider below), via
+    /// a real time-stretch (SoundTouch.Net) rather than the cheap "relabel the sample rate" trick
+    /// most simple players use -- owner request 2026-08-11: "keep the key the same" while still
+    /// speeding up, so pitch is left alone (SoundTouchProcessor.Pitch stays at its 1.0 default,
+    /// only Tempo changes). Applied last so it also speeds up the lead-in whistle layered in via
+    /// SequencedSampleProvider, not just the main clip -- the two would otherwise play back at
+    /// different apparent tempos.</param>
+    /// <param name="whistleOverridePath">TriggerEntry.AltWhistlePath -- per-event alternate to the
+    /// global LeadInClipPath. Null/empty falls back to the global clip, same as before this param
+    /// existed.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true, Func<float>? liveVolumeSource = null, bool speed2x = false, string? whistleOverridePath = null, string? channel = null)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
@@ -197,7 +231,7 @@ internal static class AudioPlayer
             }
         }
 
-        if (interruptPrevious) StopAll();
+        if (interruptPrevious) StopChannel(channel);
         if (isHighPriorityEvent) AudioDuckingController.OnHighPriorityEventFired();
 
         float volume = volumeOverride ?? MasterVolume;
@@ -213,7 +247,7 @@ internal static class AudioPlayer
                 // preloaded (e.g. a brand-new assignment made mid-game).
                 using var audio = CachedAudioSource.Open(path);
                 using var output = new WaveOutEvent();
-                lock (Lock) ActiveOutputs.Add(output);
+                lock (Lock) ActiveOutputs.Add((output, channel));
                 audio.Volume = volume;
                 AudioFileReader? leadInReader = null;
 
@@ -267,7 +301,7 @@ internal static class AudioPlayer
                     // the real in-game cue).
                     if (playLeadInWhistle)
                     {
-                        var leadIn = BuildLeadInProvider(source.WaveFormat, volume, out leadInReader);
+                        var leadIn = BuildLeadInProvider(source.WaveFormat, volume, whistleOverridePath, out leadInReader);
                         if (leadIn != null) source = new SequencedSampleProvider(leadIn, source);
                     }
 
@@ -277,6 +311,14 @@ internal static class AudioPlayer
                     if (LimiterEnabled) source = new LimiterProvider(source);
 
                     source = new PeakMeterProvider(source, lvl => CurrentOutputLevel = lvl);
+
+                    // Speed toggle -- see the Play() doc comment on speed2x. Applied last, after
+                    // the whistle is already sequenced in, so both speed up together. 1.09x --
+                    // owner corrections 2026-08-11: 2x too fast, then 1.5x too fast, then 1.25x
+                    // too fast, then 1.15x still too fast -- param/field names kept as "speed2x"
+                    // to avoid an unnecessary rename churn across C#/JS, but the actual multiplier
+                    // here is what matters.
+                    if (speed2x) source = new SoundTouchSpeedSampleProvider(source, 1.09);
 
                     output.Init(source.ToWaveProvider());
                     output.Play();
@@ -315,7 +357,7 @@ internal static class AudioPlayer
                 }
                 finally
                 {
-                    lock (Lock) ActiveOutputs.Remove(output);
+                    lock (Lock) ActiveOutputs.RemoveAll(t => t.Output == output);
                     leadInReader?.Dispose();
                 }
             }
@@ -336,15 +378,18 @@ internal static class AudioPlayer
     /// previously hard-coded to the static MasterVolume field here, which meant muting a side
     /// (AwayVolume=0) or the PA layer (PaVolume=0) via volumeOverride still let the whistle play
     /// at full volume.</summary>
-    static ISampleProvider? BuildLeadInProvider(WaveFormat targetFormat, float volume, out AudioFileReader? reader)
+    static ISampleProvider? BuildLeadInProvider(WaveFormat targetFormat, float volume, string? whistleOverridePath, out AudioFileReader? reader)
     {
         reader = null;
-        if (!LeadInEnabled || string.IsNullOrWhiteSpace(LeadInClipPath) || !File.Exists(LeadInClipPath))
+        string? clipPath = !string.IsNullOrWhiteSpace(whistleOverridePath) && File.Exists(whistleOverridePath)
+            ? whistleOverridePath
+            : LeadInClipPath;
+        if (!LeadInEnabled || string.IsNullOrWhiteSpace(clipPath) || !File.Exists(clipPath))
             return null;
 
         try
         {
-            reader = new AudioFileReader(LeadInClipPath) { Volume = volume * WhistleVolume };
+            reader = new AudioFileReader(clipPath) { Volume = volume * WhistleVolume };
             ISampleProvider src = reader.WaveFormat.Channels == 1
                 ? new MonoToStereoSampleProvider(reader)
                 : reader;
@@ -359,6 +404,82 @@ internal static class AudioPlayer
             reader = null;
             return null;
         }
+    }
+}
+
+/// <summary>Speed 2x toggle (AudioPlayer.Play's speed2x param) -- relabels the wrapped source's
+/// reported SampleRate by `factor` without touching the PCM data at all. WaveOutEvent/the output
+/// device then plays those same samples at the higher rate, so the clip runs `factor`x faster (and
+/// factor semitones-ish higher in pitch, since this is a naive rate change rather than a real
+/// time-stretch/pitch-preserving engine -- acceptable for a quick "hype it up" toggle, not meant to
+/// sound studio-clean). Read() just passes through untouched; only WaveFormat lies.</summary>
+/// <summary>Owner request 2026-08-11 (after an earlier version of this used the classic
+/// "relabel the sample rate" trick simple players use for a speed toggle -- cheap, but it pitched
+/// songs up right along with the speed, more and more noticeably as the multiplier got tuned
+/// down across several owner passes: "keep the key the same"): real time-stretch via
+/// SoundTouch.Net (pure-managed C# port of the SoundTouch library, no native DLL) instead.
+/// SoundTouchProcessor's Put/ReceiveSamples work in FRAMES (one "sample" = all channels for one
+/// instant), while ISampleProvider.Read works in raw interleaved floats -- every count here gets
+/// divided/multiplied by WaveFormat.Channels at the boundary to bridge the two.</summary>
+sealed class SoundTouchSpeedSampleProvider : ISampleProvider
+{
+    readonly ISampleProvider _source;
+    readonly SoundTouch.SoundTouchProcessor _processor;
+    readonly int _channels;
+    readonly float[] _sourceBuffer;
+    bool _sourceExhausted;
+
+    public WaveFormat WaveFormat { get; }
+
+    public SoundTouchSpeedSampleProvider(ISampleProvider source, double tempo)
+    {
+        _source = source;
+        WaveFormat = source.WaveFormat;
+        _channels = source.WaveFormat.Channels;
+        _sourceBuffer = new float[4096 * _channels];
+        _processor = new SoundTouch.SoundTouchProcessor
+        {
+            SampleRate = source.WaveFormat.SampleRate,
+            Channels = _channels,
+            Tempo = tempo,
+            // Pitch defaults to 1.0 (unchanged) -- Tempo alone is the "speed without pitch shift"
+            // knob; setting Pitch too would reintroduce exactly what this class exists to avoid.
+        };
+    }
+
+    public int Read(float[] buffer, int offset, int count)
+    {
+        int framesWanted = count / _channels;
+        int framesWritten = 0;
+
+        while (framesWritten < framesWanted)
+        {
+            int available = _processor.AvailableSamples;
+            if (available > 0)
+            {
+                int framesToTake = Math.Min(available, framesWanted - framesWritten);
+                var outSpan = buffer.AsSpan(offset + framesWritten * _channels, framesToTake * _channels);
+                int received = _processor.ReceiveSamples(outSpan, framesToTake);
+                framesWritten += received;
+                if (received > 0) continue;
+            }
+
+            if (_sourceExhausted) break; // pipeline drained after Flush() -- nothing left to read
+
+            int samplesRead = _source.Read(_sourceBuffer, 0, _sourceBuffer.Length);
+            if (samplesRead > 0)
+            {
+                _processor.PutSamples(_sourceBuffer.AsSpan(0, samplesRead), samplesRead / _channels);
+            }
+            else
+            {
+                _processor.Flush();
+                _sourceExhausted = true;
+                if (_processor.AvailableSamples == 0) break; // nothing left even after flushing
+            }
+        }
+
+        return framesWritten * _channels;
     }
 }
 

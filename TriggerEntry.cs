@@ -36,4 +36,15 @@ public class TriggerEntry
     /// regardless of the global toggle. Missing from old saved JSON deserializes to true (default),
     /// so every existing assignment keeps behaving exactly as it did before this field existed.</summary>
     public bool PlayLeadInWhistle { get; set; } = true;
+
+    /// <summary>Per-event alternate to the global lead-in whistle clip (ConfigStore.LeadInWhistlePath
+    /// / AudioPlayer.LeadInClipPath) -- empty means "use the global one" (default, same behavior as
+    /// before this field existed). Only takes effect when PlayLeadInWhistle is also true; this
+    /// doesn't add a second on/off toggle, it swaps WHICH clip plays for just this card.</summary>
+    public string AltWhistlePath { get; set; } = "";
+
+    /// <summary>Speed toggle for this card's clip -- see AudioPlayer.Play's speed2x param and
+    /// SoundTouchSpeedSampleProvider for how it's applied. Affects both real in-game firing and Preview.
+    /// Missing from old saved JSON deserializes to false (default), so no migration needed.</summary>
+    public bool PlaybackSpeed2x { get; set; } = false;
 }

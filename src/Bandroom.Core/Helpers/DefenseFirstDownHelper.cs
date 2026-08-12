@@ -37,9 +37,12 @@ public sealed class DefenseFirstDownHelper : IRuleEvaluator
         if (state.Current.Down != 1)
             return null;
 
+        // Renamed 2026-08-11 (owner audit call, same session as DriveStarterHelper's renames) --
+        // "Defense: After Opening Kick" is clearer about what this actually is (the receiving
+        // team's D taking the field right after a kickoff return) than the old generic name.
         return new TriggerEvent
         {
-            EventKey = "Defense: First Down",
+            EventKey = "Defense: After Opening Kick",
             Volume = 85,
             IsEarnedBigEvent = false
         };

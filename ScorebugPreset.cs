@@ -23,15 +23,25 @@ public sealed class ScorebugPreset
     /// <summary>Crop box for the AWAY team's timeout-remaining dash row (small tick marks under
     /// the team name, e.g. "AUBURN — — —"), calibrated 2026-08-07 from a live screenshot showing
     /// away=3/home=0 remaining. Sampled by brightness (see GameWatcher.SampleTimeoutSegments),
-    /// NOT OCR text -- these are graphical dashes, not font glyphs. Only away is tracked because
-    /// TimeoutHelper only ever reads AwayTimeoutsRemaining, and this app always treats the user's
-    /// own team as home (UserIsHome is hardcoded true in WebMainForm.SetGameTeamsFromWeb), so
-    /// "away" here always means "the opponent" by this app's existing design convention.
+    /// NOT OCR text -- these are graphical dashes, not font glyphs.
     /// Estimated crop, not pixel-measured -- treat as a starting point needing live tuning.</summary>
     public double AwayTimeoutFxX { get; init; }
     public double AwayTimeoutFxY { get; init; }
     public double AwayTimeoutFxW { get; init; }
     public double AwayTimeoutFxH { get; init; }
+
+    /// <summary>Owner request 2026-08-11 ("check for Home timeouts too" -- TimeoutHelper only
+    /// ever read AwayTimeoutsRemaining, so a Home-team timeout was silently invisible). NOT
+    /// independently measured for any preset below -- best-guess placeholder only, mirrored off
+    /// each preset's own AwayUnderlineFxX -> HomeUnderlineFxX horizontal offset (same left/right
+    /// team-block spacing this scorebug already uses elsewhere) applied to that preset's
+    /// AwayTimeoutFxX. Y/W/H copied straight from the Away box, same horizontal strip assumption.
+    /// Explicitly unverified -- confirm against a live screenshot showing a Home timeout actually
+    /// used (dash count changed) before trusting this crop position.</summary>
+    public double HomeTimeoutFxX { get; init; }
+    public double HomeTimeoutFxY { get; init; }
+    public double HomeTimeoutFxW { get; init; }
+    public double HomeTimeoutFxH { get; init; }
 
     /// <summary>Tight positional crops for the away/home score digits and the game clock,
     /// promoted from hardcoded constants in GameWatcher.cs to per-preset fields 2026-08-10 --
@@ -106,6 +116,9 @@ public sealed class ScorebugPreset
         AwayUnderlineFxX = 0.145, AwayUnderlineFxY = 0.975, AwayUnderlineFxW = 0.075, AwayUnderlineFxH = 0.012,
         HomeUnderlineFxX = 0.395, HomeUnderlineFxY = 0.975, HomeUnderlineFxW = 0.11, HomeUnderlineFxH = 0.012,
         AwayTimeoutFxX = 0.15, AwayTimeoutFxY = 0.895, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
+        // Placeholder mirror (see HomeTimeoutFx*'s doc comment): AwayUnderlineFxX (0.145) ->
+        // HomeUnderlineFxX (0.395) is a +0.25 offset on this preset; applied to AwayTimeoutFxX.
+        HomeTimeoutFxX = 0.40, HomeTimeoutFxY = 0.895, HomeTimeoutFxW = 0.08, HomeTimeoutFxH = 0.025,
     };
 
     /// <summary>Third scorebug layout, calibrated 2026-08-08 from two 1920x1080 screenshots the
@@ -151,7 +164,13 @@ public sealed class ScorebugPreset
     /// (away) block has logo-then-name-then-score ordering vs LSU's score-then-name-then-logo, so
     /// the mirror assumption is shakier than a direct measurement would be. Get a Georgia-side
     /// close-up (ideally with a timeout already used, e.g. 2/3 remaining, to confirm the
-    /// lit-vs-unlit visual difference too) to firm this up.</summary>
+    /// lit-vs-unlit visual difference too) to firm this up.
+    /// HomeTimeoutFx* (added 2026-08-11) is a SECOND mirror -- taking the already-mirrored
+    /// AwayTimeoutFxX above and mirroring it back across using the AwayUnderlineFxX/
+    /// HomeUnderlineFxX delta, rather than restoring the original real LSU measurement (which
+    /// wasn't kept). Since the real data point for THIS preset was actually the home side, this
+    /// double-mirrored guess is probably the shakiest of the three presets' Home placeholders --
+    /// prioritize re-measuring this one directly from a live screenshot.</summary>
     public static readonly ScorebugPreset CollegeFootball27 = new()
     {
         Name = "College Football 27",
@@ -159,16 +178,26 @@ public sealed class ScorebugPreset
         AwayScoreFxX = 0.395, AwayScoreFxW = 0.035,
         HomeScoreFxX = 0.595, HomeScoreFxW = 0.035,
         ClockFxX = 0.465, ClockFxW = 0.06,
-        // PenaltyAgainstFx*/BannerFx* -- NOT calibrated from a CFB 27 screenshot (none seen showing
-        // either overlay yet). Left equal to the CBS-calibrated numbers as an explicit placeholder
-        // (same "clone as a starting point, flag it" convention as CollegeFootball26Console below)
-        // rather than inventing new coordinates with no basis -- get a live CFB 27 penalty-overlay
-        // and TOUCHDOWN/FIELD GOAL/SAFETY-banner screenshot to replace these for real.
+        // BannerFx* -- calibrated 2026-08-11 from a live CFB 27 TOUCHDOWN screenshot (Montana St
+        // kickoff return, screenshot batch in OneDrive\Pictures\Screenshots 1\, #490). Unlike the
+        // CBS skin's separate full-screen ribbon, this skin's TOUCHDOWN/FIELD GOAL/SAFETY banner
+        // just replaces the ENTIRE persistent scorebug pill in place (team logos still visible on
+        // both ends, white text fills the whole center where the score/clock normally sit) -- so
+        // the crop needs to span the full bar width, not a narrow center box like CBS's. Reuses
+        // the same BandFxY/BandFxH vertical band as the rest of the bug since it's the same strip.
+        // PenaltyAgainstFx* -- still NOT calibrated from a CFB 27 screenshot (none seen showing a
+        // live penalty-decision overlay in this batch either). Left equal to the CBS-calibrated
+        // numbers as an explicit placeholder (same "clone as a starting point, flag it" convention
+        // as CollegeFootball26Console below) rather than inventing new coordinates with no basis --
+        // get a live CFB 27 penalty-overlay screenshot to replace this for real.
         PenaltyAgainstFxX = 0.65, PenaltyAgainstFxY = 0.62, PenaltyAgainstFxW = 0.32, PenaltyAgainstFxH = 0.22,
-        BannerFxX = 0.35, BannerFxY = 0.87, BannerFxW = 0.3, BannerFxH = 0.08,
+        BannerFxX = 0.15, BannerFxY = 0.870, BannerFxW = 0.70, BannerFxH = 0.075,
         AwayUnderlineFxX = 0.430, AwayUnderlineFxY = 0.876, AwayUnderlineFxW = 0.045, AwayUnderlineFxH = 0.024,
         HomeUnderlineFxX = 0.550, HomeUnderlineFxY = 0.876, HomeUnderlineFxW = 0.045, HomeUnderlineFxH = 0.024,
         AwayTimeoutFxX = 0.253, AwayTimeoutFxY = 0.925, AwayTimeoutFxW = 0.091, AwayTimeoutFxH = 0.012,
+        // Double-mirrored placeholder -- see the long Timeouts comment above. AwayUnderlineFxX
+        // (0.430) -> HomeUnderlineFxX (0.550) is a +0.12 offset; applied to AwayTimeoutFxX.
+        HomeTimeoutFxX = 0.373, HomeTimeoutFxY = 0.925, HomeTimeoutFxW = 0.091, HomeTimeoutFxH = 0.012,
     };
 
     /// <summary>Added 2026-08-09 for the owner's separate CFB 26 PS/Xbox console capture, kept as
@@ -186,6 +215,10 @@ public sealed class ScorebugPreset
         AwayUnderlineFxX = 0.20, AwayUnderlineFxY = 0.965, AwayUnderlineFxW = 0.09, AwayUnderlineFxH = 0.015,
         HomeUnderlineFxX = 0.565, HomeUnderlineFxY = 0.965, HomeUnderlineFxW = 0.09, HomeUnderlineFxH = 0.015,
         AwayTimeoutFxX = 0.20, AwayTimeoutFxY = 0.905, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
+        // Placeholder mirror (see HomeTimeoutFx*'s doc comment): AwayUnderlineFxX (0.20) ->
+        // HomeUnderlineFxX (0.565) is a +0.365 offset; applied to AwayTimeoutFxX. Stacks on top of
+        // this preset's existing "cloned, unverified for CFB 26" caveat above.
+        HomeTimeoutFxX = 0.565, HomeTimeoutFxY = 0.905, HomeTimeoutFxW = 0.08, HomeTimeoutFxH = 0.025,
     };
 
     public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebugV3, CollegeFootball27, CollegeFootball26Console };

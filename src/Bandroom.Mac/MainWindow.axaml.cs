@@ -345,7 +345,6 @@ public partial class MainWindow : Window
         new Bandroom.Core.Helpers.OffenseDownHelper(),
         new Bandroom.Core.Helpers.PenaltyHelper(),
         new Bandroom.Core.Helpers.SafetyHelper(),
-        new Bandroom.Core.Helpers.NoPuntReturnHelper(),
         new Bandroom.Core.Helpers.TflHelper(),
         new Bandroom.Core.Helpers.TimeoutHelper(),
         new Bandroom.Core.Helpers.TouchdownHelper(),

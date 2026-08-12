@@ -12,6 +12,18 @@ public sealed class GameStateEventHelper : IRuleEvaluator
     // all. Same self-tracked-flag fix as KickoffHelper's _didFire for the same class of bug.
     bool _didFireVictoryInHand;
 
+    // FIXED 2026-08-11 (owner report, live big game): "Pregame Take the Field" fired mid-game off
+    // an Away first down. Root cause -- the condition below only checked a single-tick
+    // Previous/Current pair (Quarter 0->1, Down 0->something), with no guard against it matching
+    // again later. A big game's extra overlays (celebration graphics, GAMEDAY-style graphics after
+    // a big first down) can blank the scorebug for a tick, misreading Quarter/Down back down to 0
+    // -- the very next tick where they resolve again then looks IDENTICAL to the real, one-time
+    // pregame transition. Real pregame can only happen once per game, same class of bug
+    // KickoffHelper's/_didFireVictoryInHand's own self-tracked flags exist to prevent -- this
+    // never resets (unlike _didFireVictoryInHand, which legitimately can re-arm) since there's only
+    // ever one real "take the field" moment per GAMETIME session.
+    bool _didFirePregame;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         // --- Quarter transitions ---
@@ -45,9 +57,11 @@ public sealed class GameStateEventHelper : IRuleEvaluator
         }
 
         // --- Pregame Take the Field: first detection, quarter 1, down unknown (0) ---
-        if (state.Previous.Quarter == 0 && state.Current.Quarter == 1
+        if (!_didFirePregame
+            && state.Previous.Quarter == 0 && state.Current.Quarter == 1
             && state.Previous.Down == 0 && state.Current.Down > 0)
         {
+            _didFirePregame = true;
             return new TriggerEvent
             {
                 EventKey = "Other: Pregame Take the Field",

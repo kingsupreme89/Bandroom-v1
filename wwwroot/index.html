@@ -428,6 +428,25 @@
           <button class="pill" id="btn-quick-load">Load</button>
         </div>
 
+        <!-- Owner request 2026-08-11: three switchable song-assignment presets per team ("use as
+             presets" for Home games / Away games / Big Games), plus a way to copy one onto another
+             (e.g. "copy Big Game preset to Home"). Bridge: SwitchTeamPresetFromWeb,
+             CopyTeamPresetFromWeb, GetTeamPresetStatusFromWeb (app.js: renderTeamPresetPills). -->
+        <div id="team-preset-bar" class="glass" hidden>
+          <span class="matchup-side-label">Preset:</span>
+          <button class="pill pill-preset" id="btn-preset-plain" data-preset="">Plain</button>
+          <button class="pill pill-preset" id="btn-preset-home" data-preset="Home">Home</button>
+          <button class="pill pill-preset" id="btn-preset-away" data-preset="Away">Away</button>
+          <button class="pill pill-preset" id="btn-preset-biggame" data-preset="BigGame">Big Game</button>
+          <span class="team-preset-copy-wrap">
+            <span class="matchup-side-label">Copy</span>
+            <select id="team-preset-copy-from" class="team-preset-copy-select" title="Copy from"></select>
+            <span class="matchup-side-label">to</span>
+            <select id="team-preset-copy-to" class="team-preset-copy-select" title="Copy to"></select>
+            <button class="pill" id="btn-preset-copy" title="Overwrite the 'to' preset with a copy of the 'from' preset">Copy</button>
+          </span>
+        </div>
+
         <div id="quick-load-confirm-overlay" hidden>
           <div id="quick-load-confirm-dialog" class="glass">
             <div class="clipper-header">
@@ -1391,6 +1410,43 @@
         <div class="soundbooth-preview-row">
           <button class="btn-ghost soundbooth-preview-btn" data-preview-trigger="score">Preview</button>
         </div>
+        <!-- Fills the Mixer tab's empty space below the knob/pills with direct control over the
+             two things the Whistle/Fade pills above only adjust a volume/delay number for -- the
+             whistle clip itself (upload/replace + on-off) and a plain-language readout of what
+             Fade's number means. Docked Game Day mode hides #adjust-panel (see
+             enterGameDayMode's doc comment), which used to be the only place
+             btn-leadin-whistle-upload/toggle-leadin-whistle lived, so without this section there
+             was no way to set or enable a whistle clip while docked. Mirrors
+             #leadin-whistle-section's markup/behavior with sb-prefixed ids; both copies are kept
+             in sync by refreshLeadInWhistleSection in app.js. -->
+        <div class="soundbooth-row soundbooth-whistle-fade-section">
+          <div class="soundbooth-label">
+            Lead-In Whistle
+            <button class="sb-info" data-info="knob-whistle-clip" aria-label="What does this do?">i</button>
+          </div>
+          <p class="leadin-whistle-hint" id="sb-leadin-whistle-hint">A short sound that plays right
+            before every triggered clip -- like a referee's whistle starting a play. No whistle
+            set yet.</p>
+          <label class="toggle-row" id="sb-leadin-whistle-toggle-row" hidden>
+            <input type="checkbox" id="toggle-sb-leadin-whistle" />
+            <span>Play before every triggered clip</span>
+          </label>
+          <button id="btn-sb-leadin-whistle-upload" class="btn-ghost">Choose / Replace Whistle...</button>
+        </div>
+        <!-- Same reasoning as the whistle section above -- old adjust-panel's "Fire Sensitivity
+             (Delay)" slider (with its plain-language "Xs until fade-out -- no fade-in" caption)
+             is hidden by Game Day mode along with the rest of #adjust-panel. The Fade pill/knob
+             above already sets the same bridge value, but has no room for that caption; this
+             gives it one while docked. Own slider (not knob) since a caption-under-a-slider reads
+             clearer here than the knob's bare number. -->
+        <div class="soundbooth-row soundbooth-whistle-fade-section">
+          <div class="soundbooth-label">
+            Fade Delay
+            <button class="sb-info" data-info="knob-fade-delay" aria-label="What does this do?">i</button>
+          </div>
+          <input type="range" id="slider-sb-fade-delay" min="0" max="30" value="10" step="1" class="slider" />
+          <div class="slider-value"><span id="sb-fade-delay-value">10</span>s until fade-out &mdash; no fade-in</div>
+        </div>
       </div>
 
       <div class="soundbooth-tab-panel" data-sb-panel="reverb-eq" hidden>
@@ -1508,31 +1564,70 @@
           <button class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-prev" data-dir="-1" title="Previous scorebug layout">&#8249;</button>
           <span class="pill scorebug-switcher-pill" id="scorebug-switcher-name">...</span>
           <button class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-next" data-dir="1" title="Next scorebug layout">&#8250;</button>
+          <!-- Owner request 2026-08-11: the Big-Game/last-matchup/scorebug-side/away-band toggles
+               used to sit always-visible as their own island -- now tucked behind this large pill,
+               placed right next to the scorebug switcher per owner request, toggling
+               .matchup-controls-island open/closed as a popover (see wireMatchupGameSettingsPill
+               in app.js). -->
+          <button type="button" class="pill matchup-header-pill-lg" id="btn-matchup-game-settings" title="Game settings for this matchup">Game Settings</button>
         </div>
         <button id="btn-close-matchup" class="icon-btn">&times;</button>
       </div>
-      <p class="matchup-instructions">
-        Do this while you're still on CFB 27's own team-select screen: pick the same two teams
-        below, then hit GAMETIME right before kickoff. Each team's own saved profile loads
-        automatically, so the right song plays for whichever side actually scores or forces a
-        turnover. You can still switch between them below to tweak songs during the game --
-        GAMETIME only locks in <em>who's home and away</em>, not which one you're editing.
-        Press <strong>Stop Watching</strong> at the top when the game ends to unlock and start a
-        new one.
-      </p>
-      <!-- Owner request: one-click re-select of last game's teams -- fetched via
-           bridge.GetLastMatchup() on dialog open (see initMatchupLastPill in app.js), hidden
-           entirely if nothing's been recorded yet (fresh install / never confirmed a matchup). -->
-      <button type="button" class="pill matchup-last-pill" id="matchup-last-pill" hidden></button>
-      <!-- Owner request: not every game is a Big Game (both bands physically present) -- this
-           needs to be flippable right here per-matchup instead of only buried in the Adjust
-           sidebar's Big Game panel. Same underlying ConfigStore.BigGameSettings flag as
-           #toggle-big-game-enabled (see wireMatchupBigGameToggle in app.js); toggling either one
-           keeps the other in sync and saves immediately, no separate Save step needed here. -->
-      <div class="matchup-biggame-row">
-        <label class="toggle-row">
+      <!-- Owner request 2026-08-11: was an always-visible paragraph up top competing with the
+           full-bleed photo, then a Help-pill popover -- now a bottom scrolling ticker, same
+           left-scrolling marquee #bandroom-ticker already uses elsewhere in the app, anchored
+           above the Cancel/GAMETIME row (see .matchup-ticker/.matchup-footer-bar in style.css). -->
+      <div class="matchup-ticker">
+        <div class="matchup-ticker-track">
+          <span class="matchup-ticker-scroll">
+            Do this while you're still on CFB 27's own team-select screen: pick the same two teams
+            below, then hit GAMETIME right before kickoff. Each team's own saved profile loads
+            automatically, so the right song plays for whichever side actually scores or forces a
+            turnover. You can still switch between them below to tweak songs during the game --
+            GAMETIME only locks in who's home and away, not which one you're editing. Press
+            Stop Watching at the top when the game ends to unlock and start a new one.
+          </span>
+        </div>
+      </div>
+      <!-- Owner request 2026-08-11: these four controls used to be scattered (last-pill/Big-Game
+           up here, the two scorebug-side/away-band toggles down past the coverflow near the
+           footer) -- floating individually on the now-full-bleed photo backdrop, none of them
+           read as belonging together. Grouped into one glass "island" popover, opened via the
+           "Game Settings" pill next to the scorebug switcher (see wireMatchupGameSettingsPill in
+           app.js) instead of sitting always-visible. -->
+      <div class="matchup-controls-island" id="matchup-controls-island" hidden>
+        <!-- Owner request: one-click re-select of last game's teams -- fetched via
+             bridge.GetLastMatchup() on dialog open (see initMatchupLastPill in app.js), hidden
+             entirely if nothing's been recorded yet (fresh install / never confirmed a matchup). -->
+        <button type="button" class="pill matchup-last-pill" id="matchup-last-pill" hidden></button>
+        <!-- Owner request: not every game is a Big Game (both bands physically present) -- this
+             needs to be flippable right here per-matchup instead of only buried in the Adjust
+             sidebar's Big Game panel. Same underlying ConfigStore.BigGameSettings flag as
+             #toggle-big-game-enabled (see wireMatchupBigGameToggle in app.js); toggling either one
+             keeps the other in sync and saves immediately, no separate Save step needed here. -->
+        <label class="toggle-row pill-toggle">
           <input type="checkbox" id="toggle-matchup-big-game" />
           <span>Big Game (both bands here)</span>
+        </label>
+        <!-- Moved up from below the coverflow (Session 51) into this same island -- CFB27 draws
+             teams by the GAME's own home/away stadium assignment, not by which one the user is
+             rooting for -- possession detection (SamplePossessionByUnderline) only reads
+             LEFT/RIGHT screen position, so if the user's own team is the visitor this game (drawn
+             on the left), every possession read is inverted for the whole game unless this is
+             checked. See GameWatcher.UserTeamOnLeftSide's doc comment. -->
+        <label class="toggle-row pill-toggle" title="Check this if your team is the visiting team in CFB27's own matchup this game (shown on the LEFT of the scorebug) -- otherwise every possession read comes out backwards for the whole game.">
+          <input type="checkbox" id="matchup-screen-side-left" />
+          <span>My team is on the LEFT (visiting side) of the scorebug this game</span>
+        </label>
+        <!-- Moved up from below the coverflow (Session 51) into this same island -- owner request:
+             GAMETIME opens the Band Room Viewer (fullscreen team-background gallery, see
+             openBandroomViewer in app.js) as Game Day mode's backdrop -- this just says which
+             team's band room to land on first, Away or Home. Unrelated to
+             matchup-screen-side-left above (that one's about which side of the SCOREBUG your team
+             is drawn on for OCR possession-reading, not which band room shows first). -->
+        <label class="toggle-row pill-toggle" title="Which team's Band Room Viewer opens first when you hit GAMETIME -- you can still switch to the other side's with the Away/Home bar above the events list.">
+          <input type="checkbox" id="matchup-my-team-away" />
+          <span>My team is Away (load their band room first)</span>
         </label>
       </div>
       <div class="matchup-columns">
@@ -1545,12 +1640,6 @@
              renderMatchupCoverflow the same way applyVsBackdrop tints the in-game VS backdrop
              halves via --half-color -- same mechanism, different element. -->
         <div class="matchup-column matchup-column-away">
-          <!-- Owner request: a fast vertical scrub list on the outer edge of each side, alongside
-               (not replacing) the coverflow -- same small-icon look as the left sidebar's team
-               grid (#team-grid), just laid out as a single scrollable column. Click an icon to
-               pick that team outright (same click-to-select convention as the sidebar), which
-               re-centers this side's coverflow on it too. See wireMatchupSideGrid in app.js. -->
-          <div class="matchup-side-grid" id="matchup-away-side-grid"></div>
           <div class="matchup-column-main">
             <div class="matchup-column-title">Away</div>
             <input type="text" id="matchup-away-search" placeholder="Search teams..." class="team-picker-search" />
@@ -1560,6 +1649,15 @@
               <button class="coverflow-arrow coverflow-arrow-right" data-side="away" data-dir="1" title="Next team">&#8250;</button>
             </div>
             <div class="coverflow-name" id="matchup-away-name"></div>
+            <!-- Owner request 2026-08-11: moved from a flanking outer-edge column to directly below
+                 the big logo, centered under it -- a fast vertical scrub list, same small-icon look
+                 as the left sidebar's team grid (#team-grid). Click an icon to pick that team
+                 outright (same click-to-select convention as the sidebar), which re-centers this
+                 side's coverflow on it too. Top edge mask-fades into the coverflow above it (see
+                 .matchup-side-grid's mask-image) so scrolled icons look like they're feeding up
+                 into the big logo and disappearing, not just stopping at a hard edge. See
+                 wireMatchupSideGrid/wireMatchupSideGridWheel in app.js. -->
+            <div class="matchup-side-grid" id="matchup-away-side-grid"></div>
           </div>
         </div>
         <!-- Gameday logo centerpiece -- owner's explicit choice 2026-08-09 to keep using the real
@@ -1588,22 +1686,12 @@
               <button class="coverflow-arrow coverflow-arrow-right" data-side="home" data-dir="1" title="Next team">&#8250;</button>
             </div>
             <div class="coverflow-name" id="matchup-home-name"></div>
+            <!-- Same move + mask-fade-into-logo treatment as the Away side, see its comment above. -->
+            <div class="matchup-side-grid" id="matchup-home-side-grid"></div>
           </div>
-          <div class="matchup-side-grid" id="matchup-home-side-grid"></div>
         </div>
       </div>
       <div class="save-profile-subtext" id="matchup-subtext"></div>
-      <!-- CFB27 draws teams by the GAME's own home/away stadium assignment, not by which one the
-           user is rooting for -- possession detection (SamplePossessionByUnderline) only reads
-           LEFT/RIGHT screen position, so if the user's own team is the visitor this game (drawn
-           on the left), every possession read is inverted for the whole game unless this is
-           checked. See GameWatcher.UserTeamOnLeftSide's doc comment. -->
-      <div class="matchup-biggame-row">
-        <label class="toggle-row" title="Check this if your team is the visiting team in CFB27's own matchup this game (shown on the LEFT of the scorebug) -- otherwise every possession read comes out backwards for the whole game.">
-          <input type="checkbox" id="matchup-screen-side-left" />
-          <span>My team is on the LEFT (visiting side) of the scorebug this game</span>
-        </label>
-      </div>
       <div class="save-profile-actions">
         <button id="btn-matchup-cancel" class="btn-ghost">Cancel</button>
         <button id="btn-matchup-confirm" class="gametime-btn" disabled>GAMETIME</button>

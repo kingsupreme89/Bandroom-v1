@@ -41,17 +41,70 @@ internal static class EventActivityLog
     static readonly object Lock = new();
     static readonly List<Entry> Entries = new(MaxEntries);
 
+    /// <summary>Owner request 2026-08-11: a relaunch (or a crash) wiped the whole in-memory log,
+    /// so exporting right after startup produced an empty file even though the previous run's
+    /// activity was still sitting in event_log_live.txt on disk. Reloads that file back into
+    /// Entries once at process start. The live file only stores the already-formatted display
+    /// string (see ToDisplayString/WriteLiveFile), not the structured EventKey/Side, so restored
+    /// entries carry EventKey="" and Side="n/a" -- fine, since both the UI feed and the exporter
+    /// only ever render ToDisplayString for the text the user actually reads. Best-effort: a
+    /// missing/corrupt file just means starting with an empty log, same as before this existed.</summary>
+    static EventActivityLog()
+    {
+        try
+        {
+            string path = Path.Combine(ConfigStore.UserDataRoot, "event_log_live.txt");
+            if (!File.Exists(path)) return;
+            var restored = new List<Entry>();
+            foreach (var line in File.ReadAllLines(path))
+            {
+                int sep = line.IndexOf(" -- ", StringComparison.Ordinal);
+                if (sep < 0) continue;
+                var ts = DateTime.TryParse(line[..sep], out var parsed) ? parsed : DateTime.Now;
+                restored.Add(new Entry(ts, "", "n/a", line[(sep + 4)..]));
+            }
+            if (restored.Count > MaxEntries)
+                restored = restored.GetRange(restored.Count - MaxEntries, MaxEntries);
+            Entries.AddRange(restored);
+        }
+        catch { /* best-effort -- worst case we start with an empty log, same as before */ }
+    }
+
     /// <summary>Appends one entry, dropping the oldest once the buffer is full. Side should be
     /// "home", "away", or "n/a" for side-agnostic ("Other:*") events. Message must already be
     /// plain English -- no internal jargon -- since it's shown to the user verbatim.</summary>
     public static void Record(string eventKey, string side, string message)
     {
+        List<Entry> snapshot;
         lock (Lock)
         {
             Entries.Add(new Entry(DateTime.Now, eventKey ?? "", side ?? "n/a", message ?? ""));
             if (Entries.Count > MaxEntries)
                 Entries.RemoveAt(0);
+            snapshot = new List<Entry>(Entries);
         }
+        WriteLiveFile(snapshot);
+    }
+
+    /// <summary>Owner request 2026-08-11 ("event log needs to update in real time -- it's not
+    /// now"): ExportEventActivityLogFromWeb only ever wrote a fresh timestamped snapshot on
+    /// manual button click -- opened once in an external editor, it never changed again, which
+    /// reads as "frozen" during a live game even though the in-app Event Log tab (which polls
+    /// GetEventActivityLog every 2s) was updating fine the whole time. This gives the "read it in
+    /// a text editor" workflow (see the "whatsthedeal" review flow) the same liveness: one FIXED
+    /// filename, rewritten in full on every single Record() call (cheap -- MaxEntries caps this
+    /// at 200 short lines), so an editor with auto-reload-on-change (VS Code, etc.) shows new
+    /// events appear within a second of them firing, no re-export/re-open needed. Best-effort --
+    /// a write failure here must never take down the audio pipeline that called Record().</summary>
+    static void WriteLiveFile(List<Entry> snapshot)
+    {
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.UserDataRoot);
+            string path = Path.Combine(ConfigStore.UserDataRoot, "event_log_live.txt");
+            File.WriteAllLines(path, snapshot.Select(e => e.ToDisplayString()));
+        }
+        catch { /* best-effort -- logging must never crash the caller */ }
     }
 
     /// <summary>Snapshot of the current buffer, oldest first. Returns a copy so callers (the web

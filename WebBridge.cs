@@ -67,6 +67,13 @@ public sealed class WebBridge
 
     public void SelectTeam(string name) => _host.SelectTeamFromWeb(name);
 
+    // Three switchable song-assignment presets per team (Home/Away/Big Game) plus copying one
+    // onto another -- owner request 2026-08-11. See WebMainForm.SwitchTeamPresetFromWeb's own
+    // doc comment for the full storage/gameplay-selection design.
+    public string SwitchTeamPreset(string preset) => _host.SwitchTeamPresetFromWeb(preset);
+    public bool CopyTeamPreset(string fromPreset, string toPreset) => _host.CopyTeamPresetFromWeb(fromPreset, toPreset);
+    public string GetTeamPresetStatus() => _host.GetTeamPresetStatusFromWeb();
+
     public string? GetTeamBackgroundUrl(string teamName)
     {
         string? path = TeamBackdrop.FindImagePath(teamName);
@@ -326,7 +333,18 @@ public sealed class WebBridge
         {
             var meta = JsonSerializer.Deserialize<AudioTrackMetadata>(metadataJson, CamelCaseJsonOptions) ?? new AudioTrackMetadata();
             AudioTrackMetadataStore.Save(audioFile, meta);
-            return JsonSerializer.Serialize(new { success = true });
+
+            // Local-only rename to "School - Title" -- see WebMainForm.RenameAssignedTrackFromWeb's
+            // doc comment for why this never touches the marketplace.
+            string? renamedTo = null;
+            if (!string.IsNullOrWhiteSpace(meta.SchoolAbbreviation) && !string.IsNullOrWhiteSpace(meta.StandardTitle))
+            {
+                var desiredBaseName = $"{meta.SchoolAbbreviation.Trim()} - {meta.StandardTitle.Trim()}";
+                if (!string.Equals(desiredBaseName, Path.GetFileNameWithoutExtension(audioFile), StringComparison.OrdinalIgnoreCase))
+                    renamedTo = _host.RenameAssignedTrackFromWeb(trigger, desiredBaseName);
+            }
+
+            return JsonSerializer.Serialize(new { success = true, fileName = renamedTo });
         }
         catch (Exception ex)
         {
@@ -1207,6 +1225,8 @@ public sealed class WebBridge
             paFileName = string.IsNullOrWhiteSpace(e.PaAudioFile) ? null : Path.GetFileNameWithoutExtension(e.PaAudioFile),
             confirmed = ConfirmedTriggers.Contains(e.Trigger),
             playLeadInWhistle = e.PlayLeadInWhistle,
+            altWhistleSet = !string.IsNullOrWhiteSpace(e.AltWhistlePath),
+            speed2x = e.PlaybackSpeed2x,
         }));
 
     public void AssignEvent(string trigger) => _host.OpenAssignTrackFromWeb(trigger);
@@ -1228,6 +1248,10 @@ public sealed class WebBridge
     public void ClearTrackAssignment(string trigger, bool isPa) => _host.ClearTrackAssignmentFromWeb(trigger, isPa);
     // Punch-list item 3: copy-assignment-from-another-event button on event cards.
     public bool CopyEventAssignment(string sourceTrigger, string targetTrigger) => _host.CopyEventAssignmentFromWeb(sourceTrigger, targetTrigger);
+    // Clipper song-list "Share to..." action -- cross-team version of CopyEventAssignment above,
+    // assigns a library file straight onto another team's event by trigger.
+    public bool AssignLibraryFileToTeamEvent(string teamName, string trigger, string path) => _host.AssignLibraryFileToTeamEventFromWeb(teamName, trigger, path);
+    public string GetEventsForTeam(string teamName, string? category) => _host.GetEventsForTeamFromWeb(teamName, category);
     // Big Game conditional-alternate slot -- see WebMainForm.AssignBigGameTrackFileFromWeb.
     public bool AssignBigGameTrackFile(string trigger, string path) => _host.AssignBigGameTrackFileFromWeb(trigger, path);
     public void ClearBigGameTrackAssignment(string trigger) => _host.ClearBigGameTrackAssignmentFromWeb(trigger);
@@ -1245,6 +1269,10 @@ public sealed class WebBridge
     // GetEventsForCategory already includes the current value per row, these exist for the toggle
     // click itself.
     public void SetEventPlayLeadInWhistle(string trigger, bool enabled) => _host.SetEventPlayLeadInWhistleFromWeb(trigger, enabled);
+    public void SetEventPlaybackSpeed2x(string trigger, bool enabled) => _host.SetEventPlaybackSpeed2xFromWeb(trigger, enabled);
+    public bool BrowseAndSetEventAltWhistle(string trigger) => _host.BrowseAndSetEventAltWhistleFromWeb(trigger);
+    public void ClearEventAltWhistle(string trigger) => _host.ClearEventAltWhistleFromWeb(trigger);
+    public string SaveTrimAsEventAltWhistle(string trigger, double startSec, double endSec) => _host.SaveTrimAsEventAltWhistleFromWeb(trigger, startSec, endSec);
 
     public void SetVolume(int percent) => _host.SetVolumeFromWeb(percent);
     public int GetVolume() => _host.GetVolumeFromWeb();

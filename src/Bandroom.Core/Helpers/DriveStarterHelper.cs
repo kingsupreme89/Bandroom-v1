@@ -54,20 +54,33 @@ public sealed class DriveStarterHelper : IRuleEvaluator
         if (state.Previous.Down == 0)
             return null;
 
-        // User's team got the ball → Offense Drive Starter
+        // MERGED 2026-08-11 (live owner call): this used to fire its own "Offense: 1st Down
+        // After Punt" card, separate from a mid-drive earned first down -- owner reported it
+        // reads as confusing (a fresh drive's 1st & 10 is still just "1st down" to a band) and
+        // it kept ending up unassigned/mis-assigned as a result, plus fired instead of playing
+        // nothing while the real 1st-down cue got delayed. Now just fires the SAME event as an
+        // earned first down (same short/long split FirstDownHelper uses), so it always has
+        // whichever song "1st Down" already has assigned instead of being its own silent card.
+        // See WebMainForm.RenamedEventKeyAliases for the old-key fallback so a profile that
+        // already had a song assigned specifically under the old "1st Down After Punt" key still
+        // gets used if "Offense: Earned First Down" itself is unassigned.
         if (state.UserHasPossession)
         {
             return new TriggerEvent
             {
-                EventKey = "Offense: Drive Starter",
+                EventKey = state.Current.YardsToGo <= 5 ? "Offense: Earned First Down Short" : "Offense: Earned First Down",
                 Volume = 70,
                 IsEarnedBigEvent = false
             };
         }
 
+        // Renamed 2026-08-11 (owner audit call), same session as the offense side's rename --
+        // "Defense: After Punt" for the same clarity reason. Also made home-only-always (see
+        // WebMainForm.HomeOnlyAlwaysEventKeys) per the owner's explicit call: this never plays
+        // for the away side, Big Game or not.
         return new TriggerEvent
         {
-            EventKey = "Defense: Drive Starter",
+            EventKey = "Defense: After Punt",
             Volume = 70,
             IsEarnedBigEvent = false
         };

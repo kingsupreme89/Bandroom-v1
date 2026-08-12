@@ -46,10 +46,12 @@ static class Snap
         int quarter = 1,
         int timeRemainingSeconds = 900,
         int awayTimeoutsRemaining = 3,
+        int homeTimeoutsRemaining = 3,
         bool isKickoff = false,
         bool isPat = false,
         bool isTouchdown = false,
         bool isNoPuntReturn = false,
+        bool isTimeout = false,
         bool isPregameReady = false) => new PlaySnapshot
         {
             Down = down,
@@ -66,10 +68,12 @@ static class Snap
             Quarter = quarter,
             TimeRemainingSeconds = timeRemainingSeconds,
             AwayTimeoutsRemaining = awayTimeoutsRemaining,
+            HomeTimeoutsRemaining = homeTimeoutsRemaining,
             IsKickoff = isKickoff,
             IsPAT = isPat,
             IsTouchdown = isTouchdown,
             IsNoPuntReturn = isNoPuntReturn,
+            IsTimeout = isTimeout,
             IsPregameReady = isPregameReady,
         };
 }

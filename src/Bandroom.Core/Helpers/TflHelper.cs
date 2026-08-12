@@ -20,7 +20,16 @@ namespace Bandroom.Core.Helpers;
 /// OffenseDownHelper/DefenseThirdDownShortHelper (STATE_MACHINE_ANALYSIS Discrepancy #12):
 /// "down" and "yards to go" are independent OCR reads that don't always land on the same tick,
 /// so classifying a loss off Current.YardsToGo on the exact down-change tick can read a stale
-/// value.</summary>
+/// value.
+///
+/// DOUBLES AS THE FUMBLE CUE (owner call 2026-08-11, live big game): a fumble the offense
+/// recovers itself is just a down that advanced with a yardage loss -- exactly this evaluator's
+/// existing detection, no separate "Fumble" event/card needed. TurnoverHelper now only fires
+/// "Turnover Forced" when the fumble/interception ACTUALLY flips possession (see that file's own
+/// 2026-08-11 fix); a same-team-recovered fumble falls through to here instead. Display label
+/// updated to "Tackle for Loss / Fumble" (wwwroot/app.js) to reflect that -- EventKey string
+/// itself ("Defense: Tackle for Loss") is unchanged so existing song assignments / default song
+/// pack mappings keep working.</summary>
 public sealed class TflHelper : IRuleEvaluator
 {
     readonly DownDistanceBuffer _buffer = new();
@@ -66,6 +75,16 @@ public sealed class TflHelper : IRuleEvaluator
                 state.NearMisses.Add("TflHelper: buffered wait timed out, no YardsToGo increase detected (not a Loss)");
             return null; // not actually a loss
         }
+
+        // Owner call 2026-08-11: 4th down always overrides the generic Tackle for Loss cue -- a
+        // loss that pushes the offense to 4th down is about to be followed by BigEventHelper's
+        // "Defense: Fourth Down" cue when that 4th-down snap resolves, and that's the bigger,
+        // more specific moment. Suppressing here rather than in BigEventHelper since the two
+        // don't fire on the same tick (this fires immediately off the loss; "Defense: Fourth
+        // Down" only fires once the 4th-down play itself ends the drive) -- the loss cue would
+        // otherwise play first and get stepped on moments later by the more important one anyway.
+        if (state.Current.Down == 4)
+            return null;
 
         return new TriggerEvent
         {

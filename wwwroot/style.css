@@ -318,6 +318,14 @@ button:focus-visible, .team-swatch:focus-visible,
   animation: neon-pulse 3.2s ease-in-out infinite;
 }
 
+/* Locked-in mode (owner request, 2026-08-11): once a matchup is locked in, browsing the full
+   TEAM logo grid (#left-panel) has no purpose -- you're only ever working the two matchup teams
+   from then on, switched via the Away/Home arrows (#matchup-side-bar) instead. #nav-rack (The
+   Bandroom/Sound Bank/My Downloads/Auto-Assign/Help) stays -- owner explicitly wants that one
+   kept. Toggled via .locked-in-mode on #app, set in updateMatchupLabel() (app.js) so it tracks
+   state.matchupLocked exactly, on and off, same lifecycle as everything else keyed off that flag. */
+#app.locked-in-mode #left-panel { display: none; }
+
 /* ================================================================
    macOS TRAFFIC-LIGHT WINDOW CONTROLS (red/yellow/green dots)
    ================================================================ */
@@ -1483,6 +1491,7 @@ input, select, textarea, [contenteditable] {
    collapsing out of the way. #clipper-assign[hidden] above already guards against this same trap. */
 .clipper-assign-list[hidden] { display: none; }
 .clipper-assign-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2695,6 +2704,53 @@ input, select, textarea, [contenteditable] {
 }
 #matchup-side-bar[hidden] { display: none; }
 
+/* Three switchable song-assignment presets per team (owner request 2026-08-11) -- same visual
+   language as #matchup-side-bar right above it (glass pill row), just its own bar since it's a
+   different axis (WHICH preset of the active team, not WHICH team). */
+#team-preset-bar {
+  border-radius: var(--radius-panel);
+  padding: 10px 18px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+#team-preset-bar[hidden] { display: none; }
+body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not part of the docked live view */
+.pill-preset { position: relative; }
+.pill-preset.active {
+  border-color: var(--team-glow, var(--accent));
+  box-shadow: 0 0 0 1px var(--team-glow, var(--accent)), 0 0 12px 1px color-mix(in srgb, var(--team-glow, var(--accent)) 55%, transparent);
+  color: var(--text-primary);
+}
+/* Small "has songs saved" dot, same idea/position as .team-swatch.configured::after. */
+.pill-preset.configured::after {
+  content: "";
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #3ddc84;
+  box-shadow: 0 0 4px rgba(61, 220, 132, 0.8);
+}
+.team-preset-copy-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--glass-border);
+}
+.team-preset-copy-select {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  padding: 5px 8px;
+}
+
 #auto-assign-wizard-bar {
   border-radius: var(--radius-panel);
   padding: 10px 18px;
@@ -2910,35 +2966,58 @@ input, select, textarea, [contenteditable] {
 }
 .situation-volume-close:hover { color: var(--text-primary); }
 
-/* Punch-list item 3: "Copy From..." button/picker on event cards -- same popover mechanics as
-   .situation-volume-popover above (absolute, pops above the card, one at a time) but a scrollable
-   option list instead of a slider. */
-.situation-btn-copy { border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 65%, var(--glass-border)); }
-.situation-copy-popover {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  right: 0;
-  z-index: 20;
-  width: 260px;
-  max-height: 260px;
+/* "Share to..." -- pushes this song out to another event on the same team. A small icon button
+   in the transport strip, next to Play. ("Copy From..." -- the reverse-direction pull-in sibling
+   feature this popover shape originally shared with -- was removed 2026-08-11, superseded by
+   this Share button; only the .situation-copy-* class names on the shared list/option markup
+   remain, kept because Share reuses them rather than duplicating the styling.) */
+/* FIXED 2026-08-11 (real UI bug, live screenshot): this used to be position:absolute nested
+   inside the card, anchored bottom:100%/right:0 relative to .situation-transport. Cards use a
+   glass/backdrop-filter background, which creates its own CSS stacking context -- that TRAPS any
+   z-index inside it, so a popover popping upward out of one card rendered clipped/overlapping the
+   card ABOVE it instead of floating cleanly on top of everything, exactly the garbled overlap in
+   the owner's screenshot. Fix: openCardPopover() (app.js) now reparents the popover to
+   document.body and positions it with JS-computed `left`/`top` in `position: fixed`, which
+   escapes the card's stacking context entirely. Also restyled per owner request as a slide-out
+   panel from the right edge of the card instead of a pop-up above it -- see .slide-open below.
+   Static position:absolute/bottom/right removed; JS now owns left/top per open. */
+.situation-share-popover {
+  position: fixed;
+  z-index: 500;
+  width: 280px;
+  max-height: 320px;
   display: flex;
   flex-direction: column;
   padding: 10px;
   border-radius: 12px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  background: var(--panel-bg, #1a1d24);
+  border: 1px solid color-mix(in srgb, var(--team-secondary, var(--accent)) 40%, var(--glass-border));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translateX(-18px);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
-.situation-copy-popover[hidden] { display: none; }
+.situation-share-popover.slide-open {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+.situation-share-popover[hidden] { display: none; }
 .situation-copy-title {
   font-size: 12px;
   font-weight: 700;
   color: var(--team-glow, var(--accent));
   margin-bottom: 6px;
+  cursor: move;
+  user-select: none;
 }
 .situation-copy-list { overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 .situation-copy-option {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--glass-border);
@@ -2952,8 +3031,54 @@ input, select, textarea, [contenteditable] {
   border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, var(--glass-border));
   background: color-mix(in srgb, var(--team-secondary, var(--accent)) 18%, rgba(255, 255, 255, 0.05));
 }
-.situation-copy-option-file { color: var(--team-glow, var(--accent)); font-weight: 600; }
+/* Was display:flex/justify-content:space-between on the option itself -- with a long event name
+   (e.g. "Got 1st Down - Big Gain") and a long "overwrites <filename>" string both squeezed into
+   the 280px popover's remaining width, both sides wrapped and collided (the garbled overlap in
+   the owner's screenshot). Stacked instead: name on its own line, file on the line below, each
+   free to wrap on its own without fighting the other for horizontal space. */
+.situation-copy-option-name { font-weight: 600; }
+.situation-copy-option-file {
+  color: var(--team-glow, var(--accent));
+  font-weight: 600;
+  font-size: 11px;
+  opacity: 0.9;
+  width: 100%;
+  overflow-wrap: break-word;
+}
 .situation-copy-empty { font-size: 12px; color: var(--team-glow, var(--accent)); opacity: 0.75; padding: 6px 2px; }
+
+/* Clipper song-list "Share to..." -- cross-team version of the same idea, launched from a per-row
+   icon in buildClipperAssignRow instead of an event card. Same popover shape as
+   .situation-copy-popover (team select on top, then that team's event list below, same option
+   styling) but anchored to .clipper-assign-row (position: relative, see above) since Clipper rows
+   aren't wrapped in a .situation-transport-style container. */
+.clipper-share-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: 280px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--panel-bg, #1a1d24);
+  border: 1px solid color-mix(in srgb, var(--team-secondary, var(--accent)) 40%, var(--glass-border));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  cursor: default;
+}
+.clipper-share-popover[hidden] { display: none; }
+.clipper-share-team-select {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(10, 14, 18, 0.72);
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
 .situation-copy-close {
   align-self: flex-end;
   background: none; border: none; color: var(--text-muted); cursor: pointer;
@@ -3438,6 +3563,18 @@ input, select, textarea, [contenteditable] {
   position: relative;
 }
 .soundbooth-label { display: flex; align-items: center; gap: 6px; font-size: 13.5px; flex: 1 1 auto; }
+/* .soundbooth-row is a flex row meant for one label+control pair; this section stacks a label,
+   hint text, toggle, and button, so it needs its own column layout instead. */
+.soundbooth-whistle-fade-section {
+  flex-direction: column;
+  align-items: stretch;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--glass-border);
+}
+.soundbooth-whistle-fade-section .soundbooth-label { flex: none; }
+.soundbooth-whistle-fade-section .leadin-whistle-hint { margin: 4px 0 8px; }
+.soundbooth-whistle-fade-section .toggle-row { margin-bottom: 8px; }
 .soundbooth-eq-tiles { display: flex; gap: 4px; }
 .sb-tile {
   padding: 5px 10px;
@@ -3536,6 +3673,25 @@ input, select, textarea, [contenteditable] {
 
 body.gameday-mode #adjust-panel { display: none; }
 
+/* Owner request, widened 2026-08-11: originally gameday-mode-only (GAMETIME shows the Band Room
+   Viewer's photo as the backdrop), but a team's background photo shows through applyBackground on
+   the PLAIN (non-gameday) editing screen too -- confirmed via screenshot, same haze/hard-to-read
+   problem on these same panels there, not just while docked. No longer gated on gameday-mode:
+   these panels -- matchup-side-bar/team-preset-bar/category-bar/situations-panel/clipper-island --
+   never get their normal .glass blur, full stop, since a real photo can be behind them at any
+   time now. Sound Booth's own dock keeps its usual glass blur (owner: "this is perfect") -- only
+   the event-cards column loses it. Bumped background opacity in place of the blur (was relying
+   partly on blur to hide the photo's detail/noise behind it) so text stays legible either way. */
+#matchup-side-bar,
+#team-preset-bar,
+#category-bar,
+#situations-panel,
+#clipper-island {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(10, 14, 18, 0.82);
+}
+
 body.gameday-mode #sound-booth-overlay {
   position: fixed;
   inset: auto 0 0 auto;
@@ -3583,6 +3739,33 @@ body.gameday-mode:has(#sound-booth-overlay:not([hidden])) #body {
 }
 body.gameday-mode:has(#sound-booth-overlay[hidden]) #gameday-reopen-soundbooth {
   display: block;
+}
+
+/* Owner request: GAMETIME opens the Band Room Viewer (openBandroomViewer in app.js) as Game Day
+   mode's backdrop instead of a blocking fullscreen modal -- dropped behind #body (z-index 0, same
+   layer #backdrop/#backdrop-vs already use) so the docked Situations/Sound Booth panels and the
+   matchup-side-bar (which already switches team + reopens this viewer on Away/Home click, see
+   wireMatchupSideBar) render on top of it through their .glass blur, not blocked by it. Own
+   prev/next arrows and counter stay usable (still cycle the current team's own photos -- switching
+   TEAMS is the side bar's job); the close (X) button is hidden since this is now tied to game
+   state (closed by Stop Watching, see setWatching's "off" branch), not a dismissable popup. */
+body.gameday-mode #bandroom-viewer-overlay {
+  /* Negative, not 0 -- #bandroom-viewer-overlay comes AFTER #body in the DOM (see index.html), so
+     a plain z-index:0 would still paint on top of #body's unpositioned (z-index:auto) content,
+     which interleaves with z-index:0 by document order. Negative guarantees it stays behind
+     #body's in-flow content regardless of where either sits in the markup. */
+  z-index: -1;
+  pointer-events: none;
+}
+body.gameday-mode #bandroom-viewer-overlay.bandroom-viewer-visible {
+  pointer-events: none;
+}
+body.gameday-mode #bandroom-viewer-overlay .bandroom-viewer-arrow,
+body.gameday-mode #bandroom-viewer-overlay .bandroom-viewer-footer {
+  pointer-events: auto;
+}
+body.gameday-mode .bandroom-viewer-close {
+  display: none;
 }
 
 /* VS-prominent restyle of the (already-functional) matchup-side-bar switch buttons while in
@@ -4473,24 +4656,57 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 #load-profile-list { max-height: 50vh; }
 
 /* Big cinematic split-screen "Start a Game" dialog (CFB27 team-select proportions, mined for
-   LAYOUT ONLY -- our own glass/neon language, not their chrome). Near-full-viewport instead of
-   a small centered card; header/instructions/subtext/actions stay compact so the split-screen
-   columns get the vertical room, and the dialog itself never grows a scrollbar. */
+   LAYOUT ONLY -- our own glass/neon language, not their chrome). Owner request 2026-08-11: go
+   the rest of the way to a true fullscreen takeover (was near-full-viewport with a visible dark
+   backdrop border/rounded corners around it) -- edge-to-edge, no #matchup-overlay dimming behind
+   it since there's no longer anything left uncovered to dim. .matchup-column's own heavy
+   black-fade gradient (see its background-image stack below) is what keeps team/search/name text
+   legible over the now-larger full-bleed photo halves; nothing else changed there. */
+#matchup-overlay {
+  background: none;
+  padding: 0;
+}
 #matchup-dialog {
-  width: min(1400px, 96vw);
-  height: min(880px, 90vh);
+  width: 100vw;
+  height: 100vh;
   padding: clamp(14px, 2vw, 24px);
-  border-radius: var(--radius-panel);
+  border-radius: 0;
+  border: none;
   display: flex;
   flex-direction: column;
   gap: 10px;
   overflow: hidden;
+  position: relative;
+  /* Owner request: no blur, and don't require the app WINDOW to be maximized either. .glass's
+     backdrop-filter blur (now off) was doing double duty as the only thing hiding the rest of the
+     app's own UI (nav sidebar, Sound Bank, Sound Booth -- all still rendered behind this overlay
+     in the DOM) through .glass's own ~6%-opacity fill -- turning blur off with nothing else
+     covering that background left everything behind showing straight through, unreadably
+     overlapping this dialog's own text (see the owner's screenshot). Solid opaque background
+     instead: hides the app behind it completely on its own, no blur AND no dependency on the OS
+     window happening to be maximized (the page fills whatever window size exists either way,
+     100vw/100vh is relative to the app's own viewport, not the OS screen). */
+  background: var(--window-bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .matchup-header {
   position: relative;
   display: flex; justify-content: space-between; align-items: center;
   font-size: 18px; font-weight: 700;
   flex: none;
+  z-index: 1;
+  /* Owner request 2026-08-11: now that .matchup-columns is a full-bleed photo backdrop behind
+     everything (see above), bare text/controls floating directly on it were unreadable in busy
+     spots (photo detail behind the scorebug-switcher pill, etc). "Island" scrim -- same glass
+     language as the rest of the app, not a new visual idea -- gives this row its own readable
+     surface instead of sitting raw on the photo. */
+  background: rgba(8, 9, 12, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-radius: 14px;
+  border: 1px solid var(--glass-border);
+  padding: 8px 16px;
 }
 /* Scorebug switcher pill -- small reuse of the coverflow's circular arrow buttons (same
    .coverflow-arrow class, just sized down via the modifier below) flanking a pill showing the
@@ -4525,8 +4741,26 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   font-size: 12.5px;
   color: var(--text-muted);
   line-height: 1.4;
-  flex: none;
-  max-width: 900px;
+  max-width: 640px;
+  /* Owner request 2026-08-11: was an always-visible row -- now a popover toggled by the header's
+     "Help" pill (wireMatchupHelpPill in app.js), pulled out of flow and anchored under the header
+     so opening it doesn't push the rest of the dialog down. [hidden] already gets display:none. */
+  position: absolute;
+  top: 62px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  background: rgba(8, 9, 12, 0.72);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  padding: 10px 16px;
+}
+.matchup-header-pill-lg {
+  font-size: 14px;
+  padding: 9px 22px;
+  font-weight: 700;
 }
 /* Full-bleed split screen: two halves tinted toward whichever team is centered in that side's
    coverflow (--side-color, set in renderMatchupCoverflow -- same pattern as applyVsBackdrop's
@@ -4535,6 +4769,67 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   display: flex;
   justify-content: flex-end;
   padding: 2px 4px 6px;
+  position: relative;
+  z-index: 1;
+}
+/* Owner request 2026-08-11: last-matchup/Big-Game/scorebug-side/away-band toggles used to be four
+   separate controls scattered around the screen (two up top, two down past the coverflow) --
+   floating individually on the full-bleed photo backdrop, they didn't read as belonging together.
+   One glass island, right-aligned (align-self instead of position:absolute so it stays anchored to
+   #matchup-dialog's own flex column flow without extra offset math), holding all four as a
+   vertical stack of glowing LED pill toggles. */
+.matchup-controls-island {
+  /* Owner request 2026-08-11: this used to sit always-visible, right-aligned in normal flow --
+     now a popover toggled by the "Game Settings" pill next to the scorebug switcher (see
+     wireMatchupGameSettingsPill in app.js), so it's pulled out of flow entirely and anchored to
+     the top-right of the dialog instead. [hidden] already gets display:none for free. */
+  position: absolute;
+  top: 62px;
+  right: clamp(14px, 2vw, 24px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(8, 9, 12, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--glass-border);
+  z-index: 5;
+  width: min(340px, 80vw);
+}
+.matchup-controls-island .matchup-last-pill {
+  margin: 0;
+  text-align: center;
+}
+/* Pill-shaped toggle chips -- same .pill glow language (secondary-team tint fill, primary-team
+   glow pulse border) as every other actionable pill in the app, but built on a checkbox+label
+   instead of a button so the existing wireMatchupBigGameToggle-style `input:checked` listeners
+   keep working unchanged. Unchecked state is deliberately dim/static (no pulse) so the row visibly
+   distinguishes "on" from "off" the same way toggle switches do everywhere else -- only checked
+   toggles join the glowing pill language. */
+.pill-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.pill-toggle:hover { background: rgba(255, 255, 255, 0.07); }
+.pill-toggle:has(input:checked) {
+  border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, var(--glass-border));
+  background: color-mix(in srgb, var(--team-secondary, var(--accent)) 18%, rgba(255, 255, 255, 0.04));
+  color: #fff;
+  animation: pill-glow-pulse 3s ease-in-out infinite;
 }
 .matchup-biggame-row .toggle-row {
   padding: 4px 10px;
@@ -4553,6 +4848,8 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   font-size: 12.5px;
   cursor: pointer;
   transition: filter 0.15s ease;
+  position: relative;
+  z-index: 1;
 }
 .matchup-last-pill:hover { filter: brightness(1.25); }
 .matchup-biggame-row .toggle-row:has(input:checked) {
@@ -4560,13 +4857,18 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   background: color-mix(in srgb, var(--team-glow, var(--accent)) 14%, rgba(255, 255, 255, 0.03));
 }
 .matchup-columns {
-  position: relative;
+  /* Owner request 2026-08-11: team background photos were only filling the narrow flex-row strip
+     between the instructions and the footer -- pull this out of #matchup-dialog's normal flex
+     flow entirely and pin it to the FULL dialog (edge to edge, 100vw/100vh) so the photo halves
+     read as a true cinematic backdrop behind the header/instructions/footer too, not a boxed-in
+     middle band. Everything else in #matchup-dialog stays in flow on top of it (see z-index below
+     on those siblings); #matchup-dialog got `position: relative` above to anchor this. */
+  position: absolute;
+  inset: 0;
   display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
   gap: 0;
-  margin: 0 clamp(-24px, -2vw, -14px);
   overflow: hidden;
+  z-index: 0;
 }
 .matchup-column {
   flex: 1 1 50%;
@@ -4587,13 +4889,21 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
      the covers/reflection (where CoverFlow itself is pure black) and eases off toward the edges
      so the team photo still reads underneath instead of being fully replaced. */
   background-image:
-    linear-gradient(180deg, rgba(4, 4, 6, 0.94) 0%, rgba(4, 4, 6, 0.75) 38%, rgba(4, 4, 6, 0.3) 68%, transparent 100%),
+    /* Lightened 2026-08-11 (owner, live game) -- was 0.94/0.75/0.3 peaking right behind the
+       covers, which buried the team photo under near-solid black. Same shape, softer everywhere
+       so the photo actually reads. */
+    linear-gradient(180deg, rgba(4, 4, 6, 0.6) 0%, rgba(4, 4, 6, 0.42) 38%, rgba(4, 4, 6, 0.15) 68%, transparent 100%),
+    /* Owner request: matching vignette at the BOTTOM too (was top-only) -- fades the reflection
+       (which now hangs further down, see .team-swatch-reflection's stronger matchup mask above)
+       into the floor instead of it just visually stopping mid-air. Lightened alongside the top
+       gradient, same owner pass. */
+    linear-gradient(0deg, rgba(4, 4, 6, 0.5) 0%, rgba(4, 4, 6, 0.28) 22%, transparent 55%),
     radial-gradient(ellipse 90% 70% at 50% 42%, color-mix(in srgb, var(--side-color) 30%, transparent) 0%, transparent 72%),
     linear-gradient(180deg, color-mix(in srgb, var(--side-color) 14%, transparent) 0%, transparent 45%),
     var(--team-bg-image);
-  background-size: auto, auto, auto, cover;
-  background-position: center, center, center, center;
-  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;
+  background-size: auto, auto, auto, auto, cover;
+  background-position: center, center, center, center, center;
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, no-repeat;
   transition: background-image 0.35s ease;
 }
 .matchup-column-away { border-right: 1px solid color-mix(in srgb, var(--side-color) 35%, var(--glass-border)); }
@@ -4610,25 +4920,61 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
    overflow-y:auto for the same smooth/momentum scroll feel as #team-grid, just a single column
    of smaller icons instead of a 5-wide grid. Sits beside the coverflow, not instead of it. */
 .matchup-side-grid {
-  flex: 0 0 44px;
-  width: 44px;
-  min-width: 44px;
-  max-width: 44px;
+  /* Owner request 2026-08-11: "make the scroll longer" -- was flex:0 0 90px (a fixed-height 90px
+     strip, tiny now that it moved below the big logo instead of flanking it). flex-grow:1 lets it
+     claim whatever vertical room .matchup-column-main has left after the title/search/coverflow/
+     name above it, instead of a fixed small box -- min-height as a floor, max-height so it doesn't
+     swallow the whole column on a very tall/short monitor. */
+  flex: 1 1 260px;
+  min-height: 220px;
+  max-height: 420px;
+  width: 90px;
+  min-width: 90px;
+  max-width: 90px;
   display: grid;
   grid-template-columns: 1fr;
-  gap: 6px;
-  align-content: start;
+  gap: 10px;
+  /* Owner request 2026-08-11: this strip used to start scrolled to the top (alphabetical start),
+     visually disconnected from the big centered coverflow logo beside it. renderMatchupSideGrid
+     now scrolls the active team's tile to the vertical center on every render (scrollActiveTileTo
+     Center in app.js), so `center` here matches that -- when the list is short enough to not need
+     scrolling at all, it still centers instead of hugging the top. */
+  align-content: center;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 2px;
+  /* Owner request (Mac Dock effect, finished 2026-08-11): the generous 18px side padding is
+     deliberate headroom, not just spacing -- .team-swatch's hover-magnify scale-up (below) grows
+     from its own center, so as long as the grown size never exceeds this padding budget it never
+     actually triggers this container's own overflow-x:hidden clip. That's what lets tiles visibly
+     "pop" past their resting track width while the column still scrolls vertically -- an ancestor
+     with overflow-y:auto/overflow-x:hidden always clips descendant transforms that exceed ITS OWN
+     box, no matter what overflow a deeper-nested element declares, so reserving the room here is
+     the only way to get real pop-out growth without either clipping it or fighting Chromium's
+     visible->auto conversion (any element with overflow-y != visible forces its own overflow-x:
+     visible to auto, which still clips/scrollbars once content exceeds the padding box). */
+  padding: 6px 18px;
   z-index: 2;
 }
-/* BUG FIX: forcing an explicit 44px width here fought the grid's own 1fr track (44px minus this
-   container's own 2px*2 padding = 40px available), so every tile rendered ~4px wider than its
-   track and got clipped by overflow-x -- worst at the strip's outer edge where there's nothing
-   to visually hide the cut. Letting width fall through to .team-swatch's own `width: 100%` (it
-   already derives height from that via aspect-ratio: 1) keeps every tile exactly track-sized. */
-.matchup-side-grid .team-swatch { font-size: 11px; }
+/* BUG FIX (pre-Dock-effect): forcing an explicit width here fought the grid's own 1fr track, so
+   every tile rendered a few px wider than its track and got clipped by overflow-x -- worst at the
+   strip's outer edge where there's nothing to visually hide the cut. Letting width fall through to
+   .team-swatch's own `width: 100%` (it already derives height from that via aspect-ratio: 1) keeps
+   every tile exactly track-sized regardless of how the container's own width above changes. */
+.matchup-side-grid .team-swatch {
+  font-size: 12px;
+  transform: scale(var(--dock-scale, 1));
+  transition: transform 0.16s cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 0.16s ease;
+  /* Team-color glow (owner request) -- --tile-color is already set per-tile to the team's own
+     primary color by fillTeamSwatch (app.js), same variable the press-glow/active state uses.
+     Intensifies with --dock-scale so the glow visibly "breathes" as the Dock hover-magnify (see
+     wireMatchupSideGridDock in app.js) scales a tile up, tapering back down with its neighbors. */
+  box-shadow:
+    0 3px 6px rgba(0, 0, 0, 0.35),
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    inset 1px 1px 0 rgba(255, 255, 255, 0.22),
+    inset -2px -3px 5px rgba(0, 0, 0, 0.35),
+    0 0 14px 2px color-mix(in srgb, var(--tile-color, var(--accent)) 55%, transparent);
+}
 .matchup-side-grid::-webkit-scrollbar { width: 5px; }
 .matchup-column-title {
   font-size: clamp(11px, 1.1vw, 13px);
@@ -4802,7 +5148,12 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
    width, .coverflow-stage collapses toward 0px and overflow-x:hidden on .coverflow-track clips
    every tile (root cause of "matchup logos don't show" -- team-picker/onboarding don't hit this
    since their flex-column parents don't override align-items, so they get the stretch default). */
-.matchup-columns .coverflow-stage { height: min(48vh, 420px); flex: 1 1 auto; width: 100%; }
+/* Owner report 2026-08-11: this box used to be min(48vh, 420px), taller than the cf-center logo's
+   own max size (clamp(260px, 32vw, 420px) below) on most screens -- since the logo tile is
+   vertically centered INSIDE this box, the leftover height split evenly above/below it, showing
+   as a big dead gap between the logo's visible bottom edge and .coverflow-name underneath. Capped
+   closer to the logo's own max footprint so that gap shrinks to roughly just breathing room. */
+.matchup-columns .coverflow-stage { height: clamp(280px, 36vh, 440px); flex: 1 1 auto; width: 100%; }
 /* Coverflow arrows here specifically (owner request): filled primary-color circle with a
    secondary-color glyph, rather than the plain glass circle .coverflow-arrow uses everywhere
    else (scorebug switcher, team picker, onboarding). --side-primary/--side-secondary are set per
@@ -4837,21 +5188,104 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   margin: calc(clamp(90px, 13vw, 150px) / -2) 0 0 calc(clamp(90px, 13vw, 150px) / -2);
 }
 .matchup-columns .coverflow-track .team-swatch.cf-center {
-  width: clamp(210px, 26vw, 320px);
-  height: clamp(210px, 26vw, 320px);
-  margin: calc(clamp(210px, 26vw, 320px) / -2) 0 0 calc(clamp(210px, 26vw, 320px) / -2);
+  /* Owner request 2026-08-11: bigger centerpiece logo (reference screenshot sent). */
+  width: clamp(260px, 32vw, 420px);
+  height: clamp(260px, 32vw, 420px);
+  margin: calc(clamp(260px, 32vw, 420px) / -2) 0 0 calc(clamp(260px, 32vw, 420px) / -2);
   box-shadow: 0 0 48px 6px color-mix(in srgb, var(--side-color, var(--accent)) 55%, transparent);
+}
+/* Owner request: "very reflective" logos -- stronger/longer mirror than the shared
+   .team-swatch-reflection default (0.55 opacity, fades out by 60% down), matchup-only so the
+   smaller team-picker/onboarding coverflows elsewhere keep their subtler reflection. */
+.matchup-columns .team-swatch-reflection {
+  opacity: 0.75;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.65) 0%, transparent 78%);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.65) 0%, transparent 78%);
+}
+/* Owner request: "smooth album flow" -- slower, more cinematic glide between covers than the
+   shared 0.22s/ease default elsewhere (team-picker/onboarding keep the snappier one). */
+.matchup-columns .coverflow-track .team-swatch {
+  transition: transform 0.4s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.4s ease, filter 0.4s ease;
 }
 .matchup-columns .coverflow-track .team-swatch.cf-l1 { transform: translateX(-15vw) scale(0.72) rotateY(28deg); }
 .matchup-columns .coverflow-track .team-swatch.cf-r1 { transform: translateX(15vw) scale(0.72) rotateY(-28deg); }
 .matchup-columns .coverflow-track .team-swatch.cf-l2 { transform: translateX(-25vw) scale(0.52) rotateY(38deg); }
 .matchup-columns .coverflow-track .team-swatch.cf-r2 { transform: translateX(25vw) scale(0.52) rotateY(-38deg); }
 .matchup-columns .coverflow-name {
-  margin-top: clamp(10px, 1.6vw, 20px);
-  font-size: clamp(18px, 2.4vw, 30px);
-  font-weight: 800;
-  color: var(--text-primary);
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
+  /* Owner report 2026-08-11: this used to sit way below the logo with a big dead gap between them
+     (root cause was .coverflow-stage's reserved box being taller than the logo it centers, fixed
+     above) -- pulled up further here with a small negative margin now that the box itself is
+     tighter, so the name reads as attached to the logo instead of floating separately. */
+  margin-top: clamp(-6px, -0.4vw, 0px);
+  /* Owner request 2026-08-11: replaced the earlier script-font reference with a second reference
+     image ("SPORT") -- bold condensed all-caps block/slab letterforms, tight tracking, no
+     flourish. Bigger than the script version it replaces (was clamp(26px,3.2vw,42px)). */
+  font-size: clamp(34px, 4vw, 54px);
+  /* Same condensed-block stack the app's own [id$="-title"] headers already use elsewhere (design
+     system rule) to get this exact "SPORT" look -- can't embed the reference image's precise
+     commercial face (only Outfit ships with the app, see AppFonts.cs/wwwroot/fonts), so this
+     leans on the closest built-in stack: Arial Black/Arial Narrow Bold/Impact, condensed via
+     negative letter-spacing + scaleY to read taller/narrower like the reference. */
+  font-family: "Arial Black", "Arial Narrow Bold", Impact, var(--font-body, "Outfit"), sans-serif;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  /* Owner request 2026-08-11 (third reference image, "SPORTY"): pushed further toward that
+     aggressive forward-leaning racing/esports block look -- tighter tracking than the plain
+     "SPORT" pass above, plus an explicit skew on top of the browser's synthetic italic (Arial
+     Black has no true italic face, so italic alone only gives a mild oblique -- the skew is what
+     actually reads as the reference's sharp forward lean) and a touch more vertical stretch to
+     emphasize the tall, narrow letterforms. */
+  letter-spacing: -0.03em;
+  transform: skewX(-12deg) scaleY(1.16);
+  /* Owner request: team names in the team's own primary/secondary colors instead of plain white --
+     --side-primary/--side-secondary are set per column in renderMatchupCoverflow off the
+     currently-centered team's own colors. Gradient text (top=secondary, bottom=primary) rather
+     than a flat single color so both show at once, same two-color spirit as the rest of the app's
+     pill language (secondary fill + primary glow). */
+  background: linear-gradient(180deg, var(--side-secondary, var(--text-primary)) 0%, var(--side-primary, var(--accent)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  /* Owner request 2026-08-11: neon LED glow in the OPPOSITE color from the gradient fill's
+     dominant one (--side-primary drives the fill's bottom half/bulk, so the glow uses
+     --side-secondary -- same "glow = the other team color" pairing the rest of the app's pill
+     language already uses).
+     FIXED same session (owner report: glow rendered as hard/overlapping lines, not smooth) --
+     the previous version paired -webkit-text-stroke with the skewed, gradient-clipped fill: the
+     stroke is drawn as its own separate outline pass that Chromium doesn't shear/antialias in
+     perfect lockstep with the transformed glyph fill, so at this letter size + skew the two edges
+     visibly double up into a "double-line" look instead of one clean edge. Dropping the stroke
+     entirely and doing the whole glow via stacked drop-shadow blurs instead -- drop-shadow
+     renders off the actual (already-transformed) alpha silhouette of the text, so every layer
+     stays perfectly aligned with the glyphs under the skew with no separate outline geometry to
+     drift out of sync. Tightened the blur radii into a smooth near->far falloff (2px contact
+     shadow, then 4/10/20px glow layers) rather than jumping straight from a thin stroke to a wide
+     blur, so the halo reads as one soft glow instead of a ring. */
+  -webkit-font-smoothing: antialiased;
+  filter:
+    drop-shadow(0 2px 2px rgba(0, 0, 0, 0.55))
+    drop-shadow(0 0 4px color-mix(in srgb, var(--side-secondary, var(--accent)) 80%, transparent))
+    drop-shadow(0 0 10px color-mix(in srgb, var(--side-secondary, var(--accent)) 60%, transparent))
+    drop-shadow(0 0 20px color-mix(in srgb, var(--side-secondary, var(--accent)) 40%, transparent));
+  animation: matchup-name-glow 2.4s ease-in-out infinite;
+}
+@keyframes matchup-name-glow {
+  0%, 100% {
+    filter:
+      drop-shadow(0 2px 2px rgba(0, 0, 0, 0.55))
+      drop-shadow(0 0 4px color-mix(in srgb, var(--side-secondary, var(--accent)) 70%, transparent))
+      drop-shadow(0 0 9px color-mix(in srgb, var(--side-secondary, var(--accent)) 45%, transparent))
+      drop-shadow(0 0 16px color-mix(in srgb, var(--side-secondary, var(--accent)) 30%, transparent));
+  }
+  50% {
+    filter:
+      drop-shadow(0 2px 2px rgba(0, 0, 0, 0.55))
+      drop-shadow(0 0 5px color-mix(in srgb, var(--side-secondary, var(--accent)) 90%, transparent))
+      drop-shadow(0 0 14px color-mix(in srgb, var(--side-secondary, var(--accent)) 65%, transparent))
+      drop-shadow(0 0 24px color-mix(in srgb, var(--side-secondary, var(--accent)) 42%, transparent));
+  }
 }
 .gametime-btn {
   padding: 10px 20px;
@@ -4865,6 +5299,55 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 }
 .gametime-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .gametime-btn:not(:disabled):hover { filter: brightness(1.1); }
+/* Owner request 2026-08-11: THE call to action on this screen -- large flashing green pill,
+   matchup-only (scoped to #matchup-dialog so the shared .gametime-btn class elsewhere, if any,
+   keeps its normal look). Disabled state still dims/stops flashing via the shared :disabled rule
+   above (opacity 0.4), just layered under this. */
+#matchup-dialog .gametime-btn {
+  padding: 16px 44px;
+  border-radius: 999px;
+  font-size: 18px;
+  background: #1fbf5c;
+  color: #06220f;
+  animation: gametime-flash 1.1s ease-in-out infinite;
+}
+#matchup-dialog .gametime-btn:disabled { animation: none; }
+@keyframes gametime-flash {
+  0%, 100% { background: #1fbf5c; box-shadow: 0 0 10px 0px rgba(31, 191, 92, 0.5); }
+  50% { background: #3dffa0; box-shadow: 0 0 26px 6px rgba(61, 255, 160, 0.85); }
+}
+
+/* Owner request 2026-08-11: instructions moved from a top paragraph/popover to a bottom scrolling
+   ticker, same left-scrolling marquee shape as #bandroom-ticker (the app's own live-events ticker)
+   -- anchored to the bottom of #matchup-dialog, with the Cancel/GAMETIME row floating just above it
+   (see #matchup-dialog .save-profile-actions above). */
+.matchup-ticker {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  border-top: 1px solid var(--glass-border);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 2;
+  overflow: hidden;
+}
+.matchup-ticker-track {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  position: relative;
+}
+.matchup-ticker-scroll {
+  display: inline-block;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  padding-left: 100%;
+  animation: ticker-scroll-left 34s linear infinite;
+}
 
 #save-profile-dialog, #bandroom-upload-dialog {
   width: min(420px, 90vw);
@@ -4902,6 +5385,37 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+/* #matchup-dialog's .matchup-columns is position:absolute/inset:0 (full-bleed team-photo
+   backdrop, see .matchup-columns above) -- these two shared classes need to sit above it here
+   specifically, scoped so it doesn't affect their use in the unrelated save/load-profile dialogs. */
+/* BUG FIX 2026-08-11 (owner report: "GAMETIME does nothing, still on the matchup screen"):
+   .matchup-columns went position:absolute (full-bleed photo backdrop, see above) so it no longer
+   reserves space in #matchup-dialog's flex column -- this footer row collapsed straight up to sit
+   right under the header, landing directly underneath the "Game Settings" popover's own anchored
+   position (also top-of-dialog). The popover's higher z-index meant clicks meant for GAMETIME
+   were actually hitting the popover panel/backdrop instead -- a real dead-button bug, not just a
+   visual one. Pulled fully out of flow and pinned to the bottom instead, above the ticker
+   (.matchup-ticker), so it can't overlap the popover again regardless of what else collapses. */
+#matchup-dialog .save-profile-subtext,
+#matchup-dialog .save-profile-actions {
+  position: absolute;
+  left: clamp(14px, 2vw, 24px);
+  right: clamp(14px, 2vw, 24px);
+  z-index: 2;
+}
+#matchup-dialog .save-profile-subtext {
+  bottom: 92px;
+  background: rgba(8, 9, 12, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 10px;
+  padding: 4px 12px;
+  display: inline-block;
+  width: fit-content;
+}
+#matchup-dialog .save-profile-actions {
+  bottom: 48px;
 }
 
 #onboarding-overlay {

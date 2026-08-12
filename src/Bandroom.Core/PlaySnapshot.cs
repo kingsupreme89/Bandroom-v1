@@ -10,6 +10,7 @@ public sealed class PlaySnapshot
     public int Quarter { get; init; }
     public int TimeRemainingSeconds { get; init; }
     public int AwayTimeoutsRemaining { get; init; }
+    public int HomeTimeoutsRemaining { get; init; }
     public bool BigGame { get; init; }
     public bool PossessionAway { get; init; }
     public bool IsKickoff { get; init; }
@@ -19,6 +20,14 @@ public sealed class PlaySnapshot
     public bool IsTouchdown { get; init; }
     public bool IsTurnover { get; init; }
     public bool IsNoPuntReturn { get; init; }
+
+    /// <summary>True while the scorebug's own "Time Out" text (GameWatcher's "situation" region,
+    /// same slot that cycles through KICKOFF/PAT GOOD/TOUCHDOWN/etc) is on screen. Added 2026-08-11
+    /// (owner report: a real timeout with plenty of time left never fired any cue) -- TimeoutHelper
+    /// used to gate purely on TimeRemainingSeconds &lt;= 240 regardless of whether a timeout was
+    /// actually visible, which silently ate every timeout called outside the 2-minute-drill window.
+    /// Now the actual visual signal, not a clock heuristic.</summary>
+    public bool IsTimeout { get; init; }
 
     /// <summary>True while the "FIELD GOAL" full-screen banner (GameWatcher's "banner" region)
     /// is on screen -- fires for BOTH made and missed attempts (the banner text itself doesn't

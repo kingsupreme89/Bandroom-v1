@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="SoundTouch.Net" Version="2.3.1" />
     <ProjectReference Include="src\Bandroom.Core\Bandroom.Core.csproj" />
     <PackageReference Include="Clowd.Squirrel" Version="2.11.1" />
     <PackageReference Include="NAudio" Version="2.2.1" />
@@ -71,8 +72,7 @@
          per-asset cap, so public builds publish with /p:BundleDefaultSongs=false and the app
          fetches the pack separately (DefaultSongPackService) after install. Defaults to true so
          local dev builds keep working exactly as before. -->
-    <Content Include="Songs\Default\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="Songs\Default"
-             Condition="'$(BundleDefaultSongs)' != 'false'" />
+    <Content Include="Songs\Default\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="Songs\Default" Condition="'$(BundleDefaultSongs)' != 'false'" />
     <Content Include="Assets\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

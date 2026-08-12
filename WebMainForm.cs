@@ -38,6 +38,53 @@ public sealed class WebMainForm : Form
     List<TriggerEntry>? _homeConfig, _awayConfig;
     string? _possession;
 
+    /// <summary>Owner request 2026-08-11: three switchable song-assignment PRESETS per team --
+    /// "Home", "Away", "Big Game" -- instead of just one profile. Null means the plain/base profile
+    /// (unchanged pre-existing behavior); "Home"/"Away"/"BigGame" means _config is currently editing
+    /// that team's alternate preset instead. Stored as a composite profile name via
+    /// TeamPresetProfileKey (e.g. "Georgia · Away") through the SAME ConfigStore.SaveProfile/
+    /// LoadProfile a plain team profile already uses -- presets are just extra named profiles, no
+    /// new storage format. Reset to null on every team switch (SelectTeamFromWeb) so switching
+    /// teams always lands back on the plain base profile, matching pre-preset behavior exactly
+    /// unless the user explicitly picks a preset pill.</summary>
+    string? _activeTeamPreset;
+
+    /// <summary>preset is one of "Home"/"Away"/"BigGame" (identifiers, matching the JS pill
+    /// values) -- translated to a nicer-spaced display name only in the composite profile key
+    /// used for on-disk storage/the Save/Load Profile list.</summary>
+    static string TeamPresetProfileKey(string teamName, string? preset) => preset switch
+    {
+        null or "" => teamName,
+        "BigGame" => $"{teamName} · Big Game",
+        _ => $"{teamName} · {preset}"
+    };
+
+    /// <summary>Which profile GAMEPLAY should actually use for a side once the matchup is
+    /// confirmed -- "BigGame" preset if the Big Game toggle is on (ConfigStore.BigGameSettings,
+    /// same flag GameWatcher.IsBigGame reads), else "Home"/"Away" depending which side of THIS
+    /// game teamName is on. Falls back to the plain base profile's OWN key if that preset was
+    /// never saved for this team (does NOT check the plain profile actually exists on disk --
+    /// callers use LoadGameplayProfile below, which handles that fallback safely).</summary>
+    static string GameplayProfileKey(string teamName, bool isHomeSide)
+    {
+        string preset = ConfigStore.LoadBigGameSettings().Enabled ? "BigGame" : (isHomeSide ? "Home" : "Away");
+        string key = TeamPresetProfileKey(teamName, preset);
+        return ConfigStore.ListProfiles().Contains(key, StringComparer.OrdinalIgnoreCase) ? key : teamName;
+    }
+
+    /// <summary>Loads whatever GameplayProfileKey resolves to, falling all the way back to
+    /// BuildDefault() if even the plain team profile doesn't exist yet (brand new team) -- same
+    /// safety net SetGameTeamsFromWeb always had before presets existed, just centralized here so
+    /// both SetGameTeamsFromWeb and RefreshHomeAwayConfigIfNeeded share it instead of one of them
+    /// risking a raw LoadProfile() throw on a team with nothing saved at all.</summary>
+    static List<TriggerEntry> LoadGameplayProfile(string teamName, bool isHomeSide)
+    {
+        string key = GameplayProfileKey(teamName, isHomeSide);
+        return ConfigStore.ListProfiles().Contains(key, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(key)
+            : ConfigStore.BuildDefault();
+    }
+
     /// <summary>True from the moment GAMETIME is pressed until watching is stopped. While
     /// locked, _homeTeam/_awayTeam (and therefore which physical side OCR-detected events route
     /// to) can't change -- only the SONGS assigned to each side can, via the Home/Away toggle.
@@ -358,11 +405,77 @@ public sealed class WebMainForm : Form
         SaveCurrentTeamProfile();
 
         Theme.ActiveTeam = team;
+        _activeTeamPreset = null; // switching teams always lands back on the plain base profile
         _config = ConfigStore.ListProfiles().Contains(team.Name, StringComparer.OrdinalIgnoreCase)
             ? ConfigStore.LoadProfile(team.Name)
             : ConfigStore.BuildDefault();
         ConfigStore.Save(_config);
         PushCategories();
+    }
+
+    /// <summary>The three preset pills under the active team's editing bar. preset is ""
+    /// (plain/base profile) or "Home"/"Away"/"BigGame". Saves whatever was being edited under the
+    /// PREVIOUS preset first (so switching pills never silently drops in-progress edits), then
+    /// loads the target preset -- falling back to the team's plain base profile as a starting
+    /// point if that preset hasn't been saved yet (so switching to an unused preset for the first
+    /// time starts from what the user already has, not a blank slate), and finally BuildDefault if
+    /// even that doesn't exist. Returns which preset ended up active (mirrors the input, but lets
+    /// the JS side stay in sync without a separate getter).</summary>
+    public string SwitchTeamPresetFromWeb(string preset)
+    {
+        SaveCurrentTeamProfile();
+        _activeTeamPreset = string.IsNullOrEmpty(preset) ? null : preset;
+        string key = TeamPresetProfileKey(Theme.ActiveTeam.Name, _activeTeamPreset);
+        var profiles = ConfigStore.ListProfiles();
+        _config = profiles.Contains(key, StringComparer.OrdinalIgnoreCase) ? ConfigStore.LoadProfile(key)
+            : profiles.Contains(Theme.ActiveTeam.Name, StringComparer.OrdinalIgnoreCase) ? ConfigStore.LoadProfile(Theme.ActiveTeam.Name)
+            : ConfigStore.BuildDefault();
+        ConfigStore.Save(_config);
+        PushCategories();
+        return _activeTeamPreset ?? "";
+    }
+
+    /// <summary>Copies one preset onto another for the ACTIVE team ("copy Big Game preset to
+    /// Home", owner's own example) -- same load-then-save-under-a-different-name shape as
+    /// DuplicateProfileFromWeb above, just scoped to this team's own presets instead of two
+    /// different teams. fromPreset/toPreset are each "" (plain/base) or "Home"/"Away"/"BigGame".
+    /// If the destination is the preset currently being edited, refreshes _config immediately so
+    /// the UI reflects the copy without needing a manual pill re-click.</summary>
+    public bool CopyTeamPresetFromWeb(string fromPreset, string toPreset)
+    {
+        string teamName = Theme.ActiveTeam.Name;
+        string fromKey = TeamPresetProfileKey(teamName, string.IsNullOrEmpty(fromPreset) ? null : fromPreset);
+        string toKey = TeamPresetProfileKey(teamName, string.IsNullOrEmpty(toPreset) ? null : toPreset);
+        if (!ConfigStore.ListProfiles().Contains(fromKey, StringComparer.OrdinalIgnoreCase)) return false;
+
+        var entries = ConfigStore.LoadProfile(fromKey);
+        ConfigStore.SaveProfile(toKey, entries);
+
+        string activeKey = TeamPresetProfileKey(teamName, _activeTeamPreset);
+        if (string.Equals(toKey, activeKey, StringComparison.OrdinalIgnoreCase))
+        {
+            _config = entries;
+            ConfigStore.Save(_config);
+            PushCategories();
+        }
+        RefreshHomeAwayConfigIfNeeded(teamName);
+        return true;
+    }
+
+    /// <summary>Which of the active team's three presets actually have a saved profile on disk --
+    /// drives the "configured" dot on each pill (same idea as .team-swatch.configured elsewhere).
+    /// JSON object: {"Home":bool,"Away":bool,"BigGame":bool}.</summary>
+    public string GetTeamPresetStatusFromWeb()
+    {
+        string teamName = Theme.ActiveTeam.Name;
+        var profiles = ConfigStore.ListProfiles();
+        var status = new Dictionary<string, bool>
+        {
+            ["Home"] = profiles.Contains(TeamPresetProfileKey(teamName, "Home"), StringComparer.OrdinalIgnoreCase),
+            ["Away"] = profiles.Contains(TeamPresetProfileKey(teamName, "Away"), StringComparer.OrdinalIgnoreCase),
+            ["BigGame"] = profiles.Contains(TeamPresetProfileKey(teamName, "BigGame"), StringComparer.OrdinalIgnoreCase),
+        };
+        return JsonSerializer.Serialize(status);
     }
 
     /// <summary>Explicit user-triggered save, from the Save rail button. name is null/empty ->
@@ -552,10 +665,11 @@ public sealed class WebMainForm : Form
     {
         _homeTeam = TeamColors.All.FirstOrDefault(t => t.Name == homeName);
         _awayTeam = TeamColors.All.FirstOrDefault(t => t.Name == awayName);
-        _homeConfig = ConfigStore.ListProfiles().Contains(homeName, StringComparer.OrdinalIgnoreCase)
-            ? ConfigStore.LoadProfile(homeName) : ConfigStore.BuildDefault();
-        _awayConfig = ConfigStore.ListProfiles().Contains(awayName, StringComparer.OrdinalIgnoreCase)
-            ? ConfigStore.LoadProfile(awayName) : ConfigStore.BuildDefault();
+        // GameplayProfileKey picks each team's "BigGame" preset if the Big Game toggle is on,
+        // else their "Home"/"Away" preset for whichever side they're actually on this game --
+        // falling back to the plain base profile for a team with no presets saved.
+        _homeConfig = LoadGameplayProfile(homeName, isHomeSide: true);
+        _awayConfig = LoadGameplayProfile(awayName, isHomeSide: false);
         _watcher.UserIsHome = true; // The user's selected team in the matchup picker IS the home team
         _watcher.HomeTeamName = homeName;
         _watcher.AwayTeamName = awayName;
@@ -571,8 +685,11 @@ public sealed class WebMainForm : Form
         int homeAssigned = 0, awayAssigned = 0;
         if (!homeHasAssignments) homeAssigned = ConfigStore.ImportDefaultPackForTeam(homeName, _homeConfig);
         if (!awayHasAssignments) awayAssigned = ConfigStore.ImportDefaultPackForTeam(awayName, _awayConfig);
-        if (homeAssigned > 0) ConfigStore.SaveProfile(homeName, _homeConfig);
-        if (awayAssigned > 0) ConfigStore.SaveProfile(awayName, _awayConfig);
+        // Save back under the SAME key that was actually loaded (GameplayProfileKey) -- not just
+        // the bare team name -- so a default-pack fill on an empty preset lands back in that
+        // preset's own file, not a different one RefreshHomeAwayConfigIfNeeded would never look at.
+        if (homeAssigned > 0) ConfigStore.SaveProfile(GameplayProfileKey(homeName, isHomeSide: true), _homeConfig);
+        if (awayAssigned > 0) ConfigStore.SaveProfile(GameplayProfileKey(awayName, isHomeSide: false), _awayConfig);
     }
 
     /// <summary>The GAMETIME button. Same wiring as SetGameTeamsFromWeb, plus the confirmation
@@ -722,6 +839,23 @@ public sealed class WebMainForm : Form
         ["Offense: Third Down Short"] = "down:3rd",
     };
 
+    /// <summary>EventKeys that got renamed after already shipping as assignable cards -- maps the
+    /// CURRENT key to the OLD key, so ResolveEntryForEvent can fall back to a song someone already
+    /// assigned under the old name instead of it going silently unassigned after the rename. Add an
+    /// entry here every time an EventKey changes, same convention as ScorebugPreset.LegacyNameAliases.</summary>
+    static readonly Dictionary<string, string> RenamedEventKeyAliases = new()
+    {
+        // Renamed 2026-08-11 (owner audit call) -- clearer name for what this event actually is.
+        ["Defense: After Punt"] = "Defense: Drive Starter",
+        // MERGED 2026-08-11 (live owner call): "Offense: 1st Down After Punt" retired as its own
+        // card and folded into the regular earned-first-down cue (see DriveStarterHelper) -- if
+        // "Offense: Earned First Down" itself has no song assigned, fall back to whatever was
+        // already assigned under the old "1st Down After Punt" (or, one hop further back,
+        // "Drive Starter") key rather than going silent.
+        ["Offense: Earned First Down"] = "Offense: 1st Down After Punt",
+        ["Defense: After Opening Kick"] = "Defense: First Down",
+    };
+
     /// <summary>Returns what actually happened so callers that need visible feedback (the test
     /// hook) can tell "fired," "no song assigned," and "no matchup loaded" apart instead of all
     /// three looking identically like silence. Real engine/legacy callers ignore the return.</summary>
@@ -745,6 +879,14 @@ public sealed class WebMainForm : Form
             var legacyEntry = config.FirstOrDefault(e => e.Trigger.Equals(legacyTrigger, StringComparison.OrdinalIgnoreCase));
             if (legacyEntry != null && !string.IsNullOrWhiteSpace(legacyEntry.AudioFile))
                 entry = legacyEntry;
+        }
+
+        if ((entry == null || string.IsNullOrWhiteSpace(entry.AudioFile))
+            && RenamedEventKeyAliases.TryGetValue(eventName, out var oldEventName))
+        {
+            var renamedEntry = config.FirstOrDefault(e => e.Event == oldEventName);
+            if (renamedEntry != null && !string.IsNullOrWhiteSpace(renamedEntry.AudioFile))
+                entry = renamedEntry;
         }
         return entry;
     }
@@ -774,7 +916,7 @@ public sealed class WebMainForm : Form
 
         if (bypassCooldown) AudioPlayer.ClearCooldown(entry.AudioFile);
         if (!File.Exists(entry.AudioFile)) return "file-missing";
-        FireEvent(entry, (side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume) * volumeMultiplier, interruptPrevious);
+        FireEvent(entry, (side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume) * volumeMultiplier, interruptPrevious, side);
         return "fired:" + Path.GetFileName(entry.AudioFile);
     }
 
@@ -792,7 +934,11 @@ public sealed class WebMainForm : Form
     void RecordFireResult(string eventKey, string side, string result)
     {
         string name = EventActivityLog.FriendlyEventName(eventKey);
-        string sideLabel = DisplaySide(side);
+        // Owner request 2026-08-11: the log line alone couldn't tell a Big Game fire apart from an
+        // ordinary one (e.g. "2nd & Short Away" -- was this the Big Game's louder/alternate cue or
+        // not?). _watcher.IsBigGame is the same flag FireEvent's own BigGameAudioFile fallback
+        // already keys off (line ~2599 above), so this tag reflects exactly what actually played.
+        string sideLabel = DisplaySide(side) + (_watcher.IsBigGame ? " BG" : "");
         if (result.StartsWith("fired:"))
         {
             string filename = result["fired:".Length..];
@@ -833,7 +979,7 @@ public sealed class WebMainForm : Form
 
     void SaveCurrentTeamProfile()
     {
-        ConfigStore.SaveProfile(Theme.ActiveTeam.Name, _config);
+        ConfigStore.SaveProfile(TeamPresetProfileKey(Theme.ActiveTeam.Name, _activeTeamPreset), _config);
         RefreshHomeAwayConfigIfNeeded(Theme.ActiveTeam.Name);
         RunOnUi(() =>
         {
@@ -849,10 +995,32 @@ public sealed class WebMainForm : Form
     /// no effect on actual gameplay until the matchup was re-confirmed from scratch.</summary>
     void RefreshHomeAwayConfigIfNeeded(string savedTeamName)
     {
-        if (_homeTeam is { } home && string.Equals(home.Name, savedTeamName, StringComparison.OrdinalIgnoreCase))
-            _homeConfig = ConfigStore.LoadProfile(savedTeamName);
-        if (_awayTeam is { } away && string.Equals(away.Name, savedTeamName, StringComparison.OrdinalIgnoreCase))
-            _awayConfig = ConfigStore.LoadProfile(savedTeamName);
+        // Reloads from GameplayProfileKey, NOT necessarily savedTeamName itself -- an edit made
+        // while a different preset than the one currently live for this game is active (e.g.
+        // tweaking the "Away" preset for a team that's actually playing Home this game, or vice
+        // versa) must NOT leak into gameplay. GameplayProfileKey recomputes which preset SHOULD be
+        // live every time, so only an edit to the actually-active preset (or the plain profile,
+        // when no preset applies) ever hot-refreshes _homeConfig/_awayConfig.
+        bool isHome = _homeTeam is { } home && string.Equals(home.Name, savedTeamName, StringComparison.OrdinalIgnoreCase);
+        bool isAway = _awayTeam is { } away && string.Equals(away.Name, savedTeamName, StringComparison.OrdinalIgnoreCase);
+        if (isHome) _homeConfig = LoadGameplayProfile(savedTeamName, isHomeSide: true);
+        if (isAway) _awayConfig = LoadGameplayProfile(savedTeamName, isHomeSide: false);
+
+        // FIXED 2026-08-11 (live bug: "random" playback delays reported mid-game). StartWatching-
+        // IfMatchupSet's AudioCache.Preload only ever runs once, at GAMETIME -- any song assigned
+        // or re-assigned to Home/Away AFTER that (exactly what testing/tweaking mid-game is) never
+        // gets warmed into RAM, so its first real fire falls through to CachedAudioSource's cold
+        // disk-read fallback. That stall only hits whichever specific event was just touched, so
+        // it read as random/intermittent rather than a consistent every-time delay. Re-preload in
+        // the background (not blocking the save/UI) whenever a Home/Away profile that's actually
+        // live in the current matchup gets saved, same list-building as StartWatchingIfMatchupSet.
+        if (isHome || isAway)
+        {
+            var toCache = (_homeConfig ?? Enumerable.Empty<TriggerEntry>())
+                .Concat(_awayConfig ?? Enumerable.Empty<TriggerEntry>())
+                .SelectMany(e => new[] { e.AudioFile, e.PaAudioFile });
+            Task.Run(() => AudioCache.Preload(toCache));
+        }
     }
 
     public string ToggleWatchingFromWeb()
@@ -1061,7 +1229,7 @@ public sealed class WebMainForm : Form
         if (entry == null) return;
         float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
-            AudioPlayer.Play(entry.AudioFile, AudioPlayer.MasterVolume * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => AudioPlayer.MasterVolume * eventVolumeScale);
+            AudioPlayer.Play(entry.AudioFile, AudioPlayer.MasterVolume * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => AudioPlayer.MasterVolume * eventVolumeScale, speed2x: entry.PlaybackSpeed2x, whistleOverridePath: entry.AltWhistlePath);
         if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
             AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isPreview: true, liveVolumeSource: () => AudioPlayer.PaVolume * eventVolumeScale);
     }
@@ -1082,6 +1250,105 @@ public sealed class WebMainForm : Form
         if (entry == null) return;
         entry.PlayLeadInWhistle = enabled;
         SaveCurrentTeamProfile();
+    }
+
+    /// <summary>Speed toggle button on an event card's transport strip -- see
+    /// AudioPlayer.Play's speed2x param / SoundTouchSpeedSampleProvider. Plain on/off per card,
+    /// same convention as SetEventPlayLeadInWhistleFromWeb above.</summary>
+    public void SetEventPlaybackSpeed2xFromWeb(string trigger, bool enabled)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        entry.PlaybackSpeed2x = enabled;
+        ConfigStore.Save(_config);
+        SaveCurrentTeamProfile();
+        PushCategories();
+    }
+
+    /// <summary>Native file picker for a per-event alternate lead-in whistle (TriggerEntry.
+    /// AltWhistlePath) -- same OpenFileDialog-and-copy pattern as
+    /// BrowseAndSetLeadInWhistleFromWeb (the global whistle chooser) below, just scoped to one
+    /// trigger and stored alongside it instead of overwriting the single global clip.</summary>
+    public bool BrowseAndSetEventAltWhistleFromWeb(string trigger)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return false;
+
+        using var dlg = new OpenFileDialog { Filter = "Audio Files|*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac|All Files|*.*", Title = "Choose Alternate Whistle Clip" };
+        if (dlg.ShowDialog() != DialogResult.OK) return false;
+
+        try
+        {
+            string whistlesFolder = Path.Combine(ConfigStore.SongsFolder, "whistles");
+            Directory.CreateDirectory(whistlesFolder);
+            string safeTriggerName = string.Concat(trigger.Where(c => !Path.GetInvalidFileNameChars().Contains(c)));
+            string dest = Path.Combine(whistlesFolder, $"{safeTriggerName}_{Path.GetFileName(dlg.FileName)}");
+            File.Copy(dlg.FileName, dest, overwrite: true);
+            entry.AltWhistlePath = dest;
+            ConfigStore.Save(_config);
+            SaveCurrentTeamProfile();
+            PushCategories();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("BrowseAndSetEventAltWhistleFromWeb failed to copy file", ex);
+            return false;
+        }
+    }
+
+    public void ClearEventAltWhistleFromWeb(string trigger)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        entry.AltWhistlePath = "";
+        ConfigStore.Save(_config);
+        SaveCurrentTeamProfile();
+        PushCategories();
+    }
+
+    /// <summary>Alt-whistle counterpart to SaveTrimAsLeadInWhistleFromWeb -- same trim-and-save
+    /// mechanics (TrimSourceFolder -> normalize -> write .wav), but scoped to one trigger's
+    /// AltWhistlePath instead of the single global ConfigStore.LeadInWhistlePath, same "whistles"
+    /// subfolder and fixed-per-trigger filename BrowseAndSetEventAltWhistleFromWeb already uses so
+    /// re-trimming just overwrites this event's own alt whistle rather than piling up copies.</summary>
+    public string SaveTrimAsEventAltWhistleFromWeb(string trigger, double startSec, double endSec)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return JsonSerializer.Serialize(new { ok = false, error = "No such trigger." });
+        string? srcPath = Directory.Exists(ConfigStore.TrimSourceFolder)
+            ? Directory.GetFiles(ConfigStore.TrimSourceFolder).FirstOrDefault() : null;
+        if (srcPath == null) return JsonSerializer.Serialize(new { ok = false, error = "Trim source is gone -- reopen the trimmer." });
+        if (endSec <= startSec) return JsonSerializer.Serialize(new { ok = false, error = "End must be after start." });
+
+        try
+        {
+            string whistlesFolder = Path.Combine(ConfigStore.SongsFolder, "whistles");
+            Directory.CreateDirectory(whistlesFolder);
+            string safeTriggerName = string.Concat(trigger.Where(c => !Path.GetInvalidFileNameChars().Contains(c)));
+            string outPath = Path.Combine(whistlesFolder, $"{safeTriggerName}_alt.wav");
+
+            using (var reader = new NAudio.Wave.AudioFileReader(srcPath))
+            {
+                var offset = new NAudio.Wave.SampleProviders.OffsetSampleProvider(reader)
+                {
+                    SkipOver = TimeSpan.FromSeconds(startSec),
+                    Take = TimeSpan.FromSeconds(endSec - startSec),
+                };
+                var normalized = AudioNormalizer.NormalizeAndLimit(offset);
+                NAudio.Wave.WaveFileWriter.CreateWaveFile16(outPath, normalized);
+            }
+            entry.AltWhistlePath = outPath;
+            ConfigStore.Save(_config);
+            SaveCurrentTeamProfile();
+            PushCategories();
+            return JsonSerializer.Serialize(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SaveTrimAsEventAltWhistleFromWeb failed", ex);
+            return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the whistle clip." });
+        }
     }
 
     public void StopPreviewFromWeb() => AudioPlayer.StopAll();
@@ -1432,6 +1699,77 @@ public sealed class WebMainForm : Form
 
     public void ClearTrackAssignmentFromWeb(string trigger, bool isPa) => AssignTrackFileFromWeb(trigger, isPa, "");
 
+    /// <summary>Renames the audio file (and its .meta.json sidecar) currently assigned to
+    /// `trigger` on disk to "{newBaseName}{original extension}", then rewrites every reference to
+    /// the old path -- in this profile's in-memory _config/_homeConfig/_awayConfig AND in every
+    /// OTHER saved profile file on disk (a shared file can be assigned under multiple team
+    /// profiles) -- so no assignment silently breaks. Local-only: never touches the marketplace,
+    /// so retitling a downloaded/shared song never pushes the rename back to whoever uploaded it
+    /// (same "local override, don't sync out" shape as CustomTeamLogos in
+    /// PublicTeamLogoSyncService). Returns the new file name, or null if the trigger has no
+    /// assigned file or the rename target already exists as a DIFFERENT unrelated file (handled
+    /// via a numeric suffix, not a failure) or the source file is missing.</summary>
+    public string? RenameAssignedTrackFromWeb(string trigger, string newBaseName)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        var oldPath = entry?.AudioFile;
+        if (entry == null || string.IsNullOrWhiteSpace(oldPath) || !File.Exists(oldPath)) return null;
+
+        var dir = Path.GetDirectoryName(oldPath)!;
+        var ext = Path.GetExtension(oldPath);
+        var safeName = ConfigStore.SanitizeFileName(newBaseName);
+        if (string.IsNullOrWhiteSpace(safeName)) return null;
+
+        var newPath = Path.Combine(dir, safeName + ext);
+        int suffix = 1;
+        while (File.Exists(newPath) && !string.Equals(newPath, oldPath, StringComparison.OrdinalIgnoreCase))
+            newPath = Path.Combine(dir, $"{safeName} ({++suffix}){ext}");
+
+        if (string.Equals(newPath, oldPath, StringComparison.OrdinalIgnoreCase))
+            return Path.GetFileName(oldPath);
+
+        File.Move(oldPath, newPath);
+        var oldSidecar = oldPath + ".meta.json";
+        if (File.Exists(oldSidecar)) File.Move(oldSidecar, newPath + ".meta.json");
+
+        RewriteAudioFileReferences(oldPath, newPath);
+        return Path.GetFileName(newPath);
+    }
+
+    /// <summary>Swaps `oldPath` for `newPath` on any TriggerEntry.AudioFile/PaAudioFile/
+    /// BigGameAudioFile that referenced it, across the in-memory active/home/away configs (saved
+    /// immediately) and every other team's saved profile file on disk (so a rename made while
+    /// editing one team doesn't orphan the same shared file assigned under another team).</summary>
+    void RewriteAudioFileReferences(string oldPath, string newPath)
+    {
+        static bool Retarget(TriggerEntry e, string oldPath, string newPath)
+        {
+            bool changed = false;
+            if (string.Equals(e.AudioFile, oldPath, StringComparison.OrdinalIgnoreCase)) { e.AudioFile = newPath; changed = true; }
+            if (string.Equals(e.PaAudioFile, oldPath, StringComparison.OrdinalIgnoreCase)) { e.PaAudioFile = newPath; changed = true; }
+            if (string.Equals(e.BigGameAudioFile, oldPath, StringComparison.OrdinalIgnoreCase)) { e.BigGameAudioFile = newPath; changed = true; }
+            return changed;
+        }
+
+        bool activeChanged = false;
+        foreach (var e in _config) activeChanged |= Retarget(e, oldPath, newPath);
+        if (activeChanged) SaveCurrentTeamProfile();
+
+        if (_homeConfig != null) foreach (var e in _homeConfig) Retarget(e, oldPath, newPath);
+        if (_awayConfig != null) foreach (var e in _awayConfig) Retarget(e, oldPath, newPath);
+
+        foreach (var profileName in ConfigStore.ListProfiles())
+        {
+            if (activeChanged && profileName == TeamPresetProfileKey(Theme.ActiveTeam.Name, _activeTeamPreset))
+                continue; // already saved above
+
+            var entries = ConfigStore.LoadProfile(profileName);
+            bool changed = false;
+            foreach (var e in entries) changed |= Retarget(e, oldPath, newPath);
+            if (changed) ConfigStore.SaveProfile(profileName, entries);
+        }
+    }
+
     /// <summary>Punch-list item 3: "copy assignment from another event" button on an event card
     /// -- lets an unassigned (or already-assigned) event pull in another same-team event's
     /// existing song/PA/lead-in-whistle setting as a starting point, e.g. "3rd and short"
@@ -1457,6 +1795,69 @@ public sealed class WebMainForm : Form
         if (!string.IsNullOrWhiteSpace(target.AudioFile)) NormalizeAssignmentInBackground(target, isPa: false);
         if (!string.IsNullOrWhiteSpace(target.PaAudioFile)) NormalizeAssignmentInBackground(target, isPa: true);
         return true;
+    }
+
+    /// <summary>Clipper song-list "Share to..." action -- pushes a library file directly onto
+    /// ANOTHER team's event, unlike CopyEventAssignmentFromWeb above which only reaches events on
+    /// the currently active team (both triggers looked up in the same live _config). This loads/
+    /// saves the TARGET team's saved profile file directly via ConfigStore.LoadProfile/SaveProfile
+    /// so it can reach any team's roster, including ones never loaded this session. If the target
+    /// happens to be the active team, updates the live _config/PushCategories too instead of only
+    /// the on-disk copy, so the UI doesn't go stale (same "looks right in source, stale in the
+    /// deployed/loaded copy" class of bug Session 47's handoff flagged for the built app.js).</summary>
+    public bool AssignLibraryFileToTeamEventFromWeb(string teamName, string trigger, string path)
+    {
+        if (string.IsNullOrWhiteSpace(teamName) || string.IsNullOrWhiteSpace(trigger) || string.IsNullOrWhiteSpace(path)) return false;
+        if (TeamColors.All.All(t => t.Name != teamName)) return false;
+
+        bool isActiveTeam = string.Equals(teamName, Theme.ActiveTeam.Name, StringComparison.OrdinalIgnoreCase);
+        var profile = isActiveTeam
+            ? _config
+            : (ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase)
+                ? ConfigStore.LoadProfile(teamName)
+                : ConfigStore.BuildDefault());
+
+        var entry = profile.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return false;
+        entry.AudioFile = path;
+
+        if (isActiveTeam)
+        {
+            ConfigStore.Save(_config);
+            SaveCurrentTeamProfile();
+            PushCategories();
+            NormalizeAssignmentInBackground(entry, isPa: false);
+        }
+        else
+        {
+            ConfigStore.SaveProfile(teamName, profile);
+        }
+        return true;
+    }
+
+    /// <summary>Team+event picker data for the Clipper's cross-team "Share to..." action -- same
+    /// shape as GetEventsForCategory (WebBridge.cs) but reads the TARGET team's saved profile (or
+    /// engine defaults if it's never been saved) instead of the live _config, so the picker can
+    /// show any team's event list/current assignment without switching the active team away from
+    /// whatever the user is actually working on.</summary>
+    public string GetEventsForTeamFromWeb(string teamName, string? category)
+    {
+        if (TeamColors.All.All(t => t.Name != teamName)) return "[]";
+        bool isActiveTeam = string.Equals(teamName, Theme.ActiveTeam.Name, StringComparison.OrdinalIgnoreCase);
+        var profile = isActiveTeam
+            ? _config
+            : (ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase)
+                ? ConfigStore.LoadProfile(teamName)
+                : ConfigStore.BuildDefault());
+        var filtered = string.IsNullOrEmpty(category) || category == "All"
+            ? profile
+            : profile.Where(e => CategoryMap.Resolve(e) == category).ToList();
+        return JsonSerializer.Serialize(filtered.Select(e => new
+        {
+            trigger = e.Trigger,
+            eventName = e.Event,
+            fileName = string.IsNullOrWhiteSpace(e.AudioFile) ? null : Path.GetFileNameWithoutExtension(e.AudioFile),
+        }));
     }
 
     /// <summary>Big Game conditional-alternate slot (TriggerEntry.BigGameAudioFile, added
@@ -2375,7 +2776,19 @@ public sealed class WebMainForm : Form
 
     // --- Backend event wiring (unchanged from native MainForm) ---
 
-    void FireEvent(TriggerEntry entry, float? volumeOverride = null, bool interruptPrevious = true)
+    // FIXED 2026-08-11 (live bug: a touchdown fired right after a turnover -- e.g. a fumble
+    // recovery followed by a score a play or two later -- and the touchdown cue's StopAll()
+    // cut the still-playing turnover cue off abruptly mid-clip instead of letting the two big
+    // moments coexist). Both are already flagged isHighPriority specifically so OTHER audio
+    // ducks out of their way instead of getting hard-stopped -- but interruptPrevious was
+    // unconditionally true for any new real trigger, so a second big-moment cue stopped the
+    // first ANYWAY before ducking even had a chance to matter. Tracks the last high-priority
+    // fire and skips the interrupt (layers + ducks instead, same trick same-tick multi-fires
+    // already use) if another one lands within this grace window.
+    static readonly TimeSpan HighPriorityOverlapGrace = TimeSpan.FromSeconds(6);
+    DateTime _lastHighPriorityFireUtc = DateTime.MinValue;
+
+    void FireEvent(TriggerEntry entry, float? volumeOverride = null, bool interruptPrevious = true, string? channel = null)
     {
         // Per-event volume (TriggerEntry.Volume, 0-100) is a multiplier on top of whichever base
         // volume this call would already use -- lets one card be balanced quieter/louder without
@@ -2402,6 +2815,15 @@ public sealed class WebMainForm : Form
             bool isPregame = entry.Event.Contains("Pregame Ready", StringComparison.OrdinalIgnoreCase);
             RecordSongTriggered(entry.Event);
 
+            // See HighPriorityOverlapGrace's doc comment: a second big moment within the grace
+            // window layers/ducks instead of hard-stopping the first.
+            if (isHighPriority)
+            {
+                if (DateTime.UtcNow - _lastHighPriorityFireUtc < HighPriorityOverlapGrace)
+                    interruptPrevious = false;
+                _lastHighPriorityFireUtc = DateTime.UtcNow;
+            }
+
             // REMOVED 2026-08-11: the configurable Sound Start Delay (0-5000ms, previously
             // _soundStartDelayMs) between an event firing and playback actually starting, and the
             // _soundFireGeneration staleness-guard machinery that existed solely to keep a stale
@@ -2409,7 +2831,7 @@ public sealed class WebMainForm : Form
             // feature entirely. Back to firing synchronously, same as before that feature existed.
             string paFile = entry.PaAudioFile;
             bool paExists = !string.IsNullOrWhiteSpace(paFile) && File.Exists(paFile);
-            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle);
+            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle, speed2x: entry.PlaybackSpeed2x, whistleOverridePath: entry.AltWhistlePath, channel: channel);
             // PA Announcer layer: plays concurrently with the main cue above, not instead of it,
             // so interruptPrevious MUST be false here -- true would call StopAll() and kill the
             // main clip that was just started a line above. Fired after, not before, the main
@@ -2472,12 +2894,21 @@ public sealed class WebMainForm : Form
     /// these Defense:*-prefixed cues never play for away, period -- not even during a Big Game.
     /// Distinct from the ordinary Defense tier below, which DOES unlock for away during a Big
     /// Game. Owner's explicit call for these two specifically ("3rd & Long" and the new
-    /// "Defense: First Down" post-kickoff cue) -- rare/subtle enough that even a full away band
-    /// wouldn't bother, per the owner's real band experience.</summary>
+    /// "Defense: After Opening Kick" post-kickoff cue, renamed 2026-08-11 from "Defense: First
+    /// Down") -- rare/subtle enough that even a full away band wouldn't bother, per the owner's
+    /// real band experience.</summary>
     static readonly HashSet<string> HomeOnlyAlwaysEventKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Defense: Third Down",
-        "Defense: First Down",
+        // "Defense: Third Down" REMOVED from this set 2026-08-11 (owner, live game): a real 3rd &
+        // long stop is a big enough moment that away's own band should get it too now, same
+        // balanced-dual-fire treatment as "Defense/Offense: Third Down Short" -- see
+        // DefenseThirdDownHelper (100%) + OffenseDownHelper's long branch (60%, new
+        // "Offense: Third Down" key). Reverses the "rare/subtle enough that even a full away band
+        // wouldn't bother" call made earlier the same day.
+        "Defense: After Opening Kick",
+        // Added 2026-08-11 (owner audit call, same session as the rename) -- home crowd cue for
+        // stopping the opponent right after a punt; away's own travel band shouldn't get this one.
+        "Defense: After Punt",
     };
 
     /// <summary>The actual routing rules for one engine event -- side-flip (Defense:*/Penalty:

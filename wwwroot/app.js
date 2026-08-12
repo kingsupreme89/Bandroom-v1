@@ -535,6 +535,12 @@ async function openSituations(category) {
     row.classList.toggle("selected", name === category);
   });
 
+  // openCardPopover reparents the Share To popover straight onto <body> (see its own doc
+  // comment -- escapes the card's glass/backdrop-filter stacking context). Rebuilding `list` below
+  // discards the ROW that used to own each popover, but the popover itself now lives outside that
+  // subtree, so it'd otherwise orphan on body forever across every single refresh. Sweep them here.
+  document.querySelectorAll("body > .situation-share-popover").forEach((p) => p.remove());
+
   const events = bridge ? JSON.parse(await bridge.GetEventsForCategory(category)) : [];
   list.innerHTML = "";
   for (const ev of events) {
@@ -554,28 +560,35 @@ async function openSituations(category) {
       <span class="situation-actions" style="position: relative;">
         <button class="situation-btn" data-act="assign">Assign / Edit</button>
         <button class="situation-btn situation-btn-pa" data-act="assign-pa" title="Assign a PA Announcer clip that plays alongside the main song for this situation">Assign PA</button>
-        <button class="situation-btn situation-btn-copy" data-act="copy-from" title="Copy the song/PA assignment from another already-assigned event on this team, as a starting point">Copy From&hellip;</button>
-        <span class="situation-transport">
+        <span class="situation-transport" style="position: relative;">
+          <button class="bandroom-item-action" data-act="open-clipper" title="Open the Clipper to pick/trim a song for this event">&#9986;</button>
+          <button class="bandroom-item-action" data-act="share-to" title="Assign this same song to another event too" ${ev.fileName ? "" : "disabled"}>&#8599;</button>
           <button class="bandroom-item-action" data-act="preview" title="Play" ${ev.fileName ? "" : "disabled"}>&#9654;</button>
           <button class="bandroom-item-action" data-act="stop" title="Stop">&#9209;</button>
           <button class="bandroom-item-action" data-act="volume" title="Adjust this event's own volume">&#128266;</button>
           <button class="bandroom-item-action situation-whistle-toggle${ev.playLeadInWhistle === false ? "" : " active"}" data-act="whistle" title="${ev.playLeadInWhistle === false ? "Lead-in whistle off for this song -- click to turn it back on" : "Lead-in whistle on for this song (when the global toggle is on) -- click to skip it for just this one"}">&#128239;</button>
+          <button class="bandroom-item-action situation-whistle-toggle${ev.altWhistleSet ? " active" : ""}" data-act="alt-whistle" title="${ev.altWhistleSet ? "This event has its own alternate whistle clip -- click to clear it and go back to the global whistle" : "Pick an alternate whistle clip just for this event, instead of the global one"}">&#127895;</button>
+          <button class="bandroom-item-action situation-whistle-toggle${ev.speed2x ? " active" : ""}" data-act="speed2x" title="${ev.speed2x ? "Playing at 1.09x speed -- click to go back to normal speed" : "Play this event's song at 1.09x speed (in-game and preview)"}">&#9193;</button>
           <button class="bandroom-item-action" data-act="track-info" title="Track Info" ${ev.fileName ? "" : "disabled"}>&#8505;</button>
+          <div class="situation-share-popover glass" hidden>
+            <div class="situation-copy-title">Share this song to&hellip;</div>
+            <div class="situation-copy-list"></div>
+            <button class="situation-copy-close" title="Close">&times;</button>
+          </div>
         </span>
         <div class="situation-volume-popover" hidden>
           <input type="range" min="0" max="100" value="100" class="slider situation-volume-slider" />
           <span class="situation-volume-value">100%</span>
           <button class="situation-volume-close" title="Close">&times;</button>
         </div>
-        <div class="situation-copy-popover glass" hidden>
-          <div class="situation-copy-title">Copy assignment from&hellip;</div>
-          <div class="situation-copy-list"></div>
-          <button class="situation-copy-close" title="Close">&times;</button>
-        </div>
       </span>`;
     row.querySelector('[data-act="assign"]').addEventListener("click", () => openClipperAssign(ev.trigger, ev.eventName, false, ev.fileName));
     row.querySelector('[data-act="assign-pa"]').addEventListener("click", () => openClipperAssign(ev.trigger, ev.eventName, true, ev.paFileName));
-    wireSituationCopyFromPopover(row, ev, events);
+    // Same jump as "Assign / Edit" above, just as a compact icon in the transport strip --
+    // owner asked for the same-style icon button (like the ↗ Share to... icon) as a quicker way
+    // into the Clipper without hunting for the pill row on narrower cards.
+    row.querySelector('[data-act="open-clipper"]').addEventListener("click", () => openClipperAssign(ev.trigger, ev.eventName, false, ev.fileName));
+    wireSituationShareToPopover(row, ev, events);
     row.querySelector('[data-act="preview"]').addEventListener("click", () => { _previewAudio?.pause(); bridge?.PreviewEvent(ev.trigger); });
     row.querySelector('[data-act="stop"]').addEventListener("click", () => bridge?.StopPreview());
     row.querySelector('[data-act="track-info"]').addEventListener("click", () => openTrackInfoDrawer(ev.trigger, ev.fileName));
@@ -588,51 +601,127 @@ async function openSituations(category) {
         : "Lead-in whistle off for this song -- click to turn it back on";
       bridge?.SetEventPlayLeadInWhistle(ev.trigger, nowOn);
     });
+    // Per-event alternate whistle -- clicking when unset opens Clipper Island in "alt-whistle"
+    // mode (pick a library song, Trim... it, Set as Alt Whistle -- same flow the global whistle
+    // button already used, previously this was the only whistle control still using a bare native
+    // OpenFileDialog via BrowseAndSetEventAltWhistle). Clicking again while set just clears it
+    // back to the global whistle rather than trying to cram a second "replace" affordance into one
+    // icon button.
+    row.querySelector('[data-act="alt-whistle"]').addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (ev.altWhistleSet) {
+        await bridge?.ClearEventAltWhistle(ev.trigger);
+        showToast("Cleared -- this event uses the global whistle again.");
+        await openSituations(state.currentSituationsCategory);
+      } else {
+        await openClipperAssignForAltWhistle(ev.trigger, ev.eventName);
+      }
+    });
+    row.querySelector('[data-act="speed2x"]').addEventListener("click", (e) => {
+      const btn = e.currentTarget;
+      const nowOn = !btn.classList.contains("active");
+      btn.classList.toggle("active", nowOn);
+      btn.title = nowOn
+        ? "Playing at 1.09x speed -- click to go back to normal speed"
+        : "Play this event's song at 1.09x speed (in-game and preview)";
+      bridge?.SetEventPlaybackSpeed2x(ev.trigger, nowOn);
+    });
     wireSituationVolumePopover(row, ev.trigger);
     list.appendChild(row);
   }
 }
 
-/// Punch-list item 3: "Copy From..." button pops a small list of this SAME team's other
-/// already-assigned events (source of truth is the `events` array openSituations() already
-/// fetched for this card's category -- same team by construction, no extra bridge call needed
-/// just to build the picker). Picking one calls WebBridge.CopyEventAssignment, which copies
-/// AudioFile/PaAudioFile/PlayLeadInWhistle server-side (WebMainForm.CopyEventAssignmentFromWeb),
-/// then re-opens the current category so the card reflects the new assignment immediately.
-function wireSituationCopyFromPopover(row, ev, events) {
-  const btn = row.querySelector('[data-act="copy-from"]');
-  const popover = row.querySelector(".situation-copy-popover");
-  const list = row.querySelector(".situation-copy-list");
-  const closeBtn = row.querySelector(".situation-copy-close");
+/// Shared open/close for the card-anchored popovers (.situation-share-popover and the volume
+/// popover) -- FIXED 2026-08-11: these used to be position:absolute nested inside the card, which
+/// a glass/backdrop-filter card traps in its own stacking context (z-index can't escape it), so
+/// the popover rendered clipped/overlapping a NEIGHBORING card instead of floating on top (see the
+/// owner's screenshot). Reparenting to document.body + position:fixed with JS-computed coordinates
+/// escapes that entirely. Also now slides out from the right edge of the anchor button (owner
+/// request) instead of popping up above it, via the .slide-open class (see style.css transition).
+function openCardPopover(anchorBtn, popover) {
+  document.body.appendChild(popover);
+  popover.hidden = false;
+  popover.classList.remove("slide-open");
+  const rect = anchorBtn.getBoundingClientRect();
+  const popW = 280;
+  let left = rect.right + 10;
+  if (left + popW > window.innerWidth - 8) left = rect.left - popW - 10; // no room on the right -- open to the left instead
+  if (left < 8) left = 8;
+  popover.style.left = `${left}px`;
+  popover.style.top = `${rect.top}px`;
+  requestAnimationFrame(() => {
+    const popH = popover.offsetHeight;
+    if (rect.top + popH > window.innerHeight - 8) {
+      popover.style.top = `${Math.max(8, window.innerHeight - 8 - popH)}px`;
+    }
+    popover.classList.add("slide-open");
+  });
+}
+function closeCardPopover(popover) {
+  popover.classList.remove("slide-open");
+  setTimeout(() => { popover.hidden = true; }, 180);
+}
+/// Lets the owner drag a popover to a spot of their choosing (owner request) by its title bar --
+/// switches it to explicit left/top tracking the cursor, same fixed-position element either way.
+function makePopoverDraggable(popover, handle) {
+  let dragging = false, offsetX = 0, offsetY = 0;
+  handle.addEventListener("mousedown", (e) => {
+    dragging = true;
+    const rect = popover.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    popover.style.left = `${e.clientX - offsetX}px`;
+    popover.style.top = `${e.clientY - offsetY}px`;
+  });
+  document.addEventListener("mouseup", () => { dragging = false; });
+}
 
-  const closePopover = () => { popover.hidden = true; };
+/// "Share to..." button -- pushes THIS row's already-assigned song
+/// (source) onto another event on the same team (target) instead of pulling one in. Same
+/// candidate list (this card's category, same team, no extra bridge call) but unfiltered by
+/// whether the target already has something assigned -- sharing INTO an unassigned event is the
+/// whole point (fast bulk-assignment), and sharing into an already-assigned one is allowed too
+/// (just overwrites the target, same as Copy From does in the other direction). Button itself is
+/// disabled via the `disabled` attribute set at render time when this row has nothing to share.
+function wireSituationShareToPopover(row, ev, events) {
+  const btn = row.querySelector('[data-act="share-to"]');
+  const popover = row.querySelector(".situation-share-popover");
+  const listEl = popover.querySelector(".situation-copy-list");
+  const closeBtn = popover.querySelector(".situation-copy-close");
+
+  const closePopover = () => closeCardPopover(popover);
+  makePopoverDraggable(popover, popover.querySelector(".situation-copy-title"));
 
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     if (!popover.hidden) { closePopover(); return; }
-    document.querySelectorAll(".situation-copy-popover").forEach((p) => { p.hidden = true; });
-    const candidates = events.filter((other) => other.trigger !== ev.trigger && (other.fileName || other.paFileName));
-    list.innerHTML = candidates.length
+    document.querySelectorAll(".situation-share-popover").forEach((p) => { p.hidden = true; p.classList.remove("slide-open"); });
+    const candidates = events.filter((other) => other.trigger !== ev.trigger);
+    listEl.innerHTML = candidates.length
       ? ""
-      : `<div class="situation-copy-empty">No other assigned events on this team yet.</div>`;
+      : `<div class="situation-copy-empty">No other events on this team yet.</div>`;
     for (const other of candidates) {
       const item = document.createElement("button");
       item.className = "situation-copy-option";
-      item.innerHTML = `<span class="situation-copy-option-name">${friendlyEventName(other.eventName)}</span><span class="situation-copy-option-file">${other.fileName || other.paFileName}</span>`;
+      item.innerHTML = `<span class="situation-copy-option-name">${friendlyEventName(other.eventName)}</span><span class="situation-copy-option-file">${other.fileName ? "overwrites " + other.fileName : "unassigned"}</span>`;
       item.addEventListener("click", async (ce) => {
         ce.stopPropagation();
-        const ok = bridge ? await bridge.CopyEventAssignment(other.trigger, ev.trigger) : false;
+        const ok = bridge ? await bridge.CopyEventAssignment(ev.trigger, other.trigger) : false;
         closePopover();
         if (ok) {
-          showToast(`Copied "${friendlyEventName(other.eventName)}"'s assignment to "${friendlyEventName(ev.eventName)}".`);
+          showToast(`Shared "${friendlyEventName(ev.eventName)}"'s song to "${friendlyEventName(other.eventName)}".`);
           await openSituations(state.currentSituationsCategory);
         } else {
-          showToast("Couldn't copy that assignment.");
+          showToast("Couldn't share that assignment.");
         }
       });
-      list.appendChild(item);
+      listEl.appendChild(item);
     }
-    popover.hidden = false;
+    openCardPopover(btn, popover);
   });
   closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
 }
@@ -846,6 +935,10 @@ function setActiveTeam(name, fromInit = false) {
   updateProfileStatus();
   updateHeaderTeamBadge(team);
   updateMatchupSideBar();
+  // Switching teams always resets the backend's active preset back to "Plain" (SelectTeamFromWeb),
+  // so the pill bar needs to reflect that too rather than keeping the previous team's selection.
+  state.activeTeamPreset = "";
+  updateTeamPresetBar();
 }
 
 /// Shows a one-click Away/Home toggle above the situations list once a matchup is set, so it's
@@ -877,6 +970,94 @@ function updateMatchupSideBar() {
   homeBtn.classList.toggle("active", state.activeTeam === state.matchupHome);
   awayBtn.style.setProperty("--side-glow", awayTeam?.secondary || awayTeam?.primary || "");
   homeBtn.style.setProperty("--side-glow", homeTeam?.secondary || homeTeam?.primary || "");
+}
+
+// ---- Team song-assignment presets: Home / Away / Big Game (owner request 2026-08-11) -----------
+// Three switchable alternate profiles per team, e.g. so a team's "Big Game" songs can differ from
+// their everyday set. Bridge: SwitchTeamPreset/CopyTeamPreset/GetTeamPresetStatus (WebBridge.cs ->
+// WebMainForm's *FromWeb versions), which reuse the existing named-profile save/load machinery --
+// a preset is just an extra profile named "<team> · <preset>". Gameplay auto-picks the right one
+// at GAMETIME (see WebMainForm.GameplayProfileKey); this bar is only about EDITING them.
+const TEAM_PRESET_IDS = ["", "Home", "Away", "BigGame"];
+
+function presetPillId(preset) {
+  return `btn-preset-${preset === "BigGame" ? "biggame" : preset === "" ? "plain" : preset.toLowerCase()}`;
+}
+
+function updateTeamPresetBar() {
+  const bar = document.getElementById("team-preset-bar");
+  if (!bar) return;
+  if (!state.activeTeam) { bar.hidden = true; return; }
+  bar.hidden = false;
+  for (const preset of TEAM_PRESET_IDS) {
+    const btn = document.getElementById(presetPillId(preset));
+    if (btn) btn.classList.toggle("active", (state.activeTeamPreset || "") === preset);
+  }
+  refreshTeamPresetStatus();
+}
+
+async function refreshTeamPresetStatus() {
+  if (!bridge) return;
+  let status = {};
+  try { status = JSON.parse(await bridge.GetTeamPresetStatus()); }
+  catch (err) { console.error("GetTeamPresetStatus failed", err); }
+  for (const preset of ["Home", "Away", "BigGame"]) {
+    document.getElementById(presetPillId(preset))?.classList.toggle("configured", !!status[preset]);
+  }
+  const labels = { "": "Plain", Home: "Home", Away: "Away", BigGame: "Big Game" };
+  for (const selectId of ["team-preset-copy-from", "team-preset-copy-to"]) {
+    const sel = document.getElementById(selectId);
+    if (!sel) continue;
+    const prevValue = sel.value;
+    sel.innerHTML = "";
+    for (const preset of TEAM_PRESET_IDS) {
+      const configured = preset === "" || !!status[preset];
+      const opt = document.createElement("option");
+      opt.value = preset;
+      opt.textContent = labels[preset] + (configured ? "" : " (empty)");
+      sel.appendChild(opt);
+    }
+    // Default the "from" side to whatever's currently being edited, "to" side to the next one
+    // over -- just a sane starting point, the user can always repick either dropdown.
+    sel.value = prevValue || (selectId === "team-preset-copy-from" ? (state.activeTeamPreset || "") : "Home");
+  }
+}
+
+async function switchTeamPreset(preset) {
+  if (!bridge || !state.activeTeam) return;
+  let applied = "";
+  try { applied = await bridge.SwitchTeamPreset(preset || ""); }
+  catch (err) { console.error("SwitchTeamPreset failed", err); return; }
+  state.activeTeamPreset = applied || "";
+  updateTeamPresetBar();
+  // Same re-fetch selectTeam() does after a profile swap -- _config changed server-side, the
+  // song-assignment list on screen needs to re-pull from it.
+  if (state.currentSituationsCategory && !document.getElementById("situations-panel").hidden) {
+    await openSituations(state.currentSituationsCategory);
+  }
+  await refreshCategories();
+}
+
+function wireTeamPresetBar() {
+  document.querySelectorAll(".pill-preset").forEach((btn) => {
+    btn.addEventListener("click", () => switchTeamPreset(btn.dataset.preset || ""));
+  });
+  document.getElementById("btn-preset-copy")?.addEventListener("click", async () => {
+    if (!bridge) return;
+    const from = document.getElementById("team-preset-copy-from").value;
+    const to = document.getElementById("team-preset-copy-to").value;
+    const labels = { "": "Plain", Home: "Home", Away: "Away", BigGame: "Big Game" };
+    if (from === to) { showToast("Pick two different presets to copy between."); return; }
+    let ok = false;
+    try { ok = await bridge.CopyTeamPreset(from, to); }
+    catch (err) { console.error("CopyTeamPreset failed", err); showToast("Copy failed."); return; }
+    if (!ok) { showToast(`"${labels[from]}" preset hasn't been saved yet -- nothing to copy.`); return; }
+    showToast(`Copied ${labels[from]} → ${labels[to]}.`);
+    if ((state.activeTeamPreset || "") === to && state.currentSituationsCategory && !document.getElementById("situations-panel").hidden) {
+      await openSituations(state.currentSituationsCategory);
+    }
+    await refreshTeamPresetStatus();
+  });
 }
 
 /// Events-page Auto-Assign (matchup-side-bar): overwrites EVERY slot for state.activeTeam with
@@ -1280,6 +1461,7 @@ function setWatching(mode) {
     state.matchupLocked = false;
     revertVsBackdrop();
     exitGameDayMode();
+    closeBandroomViewer();
     updateMatchupLabel();
   }
   // Toast only on the WATCHING -> WAITING transition (the game window disappeared mid-session,
@@ -1402,7 +1584,7 @@ document.getElementById("btn-track-info-save")?.addEventListener("click", async 
   try {
     const result = JSON.parse(await bridge.SaveTrackMetadata(_trackInfoTrigger, JSON.stringify(metadata)));
     if (result.success) {
-      showToast("Track info saved.");
+      showToast(result.fileName ? `Track info saved. Renamed to "${result.fileName}".` : "Track info saved.");
       document.getElementById("track-info-overlay").hidden = true;
     } else {
       showToast(result.error || "Couldn't save track info.");
@@ -2220,6 +2402,8 @@ async function refreshVolumeSliders() {
     ["slider-away-volume", "away-volume-value", bridge.GetAwayVolume],
     ["slider-pa-volume", "pa-volume-value", bridge.GetPaVolume],
     ["slider-whistle-volume", "whistle-volume-value", bridge.GetWhistleVolume],
+    ["slider-sensitivity", "sensitivity-value", bridge.GetFadeDelay],
+    ["slider-sb-fade-delay", "sb-fade-delay-value", bridge.GetFadeDelay],
   ];
   for (const [sliderId, labelId, getter] of map) {
     try {
@@ -2243,6 +2427,21 @@ function syncSoundBoothKnobDisplay(paramKey) {
   if (_sbContextKnob?.getParamKey() === paramKey) _sbContextKnob.rebind(paramKey);
 }
 
+/// Fade Delay has three separate controls all driving the same SetFadeDelay bridge value: the
+/// sidebar's Fire Sensitivity slider (slider-sensitivity), the Sound Booth Mixer tab's own Fade
+/// slider (slider-sb-fade-delay), and the Fade knob pill. `skipId` is whichever one the user is
+/// actively dragging, so its own input isn't fought mid-drag by a redundant .value write.
+function syncFadeDelaySlider(value, skipId) {
+  for (const [sliderId, valueId] of [
+    ["slider-sensitivity", "sensitivity-value"],
+    ["slider-sb-fade-delay", "sb-fade-delay-value"],
+  ]) {
+    if (sliderId === skipId) continue;
+    document.getElementById(sliderId).value = value;
+    document.getElementById(valueId).textContent = value;
+  }
+}
+
 /// Task queue item 5 (Session 11) -- the panel section is now always visible (see index.html's
 /// comment on #leadin-whistle-section), but the enable/disable toggle row only makes sense once a
 /// clip actually exists; the hint text swaps to reflect which state we're in. Pulled out of
@@ -2250,12 +2449,22 @@ function syncSoundBoothKnobDisplay(paramKey) {
 /// handler can re-run it without duplicating this logic.
 async function refreshLeadInWhistleSection() {
   const whistleAvailable = await bridge.GetLeadInWhistleAvailable();
-  document.getElementById("leadin-whistle-toggle-row").hidden = !whistleAvailable;
-  document.getElementById("leadin-whistle-hint").textContent = whistleAvailable
+  const hintText = whistleAvailable
     ? "A short sound that plays right before every triggered clip."
     : "A short sound that plays right before every triggered clip -- like a referee's whistle starting a play. No whistle set yet.";
-  if (whistleAvailable)
-    document.getElementById("toggle-leadin-whistle").checked = await bridge.GetLeadInWhistleEnabled();
+  const enabled = whistleAvailable ? await bridge.GetLeadInWhistleEnabled() : null;
+
+  // #leadin-whistle-section (old adjust-panel sidebar) and the Sound Booth Mixer tab's
+  // sb-prefixed copy (see index.html comment on soundbooth-whistle-fade-section) both mirror the
+  // same bridge state -- Game Day mode hides the former, so the latter needs to stay in sync too.
+  for (const [rowId, hintId, toggleId] of [
+    ["leadin-whistle-toggle-row", "leadin-whistle-hint", "toggle-leadin-whistle"],
+    ["sb-leadin-whistle-toggle-row", "sb-leadin-whistle-hint", "toggle-sb-leadin-whistle"],
+  ]) {
+    document.getElementById(rowId).hidden = !whistleAvailable;
+    document.getElementById(hintId).textContent = hintText;
+    if (whistleAvailable) document.getElementById(toggleId).checked = enabled;
+  }
 }
 
 // THE SOUND BOOTH -- Sound Booth overhaul dashboard. Plain-language (i) explanations live here
@@ -2285,6 +2494,7 @@ const SB_INFO_TEXT = {
   "knob-away-volume": "Volume for the away team's event cues once a matchup is set -- independent of Home.",
   "knob-pa-volume": "Volume for the separate PA Announcer layer, which plays alongside (not instead of) the main song for the same event.",
   "knob-fade-delay": "How many seconds a triggered clip plays at full volume before it starts fading out. There's no fade-in -- clips always start at full volume immediately; this only controls when the fade-OUT ramp begins.",
+  "knob-whistle-clip": "The Whistle pill above adjusts this clip's volume, but the clip itself -- and whether it plays at all -- is set here: pick or replace the sound file, and toggle it on/off.",
 };
 
 // BUG FIX: this popover is a single shared element (one #soundbooth-info-popover for every (i)
@@ -2703,9 +2913,29 @@ function wireControls() {
   document.getElementById("btn-leadin-whistle-upload").addEventListener("click", () => {
     openClipperAssignForWhistle();
   });
+  // Sound Booth Mixer tab's own copy of the whistle controls (see index.html comment on
+  // soundbooth-whistle-fade-section) -- same bridge calls as the pair above, just reachable while
+  // docked in Game Day mode where #adjust-panel is hidden.
+  document.getElementById("toggle-sb-leadin-whistle").addEventListener("change", (e) => {
+    bridge?.SetLeadInWhistleEnabled(e.target.checked);
+  });
+  document.getElementById("btn-sb-leadin-whistle-upload").addEventListener("click", () => {
+    openClipperAssignForWhistle();
+  });
   document.getElementById("slider-sensitivity").addEventListener("input", (e) => {
     document.getElementById("sensitivity-value").textContent = e.target.value;
     bridge?.SetFadeDelay(Number(e.target.value));
+    syncSoundBoothKnobDisplay("fade-delay", Number(e.target.value));
+    syncFadeDelaySlider(e.target.value, "slider-sensitivity");
+  });
+  // Sound Booth Mixer tab's own copy of the Fade slider (see index.html comment on the second
+  // soundbooth-whistle-fade-section) -- same SetFadeDelay bridge call and same underlying value as
+  // the Fade knob pill above it and the sidebar's Fire Sensitivity slider, kept in sync three ways.
+  document.getElementById("slider-sb-fade-delay").addEventListener("input", (e) => {
+    document.getElementById("sb-fade-delay-value").textContent = e.target.value;
+    bridge?.SetFadeDelay(Number(e.target.value));
+    syncSoundBoothKnobDisplay("fade-delay", Number(e.target.value));
+    syncFadeDelaySlider(e.target.value, "slider-sb-fade-delay");
   });
   document.querySelectorAll(".reverb-tile").forEach((tile) => {
     tile.addEventListener("click", () => {
@@ -2923,11 +3153,16 @@ function wireControls() {
   wireCoverflowWheel(document.getElementById("matchup-home-track"), (dir) => shiftCoverflow("home", dir));
   wireCoverflowWheel(document.getElementById("matchup-away-track"), (dir) => shiftCoverflow("away", dir));
   wireCoverflowWheel(document.getElementById("team-picker-track"), (dir) => shiftTeamPicker(dir));
-  document.getElementById("btn-side-away").addEventListener("click", () => selectTeam(state.matchupAway));
-  document.getElementById("btn-side-home").addEventListener("click", () => selectTeam(state.matchupHome));
+  // Owner request 2026-08-11: switching sides via these arrows should feel like walking into
+  // that team's own fullscreen band room, not just a quiet data refresh underneath the still-open
+  // cards. Reuses the existing Band Room viewer (openBandroomViewer -- the same fullscreen photo
+  // modal the "Enter Band Room" pill already opens) rather than building a second gallery.
+  document.getElementById("btn-side-away").addEventListener("click", async () => { await selectTeam(state.matchupAway); await openBandroomViewer(); });
+  document.getElementById("btn-side-home").addEventListener("click", async () => { await selectTeam(state.matchupHome); await openBandroomViewer(); });
   document.getElementById("btn-auto-assign").addEventListener("click", handleAutoAssignClick);
   document.getElementById("btn-auto-assign-header")?.addEventListener("click", handleAutoAssignClick);
   setupQuickLoadProfile();
+  wireTeamPresetBar();
   document.getElementById("btn-close-auto-assign-summary")?.addEventListener("click", () => {
     document.getElementById("auto-assign-summary-overlay").hidden = true;
   });
@@ -3839,6 +4074,7 @@ function initSoundBoothKnob(el, initialParamKey) {
   function setValue(v, { commitNow } = {}) {
     value = Math.min(cfg.max, Math.max(cfg.min, v));
     sbKnobRender(el, value, cfg.min, cfg.max);
+    if (paramKey === "fade-delay") syncFadeDelaySlider(Math.round(value));
     if (commitNow) { try { cfg.set(value); } catch (err) { console.error("sb-knob set failed", err); } }
     else commit(value);
   }
@@ -3858,6 +4094,7 @@ function initSoundBoothKnob(el, initialParamKey) {
       value = typeof v === "number" ? v : cfg.min;
     } catch (err) { console.error("sb-knob get failed", err); }
     sbKnobRender(el, value, cfg.min, cfg.max, cfg.unit);
+    if (paramKey === "fade-delay") syncFadeDelaySlider(Math.round(value));
   }
 
   let dragStartY = 0, dragStartValue = 0;
@@ -5092,7 +5329,7 @@ let _clipperAssignIsPa = false;
 let _clipperAssignLibrary = null; // cached [{name, path}], same list for every trigger
 let _clipperAssignSelectedPath = null;
 let _clipperAssignSelectedName = null;
-let _clipperAssignMode = "event"; // "event" (assign/trim a situation's clip) | "whistle" (pick+trim the lead-in whistle)
+let _clipperAssignMode = "event"; // "event" (assign/trim a situation's clip) | "whistle" (pick+trim the global lead-in whistle) | "alt-whistle" (pick+trim one event's own alt whistle -- keeps _clipperAssignTrigger, unlike "whistle")
 // Owner request: default to just this team's Sound Bank (source "default") instead of every
 // source dumped together -- "all" and the individual source names (see CLIPPER_ASSIGN_SOURCE_*
 // below) are one pill-click away, not hidden. Resets to "default" every time the panel opens
@@ -5208,26 +5445,34 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode
   _clipperAssignSelectedPath = null;
   _clipperAssignSelectedName = null;
 
+  // "whistle" (global) and "alt-whistle" (one event's own override) both pick+trim a library song
+  // with no pre-existing assignment to fall back on -- same UI shape, different save target (see
+  // btn-trim-whistle's click handler below).
+  const isWhistleMode = mode === "whistle" || mode === "alt-whistle";
+
   stopPreview();
   document.getElementById("clipper-empty").hidden = true;
   document.getElementById("preview-bar").hidden = true;
   document.getElementById("clipper-title-text").textContent =
-    mode === "whistle" ? "Choose a Lead-In Whistle" : isPa ? "Assign PA Announcer Clip" : "Assign Track";
+    mode === "whistle" ? "Choose a Lead-In Whistle" : mode === "alt-whistle" ? "Choose an Alternate Whistle" : isPa ? "Assign PA Announcer Clip" : "Assign Track";
   document.getElementById("btn-clipper-close-assign").hidden = false;
-  document.getElementById("clipper-assign-event").textContent = mode === "whistle" ? "" : `for ${friendlyEventName(eventName)}`;
+  document.getElementById("clipper-assign-event").textContent = isWhistleMode
+    ? (mode === "alt-whistle" ? `for ${friendlyEventName(eventName)}` : "")
+    : `for ${friendlyEventName(eventName)}`;
   document.getElementById("clipper-assign-current").textContent =
-    mode === "whistle" ? "Pick a song below, then Trim... it down to your whistle sound." : currentFileName ? `Current: ${currentFileName}` : "Current: (none assigned)";
+    isWhistleMode ? "Pick a song below, then Trim... it down to your whistle sound." : currentFileName ? `Current: ${currentFileName}` : "Current: (none assigned)";
   document.getElementById("clipper-assign-search").value = "";
   initClipperAssignFilters();
   wireBrowseOtherTeamSoundBank();
   _clipperAssignFilter = "default";
   document.querySelectorAll(".clipper-assign-filter").forEach((b) => b.classList.toggle("active", b.dataset.filter === "default"));
   document.getElementById("btn-clipper-assign-select").disabled = true;
-  document.getElementById("btn-clipper-assign-select").hidden = mode === "whistle";
-  document.getElementById("btn-clipper-assign-clear").hidden = mode === "whistle";
-  // Event mode: Trim... always trims whatever's already assigned to this trigger. Whistle mode
-  // has no trigger to fall back on, so it needs a library row (or browsed file) picked first.
-  document.getElementById("btn-clipper-assign-trim").disabled = mode === "whistle";
+  document.getElementById("btn-clipper-assign-select").hidden = isWhistleMode;
+  document.getElementById("btn-clipper-assign-clear").hidden = isWhistleMode;
+  // Event mode: Trim... always trims whatever's already assigned to this trigger. Whistle modes
+  // have no existing assignment to fall back on, so they need a library row (or browsed file)
+  // picked first.
+  document.getElementById("btn-clipper-assign-trim").disabled = isWhistleMode;
   document.getElementById("clipper-assign").hidden = false;
 
   if (!_clipperAssignLibrary) {
@@ -5260,6 +5505,14 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode
 
 async function openClipperAssignForWhistle() {
   await openClipperAssign(null, null, false, null, "whistle");
+}
+
+/// Per-event alt whistle -- picks up the Clipper's own pick+trim library flow instead of the bare
+/// native OpenFileDialog BrowseAndSetEventAltWhistle used to be. Keeps `trigger` (unlike the
+/// global "whistle" mode above, which has nothing to save back to) so btn-trim-whistle's click
+/// handler knows to call SaveTrimAsEventAltWhistle instead of the global SaveTrimAsLeadInWhistle.
+async function openClipperAssignForAltWhistle(trigger, eventName) {
+  await openClipperAssign(trigger, eventName, false, null, "alt-whistle");
 }
 
 function closeClipperAssign() {
@@ -5345,6 +5598,21 @@ function buildClipperAssignRow(item, list) {
   });
   actions.appendChild(dlBtn);
 
+  // "Share to..." -- owner reported no way to send a Clipper song straight onto another team's
+  // event without leaving the picker; the existing situation-card "Share to..." only reaches
+  // events on the SAME team (wireSituationShareToPopover, same-team `events` array). This is the
+  // cross-team version: pick a team, then one of ITS events, assign this row's file there via
+  // the new AssignLibraryFileToTeamEvent bridge call (WebMainForm.AssignLibraryFileToTeamEventFromWeb).
+  const shareBtn = document.createElement("button");
+  shareBtn.className = "clipper-assign-row-btn";
+  shareBtn.title = "Share to another team's event...";
+  shareBtn.textContent = "↗";
+  shareBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openClipperSharePopover(row, item);
+  });
+  actions.appendChild(shareBtn);
+
   row.appendChild(actions);
 
   row.addEventListener("click", () => {
@@ -5353,9 +5621,77 @@ function buildClipperAssignRow(item, list) {
     _clipperAssignSelectedPath = item.path;
     _clipperAssignSelectedName = item.name;
     document.getElementById("btn-clipper-assign-select").disabled = false;
-    if (_clipperAssignMode === "whistle") document.getElementById("btn-clipper-assign-trim").disabled = false;
+    if (_clipperAssignMode === "whistle" || _clipperAssignMode === "alt-whistle") document.getElementById("btn-clipper-assign-trim").disabled = false;
   });
   return row;
+}
+
+/// Builds/opens the "Share to..." popover for one Clipper song row -- a team <select> up top
+/// (defaults to the active team) and a scrollable event list below it that re-fetches whenever
+/// the team changes (bridge.GetEventsForTeam reads that team's saved profile directly, see
+/// WebMainForm.GetEventsForTeamFromWeb -- doesn't touch/switch the active team). Only one open
+/// at a time, same convention as the situation-card popovers.
+let _clipperShareTeamsCache = null;
+async function openClipperSharePopover(row, item) {
+  document.querySelectorAll(".clipper-share-popover").forEach((p) => p.remove());
+
+  const popover = document.createElement("div");
+  popover.className = "clipper-share-popover";
+  popover.addEventListener("click", (e) => e.stopPropagation());
+
+  const select = document.createElement("select");
+  select.className = "clipper-share-team-select";
+  const listEl = document.createElement("div");
+  listEl.className = "situation-copy-list";
+
+  popover.appendChild(select);
+  popover.appendChild(listEl);
+  row.appendChild(popover);
+
+  if (!_clipperShareTeamsCache) {
+    _clipperShareTeamsCache = bridge ? JSON.parse(await bridge.GetTeams()) : [];
+  }
+  for (const t of _clipperShareTeamsCache) {
+    const opt = document.createElement("option");
+    opt.value = t.name;
+    opt.textContent = t.name;
+    if (t.name === state.activeTeam) opt.selected = true;
+    select.appendChild(opt);
+  }
+
+  const loadEventsForTeam = async (teamName) => {
+    listEl.innerHTML = `<div class="situation-copy-empty">Loading...</div>`;
+    const events = bridge ? JSON.parse(await bridge.GetEventsForTeam(teamName, "All")) : [];
+    listEl.innerHTML = "";
+    if (!events.length) {
+      listEl.innerHTML = `<div class="situation-copy-empty">No events found.</div>`;
+      return;
+    }
+    for (const ev of events) {
+      const opt = document.createElement("button");
+      opt.className = "situation-copy-option";
+      opt.innerHTML = `<span>${friendlyEventName(ev.eventName)}</span><span class="situation-copy-option-file">${ev.fileName ? "overwrites " + ev.fileName : "unassigned"}</span>`;
+      opt.addEventListener("click", async (ce) => {
+        ce.stopPropagation();
+        const ok = bridge ? await bridge.AssignLibraryFileToTeamEvent(teamName, ev.trigger, item.path) : false;
+        popover.remove();
+        showToast(ok ? `Shared "${item.name}" to ${teamName} - ${friendlyEventName(ev.eventName)}.` : "Couldn't share that song.");
+      });
+      listEl.appendChild(opt);
+    }
+  };
+
+  select.addEventListener("click", (e) => e.stopPropagation());
+  select.addEventListener("change", () => loadEventsForTeam(select.value));
+  await loadEventsForTeam(select.value);
+
+  const closeOnOutsideClick = (e) => {
+    if (!popover.contains(e.target)) {
+      popover.remove();
+      document.removeEventListener("click", closeOnOutsideClick);
+    }
+  };
+  setTimeout(() => document.addEventListener("click", closeOnOutsideClick), 0);
 }
 
 /// Task queue item 1 (Session 10): the flat song list mixed marketplace downloads, drag-drop/
@@ -5482,6 +5818,7 @@ async function openInlineTrimmer(trigger, isPa, overridePath) {
   document.getElementById("clipper-assign-actions-default").hidden = true;
   document.getElementById("clipper-trim-actions").hidden = false;
   document.getElementById("btn-trim-save").hidden = false;
+  document.getElementById("btn-trim-whistle").textContent = "Set as Lead-In Whistle";
   _trimSourceName = result.fileName;
   document.getElementById("clipper-trim-filename").textContent = result.fileName;
   updateTrimLabels();
@@ -5490,10 +5827,12 @@ async function openInlineTrimmer(trigger, isPa, overridePath) {
   loadTrimWaveform(result.url);
 }
 
-/// Whistle-mode counterpart to openInlineTrimmer -- there's no trigger to pull an "already
-/// assigned" file from, so this trims whatever library row/browsed file the user just picked in
+/// Whistle-mode counterpart to openInlineTrimmer -- there's no "already assigned" file to pull for
+/// either whistle mode, so this trims whatever library row/browsed file the user just picked in
 /// Clipper Island (see PrepareTrimForWhistleFromWeb). "Save Trim" doesn't apply here (there's no
-/// event to assign back to), only "Set as Lead-In Whistle".
+/// event slot to assign back to), only "Set as Whistle" (btn-trim-whistle). alt-whistle mode DOES
+/// keep _trimTrigger (unlike global "whistle" mode) -- that's what tells btn-trim-whistle's click
+/// handler to call SaveTrimAsEventAltWhistle for this one event instead of the global whistle.
 async function openInlineTrimmerForWhistle(path, fileName) {
   if (!bridge) return;
   const result = JSON.parse(await bridge.PrepareTrimForWhistle(path));
@@ -5501,7 +5840,7 @@ async function openInlineTrimmerForWhistle(path, fileName) {
     showToast(result.error || "Couldn't open the trimmer.");
     return;
   }
-  _trimTrigger = null;
+  _trimTrigger = _clipperAssignMode === "alt-whistle" ? _clipperAssignTrigger : null;
   _trimForWhistle = true;
   _trimIsPa = false;
   _trimUrl = result.url;
@@ -5516,6 +5855,8 @@ async function openInlineTrimmerForWhistle(path, fileName) {
   document.getElementById("clipper-assign-actions-default").hidden = true;
   document.getElementById("clipper-trim-actions").hidden = false;
   document.getElementById("btn-trim-save").hidden = true;
+  document.getElementById("btn-trim-whistle").textContent =
+    _clipperAssignMode === "alt-whistle" ? "Set as Alt Whistle for This Event" : "Set as Lead-In Whistle";
   _trimSourceName = result.fileName || fileName;
   document.getElementById("clipper-trim-filename").textContent = result.fileName || fileName;
   updateTrimLabels();
@@ -5786,13 +6127,22 @@ function wireInlineTrimmer() {
 
   document.getElementById("btn-trim-whistle").addEventListener("click", async () => {
     if (!bridge) return;
-    const result = JSON.parse(await bridge.SaveTrimAsLeadInWhistle(_trimStartSec, _trimEndSec));
+    // alt-whistle mode keeps _trimTrigger set (see openInlineTrimmerForWhistle) specifically so
+    // this branch can tell "save to this one event's AltWhistlePath" apart from the global
+    // "whistle" mode's "overwrite the single shared lead-in whistle".
+    const result = JSON.parse(_clipperAssignMode === "alt-whistle" && _trimTrigger
+      ? await bridge.SaveTrimAsEventAltWhistle(_trimTrigger, _trimStartSec, _trimEndSec)
+      : await bridge.SaveTrimAsLeadInWhistle(_trimStartSec, _trimEndSec));
     if (!result.ok) { showToast(result.error || "Couldn't save the whistle clip."); return; }
-    showToast("Lead-in whistle updated.");
+    showToast(_clipperAssignMode === "alt-whistle" ? "Alternate whistle set for this event." : "Lead-in whistle updated.");
     flashPanel(document.getElementById("clipper-island"));
     if (_trimForWhistle) {
       closeClipperAssign();
-      await refreshLeadInWhistleSection();
+      if (_clipperAssignMode === "alt-whistle") {
+        if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
+      } else {
+        await refreshLeadInWhistleSection();
+      }
     }
   });
 
@@ -5833,7 +6183,7 @@ function initClipperAssign() {
     if (!path) return;
     const songName = path.split(/[\\/]/).pop();
 
-    if (_clipperAssignMode === "whistle") {
+    if (_clipperAssignMode === "whistle" || _clipperAssignMode === "alt-whistle") {
       document.querySelectorAll("#clipper-assign-list .clipper-assign-row.selected").forEach((r) => r.classList.remove("selected"));
       _clipperAssignSelectedPath = path;
       _clipperAssignSelectedName = songName;
@@ -5893,7 +6243,7 @@ function initClipperAssign() {
   });
 
   document.getElementById("btn-clipper-assign-trim").addEventListener("click", async () => {
-    if (_clipperAssignMode === "whistle") {
+    if (_clipperAssignMode === "whistle" || _clipperAssignMode === "alt-whistle") {
       if (!_clipperAssignSelectedPath) return;
       await openInlineTrimmerForWhistle(_clipperAssignSelectedPath, _clipperAssignSelectedName);
       return;
@@ -6975,6 +7325,10 @@ function updateMatchupLabel() {
   if (!btn) return;
   btn.classList.toggle("locked", state.matchupLocked);
   if (unlockBtn) unlockBtn.hidden = !state.matchupLocked;
+  // Locked-in mode (owner request, 2026-08-11): hides the TEAM logo grid (#left-panel) once a
+  // matchup is locked in -- see the #app.locked-in-mode rule in style.css. Nav-rack (The
+  // Bandroom/Sound Bank/etc) stays, owner explicitly wanted that kept.
+  document.getElementById("app")?.classList.toggle("locked-in-mode", state.matchupLocked);
   if (state.matchupLocked) {
     btn.textContent = `\u{1F512} ${state.matchupAway} @ ${state.matchupHome}`;
     btn.title = "Locked in for this game -- press Stop Watching when it ends to change it, or use the unlock button to correct it without stopping";
@@ -6989,6 +7343,7 @@ function updateMatchupLabel() {
   }
   updateWatchGate();
   updateMatchupSideBar();
+  updateTeamPresetBar();
 }
 
 // Start Watching stays disabled until both matchup teams are actually picked -- previously it
@@ -7044,6 +7399,7 @@ function openMatchupDialog() {
   // #toggle-matchup-big-game in sync with the real setting the moment it's loaded at startup
   // (refreshBigGameSection) or changed by any of the three Big Game controls.
   initMatchupLastPill();
+  wireMatchupGameSettingsPill();
 }
 
 // Owner request: one-click re-select of the previous game's teams. Queries
@@ -7076,11 +7432,86 @@ async function initMatchupLastPill() {
 /// pattern. Picking a team here re-centers that side's coverflow on it too, so both stay in sync
 /// no matter which one you used.
 function renderMatchupSideGrid(side, filter) {
-  renderTeamGridInto(`matchup-${side}-side-grid`, filter, (name) => {
+  const gridId = `matchup-${side}-side-grid`;
+  renderTeamGridInto(gridId, filter, (name) => {
     if (side === "home") state.matchupHome = name; else state.matchupAway = name;
     renderMatchupCoverflow(side, document.getElementById(`matchup-${side}-search`)?.value || "");
     renderMatchupSideGrid(side, filter);
   });
+  wireMatchupSideGridDock(gridId);
+  wireMatchupSideGridWheel(gridId);
+  const activeTeam = side === "home" ? state.matchupHome : state.matchupAway;
+  scrollActiveTileToCenter(gridId, activeTeam);
+}
+
+/// Owner request 2026-08-11: the side-grid strip used to open scrolled to the top of the A-Z list
+/// no matter which team was already centered in the big coverflow next to it. Center the tile
+/// matching that team instead, so the two stay visually lined up on open/pick/re-render.
+function scrollActiveTileToCenter(gridId, teamName) {
+  const grid = document.getElementById(gridId);
+  if (!grid || !teamName) return;
+  const tile = Array.from(grid.querySelectorAll(".team-swatch")).find((el) => el.title === teamName);
+  if (!tile) return;
+  const targetTop = tile.offsetTop - grid.clientHeight / 2 + tile.offsetHeight / 2;
+  grid.scrollTop = Math.max(0, targetTop);
+}
+
+// ---- Matchup side-grid fast + looping wheel scroll (owner request 2026-08-11) -----------------
+// Native wheel scrolling felt slow for a full A-Z roster, and stopped dead at the very top/bottom
+// instead of wrapping back around -- owner wants to be able to keep scrolling past Z and land back
+// on A (and vice versa past A back to Z) instead of hitting a hard edge.
+const MATCHUP_SIDE_GRID_WHEEL_SPEED = 2.75;
+
+function wireMatchupSideGridWheel(gridId) {
+  const grid = document.getElementById(gridId);
+  if (!grid || grid._wheelWired) return;
+  grid._wheelWired = true;
+
+  grid.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const max = grid.scrollHeight - grid.clientHeight;
+    if (max <= 0) return;
+    let next = grid.scrollTop + e.deltaY * MATCHUP_SIDE_GRID_WHEEL_SPEED;
+    if (next < 0) next = max; // scrolled past A -- wrap to Z
+    else if (next > max) next = 0; // scrolled past Z -- wrap to A
+    grid.scrollTop = next;
+  }, { passive: false });
+}
+
+// ---- Matchup side-grid "Mac Dock" hover-magnify (owner request, finished 2026-08-11) -----------
+// Real proximity-based magnify, not achievable with hover-only CSS -- tiles near the cursor scale
+// up, tapering off for neighbors the farther they are, same feel as macOS's Dock. --dock-scale is
+// read by .matchup-side-grid .team-swatch's own `transform: scale(var(--dock-scale, 1))` (style.css)
+// so the actual visual transform/transition lives in CSS; this just drives the variable per tile.
+// Wired once per grid container (idempotent via _dockWired) -- the container DOM node persists
+// across re-renders (renderTeamGridInto only replaces its children), so binding once here is
+// enough even though renderMatchupSideGrid re-calls this on every keystroke/pick.
+const MATCHUP_DOCK_MAX_SCALE = 1.55;
+const MATCHUP_DOCK_FALLOFF_PX = 60;
+
+function wireMatchupSideGridDock(gridId) {
+  const grid = document.getElementById(gridId);
+  if (!grid || grid._dockWired) return;
+  grid._dockWired = true;
+
+  function apply(mouseY) {
+    for (const tile of grid.querySelectorAll(".team-swatch")) {
+      let scale = 1;
+      if (mouseY !== null) {
+        const rect = tile.getBoundingClientRect();
+        const dist = Math.abs(rect.top + rect.height / 2 - mouseY);
+        const t = Math.max(0, 1 - dist / MATCHUP_DOCK_FALLOFF_PX);
+        scale = 1 + (MATCHUP_DOCK_MAX_SCALE - 1) * t;
+      }
+      tile.style.setProperty("--dock-scale", scale.toFixed(3));
+      // Lift the magnified tile above its (still resting-size) neighbors so growth doesn't render
+      // partly behind them -- only while actually magnified, so resting tiles keep normal stacking.
+      tile.style.zIndex = scale > 1.02 ? "5" : "";
+    }
+  }
+
+  grid.addEventListener("mousemove", (e) => apply(e.clientY));
+  grid.addEventListener("mouseleave", () => apply(null));
 }
 
 // ---- Scorebug switcher (matchup screen pill + arrows) -----------------------------------
@@ -7607,6 +8038,30 @@ function closeMatchupDialog() {
   document.getElementById("matchup-overlay").hidden = true;
 }
 
+// Owner request 2026-08-11: instructions paragraph + the Big-Game/last-matchup/scorebug-side/
+// away-band toggles both moved behind large header pills (both were always-visible, eating screen
+// space over the new full-bleed photo backdrop) -- click toggles each as its own popover anchored
+// under the header, next to the scorebug switcher. Wired once each (idempotent) since
+// openMatchupDialog doesn't re-run per-open setup like this. Shared helper since both pills follow
+// the exact same open/close-on-outside-click pattern.
+function wireMatchupPopoverPill(btnId, panelId) {
+  const btn = document.getElementById(btnId);
+  const panel = document.getElementById(panelId);
+  if (!btn || !panel || btn._popoverWired) return;
+  btn._popoverWired = true;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    panel.hidden = !panel.hidden;
+  });
+  document.addEventListener("click", (e) => {
+    if (!panel.hidden && !panel.contains(e.target) && e.target !== btn) panel.hidden = true;
+  });
+}
+
+function wireMatchupGameSettingsPill() {
+  wireMatchupPopoverPill("btn-matchup-game-settings", "matchup-controls-island");
+}
+
 /// Cover-flow team select (CFB 27 team-select reference) -- browsing IS picking, same as the
 /// reference screen: the center tile is always the currently-picked team for that side, and
 /// cycling (arrows or clicking a side tile) immediately updates state.matchupHome/Away and the
@@ -7631,7 +8086,12 @@ function renderMatchupCoverflow(side, filter) {
   let centerIdx = teams.findIndex((t) => t.name === picked);
   if (centerIdx === -1) centerIdx = 0;
 
-  const positions = [[-2, "cf-l2"], [-1, "cf-l1"], [0, "cf-center"], [1, "cf-r1"], [2, "cf-r2"]];
+  // Owner request 2026-08-11: drop the tilted neighbor tiles either side of the big center logo on
+  // THIS screen specifically -- the side-grid's own fast/looping scroll (wireMatchupSideGridWheel)
+  // already covers browsing here, so the neighbors were redundant clutter. Center tile only; the
+  // other coverflow screens (team picker, onboarding, favorite-team) keep their neighbors, this
+  // array is local to renderMatchupCoverflow.
+  const positions = [[0, "cf-center"]];
   for (const [offset, cls] of positions) {
     const idx = ((centerIdx + offset) % teams.length + teams.length) % teams.length;
     const t = teams[idx];
@@ -7673,8 +8133,22 @@ function renderMatchupCoverflow(side, filter) {
   if (column) {
     const requestToken = (column._bgRequestToken = (column._bgRequestToken || 0) + 1);
     if (bridge) {
-      bridge.GetTeamBackgroundUrl(centerTeam.name).then((bgUrl) => {
+      bridge.GetTeamBackgroundUrl(centerTeam.name).then(async (bgUrl) => {
         if (column._bgRequestToken !== requestToken) return; // superseded by a newer pick
+        if (!bgUrl) {
+          // Owner report 2026-08-11: the matchup split backdrop only ever showed a photo for
+          // teams with an explicitly-pinned "active" background -- most teams never set one, so
+          // their whole half just showed the plain color-tint gradient with no band room photo
+          // at all (confirmed via screenshot: Georgia had a photo, Florida's half didn't). Same
+          // richer source openBandroomViewer already falls back to (that team's marketplace-
+          // uploaded photos) so any team with at least one uploaded image gets a real backdrop
+          // here too, not just ones with a manually-pinned background.
+          try {
+            const uploads = await fetchUploadList("image", centerTeam.name, null);
+            bgUrl = uploads?.[0]?.url || null;
+          } catch { /* fetchUploadList already swallows its own errors -- extra safety only */ }
+          if (column._bgRequestToken !== requestToken) return; // re-check after the extra await
+        }
         column.style.setProperty("--team-bg-image", bgUrl ? `url("${bgUrl}")` : "none");
       }).catch(() => {});
     }
@@ -7770,7 +8244,12 @@ async function confirmMatchup() {
   state.matchupLocked = true;
   updateMatchupLabel();
   closeMatchupDialog();
-  await applyVsBackdrop();
+  // NOTE: previously called applyVsBackdrop() here to show the two-team VS split as the backdrop.
+  // Owner request (this session): GAMETIME now opens the Band Room Viewer instead (single team's
+  // photo gallery, switchable via the Away/Home bar) -- see openBandroomViewer() call below.
+  // applyVsBackdrop/revertVsBackdrop are left in place (revertVsBackdrop still runs in
+  // setWatching's "off" branch) in case #backdrop-vs is ever wanted again, just no longer called
+  // from this flow.
   // GAMETIME now locks the matchup AND starts watching in one press (WebMainForm.ConfirmGametimeFromWeb)
   // -- reflect that immediately instead of requiring a separate Start Watching click.
   setWatching("waiting");
@@ -7787,6 +8266,15 @@ async function confirmMatchup() {
   // Game Day mode is active) so both are visible together instead of requiring that extra
   // navigation step.
   openSoundBooth();
+  // Owner request: GAMETIME opens the Band Room Viewer as Game Day mode's backdrop (see
+  // .gameday-mode overrides on #bandroom-viewer-overlay in style.css, which turn it from a
+  // blocking fullscreen modal into a non-blocking backdrop behind the docked panels). Which
+  // team's band room loads first is the matchup-my-team-away checkbox above -- switching sides
+  // afterward still works the normal way via the Away/Home bar (btn-side-away/btn-side-home
+  // already call openBandroomViewer() on switch, see wireMatchupSideBar).
+  const myTeamIsAway = document.getElementById("matchup-my-team-away")?.checked ?? false;
+  await selectTeam(myTeamIsAway ? state.matchupAway : state.matchupHome);
+  await openBandroomViewer();
   showToast(`GAMETIME! ${state.matchupAway} @ ${state.matchupHome} -- watching started`);
 }
 
@@ -7854,6 +8342,7 @@ function revertVsBackdrop() {
 function enterGameDayMode() {
   document.body.classList.add("gameday-mode");
   updateMatchupSideBar(); // repopulate logos/names/glow now that the bar renders VS-prominent
+  updateTeamPresetBar();
 }
 
 function exitGameDayMode() {
@@ -8200,34 +8689,34 @@ const EVENT_FRIENDLY_NAMES = {
   "Offense: Earned First Down": "1st Down (1st & 10)",
   "Offense: Earned First Down (Big Gain)": "Got 1st Down - Big Gain",
   "Offense: Earned First Down Short": "1st & Short",
+  "Offense: 3rd Down Conversion": "Converted 3rd Down",
   "Offense: Earned First Down (Midfield)": "Got 1st Down - Past Midfield",
   "Offense: Second Down": "2nd Down",
   "Offense: Second Down (Midfield)": "2nd Down - Past Midfield",
   "Offense: Second Down Short": "2nd & Short",
   "Offense: Third Down": "3rd Down",
   "Offense: Third Down Short": "3rd & Short",
-  "Offense: Drive Starter": "Drive Starts",
+  "Offense: 1st Down After Punt": "1st Down After Punt",
   "Offense: PAT Made": "Extra Point Good",
   "Offense: 2-Point Conversion Made": "2-Point Conversion Good",
   "Offense: Field Goal Made": "Field Goal Good",
   "Offense: Iced Game by First Down": "Game Sealed - Got 1st Down",
   "Offense: Victory in Hand": "Game Won",
   "Offense: Touchdown Scored": "Touchdown",
-  "Defense: First Down": "1st Down (Post-Kickoff)",
+  "Defense: After Opening Kick": "Defense After Opening Kick",
   "Defense: Third Down": "3rd & Long",
   "Defense: Third Down Short": "3rd & Short (Defense)",
   "Defense: Fourth Down": "Stopped Them on 4th",
-  "Defense: Third Down (Loss)": "3rd Down After a Loss",
   "Defense: Second Down": "2nd & Long",
   "Defense: Second Down (Midfield)": "2nd Down - Past Midfield",
   "Defense: Second Down (Loss)": "2nd Down After a Loss",
   "Defense: Fourth Down (Loss)": "Stopped Them on 4th After a Loss",
-  "Defense: Drive Starter": "Opponent's Drive Starts",
+  "Defense: After Punt": "Defense After Punt",
   "Defense: Field Goal Missed by Opponent": "Opponent Missed Field Goal",
   "Defense: Turnover Forced": "Turnover Forced",
   "Defense: Iced Game by Turnover": "Game Sealed by Turnover",
   "Defense: Safety": "Safety",
-  "Defense: Tackle for Loss": "Tackle for Loss",
+  "Defense: Tackle for Loss": "Tackle for Loss / Fumble",
   "Defense: Touchdown Scored": "Touchdown",
   "Defense: Timeout (4 Remaining)": "Opponent's 2nd Timeout Used",
   "Defense: Timeout (3 Remaining)": "Opponent's 3rd Timeout Used",

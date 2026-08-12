@@ -64,13 +64,25 @@ public sealed class KickoffHelper : IRuleEvaluator
             };
         }
 
-        // REMOVED 2026-08-10: every OTHER kickoff (after any mid-game score) used to fire
-        // "Other: Kickoff on Kick (Receiving/Kicking)" here. Owner's explicit call: these
-        // collided with PAT GOOD detection (both render in the scorebug's situation slot back to
-        // back right after a score) and weren't worth the noise -- "Offense: PAT Made" already
-        // fires right before every one of these kickoffs and is a perfectly good "we just scored,
-        // kickoff's coming" signal on its own. Only the two true one-time majors (opening,
-        // second-half) still fire from this helper now.
-        return null;
+        // RESTORED 2026-08-11 (owner report, live game): a TD scored fired its own cue, but
+        // neither "Offense: PAT Made" nor any kickoff cue followed it -- the 2026-08-10 removal
+        // below had assumed PAT Made was a reliable enough "kickoff's coming" proxy to not need
+        // its own cue, but PAT Made depends on OCR catching the "PAT GOOD" situation text
+        // (FieldGoalPATHelper's `state.Current.IsPAT` check) on the right tick, which isn't
+        // guaranteed -- a missed PAT read means the kickoff after ANY mid-game score goes
+        // silent. Now fires a single generic "Other: Kickoff" cue on every kickoff transition
+        // that isn't the opening/second-half one, independent of whether PAT fired.
+        //
+        // Old removed comment, kept for context: "every OTHER kickoff (after any mid-game score)
+        // used to fire 'Other: Kickoff on Kick (Receiving/Kicking)' here. Owner's explicit call:
+        // these collided with PAT GOOD detection ... weren't worth the noise." Reversed by the
+        // owner this session -- simplified back to one plain cue (not the old receiving/kicking
+        // split) rather than reintroducing that complexity.
+        return new TriggerEvent
+        {
+            EventKey = "Other: Kickoff",
+            Volume = 80,
+            IsEarnedBigEvent = false
+        };
     }
 }

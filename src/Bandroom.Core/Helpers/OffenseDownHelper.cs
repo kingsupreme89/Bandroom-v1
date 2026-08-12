@@ -68,22 +68,40 @@ public sealed class OffenseDownHelper : IRuleEvaluator
         if (down < 2 || down > 4)
             return null; // 1st down is FirstDownHelper's/DriveStarterHelper's territory.
 
-        // Defer to DefenseHelper's "(Loss)" branch -- a down that got LONGER (tackle for loss)
-        // always reads as "long" here too, which would otherwise double-fire a generic long cue
-        // alongside the more specific Loss one on the same snap.
-        if (state.Current.YardsToGo > baselineYardsToGo)
+        // Defer to DefenseHelper's/TflHelper's Loss branch -- a down that got LONGER (tackle for
+        // loss) always reads as "long" here too, which would otherwise double-fire a generic long
+        // cue alongside the more specific Loss one on the same snap.
+        //
+        // EXCEPT during a Big Game (owner call 2026-08-11, live game): a big-game 2nd/3rd & long
+        // still deserves the "hand it to the defense" hype cue on top of the loss cue, whether the
+        // long distance came from a loss or not -- only OUTSIDE Big Game does this defer entirely
+        // to avoid double-firing on an ordinary TFL play. Short yardage (e.g. a small loss that
+        // still nets 2nd & 5) is unaffected either way -- falls through to the isShort check below
+        // exactly as if this guard weren't here, so the Offense cue still plays for genuinely short
+        // situations regardless of BigGame.
+        if (state.Current.YardsToGo > baselineYardsToGo && !state.Current.BigGame)
         {
             if (timedOut)
                 state.NearMisses.Add($"OffenseDownHelper: buffered wait for down-{down} classification timed out while YardsToGo looked like a Loss, deferring to DefenseHelper");
             return null;
         }
 
-        bool isShort = state.Current.YardsToGo <= 3;
+        // "Short" threshold corrected 2026-08-11 (owner audit call): 5 yards to go or less,
+        // not 3 -- matches FirstDownHelper's own <= 5 "Short" definition for the fresh-set case,
+        // which this was inconsistent with before.
+        bool isShort = state.Current.YardsToGo <= 5;
 
+        // down==3's long branch used to fire "Defense: Third Down" here too, but that meant this
+        // key ONLY fired on 3rd & long -- corrected 2026-08-11 (owner audit call): "Defense: Third
+        // Down" should fire on 3rd down at ANY distance, so it's DefenseThirdDownHelper's own
+        // standalone job (fires alongside "Offense: Third Down Short" on short 3rd downs, alongside
+        // the new "Offense: Third Down" below on long ones). "Offense: Third Down" added 2026-08-11
+        // (owner, live game) so 3rd & long gets the same balanced dual-fire treatment as 3rd &
+        // short instead of playing only Defense's cue.
         string eventKey = down switch
         {
             2 => isShort ? "Offense: Second Down Short" : "Defense: Second Down",
-            3 => isShort ? "Offense: Third Down Short" : "Defense: Third Down",
+            3 => isShort ? "Offense: Third Down Short" : "Offense: Third Down",
             4 => "Defense: Fourth Down",
             _ => string.Empty
         };
@@ -91,10 +109,27 @@ public sealed class OffenseDownHelper : IRuleEvaluator
         if (string.IsNullOrEmpty(eventKey))
             return null;
 
+        // Owner rule 2026-08-11: on 3rd down (short OR long), BOTH the Offense and Defense cues
+        // should always play together -- Defense at full volume (the crowd anticipating a stop/
+        // sack is the bigger moment), Offense ducked under it rather than competing at equal
+        // volume. Flat 60, not BigGame-scaled, since the owner wants this balance every time, not
+        // just outside Big Game.
+        //
+        // 2nd & short is the inverse balance (owner call 2026-08-11): the offense facing a
+        // manageable 2nd down is the bigger moment here, not the defense -- whoever HAS the ball
+        // plays their 2nd down song at full 100, the other side's "Defense: Second Down Short"
+        // (DefenseSecondDownShortHelper, same-tick pairing) gets ducked to 60. Flat, not
+        // BigGame-scaled, same reasoning as 3rd down short/long above.
+        int volume = (eventKey == "Offense: Third Down Short" || eventKey == "Offense: Third Down")
+            ? 60
+            : eventKey == "Offense: Second Down Short"
+                ? 100
+                : (state.Current.BigGame ? 100 : 70);
+
         return new TriggerEvent
         {
             EventKey = eventKey,
-            Volume = state.Current.BigGame ? 100 : 70,
+            Volume = volume,
             IsEarnedBigEvent = false
         };
     }

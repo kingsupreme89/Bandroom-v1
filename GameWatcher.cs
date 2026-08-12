@@ -204,10 +204,37 @@ internal sealed class GameWatcher
     /// held -- see its own comment in RouteEngineTick for why this exists (2 required, not 1).</summary>
     int _structuralTurnoverPendingTicks;
 
+    // FIXED 2026-08-11 (live bug: repeating "Turnover Forced"/"Drive Starter" loop, alternating
+    // home/away, while CFB27 was sitting on its own pause menu -- confirmed via Event Log
+    // screenshot, "PAUSED" visible on screen the whole time). Root cause: nothing in this file
+    // treats "the game is paused" as a distinct state -- GetForegroundWindow()'s guard above only
+    // skips capture when some OTHER app has focus, but CFB27's own pause menu keeps the game
+    // window focused/foreground the whole time, so capture kept running against pause-menu
+    // pixels instead of the real scorebug. The possession-underline crop in particular reads
+    // whatever's now drawn at its normal screen coordinates -- pause-menu content sitting there
+    // produced a borderline left/right brightness split that flip-flopped every commit cycle,
+    // and each flip looked like a real structural turnover (down==1, not a kickoff) to
+    // RouteEngineTick, which then fired DriveStarterHelper's cue for the "new" drive too --
+    // repeating for as long as the pause menu stayed up. Fix: hash a coarse sample of the WHOLE
+    // captured frame every tick (not just the scorebug crop) -- live gameplay always has some
+    // motion somewhere on screen (crowd, camera, HUD animation), even during a pre-snap huddle,
+    // so a frame that's byte-identical to the last several ticks in a row can only mean the
+    // display itself has actually stopped updating (a pause/menu/loading screen). RouteEngineTick
+    // is skipped entirely while frozen -- no OCR text is trusted, no events fire -- and resumes
+    // the instant the frame starts changing again.
+    const int FrozenFrameTicksThreshold = 4; // ~1s at the 250ms poll interval
+    int _frozenFrameHash;
+    int _frozenFrameStreak;
+    bool _frameIsFrozen;
+
     /// <summary>-1 = not yet sampled (TimeoutHelper's own range check, `&lt; 0`, means it
     /// correctly just won't fire until a real reading comes in, rather than defaulting to a
     /// value that could misfire). Updated every tick by SampleTimeoutSegments.</summary>
     int _lastAwayTimeoutsRemaining = -1;
+    /// <summary>Home counterpart, added 2026-08-11 -- see ScorebugPreset.HomeTimeoutFx*'s doc
+    /// comment for the placeholder-crop caveat. -1 the same way if HomeTimeoutFxW/H aren't
+    /// calibrated for the active preset (never true today; every preset now sets a placeholder).</summary>
+    int _lastHomeTimeoutsRemaining = -1;
     // FIXED 2026-08-11 (systemic audit finding, same bug class as the possession-debounce fix):
     // this used to commit straight from SampleTimeoutSegments's per-tick brightness read with no
     // confirmation at all -- a single frame reading one segment dim when it's actually lit
@@ -220,6 +247,7 @@ internal sealed class GameWatcher
     // through immediately rather than needing confirmation -- it's a constant not-sampled state,
     // not a flicker risk.
     int? _pendingAwayTimeoutsRemaining;
+    int? _pendingHomeTimeoutsRemaining;
 
     // --- Bandroom.Core engine state ---
     EventRouter? _eventRouter;
@@ -481,7 +509,11 @@ internal sealed class GameWatcher
         _awaitingPostKickoffSnap = false;
         _pendingPossession = null;
         _pendingAwayTimeoutsRemaining = null;
+        _pendingHomeTimeoutsRemaining = null;
         _structuralTurnoverPendingTicks = 0;
+        _frozenFrameHash = 0;
+        _frozenFrameStreak = 0;
+        _frameIsFrozen = false;
         _ = RunAsync(_cts.Token);
     }
 
@@ -572,6 +604,8 @@ internal sealed class GameWatcher
                 {
                     fg.CopyFromScreen(rect.Left, rect.Top, 0, 0, new Size(winW, winH));
                 }
+
+                UpdateFrozenFrameState(fullBmp, winW, winH);
 
                 foreach (var region in _regions)
                 {
@@ -706,7 +740,11 @@ internal sealed class GameWatcher
                 }
 
                 // --- Run the Bandroom.Core rule engine from this tick's OCR snapshot ---
-                RouteEngineTick();
+                // Skipped entirely while the frame is frozen (see _frameIsFrozen's doc comment) --
+                // a paused/menu screen has no real snap/play to react to, and OCR text sampled
+                // from whatever's drawn there is untrustworthy.
+                if (!_frameIsFrozen)
+                    RouteEngineTick();
 
                 // This is the ONE delay on the actual tackle-to-sound critical path: it gates how
                 // often the "down" region gets re-OCR'd, and "down" is what both DownChanged and
@@ -757,14 +795,24 @@ internal sealed class GameWatcher
     /// matching every screenshot seen calibrating this. Returns -1 if the preset's timeout box
     /// isn't calibrated (FxW/FxH still 0), so callers can tell "not sampled" from "sampled as
     /// zero remaining."</summary>
-    int SampleTimeoutSegments(Bitmap fullBmp, int winW, int winH)
-    {
-        if (_activePreset.AwayTimeoutFxW <= 0 || _activePreset.AwayTimeoutFxH <= 0) return -1;
+    int SampleTimeoutSegments(Bitmap fullBmp, int winW, int winH) =>
+        SampleTimeoutSegments(fullBmp, winW, winH, _activePreset.AwayTimeoutFxX, _activePreset.AwayTimeoutFxY,
+            _activePreset.AwayTimeoutFxW, _activePreset.AwayTimeoutFxH);
 
-        int cropX = Math.Max(0, (int)(winW * _activePreset.AwayTimeoutFxX));
-        int cropY = Math.Max(0, (int)(winH * _activePreset.AwayTimeoutFxY));
-        int cropW = Math.Max(3, Math.Min((int)(winW * _activePreset.AwayTimeoutFxW), winW - cropX));
-        int cropH = Math.Max(1, Math.Min((int)(winH * _activePreset.AwayTimeoutFxH), winH - cropY));
+    /// <summary>Home counterpart's entry point -- same brightness-sampling method, just pointed at
+    /// ScorebugPreset.HomeTimeoutFx* instead of AwayTimeoutFx*.</summary>
+    int SampleHomeTimeoutSegments(Bitmap fullBmp, int winW, int winH) =>
+        SampleTimeoutSegments(fullBmp, winW, winH, _activePreset.HomeTimeoutFxX, _activePreset.HomeTimeoutFxY,
+            _activePreset.HomeTimeoutFxW, _activePreset.HomeTimeoutFxH);
+
+    int SampleTimeoutSegments(Bitmap fullBmp, int winW, int winH, double fxX, double fxY, double fxW, double fxH)
+    {
+        if (fxW <= 0 || fxH <= 0) return -1;
+
+        int cropX = Math.Max(0, (int)(winW * fxX));
+        int cropY = Math.Max(0, (int)(winH * fxY));
+        int cropW = Math.Max(3, Math.Min((int)(winW * fxW), winW - cropX));
+        int cropH = Math.Max(1, Math.Min((int)(winH * fxH), winH - cropY));
 
         using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
@@ -805,9 +853,21 @@ internal sealed class GameWatcher
         _pendingAwayTimeoutsRemaining = sample;
     }
 
+    /// <summary>Home counterpart -- same two-tick confirm-before-commit shape as the Away version
+    /// above (see _lastAwayTimeoutsRemaining's doc comment for why), just against the Home
+    /// fields.</summary>
+    void CommitHomeTimeoutsRemainingIfConfirmed(int sample)
+    {
+        if (sample < 0) { _lastHomeTimeoutsRemaining = sample; _pendingHomeTimeoutsRemaining = null; return; }
+        if (sample == _lastHomeTimeoutsRemaining) { _pendingHomeTimeoutsRemaining = null; return; }
+        if (sample == _pendingHomeTimeoutsRemaining) { _lastHomeTimeoutsRemaining = sample; _pendingHomeTimeoutsRemaining = null; return; }
+        _pendingHomeTimeoutsRemaining = sample;
+    }
+
     void SamplePossessionFromWindow(Bitmap fullBmp, int winW, int winH)
     {
         CommitTimeoutsRemainingIfConfirmed(SampleTimeoutSegments(fullBmp, winW, winH));
+        CommitHomeTimeoutsRemainingIfConfirmed(SampleHomeTimeoutSegments(fullBmp, winW, winH));
 
         // Underline-brightness method takes priority when the active preset has it calibrated
         // (see ScorebugPreset.AwayUnderlineFx*/HomeUnderlineFx*) -- correction 2026-08-07: the
@@ -854,7 +914,13 @@ internal sealed class GameWatcher
             _activePreset.HomeUnderlineFxX, _activePreset.HomeUnderlineFxY,
             _activePreset.HomeUnderlineFxW, _activePreset.HomeUnderlineFxH);
 
-        const double minMargin = 15; // luminance points (0-255 scale) -- ignore too-close-to-call frames
+        // Raised from 15 -> 25 (owner report 2026-08-11, live game): an 18-point flip that night
+        // was reported wrong, right at the old threshold's edge -- 15 was letting genuinely
+        // marginal/borderline frames through as if they were confident reads. (A separate 41-point
+        // flip was also reported wrong that night; that one clears even this raised bar, so it's
+        // not something a margin bump alone fixes -- occasional bad reads on otherwise-clear
+        // frames are a different problem than borderline ones slipping through.)
+        const double minMargin = 25; // luminance points (0-255 scale) -- ignore too-close-to-call frames
         string? physicalSide = (leftBrightness - rightBrightness) switch
         {
             > minMargin => "left",
@@ -906,6 +972,45 @@ internal sealed class GameWatcher
         if (side == _pendingPossession) return true;
         _pendingPossession = side;
         return false;
+    }
+
+    /// <summary>See _frameIsFrozen's doc comment. Cheap coarse hash (a fixed sparse grid of pixel
+    /// samples, not every pixel -- this runs every 250ms tick) of the WHOLE captured frame, so it
+    /// catches a paused/menu screen no matter where on screen it differs from the real HUD.
+    /// Updates _frameIsFrozen based on how many consecutive ticks the hash hasn't changed.</summary>
+    void UpdateFrozenFrameState(Bitmap fullBmp, int winW, int winH)
+    {
+        const int GridCols = 24, GridRows = 14;
+        unchecked
+        {
+            int hash = 17;
+            for (int gy = 0; gy < GridRows; gy++)
+            {
+                int y = Math.Min(winH - 1, gy * winH / GridRows);
+                for (int gx = 0; gx < GridCols; gx++)
+                {
+                    int x = Math.Min(winW - 1, gx * winW / GridCols);
+                    hash = hash * 31 + fullBmp.GetPixel(x, y).ToArgb();
+                }
+            }
+
+            if (hash == _frozenFrameHash)
+            {
+                _frozenFrameStreak++;
+            }
+            else
+            {
+                _frozenFrameHash = hash;
+                _frozenFrameStreak = 0;
+            }
+        }
+
+        bool wasFrozen = _frameIsFrozen;
+        _frameIsFrozen = _frozenFrameStreak >= FrozenFrameTicksThreshold;
+        if (_frameIsFrozen && !wasFrozen)
+            Log?.Invoke("[watcher] frame appears frozen (paused/menu screen) -- suspending event detection");
+        else if (!_frameIsFrozen && wasFrozen)
+            Log?.Invoke("[watcher] frame is moving again -- resuming event detection");
     }
 
     static double SampleCropBrightness(Bitmap fullBmp, int winW, int winH, double fxX, double fxY, double fxW, double fxH)
@@ -1250,6 +1355,7 @@ internal sealed class GameWatcher
             IsTouchdown = situation == "touchdown",
             IsTurnover = situation == "turnover" || structuralTurnover,
             IsNoPuntReturn = situation == "nopuntreturn",
+            IsTimeout = situation == "time_out",
             IsPenaltyOnOffense = isPenaltyOnOffense,
             IsPenaltyOnDefense = isPenaltyOnDefense,
             // Not sticky like _lastKnownDown/_lastKnownAwayScore/etc: the READY screen is a
@@ -1263,6 +1369,7 @@ internal sealed class GameWatcher
             AwayScore = awayScore,
             TimeRemainingSeconds = timeRemainingSeconds,
             AwayTimeoutsRemaining = _lastAwayTimeoutsRemaining,
+            HomeTimeoutsRemaining = _lastHomeTimeoutsRemaining,
             BigGame = isBigGame,
         };
 
@@ -1313,6 +1420,8 @@ internal sealed class GameWatcher
             new BigEventHelper(),
             new DefenseFirstDownHelper(),
             new DefenseHelper(),
+            new DefenseSecondDownShortHelper(),
+            new DefenseThirdDownHelper(),
             new DefenseThirdDownShortHelper(),
             new DownFieldPositionHelper(),
             new DriveStarterHelper(),
@@ -1322,10 +1431,10 @@ internal sealed class GameWatcher
             new GameStateEventHelper(),
             new KickoffHelper(),
             new OffenseDownHelper(),
-            new NoPuntReturnHelper(),
             new PenaltyHelper(),
             new PregameHelper(),
             new SafetyHelper(),
+            new ThirdDownConversionHelper(),
             new TflHelper(),
             new TimeoutHelper(),
             new TouchdownHelper(),
