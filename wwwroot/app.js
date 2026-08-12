@@ -7454,27 +7454,59 @@ function scrollActiveTileToCenter(gridId, teamName) {
   if (!tile) return;
   const targetTop = tile.offsetTop - grid.clientHeight / 2 + tile.offsetHeight / 2;
   grid.scrollTop = Math.max(0, targetTop);
+  grid._wheelTarget = grid.scrollTop; // keep wireMatchupSideGridWheel's eased target in sync
 }
 
 // ---- Matchup side-grid fast + looping wheel scroll (owner request 2026-08-11) -----------------
 // Native wheel scrolling felt slow for a full A-Z roster, and stopped dead at the very top/bottom
 // instead of wrapping back around -- owner wants to be able to keep scrolling past Z and land back
 // on A (and vice versa past A back to Z) instead of hitting a hard edge.
-const MATCHUP_SIDE_GRID_WHEEL_SPEED = 2.75;
+const MATCHUP_SIDE_GRID_WHEEL_SPEED = 1.6;
 
+// FIXED 2026-08-12 (owner report: "skipping over teams" / "all teams aren't even present" while
+// scrolling) -- the old handler set grid.scrollTop straight to grid.scrollTop + delta*SPEED in one
+// jump, and wrapped whenever THAT PROJECTED position overshot 0/max. A single fast wheel/trackpad
+// tick partway through the list (large deltaY, nothing to do with actually being at an edge) could
+// overshoot past max or 0 on its own, so the wrap fired mid-scroll and yanked the whole list back to
+// the opposite end -- reading as teams vanishing/skipping, not an actual missing-data bug. Now: (1)
+// wrap only triggers when the scroll was ALREADY resting at that edge before this tick, (2) motion
+// is eased toward a target via rAF instead of an instant jump, for the "smooth and buttery" feel
+// requested instead of a hard snap.
 function wireMatchupSideGridWheel(gridId) {
   const grid = document.getElementById(gridId);
   if (!grid || grid._wheelWired) return;
   grid._wheelWired = true;
 
+  // Stored ON the grid (not a closure var) so scrollActiveTileToCenter's direct scrollTop jumps
+  // (fired on every re-render/pick) can keep this in sync -- otherwise the next wheel tick would
+  // ease back toward a stale target and undo the re-center.
+  grid._wheelTarget = grid.scrollTop;
+  let raf = null;
+
+  function tick() {
+    const current = grid.scrollTop;
+    const delta = grid._wheelTarget - current;
+    if (Math.abs(delta) < 0.5) {
+      grid.scrollTop = grid._wheelTarget;
+      raf = null;
+      return;
+    }
+    grid.scrollTop = current + delta * 0.25;
+    raf = requestAnimationFrame(tick);
+  }
+
   grid.addEventListener("wheel", (e) => {
     e.preventDefault();
     const max = grid.scrollHeight - grid.clientHeight;
     if (max <= 0) return;
-    let next = grid.scrollTop + e.deltaY * MATCHUP_SIDE_GRID_WHEEL_SPEED;
-    if (next < 0) next = max; // scrolled past A -- wrap to Z
-    else if (next > max) next = 0; // scrolled past Z -- wrap to A
-    grid.scrollTop = next;
+    const atBottom = grid._wheelTarget >= max - 1;
+    const atTop = grid._wheelTarget <= 1;
+    let next = grid._wheelTarget + e.deltaY * MATCHUP_SIDE_GRID_WHEEL_SPEED;
+    if (next > max && atBottom) next = 0; // already at Z, keep scrolling -- wrap to A
+    else if (next < 0 && atTop) next = max; // already at A, keep scrolling -- wrap to Z
+    else next = Math.max(0, Math.min(max, next));
+    grid._wheelTarget = next;
+    if (!raf) raf = requestAnimationFrame(tick);
   }, { passive: false });
 }
 

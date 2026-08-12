@@ -2533,7 +2533,11 @@ input, select, textarea, [contenteditable] {
 #team-grid { overflow: visible; }
 .team-swatch {
   position: relative; width: 100%; aspect-ratio: 1;
-  border-radius: 10px;
+  /* Owner request 2026-08-12: old-iPhone-icon glossy depth (reference screenshot sent) --
+     rounder squircle corners (was a flatter 10px) plus a stronger highlight/reflection pass
+     below so every team icon everywhere (.team-swatch is shared by team-grid, team-picker,
+     matchup grids, side-grid, coverflow, etc.) reads as a raised glass tile, not a flat swatch. */
+  border-radius: 22%;
   border: 1px solid var(--glass-border);
   overflow: hidden;
   display: flex; align-items: center; justify-content: center;
@@ -2542,10 +2546,10 @@ input, select, textarea, [contenteditable] {
   font-size: 15px; font-weight: 800;
   color: rgba(255, 255, 255, 0.55);
   box-shadow:
-    0 3px 6px rgba(0, 0, 0, 0.35),
-    0 1px 0 rgba(255, 255, 255, 0.08) inset,
-    inset 1px 1px 0 rgba(255, 255, 255, 0.22),
-    inset -2px -3px 5px rgba(0, 0, 0, 0.35);
+    0 4px 10px rgba(0, 0, 0, 0.45),
+    0 1px 0 rgba(255, 255, 255, 0.1) inset,
+    inset 1px 1px 0 rgba(255, 255, 255, 0.28),
+    inset -2px -3px 6px rgba(0, 0, 0, 0.4);
   transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.08s ease;
   will-change: transform;
   z-index: 1;
@@ -2555,7 +2559,11 @@ input, select, textarea, [contenteditable] {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.08) 28%, rgba(255, 255, 255, 0) 55%);
+  /* Two-layer gloss: the big diagonal sheen (unchanged) plus a tight bright specular highlight
+     top-left, the same "glass bead of light" iOS/old-iPhone icons had. */
+  background:
+    radial-gradient(ellipse 55% 30% at 26% 18%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 70%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.08) 28%, rgba(255, 255, 255, 0) 55%);
   pointer-events: none;
   z-index: 2;
 }
@@ -4807,7 +4815,7 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   /* Owner request 2026-08-11: this used to sit always-visible, right-aligned in normal flow --
      now a popover toggled by the "Game Settings" pill next to the scorebug switcher (see
      wireMatchupGameSettingsPill in app.js), so it's pulled out of flow entirely and anchored to
-     the top-right of the dialog instead. [hidden] already gets display:none for free.
+     the top-right of the dialog instead.
      REPOSITIONED 2026-08-12 (owner report: right-anchored placement overlapped the away column's
      search box and coverflow) -- centered over the dialog instead, same width/size as before, just
      no longer colliding with either side's content. */
@@ -4828,6 +4836,15 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   z-index: 5;
   width: min(340px, 80vw);
 }
+/* FIXED 2026-08-12 (owner report: "Game Settings" pill does nothing when clicked) -- the rule
+   above sets `display: flex` unconditionally. A normal-priority AUTHOR declaration always beats
+   the browser's own normal-priority `[hidden] { display: none }` UA rule regardless of selector
+   specificity or the hidden attribute's presence -- so this panel was rendering as display:flex
+   ALL THE TIME, hidden or not. wireMatchupGameSettingsPill (app.js) was correctly toggling the
+   `hidden` attribute on click, but CSS never honored it, so the popover open/close was invisible.
+   #team-picker-overlay[hidden] a few hundred lines up already has this same explicit override for
+   the identical reason -- this element just never got it. */
+.matchup-controls-island[hidden] { display: none; }
 .matchup-controls-island .matchup-last-pill {
   margin: 0;
   text-align: center;
