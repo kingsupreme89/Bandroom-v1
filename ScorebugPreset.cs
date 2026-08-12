@@ -5,8 +5,11 @@ namespace SupremeStadiumSoundSelector;
 /// in via dropdown instead of re-deriving fractional coordinates from scratch each time.
 /// BandFxY/BandFxH cover the full-width down/situation/quarter capture band, PossessionFx* is
 /// the separate tight box possession-color sampling still needs (see
-/// GameWatcher.SamplePossessionFromWindow) -- only kept by the older presets below; newer ones
-/// use the underline-brightness method instead (see AwayUnderlineFx*/HomeUnderlineFx*).
+/// GameWatcher.SamplePossessionFromWindow) -- the down-and-distance box fills solid with the
+/// offense's team color, and GameWatcher now tries this FIRST when a preset has it calibrated,
+/// falling back to the underline-brightness method (AwayUnderlineFx*/HomeUnderlineFx*) only when
+/// the color sample is inconclusive. See KamsCbsScorebugV3's PossessionFx* comment for why this
+/// was dropped then restored.
 /// "Kam's CBS Scorebug" (the original CBS calibration this file started from) was removed
 /// 2026-08-09 at the owner's request -- "Kam's CBSv3" superseded it and is the only CBS-style
 /// preset kept going forward.</summary>
@@ -83,6 +86,22 @@ public sealed class ScorebugPreset
     /// reading CBS's screen coordinates for penalty and scoring-banner detection regardless of
     /// which skin was actually active. Every preset below defaults to the original CBS-calibrated
     /// numbers so none of them regress from this change.</summary>
+    /// <summary>Crop for the pregame tunnel-walk chevron marker -- the white chevron shape
+    /// flanking the center bowl/rivalry badge on the pregame scorebug (owner-confirmed present on
+    /// every game, not just bowl games). Sampled by brightness (GameWatcher.
+    /// SamplePregameEntranceFromWindow), NOT OCR text -- same technique as AwayUnderlineFx*/
+    /// AwayTimeoutFx* for the same reason (it's a graphical shape, not a font glyph). Zero (FxW)
+    /// means "not calibrated for this preset" -- GameStateEventHelper's quarter/down heuristic is
+    /// the fallback in that case (see its ChevronMarkerFx*-independent condition).
+    /// CAVEAT (same as every other crop in this file): eyeballed from one 2560x1440 screenshot
+    /// (Rose Bowl, South Carolina @ Michigan pregame walkout, displayed/measured at 2000x1125),
+    /// not pixel-measured against the raw image data -- a starting point needing live tuning
+    /// against the actual game before fully trusting it, not an exact calibration.</summary>
+    public double ChevronMarkerFxX { get; init; }
+    public double ChevronMarkerFxY { get; init; }
+    public double ChevronMarkerFxW { get; init; }
+    public double ChevronMarkerFxH { get; init; }
+
     public double PenaltyAgainstFxX { get; init; } = 0.65;
     public double PenaltyAgainstFxY { get; init; } = 0.62;
     public double PenaltyAgainstFxW { get; init; } = 0.32;
@@ -103,6 +122,19 @@ public sealed class ScorebugPreset
     {
         Name = "Kam's CBSv3",
         BandFxY = 0.83, BandFxH = 0.14,
+        // RESTORED 2026-08-12: this is the SAME color-match crop the original "Kam's CBS
+        // Scorebug" preset had (0.89/0.848/0.095/0.104, "far more reliable than the underline
+        // dashes" per that preset's own 2026-08-08 calibration note) -- it never actually broke,
+        // it just got silently dropped when that preset was retired 2026-08-09 in favor of this
+        // V3 preset, which only ever received the underline crop as a replacement. Independently
+        // re-confirmed 2026-08-12 from 6 live Georgia/Florida screenshots (clearly distinct red
+        // vs blue, no color-confusion risk): the rightmost down-and-distance box ("1st & 10",
+        // "3rd & 5") is filled solid with whichever team currently has the ball's color -- same
+        // BandFxY/BandFxH strip as V3 already uses, so the old crop should still land correctly.
+        // GameWatcher.SamplePossessionFromWindow now tries this FIRST (falls back to the
+        // underline method only when the color sample is inconclusive), reversing V3's original
+        // underline-first order -- see that method's own comment.
+        PossessionFxX = 0.89, PossessionFxY = 0.848, PossessionFxW = 0.095, PossessionFxH = 0.104,
         // Score/clock/penalty/banner values below were previously left unset and silently inherited
         // from this class's field defaults (which happen to equal these exact numbers, since CBS is
         // what those defaults were originally calibrated from). Made explicit 2026-08-11 so CBS
@@ -113,12 +145,27 @@ public sealed class ScorebugPreset
         ClockFxX = 0.65, ClockFxW = 0.08,
         PenaltyAgainstFxX = 0.65, PenaltyAgainstFxY = 0.62, PenaltyAgainstFxW = 0.32, PenaltyAgainstFxH = 0.22,
         BannerFxX = 0.35, BannerFxY = 0.87, BannerFxW = 0.3, BannerFxH = 0.08,
+        // REVERTED 2026-08-12: an attempted recalibration off a live screenshot (see git history)
+        // guessed a "white top-line" signal that pixel-sampling later proved wrong -- both team
+        // blocks fluctuate through similar brightness ranges in that region (mostly reflecting
+        // text density, not possession), so the new crop landed somewhere neither side ever cleared
+        // the confidence margin, and possession stopped resolving AT ALL ("we haven't figured out
+        // which team has the ball yet" on every play) -- worse than this original crop, which at
+        // least sometimes read correctly. Back to the pre-2026-08-12 values until there's a
+        // properly identified, pixel-verified signal (needs clean screenshots of BOTH a confirmed
+        // home-possession AND a confirmed away-possession frame to isolate what actually differs).
         AwayUnderlineFxX = 0.145, AwayUnderlineFxY = 0.975, AwayUnderlineFxW = 0.075, AwayUnderlineFxH = 0.012,
         HomeUnderlineFxX = 0.395, HomeUnderlineFxY = 0.975, HomeUnderlineFxW = 0.11, HomeUnderlineFxH = 0.012,
         AwayTimeoutFxX = 0.15, AwayTimeoutFxY = 0.895, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
         // Placeholder mirror (see HomeTimeoutFx*'s doc comment): AwayUnderlineFxX (0.145) ->
         // HomeUnderlineFxX (0.395) is a +0.25 offset on this preset; applied to AwayTimeoutFxX.
         HomeTimeoutFxX = 0.40, HomeTimeoutFxY = 0.895, HomeTimeoutFxW = 0.08, HomeTimeoutFxH = 0.025,
+        // ChevronMarkerFx* -- added 2026-08-12 (owner report: pregame walkout/chevron screen is the
+        // SAME cutscene regardless of which live-play scorebug skin (Kam's CBS vs default CFB27
+        // HUD) is selected, so CollegeFootball27's chevron crop -- calibrated from the Rose Bowl
+        // walkout screenshot, see that preset's own comment -- applies here unchanged too, not just
+        // to that one preset. Copied as-is rather than re-eyeballed.
+        ChevronMarkerFxX = 0.4275, ChevronMarkerFxY = 0.849, ChevronMarkerFxW = 0.0225, ChevronMarkerFxH = 0.04,
     };
 
     /// <summary>Third scorebug layout, calibrated 2026-08-08 from two 1920x1080 screenshots the
@@ -198,6 +245,12 @@ public sealed class ScorebugPreset
         // Double-mirrored placeholder -- see the long Timeouts comment above. AwayUnderlineFxX
         // (0.430) -> HomeUnderlineFxX (0.550) is a +0.12 offset; applied to AwayTimeoutFxX.
         HomeTimeoutFxX = 0.373, HomeTimeoutFxY = 0.925, HomeTimeoutFxW = 0.091, HomeTimeoutFxH = 0.012,
+        // ChevronMarkerFx* -- calibrated 2026-08-12 from the Rose Bowl pregame walkout screenshot
+        // (see ChevronMarkerFx*'s doc comment above for the full caveat). Left chevron only --
+        // one clear signal is enough, and this crop is deliberately tight around just the shape's
+        // brightest stroke so a near-miss crop reads dim instead of accidentally catching the
+        // badge or team-color blocks next to it.
+        ChevronMarkerFxX = 0.4275, ChevronMarkerFxY = 0.849, ChevronMarkerFxW = 0.0225, ChevronMarkerFxH = 0.04,
     };
 
     /// <summary>Added 2026-08-09 for the owner's separate CFB 26 PS/Xbox console capture, kept as

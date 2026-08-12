@@ -374,9 +374,40 @@ public class EvaluatorTests
     [Fact]
     public void TouchdownHelper_Fires_OffenseTouchdown()
     {
+        // FIXED 2026-08-12 (stale test, went red after the defense-TD race-condition rewrite in
+        // TouchdownHelper.cs the same day): that rewrite made an offense touchdown wait for the
+        // scoreboard to move before firing, specifically to rule out a defensive score whose banner
+        // arrived early (see TouchdownHelper's class comment) -- a banner-only tick with no score
+        // delta now buffers instead of firing immediately. This test never modeled a score change,
+        // so it always hit the buffered path and got null on the first Evaluate call. Fixed by
+        // giving the possessing side's score its own +7 on the same tick, matching the normal case
+        // where the banner and scoreboard update together, so this still verifies the immediate-fire
+        // path (see TouchdownHelper_Fires_OffenseTouchdown_AfterBufferedScoreConfirm below for the
+        // delayed-scoreboard path this rewrite added).
         var evaluator = new TouchdownHelper();
-        var state = State(Snap.With(isTouchdown: false), Snap.With(isTouchdown: true));
+        var state = State(
+            Snap.With(isTouchdown: false, possessionAway: false, homeScore: 0, awayScore: 0),
+            Snap.With(isTouchdown: true, possessionAway: false, homeScore: 7, awayScore: 0));
         var result = evaluator.Evaluate(state);
+        Assert.NotNull(result);
+        Assert.Equal("Offense: Touchdown Scored", result!.EventKey);
+    }
+
+    [Fact]
+    public void TouchdownHelper_Fires_OffenseTouchdown_AfterBufferedScoreConfirm()
+    {
+        // Covers the buffered path directly: banner appears with no score movement yet (OCR gap),
+        // then the scoreboard catches up a few ticks later -- see TouchdownHelper's class comment.
+        var evaluator = new TouchdownHelper();
+        var bannerState = State(
+            Snap.With(isTouchdown: false, possessionAway: false, homeScore: 0, awayScore: 0),
+            Snap.With(isTouchdown: true, possessionAway: false, homeScore: 0, awayScore: 0));
+        Assert.Null(evaluator.Evaluate(bannerState));
+
+        var scoreState = State(
+            Snap.With(isTouchdown: true, possessionAway: false, homeScore: 0, awayScore: 0),
+            Snap.With(isTouchdown: true, possessionAway: false, homeScore: 7, awayScore: 0));
+        var result = evaluator.Evaluate(scoreState);
         Assert.NotNull(result);
         Assert.Equal("Offense: Touchdown Scored", result!.EventKey);
     }

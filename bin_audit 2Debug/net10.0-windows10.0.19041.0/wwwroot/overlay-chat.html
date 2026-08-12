@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Bandroom Chat Overlay</title>
+<style>
+  /* Standalone page served by LocalOverlayServer.cs to an external browser (OBS Browser Source) --
+     deliberately has NO dependency on app.js/style.css, since this loads independently of the
+     running WebView2 shell. Colors match wwwroot/style.css's :root palette by value, not by
+     sharing the file. */
+  html, body {
+    margin: 0; padding: 0;
+    background: transparent;
+    font-family: -apple-system, "Segoe UI", Outfit, sans-serif;
+    color: #e7ecf1;
+  }
+  #chat-overlay {
+    width: 360px;
+    max-height: 480px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+  #chat-waiting {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #ffffff;
+    opacity: 0.7;
+    text-align: center;
+  }
+  .chat-msg {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px;
+    padding: 6px 10px;
+    font-size: 13.5px;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+  .chat-msg .chat-user { color: #22d3ee; font-weight: 700; margin-right: 6px; }
+</style>
+</head>
+<body>
+  <div id="chat-overlay">
+    <div id="chat-waiting">Waiting for chat connection...</div>
+    <div id="chat-messages"></div>
+  </div>
+  <script>
+    // Polls the local server's chat-data endpoint every 3s. Always empty until real Twitch/
+    // YouTube chat wiring lands in a later phase (LocalOverlayServer.cs's ServeChatData) --
+    // this page needs no changes when that happens, it'll just start rendering real rows.
+    async function pollChat() {
+      try {
+        const res = await fetch("/overlay/chat/data", { cache: "no-store" });
+        const data = await res.json();
+        const messages = data.messages || [];
+        const waiting = document.getElementById("chat-waiting");
+        const list = document.getElementById("chat-messages");
+        if (messages.length === 0) {
+          waiting.style.display = "block";
+          list.innerHTML = "";
+        } else {
+          waiting.style.display = "none";
+          list.innerHTML = messages
+            .map((m) => `<div class="chat-msg"><span class="chat-user">${m.user ?? ""}</span>${m.text ?? ""}</div>`)
+            .join("");
+          list.scrollTop = list.scrollHeight;
+        }
+      } catch (err) {
+        // Server not reachable (rare) -- keep showing the waiting state, retry next tick.
+      }
+    }
+    pollChat();
+    setInterval(pollChat, 3000);
+  </script>
+</body>
+</html>

@@ -117,13 +117,39 @@ internal static class EventActivityLog
         }
     }
 
+    /// <summary>FIXED 2026-08-12 (owner report -- log showed bare "Third Down (Home)" for a 3rd &amp;
+    /// long, while the assign screen's card for that exact same EventKey reads "3rd & Long", so
+    /// hunting for "the card that matches what the log just said" led nowhere): this used to just
+    /// strip the "Offense:"/"Defense:" prefix and print whatever was left ("Offense: Third Down" ->
+    /// "Third Down"), a completely separate, unsynced label source from wwwroot/app.js's
+    /// EVENT_FRIENDLY_NAMES map that actually names the assignable cards. Mirrors that map's down/
+    /// distance entries here so the log and the UI always agree on what to call the same EventKey --
+    /// keep both in sync any time either one changes. Anything not in this table (scoring, penalties,
+    /// kickoffs, etc) still falls back to the old prefix-strip behavior, unchanged.</summary>
+    static readonly Dictionary<string, string> FriendlyNameOverrides = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Offense: Second Down"] = "2nd & Long",
+        ["Offense: Second Down Short"] = "2nd & Short",
+        ["Offense: Third Down"] = "3rd & Long",
+        ["Offense: Third Down Short"] = "3rd & Short",
+        ["Defense: Second Down"] = "2nd & Long",
+        ["Defense: Second Down Short"] = "2nd & Short",
+        ["Defense: Third Down"] = "3rd & Long",
+        ["Defense: Third Down Short"] = "3rd & Short",
+        ["Defense: Fourth Down"] = "4th Down",
+        ["Offense: Fourth Down"] = "4th Down",
+        ["Defense: Fourth Down (Loss)"] = "4th Down After a Loss",
+    };
+
     /// <summary>Turns an internal EventKey like "Offense: Touchdown Scored" or
     /// "Other: Opening Kickoff" into something that reads naturally in a log line -- strips the
     /// "Offense:"/"Defense:"/"Other:"/"Penalty:" routing prefix, which is meaningful to the code
-    /// but not to a user reading "why didn't my song play".</summary>
+    /// but not to a user reading "why didn't my song play". Down/distance keys use
+    /// FriendlyNameOverrides instead, see its own comment for why.</summary>
     public static string FriendlyEventName(string eventKey)
     {
         if (string.IsNullOrEmpty(eventKey)) return "That event";
+        if (FriendlyNameOverrides.TryGetValue(eventKey, out var overridden)) return overridden;
         int colon = eventKey.IndexOf(':');
         return colon >= 0 && colon < eventKey.Length - 1 ? eventKey[(colon + 1)..].Trim() : eventKey;
     }

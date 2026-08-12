@@ -214,10 +214,13 @@ internal static class AudioPlayer
     /// only Tempo changes). Applied last so it also speeds up the lead-in whistle layered in via
     /// SequencedSampleProvider, not just the main clip -- the two would otherwise play back at
     /// different apparent tempos.</param>
-    /// <param name="whistleOverridePath">TriggerEntry.AltWhistlePath -- per-event alternate to the
-    /// global LeadInClipPath. Null/empty falls back to the global clip, same as before this param
-    /// existed.</param>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true, Func<float>? liveVolumeSource = null, bool speed2x = false, string? whistleOverridePath = null, string? channel = null)
+    /// <param name="whistleSpeed">TriggerEntry.WhistleSpeed -- REPLACED whistleOverridePath
+    /// 2026-08-12 (owner request: swap the per-event alternate whistle CLIP for a per-event whistle
+    /// SPEED instead). 1.0 = normal speed, same as before this param existed. Applied to the
+    /// whistle clip alone via SoundTouchSpeedSampleProvider (same tempo-shift technique as the main
+    /// clip's speed2x, just scoped to the lead-in provider before it's sequenced with the main
+    /// clip), so the whistle's speed is independent of the main clip's own speed2x toggle.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true, Func<float>? liveVolumeSource = null, bool speed2x = false, double whistleSpeed = 1.0, string? channel = null)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
@@ -247,12 +250,20 @@ internal static class AudioPlayer
                 // preloaded (e.g. a brand-new assignment made mid-game).
                 using var audio = CachedAudioSource.Open(path);
                 using var output = new WaveOutEvent();
-                lock (Lock) ActiveOutputs.Add((output, channel));
-                audio.Volume = volume;
                 AudioFileReader? leadInReader = null;
+                // Add to ActiveOutputs BEFORE the try block that removes it, but keep everything
+                // that can throw (including the volume assignment right below) INSIDE that try --
+                // otherwise an exception between Add and the old try's opening brace (e.g. from
+                // audio.Volume's setter) would leave this entry in ActiveOutputs forever: `using`
+                // still disposes `output`/`audio` on the way out, but StopAll/StopChannel would be
+                // stuck calling Stop() on a disposed WaveOutEvent for the rest of the app's life,
+                // and the list itself would just grow. Add is its own lock so a throw before the
+                // try can't skip it, but everything that can fail now has a matching finally.
+                lock (Lock) ActiveOutputs.Add((output, channel));
 
                 try
                 {
+                    audio.Volume = volume;
                     ISampleProvider source = audio.WaveFormat.Channels == 1
                         ? new MonoToStereoSampleProvider(audio.Sample)
                         : audio.Sample;
@@ -301,8 +312,12 @@ internal static class AudioPlayer
                     // the real in-game cue).
                     if (playLeadInWhistle)
                     {
-                        var leadIn = BuildLeadInProvider(source.WaveFormat, volume, whistleOverridePath, out leadInReader);
-                        if (leadIn != null) source = new SequencedSampleProvider(leadIn, source);
+                        var leadIn = BuildLeadInProvider(source.WaveFormat, volume, out leadInReader);
+                        if (leadIn != null)
+                        {
+                            if (whistleSpeed != 1.0) leadIn = new SoundTouchSpeedSampleProvider(leadIn, whistleSpeed);
+                            source = new SequencedSampleProvider(leadIn, source);
+                        }
                     }
 
                     // Master safety stage -- last thing before output, protects against clipping
@@ -378,12 +393,10 @@ internal static class AudioPlayer
     /// previously hard-coded to the static MasterVolume field here, which meant muting a side
     /// (AwayVolume=0) or the PA layer (PaVolume=0) via volumeOverride still let the whistle play
     /// at full volume.</summary>
-    static ISampleProvider? BuildLeadInProvider(WaveFormat targetFormat, float volume, string? whistleOverridePath, out AudioFileReader? reader)
+    static ISampleProvider? BuildLeadInProvider(WaveFormat targetFormat, float volume, out AudioFileReader? reader)
     {
         reader = null;
-        string? clipPath = !string.IsNullOrWhiteSpace(whistleOverridePath) && File.Exists(whistleOverridePath)
-            ? whistleOverridePath
-            : LeadInClipPath;
+        string? clipPath = LeadInClipPath;
         if (!LeadInEnabled || string.IsNullOrWhiteSpace(clipPath) || !File.Exists(clipPath))
             return null;
 

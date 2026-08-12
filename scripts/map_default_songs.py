@@ -23,7 +23,7 @@ TEAM_MAP = {
     # SEC
     "ALA": "Alabama", "ARK": "Arkansas", "AUB": "Auburn", "UF": "Florida",
     "UGA": "Georgia", "UK": "Kentucky", "LSU": "LSU", "MSST": "Mississippi State",
-    "MSU": "Mississippi State",  # scorebug uses MSU for both
+    "MSU": "Mississippi State",  # scorebug uses MSU for both -- see CONFERENCE_OVERRIDES below
     "MIZZ": "Missouri", "MIZZOU": "Missouri", "OM": "Ole Miss",
     "OLEMISS": "Ole Miss", "OLE MISS": "Ole Miss",
     "SCAR": "South Carolina", "SOCAR": "South Carolina",
@@ -31,7 +31,7 @@ TEAM_MAP = {
     "OU": "Oklahoma", "A&M": "Texas A&M",
     # Big Ten
     "ILL": "Illinois", "IND": "Indiana", "IOWA": "Iowa", "MARY": "Maryland",
-    "MRLD": "Maryland", "MICH": "Michigan", "MSU": "Michigan State",
+    "MRLD": "Maryland", "MICH": "Michigan",
     "MINN": "Minnesota", "NEB": "Nebraska", "NW": "Northwestern",
     "OSU": "Ohio State", "PSU": "Penn State", "PUR": "Purdue",
     "RUT": "Rutgers", "WISC": "Wisconsin", "UW": "Washington",
@@ -204,10 +204,27 @@ def normalize_filename(filename):
     """Pre-process: split apostrophe-concatenated tokens like `ala'22` -> `ala` + `'22`"""
     return re.sub(r"(\w)'(\d)", r"\1 '\2", filename)
 
-def detect_team(filename):
+# Abbreviations that mean a different team depending on which conference folder
+# they're found in, checked before the global TEAM_MAP so the folder context wins.
+# - "UM" is Miami's scorebug code (ACC) everywhere EXCEPT inside a \B1G\ folder, where it's
+#   shorthand for Michigan (owner call, 2026-08-12).
+# - "MSU" is Mississippi State's scorebug code (SEC) everywhere EXCEPT inside a \B1G\ folder,
+#   where it means Michigan State. FIXED 2026-08-12: TEAM_MAP used to have "MSU" as a literal dict
+#   key twice (once per school) -- Python dict literals silently let the second one win for EVERY
+#   lookup, so every "MSU"-named file resolved to Michigan State regardless of which conference
+#   folder it actually came from. Real Mississippi State files sitting under a \SEC\ source folder
+#   got their TEAM name resolved to "Michigan State" while their CONFERENCE stayed "SEC" (folder-
+#   driven, unaffected by the bug) -- producing a second, wrong "Michigan State" entry tagged SEC
+#   in the app's team-browse list, alongside the real Big Ten one, while quietly misfiling every
+#   Mississippi State default song under the wrong team.
+CONFERENCE_OVERRIDES = {
+    "Big Ten": {"UM": "Michigan", "MSU": "Michigan State"},
+}
+
+def detect_team(filename, conference=None):
     """Extract team abbreviation from normalized filename"""
     parts = filename.split()
-    
+
     # Skip conference/section prefixes and year tokens
     skip = {"SEC", "ACC", "B1G", "BIG12", "PAC12", "IND", "ND", "1ST", "PATCH", "TEST", "TTU"}
     start = 0
@@ -216,21 +233,27 @@ def detect_team(filename):
         if pu not in skip and not re.match(r"^'?\d{2}$", pu) and pu not in ("SAMPLES", "ENDS"):
             start = i
             break
-    
+
     # Build uppercase lookup for case-insensitive matching
     upper_map = {k.upper(): v for k, v in TEAM_MAP.items()}
-    
+    override_map = CONFERENCE_OVERRIDES.get(conference, {})
+
     for length in [2, 1]:
         for offset in range(min(3, len(parts) - start - length + 1)):
             candidate = " ".join(parts[start+offset:start+offset+length])
             cu = candidate.upper()
+            if cu in override_map:
+                return override_map[cu]
             if cu in upper_map:
                 return upper_map[cu]
-    
+
     for p in parts[start:start+3]:
-        if p.upper() in upper_map:
-            return upper_map[p.upper()]
-    
+        pu = p.upper()
+        if pu in override_map:
+            return override_map[pu]
+        if pu in upper_map:
+            return upper_map[pu]
+
     return None
 
 def match_event(filename):
@@ -263,9 +286,9 @@ def main():
             stats["total"] += 1
             
             normalized = normalize_filename(f)
-            team = detect_team(normalized)
-            event_key = match_event(normalized)
             conference = detect_conference(fullpath)
+            team = detect_team(normalized, conference)
+            event_key = match_event(normalized)
             
             if team and conference:
                 stats["mapped"] += 1

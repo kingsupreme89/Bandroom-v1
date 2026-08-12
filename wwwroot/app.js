@@ -153,6 +153,19 @@ let state = {
   currentSituationsCategory: null,
 };
 
+// FIXED 2026-08-12 (owner report: "why is Rice at the top" / list feels incomplete) -- state.teams
+// comes straight from TeamColors.All (C# backend): every FBS team in source-file order, then all
+// 50 FCS schools appended as one block, then any custom TeamBuilder teams appended after that. No
+// alphabetical sort ever happened anywhere -- despite the v1.1 changelog claiming "True A-to-Z
+// sorting," neither renderTeamGridInto (side-grid) nor matchupCoverflowTeams (big coverflow) ever
+// actually sorted the list. Sorting once here, right after every state.teams assignment, means
+// every screen that lists teams (main panel, team picker, matchup coverflow + side-grid,
+// onboarding, favorite-team) gets true alphabetical order automatically and stays in sync with
+// each other, instead of patching each render function separately.
+function sortTeamsAZ(teams) {
+  return [...(teams || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+}
+
 async function init() {
   // wireControls() attaches every click handler in the app (rail buttons, header
   // controls, etc). It used to run only after a chain of sequential awaits below --
@@ -164,7 +177,7 @@ async function init() {
 
   if (bridge) {
     try {
-      state.teams = JSON.parse(await bridge.GetTeams());
+      state.teams = sortTeamsAZ(JSON.parse(await bridge.GetTeams()));
     } catch (err) { console.error("GetTeams failed", err); }
     try {
       state.categories = JSON.parse(await bridge.GetCategories());
@@ -516,6 +529,22 @@ function renderCategories() {
   }
 }
 
+// Fixed cycle of whistle-speed presets for the per-event whistle-speed button (event card
+// transport strip) -- REPLACED the alternate-whistle-clip picker 2026-08-12 (owner request: "just
+// make that button a whistle speed toggle"). Must match WebMainForm.WhistleSpeedPresets exactly
+// (display labels only, the actual cycling happens server-side via CycleEventWhistleSpeed).
+const WHISTLE_SPEED_PRESETS = [1.0, 1.15, 1.3, 1.5];
+function whistleSpeedLabel(speed) {
+  const s = speed ?? 1.0;
+  return s === 1.0 ? "1x" : `${s}x`;
+}
+function whistleSpeedTitle(speed) {
+  const s = speed ?? 1.0;
+  return s === 1.0
+    ? "Whistle plays at normal speed -- click to speed it up"
+    : `Whistle plays at ${s}x speed for this event -- click to cycle to the next speed`;
+}
+
 async function openSituations(category) {
   const panel = document.getElementById("situations-panel");
   const list = document.getElementById("situations-list");
@@ -567,7 +596,7 @@ async function openSituations(category) {
           <button class="bandroom-item-action" data-act="stop" title="Stop">&#9209;</button>
           <button class="bandroom-item-action" data-act="volume" title="Adjust this event's own volume">&#128266;</button>
           <button class="bandroom-item-action situation-whistle-toggle${ev.playLeadInWhistle === false ? "" : " active"}" data-act="whistle" title="${ev.playLeadInWhistle === false ? "Lead-in whistle off for this song -- click to turn it back on" : "Lead-in whistle on for this song (when the global toggle is on) -- click to skip it for just this one"}">&#128239;</button>
-          <button class="bandroom-item-action situation-whistle-toggle${ev.altWhistleSet ? " active" : ""}" data-act="alt-whistle" title="${ev.altWhistleSet ? "This event has its own alternate whistle clip -- click to clear it and go back to the global whistle" : "Pick an alternate whistle clip just for this event, instead of the global one"}">&#127895;</button>
+          <button class="bandroom-item-action situation-whistle-toggle${ev.whistleSpeed && ev.whistleSpeed !== 1 ? " active" : ""}" data-act="whistle-speed" title="${whistleSpeedTitle(ev.whistleSpeed)}">&#127895;<span class="situation-whistle-speed-label">${whistleSpeedLabel(ev.whistleSpeed)}</span></button>
           <button class="bandroom-item-action situation-whistle-toggle${ev.speed2x ? " active" : ""}" data-act="speed2x" title="${ev.speed2x ? "Playing at 1.09x speed -- click to go back to normal speed" : "Play this event's song at 1.09x speed (in-game and preview)"}">&#9193;</button>
           <button class="bandroom-item-action" data-act="track-info" title="Track Info" ${ev.fileName ? "" : "disabled"}>&#8505;</button>
           <div class="situation-share-popover glass" hidden>
@@ -601,21 +630,21 @@ async function openSituations(category) {
         : "Lead-in whistle off for this song -- click to turn it back on";
       bridge?.SetEventPlayLeadInWhistle(ev.trigger, nowOn);
     });
-    // Per-event alternate whistle -- clicking when unset opens Clipper Island in "alt-whistle"
-    // mode (pick a library song, Trim... it, Set as Alt Whistle -- same flow the global whistle
-    // button already used, previously this was the only whistle control still using a bare native
-    // OpenFileDialog via BrowseAndSetEventAltWhistle). Clicking again while set just clears it
-    // back to the global whistle rather than trying to cram a second "replace" affordance into one
-    // icon button.
-    row.querySelector('[data-act="alt-whistle"]').addEventListener("click", async (e) => {
+    // Per-event whistle-speed button -- REPLACED the alternate-whistle-clip picker 2026-08-12
+    // (owner request: same button, now cycles the whistle's playback speed for this event through
+    // a fixed preset list instead of swapping which clip plays). Same global whistle clip always
+    // plays; only how fast/slow it plays changes. Server returns the new value so the button can
+    // relabel itself immediately without a full re-render.
+    row.querySelector('[data-act="whistle-speed"]').addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (ev.altWhistleSet) {
-        await bridge?.ClearEventAltWhistle(ev.trigger);
-        showToast("Cleared -- this event uses the global whistle again.");
-        await openSituations(state.currentSituationsCategory);
-      } else {
-        await openClipperAssignForAltWhistle(ev.trigger, ev.eventName);
-      }
+      const btn = e.currentTarget;
+      const newSpeed = await bridge?.CycleEventWhistleSpeed(ev.trigger);
+      if (newSpeed == null) return;
+      ev.whistleSpeed = newSpeed;
+      btn.classList.toggle("active", newSpeed !== 1);
+      btn.title = whistleSpeedTitle(newSpeed);
+      const label = btn.querySelector(".situation-whistle-speed-label");
+      if (label) label.textContent = whistleSpeedLabel(newSpeed);
     });
     row.querySelector('[data-act="speed2x"]').addEventListener("click", (e) => {
       const btn = e.currentTarget;
@@ -3516,12 +3545,49 @@ async function submitAddSchool() {
   }
 }
 
+// Same CFB27 scorebug abbreviations curated in scripts/map_default_songs.py's TEAM_MAP (kept in
+// sync by hand -- that script owns the canonical list since it drives real file-sorting; this is
+// just a search convenience copy). Owner request: type either the full name OR the scorebug code
+// ("OSU", "UGA", "LSU"...) in any team search box. Ambiguous codes (UM, MSU -- see that script's
+// CONFERENCE_OVERRIDES doc comment) intentionally list both teams so searching still finds either.
+const TEAM_ABBREVIATIONS = {
+  "Boston College": ["BC"], "Clemson": ["Clem"], "Duke": ["DU"], "Florida State": ["FSU"],
+  "Georgia Tech": ["GT"], "NC State": ["NCST"], "Pittsburgh": ["PITT"], "Syracuse": ["SU"],
+  "Louisville": ["UL"], "Miami": ["UM"], "North Carolina": ["UNC"], "Virginia": ["UVA"],
+  "Virginia Tech": ["VT"], "Wake Forest": ["WF"], "California": ["CAL"], "Stanford": ["STAN"],
+  "Alabama": ["ALA"], "Arkansas": ["ARK"], "Auburn": ["AUB"], "Florida": ["UF"],
+  "Georgia": ["UGA"], "Kentucky": ["UK"], "Mississippi State": ["MSST", "MSU"],
+  "Missouri": ["MIZZ", "MIZZOU"], "Ole Miss": ["OM", "OLEMISS"],
+  "South Carolina": ["SCAR", "SOCAR"], "Tennessee": ["TENN"], "Texas A&M": ["TAMU", "A&M"],
+  "Texas": ["TEX", "UT"], "Vanderbilt": ["VANDY"], "Oklahoma": ["OU"],
+  "Illinois": ["ILL"], "Indiana": ["IND"], "Maryland": ["MARY", "MRLD"], "Michigan": ["MICH", "UM"],
+  "Michigan State": ["MSU"], "Minnesota": ["MINN"], "Nebraska": ["NEB"], "Northwestern": ["NW"],
+  "Ohio State": ["OSU"], "Penn State": ["PSU"], "Purdue": ["PUR"], "Rutgers": ["RUT"],
+  "Wisconsin": ["WISC"], "Washington": ["UW", "WASH"], "Oregon": ["ORE"],
+  "Arizona": ["ARIZ"], "Arizona State": ["ASU"], "Baylor": ["BAY", "BU"],
+  "Cincinnati": ["CIN", "UC"], "Colorado": ["COL", "CU"], "Houston": ["HOU", "UH"],
+  "Iowa State": ["ISU"], "Kansas": ["KU", "KAN"], "Kansas State": ["KSU"],
+  "Oklahoma State": ["OKST"], "Texas Tech": ["TTU"], "West Virginia": ["WV", "WVU"],
+  "Oregon State": ["ORST"], "Washington State": ["WSU", "WAZZU"], "Notre Dame": ["ND"],
+};
+
+// Matches a search query against a team's full name OR any known scorebug abbreviation (see
+// TEAM_ABBREVIATIONS above) -- shared by every team search box (renderTeamGridInto,
+// matchupCoverflowTeams) so "type the full name or the abbreviation" works everywhere at once.
+function teamMatchesQuery(team, q) {
+  if (!q) return true;
+  if (team.name.toLowerCase().includes(q)) return true;
+  const abbrevs = TEAM_ABBREVIATIONS[team.name];
+  if (!abbrevs) return false;
+  return abbrevs.some((a) => a.toLowerCase().startsWith(q));
+}
+
 function renderTeamGridInto(gridId, filter, onPick, showEditLogo = false) {
   const grid = document.getElementById(gridId);
   grid.innerHTML = "";
   const q = filter.trim().toLowerCase();
   for (const t of state.teams) {
-    if (q && !t.name.toLowerCase().includes(q)) continue;
+    if (!teamMatchesQuery(t, q)) continue;
     const sw = document.createElement("div");
     sw.className = "team-swatch" + (t.name === state.activeTeam ? " active" : "");
     sw.title = t.name;
@@ -4195,8 +4261,12 @@ function initSoundBoothRack() {
         // btn-clipper-assign-play uses) so people can hear their own clip run through the
         // reverb/EQ/effects rack instead of only the canned "score" test cue -- falls back to
         // the fixed test event when Sound Booth is opened with nothing selected.
-        if (_clipperAssignSelectedPath) await bridge?.PreviewLocalFile(_clipperAssignSelectedPath);
-        else await bridge?.PreviewEvent(btn.dataset.previewTrigger || "score");
+        // FIXED 2026-08-12 (owner report: turning the Home/Away/PA/Whistle context knob had no
+        // audible effect on Preview) -- pass the context knob's currently selected param
+        // ("home-volume"/etc) through so PreviewLocalFileFromWeb tracks THAT volume, live,
+        // instead of always silently using Master. See its doc comment in WebMainForm.cs.
+        if (_clipperAssignSelectedPath) await bridge?.PreviewLocalFile(_clipperAssignSelectedPath, _sbContextKnob?.getParamKey());
+        else await bridge?.PreviewEvent(btn.dataset.previewTrigger || "score", _sbContextKnob?.getParamKey());
       } catch (err) { console.error("Sound Booth preview failed", err); }
     });
   });
@@ -5329,7 +5399,7 @@ let _clipperAssignIsPa = false;
 let _clipperAssignLibrary = null; // cached [{name, path}], same list for every trigger
 let _clipperAssignSelectedPath = null;
 let _clipperAssignSelectedName = null;
-let _clipperAssignMode = "event"; // "event" (assign/trim a situation's clip) | "whistle" (pick+trim the global lead-in whistle) | "alt-whistle" (pick+trim one event's own alt whistle -- keeps _clipperAssignTrigger, unlike "whistle")
+let _clipperAssignMode = "event"; // "event" (assign/trim a situation's clip) | "whistle" (pick+trim the global lead-in whistle)
 // Owner request: default to just this team's Sound Bank (source "default") instead of every
 // source dumped together -- "all" and the individual source names (see CLIPPER_ASSIGN_SOURCE_*
 // below) are one pill-click away, not hidden. Resets to "default" every time the panel opens
@@ -5445,19 +5515,16 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode
   _clipperAssignSelectedPath = null;
   _clipperAssignSelectedName = null;
 
-  // "whistle" (global) and "alt-whistle" (one event's own override) both pick+trim a library song
-  // with no pre-existing assignment to fall back on -- same UI shape, different save target (see
-  // btn-trim-whistle's click handler below).
-  const isWhistleMode = mode === "whistle" || mode === "alt-whistle";
+  const isWhistleMode = mode === "whistle";
 
   stopPreview();
   document.getElementById("clipper-empty").hidden = true;
   document.getElementById("preview-bar").hidden = true;
   document.getElementById("clipper-title-text").textContent =
-    mode === "whistle" ? "Choose a Lead-In Whistle" : mode === "alt-whistle" ? "Choose an Alternate Whistle" : isPa ? "Assign PA Announcer Clip" : "Assign Track";
+    mode === "whistle" ? "Choose a Lead-In Whistle" : isPa ? "Assign PA Announcer Clip" : "Assign Track";
   document.getElementById("btn-clipper-close-assign").hidden = false;
   document.getElementById("clipper-assign-event").textContent = isWhistleMode
-    ? (mode === "alt-whistle" ? `for ${friendlyEventName(eventName)}` : "")
+    ? ""
     : `for ${friendlyEventName(eventName)}`;
   document.getElementById("clipper-assign-current").textContent =
     isWhistleMode ? "Pick a song below, then Trim... it down to your whistle sound." : currentFileName ? `Current: ${currentFileName}` : "Current: (none assigned)";
@@ -5505,14 +5572,6 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode
 
 async function openClipperAssignForWhistle() {
   await openClipperAssign(null, null, false, null, "whistle");
-}
-
-/// Per-event alt whistle -- picks up the Clipper's own pick+trim library flow instead of the bare
-/// native OpenFileDialog BrowseAndSetEventAltWhistle used to be. Keeps `trigger` (unlike the
-/// global "whistle" mode above, which has nothing to save back to) so btn-trim-whistle's click
-/// handler knows to call SaveTrimAsEventAltWhistle instead of the global SaveTrimAsLeadInWhistle.
-async function openClipperAssignForAltWhistle(trigger, eventName) {
-  await openClipperAssign(trigger, eventName, false, null, "alt-whistle");
 }
 
 function closeClipperAssign() {
@@ -5621,7 +5680,7 @@ function buildClipperAssignRow(item, list) {
     _clipperAssignSelectedPath = item.path;
     _clipperAssignSelectedName = item.name;
     document.getElementById("btn-clipper-assign-select").disabled = false;
-    if (_clipperAssignMode === "whistle" || _clipperAssignMode === "alt-whistle") document.getElementById("btn-clipper-assign-trim").disabled = false;
+    if (_clipperAssignMode === "whistle") document.getElementById("btn-clipper-assign-trim").disabled = false;
   });
   return row;
 }
@@ -5828,11 +5887,9 @@ async function openInlineTrimmer(trigger, isPa, overridePath) {
 }
 
 /// Whistle-mode counterpart to openInlineTrimmer -- there's no "already assigned" file to pull for
-/// either whistle mode, so this trims whatever library row/browsed file the user just picked in
-/// Clipper Island (see PrepareTrimForWhistleFromWeb). "Save Trim" doesn't apply here (there's no
-/// event slot to assign back to), only "Set as Whistle" (btn-trim-whistle). alt-whistle mode DOES
-/// keep _trimTrigger (unlike global "whistle" mode) -- that's what tells btn-trim-whistle's click
-/// handler to call SaveTrimAsEventAltWhistle for this one event instead of the global whistle.
+/// whistle mode, so this trims whatever library row/browsed file the user just picked in Clipper
+/// Island (see PrepareTrimForWhistleFromWeb). "Save Trim" doesn't apply here (there's no event
+/// slot to assign back to), only "Set as Whistle" (btn-trim-whistle).
 async function openInlineTrimmerForWhistle(path, fileName) {
   if (!bridge) return;
   const result = JSON.parse(await bridge.PrepareTrimForWhistle(path));
@@ -5840,7 +5897,7 @@ async function openInlineTrimmerForWhistle(path, fileName) {
     showToast(result.error || "Couldn't open the trimmer.");
     return;
   }
-  _trimTrigger = _clipperAssignMode === "alt-whistle" ? _clipperAssignTrigger : null;
+  _trimTrigger = null;
   _trimForWhistle = true;
   _trimIsPa = false;
   _trimUrl = result.url;
@@ -5855,8 +5912,7 @@ async function openInlineTrimmerForWhistle(path, fileName) {
   document.getElementById("clipper-assign-actions-default").hidden = true;
   document.getElementById("clipper-trim-actions").hidden = false;
   document.getElementById("btn-trim-save").hidden = true;
-  document.getElementById("btn-trim-whistle").textContent =
-    _clipperAssignMode === "alt-whistle" ? "Set as Alt Whistle for This Event" : "Set as Lead-In Whistle";
+  document.getElementById("btn-trim-whistle").textContent = "Set as Lead-In Whistle";
   _trimSourceName = result.fileName || fileName;
   document.getElementById("clipper-trim-filename").textContent = result.fileName || fileName;
   updateTrimLabels();
@@ -6127,22 +6183,13 @@ function wireInlineTrimmer() {
 
   document.getElementById("btn-trim-whistle").addEventListener("click", async () => {
     if (!bridge) return;
-    // alt-whistle mode keeps _trimTrigger set (see openInlineTrimmerForWhistle) specifically so
-    // this branch can tell "save to this one event's AltWhistlePath" apart from the global
-    // "whistle" mode's "overwrite the single shared lead-in whistle".
-    const result = JSON.parse(_clipperAssignMode === "alt-whistle" && _trimTrigger
-      ? await bridge.SaveTrimAsEventAltWhistle(_trimTrigger, _trimStartSec, _trimEndSec)
-      : await bridge.SaveTrimAsLeadInWhistle(_trimStartSec, _trimEndSec));
+    const result = JSON.parse(await bridge.SaveTrimAsLeadInWhistle(_trimStartSec, _trimEndSec));
     if (!result.ok) { showToast(result.error || "Couldn't save the whistle clip."); return; }
-    showToast(_clipperAssignMode === "alt-whistle" ? "Alternate whistle set for this event." : "Lead-in whistle updated.");
+    showToast("Lead-in whistle updated.");
     flashPanel(document.getElementById("clipper-island"));
     if (_trimForWhistle) {
       closeClipperAssign();
-      if (_clipperAssignMode === "alt-whistle") {
-        if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
-      } else {
-        await refreshLeadInWhistleSection();
-      }
+      await refreshLeadInWhistleSection();
     }
   });
 
@@ -6183,7 +6230,7 @@ function initClipperAssign() {
     if (!path) return;
     const songName = path.split(/[\\/]/).pop();
 
-    if (_clipperAssignMode === "whistle" || _clipperAssignMode === "alt-whistle") {
+    if (_clipperAssignMode === "whistle") {
       document.querySelectorAll("#clipper-assign-list .clipper-assign-row.selected").forEach((r) => r.classList.remove("selected"));
       _clipperAssignSelectedPath = path;
       _clipperAssignSelectedName = songName;
@@ -6243,7 +6290,7 @@ function initClipperAssign() {
   });
 
   document.getElementById("btn-clipper-assign-trim").addEventListener("click", async () => {
-    if (_clipperAssignMode === "whistle" || _clipperAssignMode === "alt-whistle") {
+    if (_clipperAssignMode === "whistle") {
       if (!_clipperAssignSelectedPath) return;
       await openInlineTrimmerForWhistle(_clipperAssignSelectedPath, _clipperAssignSelectedName);
       return;
@@ -7438,7 +7485,10 @@ function renderMatchupSideGrid(side, filter) {
     renderMatchupCoverflow(side, document.getElementById(`matchup-${side}-search`)?.value || "");
     renderMatchupSideGrid(side, filter);
   });
-  wireMatchupSideGridDock(gridId);
+  // Dock hover-magnify (wireMatchupSideGridDock) disabled 2026-08-12 -- owner report: laggy
+  // icon-scroll list. It loops getBoundingClientRect() over all ~190 tiles on every mousemove,
+  // forcing a layout read that many times per second. Left wireMatchupSideGridWheel (the actual
+  // "don't skip teams" fix) untouched.
   wireMatchupSideGridWheel(gridId);
   const activeTeam = side === "home" ? state.matchupHome : state.matchupAway;
   scrollActiveTileToCenter(gridId, activeTeam);
@@ -7450,11 +7500,18 @@ function renderMatchupSideGrid(side, filter) {
 function scrollActiveTileToCenter(gridId, teamName) {
   const grid = document.getElementById(gridId);
   if (!grid || !teamName) return;
-  const tile = Array.from(grid.querySelectorAll(".team-swatch")).find((el) => el.title === teamName);
-  if (!tile) return;
-  const targetTop = tile.offsetTop - grid.clientHeight / 2 + tile.offsetHeight / 2;
-  grid.scrollTop = Math.max(0, targetTop);
-  grid._wheelTarget = grid.scrollTop; // keep wireMatchupSideGridWheel's eased target in sync
+  // FIXED 2026-08-12 (owner report: active team landing near the TOP of the strip instead of
+  // centered) -- renderTeamGridInto's squareUpTiles() sets each tile's real height inside its own
+  // requestAnimationFrame callback (deferred to next paint). This ran synchronously right after,
+  // measuring offsetTop/offsetHeight before tiles had their real squared-up size, so the centering
+  // math came out wrong. Deferring to rAF here too runs this AFTER squareUpTiles' already-queued
+  // callback (same frame, later in the queue), so it measures the real, final tile size.
+  requestAnimationFrame(() => {
+    const tile = Array.from(grid.querySelectorAll(".team-swatch")).find((el) => el.title === teamName);
+    if (!tile) return;
+    const targetTop = tile.offsetTop - grid.clientHeight / 2 + tile.offsetHeight / 2;
+    grid.scrollTop = Math.max(0, targetTop);
+  });
 }
 
 // ---- Matchup side-grid fast + looping wheel scroll (owner request 2026-08-11) -----------------
@@ -7472,43 +7529,13 @@ const MATCHUP_SIDE_GRID_WHEEL_SPEED = 1.6;
 // wrap only triggers when the scroll was ALREADY resting at that edge before this tick, (2) motion
 // is eased toward a target via rAF instead of an instant jump, for the "smooth and buttery" feel
 // requested instead of a hard snap.
-function wireMatchupSideGridWheel(gridId) {
-  const grid = document.getElementById(gridId);
-  if (!grid || grid._wheelWired) return;
-  grid._wheelWired = true;
-
-  // Stored ON the grid (not a closure var) so scrollActiveTileToCenter's direct scrollTop jumps
-  // (fired on every re-render/pick) can keep this in sync -- otherwise the next wheel tick would
-  // ease back toward a stale target and undo the re-center.
-  grid._wheelTarget = grid.scrollTop;
-  let raf = null;
-
-  function tick() {
-    const current = grid.scrollTop;
-    const delta = grid._wheelTarget - current;
-    if (Math.abs(delta) < 0.5) {
-      grid.scrollTop = grid._wheelTarget;
-      raf = null;
-      return;
-    }
-    grid.scrollTop = current + delta * 0.25;
-    raf = requestAnimationFrame(tick);
-  }
-
-  grid.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    const max = grid.scrollHeight - grid.clientHeight;
-    if (max <= 0) return;
-    const atBottom = grid._wheelTarget >= max - 1;
-    const atTop = grid._wheelTarget <= 1;
-    let next = grid._wheelTarget + e.deltaY * MATCHUP_SIDE_GRID_WHEEL_SPEED;
-    if (next > max && atBottom) next = 0; // already at Z, keep scrolling -- wrap to A
-    else if (next < 0 && atTop) next = max; // already at A, keep scrolling -- wrap to Z
-    else next = Math.max(0, Math.min(max, next));
-    grid._wheelTarget = next;
-    if (!raf) raf = requestAnimationFrame(tick);
-  }, { passive: false });
-}
+// DISABLED 2026-08-12 (owner report: one wheel notch jumps several teams, e.g. "Rice straight to
+// NC A&T") -- MATCHUP_SIDE_GRID_WHEEL_SPEED (1.6x) multiplies every wheel tick's native scroll
+// distance, so a single notch moves further than one tile's row height and reads as skipped
+// teams, even though the wrap/edge logic itself is correct. Plain native wheel scroll (no custom
+// handler at all) moves a normal, predictable amount per notch and never skips. No-op kept so the
+// call site in renderMatchupSideGrid doesn't need touching.
+function wireMatchupSideGridWheel(_gridId) {}
 
 // ---- Matchup side-grid "Mac Dock" hover-magnify (owner request, finished 2026-08-11) -----------
 // Real proximity-based magnify, not achievable with hover-only CSS -- tiles near the cursor scale
@@ -8055,7 +8082,7 @@ function advanceBatchLogoImport() {
 async function refreshTeamsAfterLogoChange() {
   if (!bridge) return;
   try {
-    state.teams = JSON.parse(await bridge.GetTeams());
+    state.teams = sortTeamsAZ(JSON.parse(await bridge.GetTeams()));
   } catch (err) {
     console.error("GetTeams refresh failed", err);
     return;
@@ -8100,7 +8127,7 @@ function wireMatchupGameSettingsPill() {
 /// name label. GAMETIME is the real commit point, not this.
 function matchupCoverflowTeams(filter) {
   const q = (filter || "").trim().toLowerCase();
-  return state.teams.filter((t) => t.name !== "General" && (!q || t.name.toLowerCase().includes(q)));
+  return state.teams.filter((t) => t.name !== "General" && teamMatchesQuery(t, q));
 }
 
 function renderMatchupCoverflow(side, filter) {
@@ -8198,7 +8225,11 @@ function renderMatchupCoverflow(side, filter) {
 /// a fast trackpad fling steps cleanly through teams instead of skipping dozens at once.
 function wireCoverflowWheel(track, shiftFn) {
   if (!track) return;
-  const container = track.closest(".matchup-column, .coverflow-stage") || track;
+  // Scoped to .coverflow-stage (the carousel strip itself), NOT the enclosing .matchup-column --
+  // that column spans the full dialog height, so listening there swallowed every wheel event
+  // anywhere on the matchup screen (preventDefault fired even when throttled/no-op), which is
+  // what made the mouse "get stuck" and stop scrolling outside the carousel (owner report 2026-08-12).
+  const container = track.closest(".coverflow-stage") || track;
   let lastShift = 0;
   container.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -8318,6 +8349,16 @@ async function confirmMatchup() {
   await selectTeam(myTeamIsAway ? state.matchupAway : state.matchupHome);
   await openBandroomViewer();
   showToast(`GAMETIME! ${state.matchupAway} @ ${state.matchupHome} -- watching started`);
+  // Log to the dynasty journal now, synchronously right after matchupLocked is set above --
+  // this used to be a separate click listener on btn-matchup-confirm with a 500ms setTimeout
+  // guessing confirmMatchup would be done by then. That was a real race: if the bridge calls
+  // above (GetTeamsNeedingDefaultProfile / ApplyDefaultProfileForTeam / SetUserTeamScreenSide /
+  // ConfirmGametime) took longer than 500ms, state.matchupLocked wasn't set yet when the
+  // journal check ran, so the game silently never got logged. Calling it here guarantees it
+  // runs only after everything above (including state.matchupLocked = true) has completed.
+  if (typeof logDynastyGame === "function") {
+    logDynastyGame({ away: state.matchupAway, home: state.matchupHome, result: "pending", matchup: `${state.matchupAway} @ ${state.matchupHome}` });
+  }
 }
 
 /// Glass-styled confirm prompt (task queue item 6) -- resolves true if the user wants to proceed
@@ -8733,11 +8774,12 @@ const EVENT_FRIENDLY_NAMES = {
   "Offense: Earned First Down Short": "1st & Short",
   "Offense: 3rd Down Conversion": "Converted 3rd Down",
   "Offense: Earned First Down (Midfield)": "Got 1st Down - Past Midfield",
-  "Offense: Second Down": "2nd Down",
+  "Offense: Second Down": "2nd & Long",
   "Offense: Second Down (Midfield)": "2nd Down - Past Midfield",
   "Offense: Second Down Short": "2nd & Short",
-  "Offense: Third Down": "3rd Down",
+  "Offense: Third Down": "3rd & Long",
   "Offense: Third Down Short": "3rd & Short",
+  "Offense: Fourth Down": "4th Down",
   "Offense: 1st Down After Punt": "1st Down After Punt",
   "Offense: PAT Made": "Extra Point Good",
   "Offense: 2-Point Conversion Made": "2-Point Conversion Good",
@@ -8747,12 +8789,13 @@ const EVENT_FRIENDLY_NAMES = {
   "Offense: Touchdown Scored": "Touchdown",
   "Defense: After Opening Kick": "Defense After Opening Kick",
   "Defense: Third Down": "3rd & Long",
-  "Defense: Third Down Short": "3rd & Short (Defense)",
-  "Defense: Fourth Down": "Stopped Them on 4th",
+  "Defense: Third Down Short": "3rd & Short",
+  "Defense: Fourth Down": "4th Down",
   "Defense: Second Down": "2nd & Long",
+  "Defense: Second Down Short": "2nd & Short",
   "Defense: Second Down (Midfield)": "2nd Down - Past Midfield",
   "Defense: Second Down (Loss)": "2nd Down After a Loss",
-  "Defense: Fourth Down (Loss)": "Stopped Them on 4th After a Loss",
+  "Defense: Fourth Down (Loss)": "4th Down After a Loss",
   "Defense: After Punt": "Defense After Punt",
   "Defense: Field Goal Missed by Opponent": "Opponent Missed Field Goal",
   "Defense: Turnover Forced": "Turnover Forced",
@@ -9898,17 +9941,10 @@ function clearDynastyJournal() {
 }
 loadDynastyJournal();
 
-// Log every game to the dynasty journal automatically when matchup confirmed
-const _origOpenMatchupConfirm = document.getElementById("btn-matchup-confirm")?.onclick;
-if (document.getElementById("btn-matchup-confirm")) {
-  document.getElementById("btn-matchup-confirm").addEventListener("click", () => {
-    setTimeout(() => {
-      if (state.matchupLocked && state.matchupAway && state.matchupHome) {
-        logDynastyGame({ away: state.matchupAway, home: state.matchupHome, result: "pending", matchup: `${state.matchupAway} @ ${state.matchupHome}` });
-      }
-    }, 500);
-  });
-}
+// Dynasty journal logging on GAMETIME confirm now happens directly inside confirmMatchup()
+// (right after state.matchupLocked = true), not via a second click listener here. The old
+// listener guessed confirmMatchup would finish within 500ms of the click and silently dropped
+// the journal entry on slower bridge round-trips -- see the comment at the end of confirmMatchup.
 
 // Show on first launch after a real new release (see maybeShowWhatsNew) -- runs after init()
 // so bridge/GetChangelog are ready.

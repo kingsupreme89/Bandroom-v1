@@ -140,7 +140,14 @@ internal sealed class AssignTrackForm : Form
 
     void PreviewSelected()
     {
-        if (_lstTracks.SelectedItem is TrackItem item) AudioPlayer.Play(item.Path);
+        // BUG FIX: was calling Play() with all defaults (isPreview left false), which routes a
+        // manual "click Play on this song in the assign dialog" through the REAL-fire path --
+        // subject to the 20s FireCooldown (click Play twice on the same clip within 20s and the
+        // second click silently did nothing, same symptom PreviewEventFromWeb's isPreview flag
+        // was added to prevent) and PreRollSeconds (a delay meaningful for real game triggers,
+        // not a manual preview click that should start instantly). isPreview: true matches every
+        // other manual preview call site (PreviewEventFromWeb, PreviewLocalFileFromWeb).
+        if (_lstTracks.SelectedItem is TrackItem item) AudioPlayer.Play(item.Path, isPreview: true);
     }
 
     void AssignFromList()

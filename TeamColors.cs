@@ -176,7 +176,7 @@ internal static class TeamColors
     static readonly TeamColor[] FcsTeams =
     {
         new("North Dakota State", Hex("#134a37"), Hex("#ffc72c")),
-        new("Montana", Hex("#7c1938"), Hex("#c0c0c0")),
+        new("Montana", Hex("#7c1938"), Hex("#b03a5b")), // secondary set to a lighter tint of the primary burgundy (was silver #c0c0c0) so applyTeamGlowVars' "lighter of primary/secondary" LED-glow pick lands on burgundy instead of silver -- owner request 2026-08-12
         new("Montana State", Hex("#154734"), Hex("#f2a900")),
         new("South Dakota State", Hex("#0033a0"), Hex("#ffc627")),
         new("Villanova", Hex("#00205b"), Hex("#c8102e")),
@@ -232,6 +232,14 @@ internal static class TeamColors
     /// AddCustomTeam so a newly-added team shows up everywhere immediately, no restart needed.</summary>
     static readonly List<TeamColor> _all = BuildAll();
 
+    // BUG FIX (audit finding): AddCustomTeam used to read/mutate _all with no synchronization.
+    // WebView2 host-object calls aren't serialized onto one thread (same reasoning as every lock
+    // in ConfigStore.cs), so two near-simultaneous "add school" calls -- or an add racing All's
+    // enumeration via ToArray() below -- could interleave a List<T>.Add with another thread's
+    // read/resize, which is undefined behavior on a plain List<T> (can throw, or silently produce
+    // a duplicate/corrupt roster). Guards the whole check-then-add in AddCustomTeam.
+    static readonly object AllLock = new();
+
     static List<TeamColor> BuildAll()
     {
         var list = new List<TeamColor>(BaseTeams);
@@ -245,13 +253,16 @@ internal static class TeamColors
         return list;
     }
 
-    public static TeamColor[] All => _all.ToArray();
+    public static TeamColor[] All { get { lock (AllLock) return _all.ToArray(); } }
 
     public static TeamColor ByName(string name)
     {
-        foreach (var t in _all)
-            if (t.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return t;
-        return _all[0];
+        lock (AllLock)
+        {
+            foreach (var t in _all)
+                if (t.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return t;
+            return _all[0];
+        }
     }
 
     /// <summary>Adds a new user-created custom school (name + primary/secondary color + optional
@@ -264,12 +275,19 @@ internal static class TeamColors
     {
         name = name.Trim();
         mascot = mascot.Trim();
-        var existing = _all.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (existing.Name != null) return existing;
+        lock (AllLock)
+        {
+            var existing = _all.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (existing.Name != null) return existing;
 
-        var team = new TeamColor(name, primary, secondary, mascot);
-        _all.Add(team);
-        ConfigStore.SaveCustomTeam(name, ColorTranslator.ToHtml(primary), ColorTranslator.ToHtml(secondary), mascot);
-        return team;
+            var team = new TeamColor(name, primary, secondary, mascot);
+            _all.Add(team);
+            // ConfigStore.SaveCustomTeam has its own file-level lock (CustomTeamsLock) guarding
+            // custom_teams.json itself; nesting it inside AllLock here is fine (SaveCustomTeam
+            // never calls back into TeamColors) and keeps the in-memory add and the on-disk
+            // persist from interleaving with a second concurrent AddCustomTeam call.
+            ConfigStore.SaveCustomTeam(name, ColorTranslator.ToHtml(primary), ColorTranslator.ToHtml(secondary), mascot);
+            return team;
+        }
     }
 }

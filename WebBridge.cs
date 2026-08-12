@@ -1225,13 +1225,13 @@ public sealed class WebBridge
             paFileName = string.IsNullOrWhiteSpace(e.PaAudioFile) ? null : Path.GetFileNameWithoutExtension(e.PaAudioFile),
             confirmed = ConfirmedTriggers.Contains(e.Trigger),
             playLeadInWhistle = e.PlayLeadInWhistle,
-            altWhistleSet = !string.IsNullOrWhiteSpace(e.AltWhistlePath),
+            whistleSpeed = e.WhistleSpeed,
             speed2x = e.PlaybackSpeed2x,
         }));
 
     public void AssignEvent(string trigger) => _host.OpenAssignTrackFromWeb(trigger);
     public void AssignPaEvent(string trigger) => _host.OpenAssignPaTrackFromWeb(trigger);
-    public void PreviewEvent(string trigger) => _host.PreviewEventFromWeb(trigger);
+    public void PreviewEvent(string trigger, string? contextParamKey = null) => _host.PreviewEventFromWeb(trigger, contextParamKey);
     public void StopPreview() => _host.StopPreviewFromWeb();
 
     // Clipping-island assign flow -- replaces the native AssignTrackForm popup for the main-song
@@ -1241,7 +1241,7 @@ public sealed class WebBridge
     // Sound Bank browsing redesign -- lists every team with a pack slice on disk, for the
     // Assignment screen's "Browse another team's Sound Bank" picker.
     public string GetDefaultPackTeams() => _host.GetDefaultPackTeamsFromWeb();
-    public void PreviewLocalFile(string path) => _host.PreviewLocalFileFromWeb(path);
+    public void PreviewLocalFile(string path, string? contextParamKey = null) => _host.PreviewLocalFileFromWeb(path, contextParamKey);
     public void PlaySoundboardSlot(string key, string path) => _host.PlaySoundboardSlotFromWeb(key, path);
     public Task<string?> ScanDynastySave() => _host.ScanDynastySaveFromWeb();
     public void AssignTrackFile(string trigger, bool isPa, string path) => _host.AssignTrackFileFromWeb(trigger, isPa, path);
@@ -1270,9 +1270,11 @@ public sealed class WebBridge
     // click itself.
     public void SetEventPlayLeadInWhistle(string trigger, bool enabled) => _host.SetEventPlayLeadInWhistleFromWeb(trigger, enabled);
     public void SetEventPlaybackSpeed2x(string trigger, bool enabled) => _host.SetEventPlaybackSpeed2xFromWeb(trigger, enabled);
-    public bool BrowseAndSetEventAltWhistle(string trigger) => _host.BrowseAndSetEventAltWhistleFromWeb(trigger);
-    public void ClearEventAltWhistle(string trigger) => _host.ClearEventAltWhistleFromWeb(trigger);
-    public string SaveTrimAsEventAltWhistle(string trigger, double startSec, double endSec) => _host.SaveTrimAsEventAltWhistleFromWeb(trigger, startSec, endSec);
+    // Per-event whistle-speed button -- REPLACED BrowseAndSetEventAltWhistle/ClearEventAltWhistle/
+    // SaveTrimAsEventAltWhistle 2026-08-12 (owner request: swap the alternate-whistle-clip picker
+    // for a whistle-speed toggle). Cycles through WebMainForm.WhistleSpeedPresets, returns the new
+    // value so the button can relabel itself immediately.
+    public double CycleEventWhistleSpeed(string trigger) => _host.CycleEventWhistleSpeedFromWeb(trigger);
 
     public void SetVolume(int percent) => _host.SetVolumeFromWeb(percent);
     public int GetVolume() => _host.GetVolumeFromWeb();

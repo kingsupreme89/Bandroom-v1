@@ -44,4 +44,18 @@ public sealed class PlaySnapshot
     /// (that screen's panel colors are per-matchup team colors, e.g. red/blue for Ohio State/
     /// Michigan vs different colors for any other pairing).</summary>
     public bool IsPregameReady { get; init; }
+
+    /// <summary>True while the pregame tunnel-walk chevron marker is on screen -- the pair of
+    /// white chevron shapes flanking the center bowl/rivalry badge in the pregame scorebug, e.g.
+    /// the Rose Bowl badge screenshot that calibrated ScorebugPreset.CollegeFootball27's
+    /// ChevronMarkerFx* crop. Owner-confirmed present on every game's pregame scorebug, not just
+    /// bowl games, so it's a team-neutral, matchup-neutral signal -- unlike IsPregameReady's panel
+    /// colors, this needed no color-independence caveat since it's read by brightness only (see
+    /// GameWatcher.SamplePregameEntranceFromWindow), same technique as the possession underline.
+    /// This fires slightly BEFORE GameStateEventHelper's existing quarter/down heuristic can (the
+    /// walkout happens before the first snap makes Down/Quarter readable), so
+    /// GameStateEventHelper's "Other: Pregame Take the Field" block ORs this in as an earlier,
+    /// more direct alternative to that heuristic rather than being a separate event/evaluator --
+    /// see that class's _didFirePregame guard, which covers both signals with one fire-once flag.</summary>
+    public bool IsPregameEntranceMarker { get; init; }
 }

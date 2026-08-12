@@ -113,7 +113,7 @@ internal static class ConfigStore
             entries.Add(new CustomTeamEntry { Name = name, PrimaryHex = primaryHex, SecondaryHex = secondaryHex, Mascot = mascot });
 
             Directory.CreateDirectory(UserDataRoot);
-            File.WriteAllText(CustomTeamsPath, JsonSerializer.Serialize(entries, JsonOptions));
+            AtomicWriteAllText(CustomTeamsPath, JsonSerializer.Serialize(entries, JsonOptions));
         }
     }
     static readonly string LeadInWhistleEnabledPath = Path.Combine(UserDataRoot, "leadin_whistle_enabled.txt");
@@ -160,7 +160,7 @@ internal static class ConfigStore
     public static void SaveBigGameSettings(BigGameSettings settings)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(BigGameSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        AtomicWriteAllText(BigGameSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
         _bigGameSettingsCache = settings;
     }
 
@@ -192,7 +192,7 @@ internal static class ConfigStore
     {
         var settings = new LastMatchup(homeName, awayName);
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(LastMatchupPath, JsonSerializer.Serialize(settings, JsonOptions));
+        AtomicWriteAllText(LastMatchupPath, JsonSerializer.Serialize(settings, JsonOptions));
         _lastMatchupCache = settings;
     }
 
@@ -230,7 +230,7 @@ internal static class ConfigStore
     public static void SaveBandDirectorDashboardSettings(BandDirectorDashboardSettings settings)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(BandDirectorDashboardSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        AtomicWriteAllText(BandDirectorDashboardSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
         _bandDirectorDashboardSettingsCache = settings;
     }
 
@@ -267,7 +267,7 @@ internal static class ConfigStore
     public static void SavePlaybackTimingSettings(PlaybackTimingSettings settings)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(PlaybackTimingSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        AtomicWriteAllText(PlaybackTimingSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
         _playbackTimingSettingsCache = settings;
     }
 
@@ -300,7 +300,7 @@ internal static class ConfigStore
     public static void SaveAppWindowSettings(AppWindowSettings settings)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(AppWindowSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        AtomicWriteAllText(AppWindowSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
         _appWindowSettingsCache = settings;
     }
 
@@ -343,7 +343,7 @@ internal static class ConfigStore
     public static void SaveAudioSettings(AudioSettings settings)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(AudioSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        AtomicWriteAllText(AudioSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
         _audioSettingsCache = settings;
     }
 
@@ -439,7 +439,7 @@ internal static class ConfigStore
             }
 
             Directory.CreateDirectory(UserDataRoot);
-            File.WriteAllText(DefaultSongsFolderOverridePath, newFolder);
+            AtomicWriteAllText(DefaultSongsFolderOverridePath, newFolder);
             _defaultSongsFolderOverrideCache = newFolder;
             _defaultSongsFolderOverrideLoaded = true;
             return true;
@@ -473,7 +473,7 @@ internal static class ConfigStore
     public static void SaveScorebugPresetName(string name)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(ScorebugPresetPath, name);
+        AtomicWriteAllText(ScorebugPresetPath, name);
     }
 
     /// <summary>Persists the Mixer panel's Lead-In Whistle on/off toggle across restarts --
@@ -485,7 +485,7 @@ internal static class ConfigStore
     public static void SaveLeadInWhistleEnabled(bool enabled)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(LeadInWhistleEnabledPath, enabled ? "true" : "false");
+        AtomicWriteAllText(LeadInWhistleEnabledPath, enabled ? "true" : "false");
     }
 
     sealed record SupabaseSettings(string Url, string AnonKey);
@@ -509,7 +509,7 @@ internal static class ConfigStore
     public static void SaveSupabaseSettings(string url, string anonKey)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(SupabaseSettingsPath, JsonSerializer.Serialize(new SupabaseSettings(url, anonKey)));
+        AtomicWriteAllText(SupabaseSettingsPath, JsonSerializer.Serialize(new SupabaseSettings(url, anonKey)));
     }
 
     /// <summary>
@@ -896,7 +896,7 @@ internal static class ConfigStore
     /// file rather than a triggers.json field so it survives profile resets/imports.</summary>
     public static bool IsFirstRun() => !File.Exists(FirstRunFlagPath);
 
-    public static void MarkFirstRunDone() => File.WriteAllText(FirstRunFlagPath, DateTime.UtcNow.ToString("O"));
+    public static void MarkFirstRunDone() => AtomicWriteAllText(FirstRunFlagPath, DateTime.UtcNow.ToString("O"));
 
     static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".ogg" };
 
@@ -973,7 +973,7 @@ internal static class ConfigStore
     static void SaveMarketplaceDownloads(List<MarketplaceDownloadEntry> entries)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(MarketplaceDownloadsManifestPath, JsonSerializer.Serialize(entries, JsonOptions));
+        AtomicWriteAllText(MarketplaceDownloadsManifestPath, JsonSerializer.Serialize(entries, JsonOptions));
     }
 
     /// <summary>Records a new download in the manifest. If a prior entry already points at the
@@ -1055,7 +1055,7 @@ internal static class ConfigStore
     static void SaveLocalTracks(List<LocalTrackEntry> entries)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(LocalTracksManifestPath, JsonSerializer.Serialize(entries, JsonOptions));
+        AtomicWriteAllText(LocalTracksManifestPath, JsonSerializer.Serialize(entries, JsonOptions));
     }
 
     public static LocalTrackEntry RecordLocalTrack(string name, string path, string type = "song")
@@ -1128,7 +1128,7 @@ internal static class ConfigStore
     public static void SaveAuthSession(AuthSession session)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(AuthSessionPath, JsonSerializer.Serialize(session, JsonOptions));
+        AtomicWriteAllText(AuthSessionPath, JsonSerializer.Serialize(session, JsonOptions));
     }
 
     public static void ClearAuthSession()
@@ -1229,7 +1229,7 @@ internal static class ConfigStore
     public static void SaveTeamLogoSyncManifest(TeamLogoSyncManifest manifest)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(TeamLogoSyncManifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
+        AtomicWriteAllText(TeamLogoSyncManifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
     }
 
     /// <summary>Tracks, per team, the updatedAt of the PUBLIC (everyone-sees-it) logo this device
@@ -1257,7 +1257,7 @@ internal static class ConfigStore
     public static void SavePublicTeamLogoSyncManifest(PublicTeamLogoSyncManifest manifest)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(PublicTeamLogoSyncManifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
+        AtomicWriteAllText(PublicTeamLogoSyncManifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
     }
 
     public static readonly string AvatarFolder = Path.Combine(UserDataRoot, "Avatar");
@@ -1291,7 +1291,7 @@ internal static class ConfigStore
     static void SaveUserProfileUnlocked(UserProfile profile)
     {
         Directory.CreateDirectory(UserDataRoot);
-        File.WriteAllText(UserProfilePath, JsonSerializer.Serialize(profile, JsonOptions));
+        AtomicWriteAllText(UserProfilePath, JsonSerializer.Serialize(profile, JsonOptions));
     }
 
     /// <summary>Atomically loads, applies <paramref name="mutate"/>, and saves the user profile
@@ -1314,6 +1314,37 @@ internal static class ConfigStore
 
     static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
 
+    /// <summary>Durability safeguard (audit finding): every config/profile/manifest write in this
+    /// file used to go straight through File.WriteAllText onto the real target path. That call is
+    /// NOT atomic -- if the process is killed (crash, forced-quit, power loss, Squirrel update
+    /// racing a save) partway through, the target file is left truncated/corrupt on disk. For files
+    /// with a try/catch on load that "just" resets to defaults (losing real user data silently);
+    /// for ConfigPath/profile files specifically it used to be worse -- see the LoadOrCreate/
+    /// LoadProfile fix notes below, those had NO try/catch at all and would crash the app outright
+    /// on next launch. Standard write-to-temp-then-replace pattern: the real path is only ever
+    /// updated by an atomic filesystem rename, so a crash mid-write leaves either the old good file
+    /// or the new good file, never a half-written one. Same fix, applied to every writer in this
+    /// class for consistency (mechanical, no behavior change for the success path).</summary>
+    static void AtomicWriteAllText(string path, string content)
+    {
+        string? dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        string tmpPath = path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+        try
+        {
+            File.WriteAllText(tmpPath, content);
+            if (File.Exists(path))
+                File.Replace(tmpPath, path, null); // atomic on the same volume
+            else
+                File.Move(tmpPath, path); // target doesn't exist yet -- Replace requires it to
+        }
+        catch
+        {
+            try { if (File.Exists(tmpPath)) File.Delete(tmpPath); } catch { /* best-effort cleanup */ }
+            throw;
+        }
+    }
+
     public static List<TriggerEntry> LoadOrCreate()
     {
         Directory.CreateDirectory(SongsFolder);
@@ -1323,9 +1354,33 @@ internal static class ConfigStore
 
         if (File.Exists(ConfigPath))
         {
-            string json = File.ReadAllText(ConfigPath);
-            var loaded = JsonSerializer.Deserialize<List<TriggerEntry>>(json, JsonOptions) ?? new List<TriggerEntry>();
-            return EnsureAllEvents(loaded);
+            // BUG FIX (audit finding): unlike every other manifest in this file, this load path had
+            // no try/catch at all -- a truncated/corrupt triggers.json (e.g. from a crash mid-write
+            // before the AtomicWriteAllText fix, or a bad manual edit) threw straight out of
+            // LoadOrCreate, which every caller (WebMainForm.cs, Bandroom.Mac's MainWindow) invokes
+            // unguarded during startup, crashing the whole app before the UI ever appears -- with no
+            // way for the user to recover short of manually deleting the file. Now falls back to
+            // BuildDefault() like every sibling Load* method, and preserves the unreadable file
+            // (renamed, not deleted) so it isn't silently lost and can still be inspected/recovered.
+            try
+            {
+                string json = File.ReadAllText(ConfigPath);
+                var loaded = JsonSerializer.Deserialize<List<TriggerEntry>>(json, JsonOptions) ?? new List<TriggerEntry>();
+                return EnsureAllEvents(loaded);
+            }
+            catch
+            {
+                try
+                {
+                    string backupPath = ConfigPath + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+                    if (!File.Exists(backupPath)) File.Copy(ConfigPath, backupPath);
+                }
+                catch { /* best-effort forensic copy -- never let this block recovery */ }
+
+                var recovered = BuildDefault();
+                Save(recovered);
+                return recovered;
+            }
         }
 
         var defaults = BuildDefault();
@@ -1335,16 +1390,37 @@ internal static class ConfigStore
 
     public static void Save(List<TriggerEntry> entries)
     {
-        File.WriteAllText(ConfigPath, JsonSerializer.Serialize(entries, JsonOptions));
+        AtomicWriteAllText(ConfigPath, JsonSerializer.Serialize(entries, JsonOptions));
     }
 
     static string ProfilePath(string name) => Path.Combine(ProfilesFolder, $"{SanitizeFileName(name)}.json");
+
+    // Windows reserves these basenames (case-insensitive, with or without an extension) at the
+    // filesystem level -- CreateFile fails on "CON.json" exactly like it fails on "CON". A
+    // user-chosen profile/team name of "con", "prn", "nul", "com1".."com9", or "lpt1".."lpt9"
+    // (a real risk: profile names come straight from free-text team/preset naming, e.g. "Con"
+    // Air Force-adjacent nicknames, "AUX" as a joke name, etc.) used to reach SaveProfile's
+    // File.WriteAllText unguarded and throw an unhandled IOException, crashing whatever UI action
+    // triggered the save. Same treatment PathsPointToSameFile-adjacent sanitizers use elsewhere.
+    static readonly HashSet<string> ReservedWindowsNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
 
     public static string SanitizeFileName(string name)
     {
         foreach (char c in Path.GetInvalidFileNameChars())
             name = name.Replace(c, '_');
-        return name.Trim();
+        name = name.Trim();
+        // Trailing dots/spaces are stripped by Windows itself when the file is actually created,
+        // which can otherwise turn two visually-distinct sanitized names (or a sanitized name and
+        // an existing file) into the same on-disk filename without either caller knowing.
+        name = name.TrimEnd('.', ' ');
+        if (string.IsNullOrEmpty(name) || ReservedWindowsNames.Contains(name))
+            name = "_" + name; // "_CON", "_" for an all-invalid/empty input -- never collides with a reserved name
+        return name;
     }
 
     /// <summary>Saves the CURRENT working config (whatever's loaded/edited right now) as a
@@ -1356,7 +1432,7 @@ internal static class ConfigStore
     public static void SaveProfile(string name, List<TriggerEntry> entries)
     {
         Directory.CreateDirectory(ProfilesFolder);
-        File.WriteAllText(ProfilePath(name), JsonSerializer.Serialize(entries, JsonOptions));
+        AtomicWriteAllText(ProfilePath(name), JsonSerializer.Serialize(entries, JsonOptions));
         if (CloudDatabaseService.IsConfigured)
             QueueCloudProfilePush(name, entries);
     }
@@ -1396,11 +1472,37 @@ internal static class ConfigStore
         });
     }
 
+    /// <summary>BUG FIX (audit finding): this used to call File.ReadAllText directly with no
+    /// File.Exists check and no try/catch -- every caller (WebMainForm.cs, Bandroom.Mac) guards
+    /// most calls with a prior ListProfiles().Contains(name) check, but that's a TOCTOU race (the
+    /// file can be deleted/renamed by a concurrent save/delete between the check and this call) and
+    /// several call sites (e.g. team-copy flows that read a just-listed name) had no guard at all.
+    /// A missing or corrupt profile file threw an unhandled exception straight out of a WebView2
+    /// bridge call, which has no caller-side try/catch to land in. Now matches every other Load*
+    /// method's contract: falls back to BuildDefault() (the same "no saved profile yet" shape every
+    /// caller already treats a missing profile as) instead of crashing, and preserves an unreadable
+    /// file for forensics instead of leaving the caller stuck retrying against a file that will
+    /// never parse.</summary>
     public static List<TriggerEntry> LoadProfile(string name)
     {
-        string json = File.ReadAllText(ProfilePath(name));
-        var loaded = JsonSerializer.Deserialize<List<TriggerEntry>>(json, JsonOptions) ?? new List<TriggerEntry>();
-        return EnsureAllEvents(loaded);
+        string path = ProfilePath(name);
+        if (!File.Exists(path)) return BuildDefault();
+        try
+        {
+            string json = File.ReadAllText(path);
+            var loaded = JsonSerializer.Deserialize<List<TriggerEntry>>(json, JsonOptions) ?? new List<TriggerEntry>();
+            return EnsureAllEvents(loaded);
+        }
+        catch
+        {
+            try
+            {
+                string backupPath = path + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+                if (!File.Exists(backupPath)) File.Copy(path, backupPath);
+            }
+            catch { /* best-effort forensic copy -- never let this block recovery */ }
+            return BuildDefault();
+        }
     }
 
     public static void DeleteProfile(string name)
@@ -1505,15 +1607,12 @@ internal static class ConfigStore
         "4th Down",
         "Offense: Earned First Down",
         "Offense: Second Down",
-        "Offense: Third Down",
-        // CORRECTED 2026-08-11 (audit finding): despite the "OffenseDownHelper now emitting
-        // this" claim this comment used to make, OffenseDownHelper.cs's switch only ever emits
-        // "Defense: Fourth Down" for down==4 (by design -- 4th down is always Defense regardless
-        // of distance, see that file's header comment). Nothing in the codebase emits
-        // "Offense: Fourth Down" at runtime. Kept retired (not deleted) only because the
-        // LegacyDownEventAlias down:4th mapping still exists for any pre-engine profile that has
-        // a real legacy song assignment saved under this exact key.
-        "Offense: Fourth Down",
+        // REMOVED 2026-08-12 (owner call, live game): OffenseFourthDownHelper now emits this for
+        // real, dual-firing alongside "Defense: Fourth Down" so the team actually driving on 4th
+        // down gets its own card too, home or away, Big Game or not (see that helper's own doc
+        // comment). The "nothing emits this" note that used to justify keeping this retired no
+        // longer holds -- moved down into AllEngineEventKeys below, same as "Offense: Third Down"
+        // the session before.
         // REMOVED 2026-08-11 (audit finding + owner call): these fire every game (any fresh
         // drive that isn't from a kickoff or turnover -- in practice, almost always the first
         // snap after a punt) but had no assignable UI card here AND no LegacyDownEventAlias
@@ -1550,6 +1649,17 @@ internal static class ConfigStore
 
     public static readonly string[] AllEngineEventKeys =
     {
+        // Re-added 2026-08-12 (owner report: log showed "Offense: Third Down" firing unassigned
+        // with no card anywhere to fix it) -- this key was left in RetiredEventKeys from before
+        // 2026-08-11, but OffenseDownHelper's rewrite that same day made it a real, currently-fired
+        // key again (3rd & long fires this alongside "Defense: Third Down", see that helper's own
+        // comment) -- the retirement just never got undone after that change.
+        "Offense: Third Down",
+        // Added 2026-08-12 (owner call, live game) -- OffenseFourthDownHelper's new counterpart to
+        // "Defense: Fourth Down", so the team actually driving on 4th down gets its own card too
+        // (see that helper's own comment for the full history: this key used to be correctly
+        // retired since nothing emitted it, that's no longer true).
+        "Offense: Fourth Down",
         // Re-added 2026-08-11 (moved down from RetiredEventKeys) -- fires on every fresh drive
         // that isn't a kickoff or turnover (in practice: almost always the first snap after a
         // punt). Was never assignable and had no legacy fallback, so was a silent dead cue.

@@ -119,6 +119,19 @@ public sealed class WebMainForm : Form
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
         TopMost = ConfigStore.LoadAppWindowSettings().AlwaysOnTop;
 
+        // FIXED 2026-08-12 (owner report: fade-out volume setting doesn't survive app close and
+        // relaunch) -- ConfigStore.SavePlaybackTimingSettings has existed since the Settings-panel
+        // migration (see PlaybackTimingSettings' own doc comment), and DOES write these 4 fields to
+        // disk correctly. But nothing ever called LoadPlaybackTimingSettings back at startup to
+        // re-apply the saved values to AudioPlayer's static fields -- the save path was write-only,
+        // so every relaunch silently fell back to AudioPlayer's hardcoded C# defaults (10s fade
+        // delay, 4.5s fade duration, 0s pre-roll, 2s cooldown) regardless of what was saved.
+        var savedTiming = ConfigStore.LoadPlaybackTimingSettings();
+        AudioPlayer.PreRollSeconds = savedTiming.PreRollSeconds;
+        AudioPlayer.FadeStartSeconds = savedTiming.FadeStartSeconds;
+        AudioPlayer.FadeOutDuration = savedTiming.FadeOutDuration;
+        GameWatcher.Cooldown = TimeSpan.FromSeconds(savedTiming.CooldownSeconds);
+
         // BUG FIX (owner report, 2026-08-10): window was hardcoded to 1920x1080 with
         // CenterScreen, with nothing anywhere clamping it to the actual monitor. On any display
         // smaller than 1920x1080 (or a multi-monitor rig where the primary isn't that size), the
@@ -212,7 +225,11 @@ public sealed class WebMainForm : Form
             // shows up without needing a restart.
             _ = SyncPublicTeamLogosAsync();
         };
-        FormClosing += (_, _) => _lifetimeCts.Cancel();
+        // AUDIT FIX (Admin-2 pass): Cancel() alone never Dispose()s the CTS -- harmless in
+        // practice since the process exits right after, but a real leak if that ever changes
+        // (e.g. a future "restart WebView without exiting" path). Dispose() after Cancel() is
+        // always safe here since nothing observes _lifetimeCts.Token past FormClosing.
+        FormClosing += (_, _) => { _lifetimeCts.Cancel(); _lifetimeCts.Dispose(); };
     }
 
     /// <summary>Best-effort startup pass for public (everyone-sees-it) team logos -- see
@@ -327,6 +344,21 @@ public sealed class WebMainForm : Form
         core.SetVirtualHostNameToFolderMapping("trimsrc", ConfigStore.TrimSourceFolder, CoreWebView2HostResourceAccessKind.Allow);
 
         core.AddHostObjectToScript("bandroom", new WebBridge(this));
+
+        // AUDIT FIX (Admin-2 pass): nothing was watching for the WebView2 render process itself
+        // dying mid-session (renderer crash/OOM, or the whole browser process going away) -- with
+        // no handler, that leaves the window showing a permanently frozen/blank page with the JS
+        // bridge gone and no way back short of relaunching the whole app. RenderProcessExited is
+        // recoverable (the browser process survives; reloading respins a renderer and the
+        // host-object/virtual-host mappings above are unaffected since those live on `core`, not
+        // the renderer). A full BrowserProcessExited is not recoverable from here -- log it and
+        // leave the window as-is rather than looping on a Reload() that can't succeed.
+        core.ProcessFailed += (_, e) =>
+        {
+            CrashLog.Write($"WebView2 process failed: kind={e.ProcessFailedKind}", new Exception(e.Reason.ToString()));
+            if (e.ProcessFailedKind != CoreWebView2ProcessFailedKind.RenderProcessExited) return;
+            RunOnUi(() => { try { core.Reload(); } catch (Exception ex) { CrashLog.Write("WebView2 reload after crash failed", ex); } });
+        };
 
         // WebView2's disk cache can hang onto an old style.css/app.js across a Squirrel update
         // (the WebView2Data profile folder is intentionally persistent across versions, for
@@ -1223,13 +1255,18 @@ public sealed class WebMainForm : Form
     /// clicked Preview while assigning a song). Uses AudioPlayer's isPreview path so playback
     /// starts instantly (no PreRollSeconds delay) and repeated clicks on the same clip always
     /// play (no FireCooldown gate) -- both of those exist for real game cues, not previewing.</summary>
-    public void PreviewEventFromWeb(string trigger)
+    // FIXED 2026-08-12 (owner report, Sound Booth mixer: "I don't hear a change in Master or
+    // Away or Home") -- the fallback Preview path (no clip selected on the Assignment screen, so
+    // Sound Booth's Preview button falls back to this canned test-cue trigger instead of
+    // PreviewLocalFileFromWeb) hardcoded AudioPlayer.MasterVolume same as that method did before
+    // its own fix -- same bug, different call site. contextParamKey threads through the same way.
+    public void PreviewEventFromWeb(string trigger, string? contextParamKey = null)
     {
         var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
         if (entry == null) return;
         float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
-            AudioPlayer.Play(entry.AudioFile, AudioPlayer.MasterVolume * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => AudioPlayer.MasterVolume * eventVolumeScale, speed2x: entry.PlaybackSpeed2x, whistleOverridePath: entry.AltWhistlePath);
+            AudioPlayer.Play(entry.AudioFile, VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed);
         if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
             AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isPreview: true, liveVolumeSource: () => AudioPlayer.PaVolume * eventVolumeScale);
     }
@@ -1265,90 +1302,28 @@ public sealed class WebMainForm : Form
         PushCategories();
     }
 
-    /// <summary>Native file picker for a per-event alternate lead-in whistle (TriggerEntry.
-    /// AltWhistlePath) -- same OpenFileDialog-and-copy pattern as
-    /// BrowseAndSetLeadInWhistleFromWeb (the global whistle chooser) below, just scoped to one
-    /// trigger and stored alongside it instead of overwriting the single global clip.</summary>
-    public bool BrowseAndSetEventAltWhistleFromWeb(string trigger)
+    /// <summary>Fixed cycle of whistle-speed presets for the per-event whistle-speed button --
+    /// keeps the value from drifting to an unreasonable speed by accident (no free-typed number),
+    /// same "click to cycle" convention SetEventPlaybackSpeed2xFromWeb's on/off button used, just
+    /// more than two states. Kept in one place so app.js's WHISTLE_SPEED_PRESETS (display labels)
+    /// and this cycle order can't drift apart.</summary>
+    static readonly double[] WhistleSpeedPresets = { 1.0, 1.15, 1.3, 1.5 };
+
+    /// <summary>Per-event whistle-speed button (event card's transport strip) -- REPLACED
+    /// BrowseAndSetEventAltWhistleFromWeb/ClearEventAltWhistleFromWeb/SaveTrimAsEventAltWhistleFromWeb
+    /// 2026-08-12 (owner request: "remove the alternate whistle and just make that button a
+    /// whistle speed toggle"). Cycles TriggerEntry.WhistleSpeed through WhistleSpeedPresets and
+    /// returns the new value so the UI can relabel the button immediately.</summary>
+    public double CycleEventWhistleSpeedFromWeb(string trigger)
     {
         var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
-        if (entry == null) return false;
-
-        using var dlg = new OpenFileDialog { Filter = "Audio Files|*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac|All Files|*.*", Title = "Choose Alternate Whistle Clip" };
-        if (dlg.ShowDialog() != DialogResult.OK) return false;
-
-        try
-        {
-            string whistlesFolder = Path.Combine(ConfigStore.SongsFolder, "whistles");
-            Directory.CreateDirectory(whistlesFolder);
-            string safeTriggerName = string.Concat(trigger.Where(c => !Path.GetInvalidFileNameChars().Contains(c)));
-            string dest = Path.Combine(whistlesFolder, $"{safeTriggerName}_{Path.GetFileName(dlg.FileName)}");
-            File.Copy(dlg.FileName, dest, overwrite: true);
-            entry.AltWhistlePath = dest;
-            ConfigStore.Save(_config);
-            SaveCurrentTeamProfile();
-            PushCategories();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            CrashLog.Write("BrowseAndSetEventAltWhistleFromWeb failed to copy file", ex);
-            return false;
-        }
-    }
-
-    public void ClearEventAltWhistleFromWeb(string trigger)
-    {
-        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
-        if (entry == null) return;
-        entry.AltWhistlePath = "";
+        if (entry == null) return 1.0;
+        int idx = Array.IndexOf(WhistleSpeedPresets, entry.WhistleSpeed);
+        entry.WhistleSpeed = WhistleSpeedPresets[(idx + 1 + WhistleSpeedPresets.Length) % WhistleSpeedPresets.Length];
         ConfigStore.Save(_config);
         SaveCurrentTeamProfile();
         PushCategories();
-    }
-
-    /// <summary>Alt-whistle counterpart to SaveTrimAsLeadInWhistleFromWeb -- same trim-and-save
-    /// mechanics (TrimSourceFolder -> normalize -> write .wav), but scoped to one trigger's
-    /// AltWhistlePath instead of the single global ConfigStore.LeadInWhistlePath, same "whistles"
-    /// subfolder and fixed-per-trigger filename BrowseAndSetEventAltWhistleFromWeb already uses so
-    /// re-trimming just overwrites this event's own alt whistle rather than piling up copies.</summary>
-    public string SaveTrimAsEventAltWhistleFromWeb(string trigger, double startSec, double endSec)
-    {
-        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
-        if (entry == null) return JsonSerializer.Serialize(new { ok = false, error = "No such trigger." });
-        string? srcPath = Directory.Exists(ConfigStore.TrimSourceFolder)
-            ? Directory.GetFiles(ConfigStore.TrimSourceFolder).FirstOrDefault() : null;
-        if (srcPath == null) return JsonSerializer.Serialize(new { ok = false, error = "Trim source is gone -- reopen the trimmer." });
-        if (endSec <= startSec) return JsonSerializer.Serialize(new { ok = false, error = "End must be after start." });
-
-        try
-        {
-            string whistlesFolder = Path.Combine(ConfigStore.SongsFolder, "whistles");
-            Directory.CreateDirectory(whistlesFolder);
-            string safeTriggerName = string.Concat(trigger.Where(c => !Path.GetInvalidFileNameChars().Contains(c)));
-            string outPath = Path.Combine(whistlesFolder, $"{safeTriggerName}_alt.wav");
-
-            using (var reader = new NAudio.Wave.AudioFileReader(srcPath))
-            {
-                var offset = new NAudio.Wave.SampleProviders.OffsetSampleProvider(reader)
-                {
-                    SkipOver = TimeSpan.FromSeconds(startSec),
-                    Take = TimeSpan.FromSeconds(endSec - startSec),
-                };
-                var normalized = AudioNormalizer.NormalizeAndLimit(offset);
-                NAudio.Wave.WaveFileWriter.CreateWaveFile16(outPath, normalized);
-            }
-            entry.AltWhistlePath = outPath;
-            ConfigStore.Save(_config);
-            SaveCurrentTeamProfile();
-            PushCategories();
-            return JsonSerializer.Serialize(new { ok = true });
-        }
-        catch (Exception ex)
-        {
-            CrashLog.Write("SaveTrimAsEventAltWhistleFromWeb failed", ex);
-            return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the whistle clip." });
-        }
+        return entry.WhistleSpeed;
     }
 
     public void StopPreviewFromWeb() => AudioPlayer.StopAll();
@@ -1638,12 +1613,33 @@ public sealed class WebMainForm : Form
     public string GetDefaultPackTeamsFromWeb() =>
         System.Text.Json.JsonSerializer.Serialize(ConfigStore.GetDefaultPackTeamsWithConference());
 
+    /// <summary>Maps a Sound Booth mixer knob's param key ("home-volume"/"away-volume"/etc) to
+    /// the live AudioPlayer field it controls -- shared by PreviewLocalFileFromWeb's one-time
+    /// volume and its liveVolumeSource so dragging that knob during an active preview is audible
+    /// immediately, not just on the next preview click. Unknown/empty keys (including the hero
+    /// knob's own "master-volume") fall back to Master, same as if no context were selected.</summary>
+    static float VolumeForSoundBoothContext(string? contextParamKey) => contextParamKey switch
+    {
+        "home-volume" => AudioPlayer.HomeVolume,
+        "away-volume" => AudioPlayer.AwayVolume,
+        "pa-volume" => AudioPlayer.PaVolume,
+        "whistle-volume" => AudioPlayer.WhistleVolume,
+        _ => AudioPlayer.MasterVolume,
+    };
+
     /// <summary>Preview an arbitrary local library file from the clipping island's song list --
     /// distinct from PreviewEventFromWeb (which previews whatever's already assigned to a
     /// trigger). Routes through the same native AudioPlayer as everything else local, not a JS
     /// &lt;audio&gt; element -- local filesystem paths aren't reliably fetchable from the WebView2
-    /// content process, same reason PreviewEventFromWeb doesn't either.</summary>
-    public void PreviewLocalFileFromWeb(string path)
+    /// content process, same reason PreviewEventFromWeb doesn't either.
+    /// FIXED 2026-08-12 (owner report: "I don't hear a change in Master or Away or Home" while
+    /// dragging Sound Booth knobs) -- this call previously hardcoded AudioPlayer.MasterVolume as
+    /// a one-time snapshot with no liveVolumeSource at all, so it never reflected Home/Away/PA/
+    /// Whistle no matter which context knob was selected, and didn't even track live Master
+    /// changes mid-playback. contextParamKey (the Sound Booth context knob's currently selected
+    /// param, e.g. "home-volume") now picks which AudioPlayer field this preview tracks, live, for
+    /// its whole duration via VolumeForSoundBoothContext.</summary>
+    public void PreviewLocalFileFromWeb(string path, string? contextParamKey = null)
     {
         // Punch-list item 5: AudioPlayer.Play's playLeadInWhistle parameter defaults to TRUE
         // (it's built for the real event-firing path) -- this call site never overrode it, so
@@ -1652,7 +1648,8 @@ public sealed class WebMainForm : Form
         // event card. Explicitly false here; PreviewEventFromWeb (the event card's own Preview
         // button) is untouched and still honors entry.PlayLeadInWhistle as before.
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-            AudioPlayer.Play(path, AudioPlayer.MasterVolume, interruptPrevious: true, isPreview: true, playLeadInWhistle: false);
+            AudioPlayer.Play(path, VolumeForSoundBoothContext(contextParamKey), interruptPrevious: true, isPreview: true,
+                playLeadInWhistle: false, liveVolumeSource: () => VolumeForSoundBoothContext(contextParamKey));
     }
 
     /// <summary>Soundboard bar (currently hidden via #soundboard-bar[hidden] -- not yet a shipped
@@ -2361,8 +2358,21 @@ public sealed class WebMainForm : Form
 
     /// <summary>"Fire Sensitivity" slider -- delay in seconds before a fired cue starts fading
     /// out. No fade-in: AudioPlayer.Play already jumps straight to full volume, only the
-    /// fade-OUT ramp exists, so this only ever tunes when that ramp begins.</summary>
-    public void SetFadeDelayFromWeb(int seconds) => AudioPlayer.FadeStartSeconds = seconds;
+    /// fade-OUT ramp exists, so this only ever tunes when that ramp begins.
+    /// FIXED 2026-08-12 (owner report: fade-out setting doesn't survive a relaunch) -- this only
+    /// ever wrote AudioPlayer.FadeStartSeconds (an in-memory static), never through
+    /// ConfigStore.SavePlaybackTimingSettings the way the Settings panel's own "Apply Timing" path
+    /// does (see ConfigStore.PlaybackTimingSettings' doc comment -- this exact class of bug already
+    /// happened once before for all 4 of these fields and got fixed for the Settings-panel path,
+    /// but this separate knob/slider control quietly regressed the same fix). Now persists through
+    /// the same record, preserving whatever PreRollSeconds/FadeOutDuration/CooldownSeconds are
+    /// already saved so this slider doesn't clobber settings adjusted elsewhere.</summary>
+    public void SetFadeDelayFromWeb(int seconds)
+    {
+        AudioPlayer.FadeStartSeconds = seconds;
+        var current = ConfigStore.LoadPlaybackTimingSettings();
+        ConfigStore.SavePlaybackTimingSettings(current with { FadeStartSeconds = seconds });
+    }
     public int GetFadeDelayFromWeb() => (int)AudioPlayer.FadeStartSeconds;
 
     // "dome"/"stadiumrain" retired 2026-08-11 (owner call) -- falls to Off below like any other
@@ -2831,7 +2841,7 @@ public sealed class WebMainForm : Form
             // feature entirely. Back to firing synchronously, same as before that feature existed.
             string paFile = entry.PaAudioFile;
             bool paExists = !string.IsNullOrWhiteSpace(paFile) && File.Exists(paFile);
-            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle, speed2x: entry.PlaybackSpeed2x, whistleOverridePath: entry.AltWhistlePath, channel: channel);
+            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, channel: channel);
             // PA Announcer layer: plays concurrently with the main cue above, not instead of it,
             // so interruptPrevious MUST be false here -- true would call StopAll() and kill the
             // main clip that was just started a line above. Fired after, not before, the main

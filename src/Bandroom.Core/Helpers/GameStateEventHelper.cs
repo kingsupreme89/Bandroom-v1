@@ -56,10 +56,25 @@ public sealed class GameStateEventHelper : IRuleEvaluator
             }
         }
 
-        // --- Pregame Take the Field: first detection, quarter 1, down unknown (0) ---
-        if (!_didFirePregame
-            && state.Previous.Quarter == 0 && state.Current.Quarter == 1
-            && state.Previous.Down == 0 && state.Current.Down > 0)
+        // --- Pregame Take the Field: three independent signals for the same real-world moment ---
+        // (1) the chevron tunnel-walk marker (IsPregameEntranceMarker, see its doc comment on
+        // PlaySnapshot) -- fires earliest, during the actual walkout, before the first snap makes
+        // Down/Quarter readable at all. (2) the original quarter/down heuristic, a fallback for
+        // whenever the chevron crop isn't calibrated for the active ScorebugPreset (ChevronMarkerFxW
+        // == 0) or the OCR/pixel read misses it on a given game. (3) ADDED 2026-08-12 (owner report,
+        // live game: pregame never fired at all that game, neither chevron nor quarter/down tripped)
+        // -- state.Current.IsKickoff going true is the SAME signal KickoffHelper already fires
+        // "Other: Opening Kickoff" off of, confirmed reliable from that owner's own event log. Firing
+        // pregame here too (if it hasn't already fired) guarantees it always fires by kickoff at the
+        // latest, even on a game where both other signals miss -- late (right at kickoff, not the
+        // actual walkout moment), but late beats never. One shared _didFirePregame guard covers all
+        // three -- whichever trips first wins, the others are no-ops after that, so this can never
+        // double-fire the same EventKey from multiple signals.
+        bool chevronEdge = state.Current.IsPregameEntranceMarker && !state.Previous.IsPregameEntranceMarker;
+        bool quarterDownEdge = state.Previous.Quarter == 0 && state.Current.Quarter == 1
+            && state.Previous.Down == 0 && state.Current.Down > 0;
+        bool kickoffFallbackEdge = state.Current.IsKickoff && !state.Previous.IsKickoff;
+        if (!_didFirePregame && (chevronEdge || quarterDownEdge || kickoffFallbackEdge))
         {
             _didFirePregame = true;
             return new TriggerEvent

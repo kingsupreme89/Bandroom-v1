@@ -37,11 +37,17 @@ public class TriggerEntry
     /// so every existing assignment keeps behaving exactly as it did before this field existed.</summary>
     public bool PlayLeadInWhistle { get; set; } = true;
 
-    /// <summary>Per-event alternate to the global lead-in whistle clip (ConfigStore.LeadInWhistlePath
-    /// / AudioPlayer.LeadInClipPath) -- empty means "use the global one" (default, same behavior as
-    /// before this field existed). Only takes effect when PlayLeadInWhistle is also true; this
-    /// doesn't add a second on/off toggle, it swaps WHICH clip plays for just this card.</summary>
-    public string AltWhistlePath { get; set; } = "";
+    /// <summary>Per-event whistle playback speed multiplier -- REPLACED AltWhistlePath 2026-08-12
+    /// (owner request: "remove the alternate whistle and just make that button a whistle speed
+    /// toggle"). Same global lead-in whistle clip (ConfigStore.LeadInWhistlePath /
+    /// AudioPlayer.LeadInClipPath) always plays; this only changes how fast/slow it plays for this
+    /// one card via AudioPlayer's SoundTouchSpeedSampleProvider (same tempo-shift technique
+    /// PlaybackSpeed2x already uses for the main clip). 1.0 = normal speed (default, same behavior
+    /// as before this field existed). Only takes effect when PlayLeadInWhistle is also true.
+    /// Missing from old saved JSON deserializes to 1.0, no migration needed. Cycled through a fixed
+    /// preset list (see WHISTLE_SPEED_PRESETS in app.js) by clicking the whistle-speed button rather
+    /// than free-typed, so it can't drift to an unreasonable value by accident.</summary>
+    public double WhistleSpeed { get; set; } = 1.0;
 
     /// <summary>Speed toggle for this card's clip -- see AudioPlayer.Play's speed2x param and
     /// SoundTouchSpeedSampleProvider for how it's applied. Affects both real in-game firing and Preview.

@@ -16,7 +16,14 @@
 param(
     [string]$Notes = "See the full changelog at https://github.com/kingsupreme89/Bandroom-v1/releases",
     [string]$CommitMessage = "Session updates",
-    [string]$Branch = "master"
+    [string]$Branch = "master",
+    # Added 2026-08-12 (owner request: "release it, make it private") -- a GitHub release has no
+    # visibility setting independent of the repo itself, so "private" here means a DRAFT release:
+    # tag + assets get pushed exactly the same, but the release only shows up to repo collaborators
+    # (not the public releases page / update feed) until someone explicitly publishes it from the
+    # GitHub UI. Existing installs' auto-update check won't see a draft as "latest" either, so this
+    # is also a safe way to stage a release before flipping it live.
+    [switch]$Draft
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -132,10 +139,12 @@ $assets = Get-ChildItem $ReleaseDir -File | ForEach-Object { $_.FullName }
 $notesFile = Join-Path ([System.IO.Path]::GetTempPath()) "bandroom_release_notes_$tag.txt"
 [System.IO.File]::WriteAllText($notesFile, $Notes, [System.Text.UTF8Encoding]::new($false))
 
+$draftArgs = if ($Draft) { @("--draft") } else { @() }
 gh release create $tag @assets `
     --repo  kingsupreme89/Bandroom-v1 `
     --title "Bandroom $tag" `
-    --notes-file $notesFile
+    --notes-file $notesFile `
+    @draftArgs
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
@@ -147,7 +156,12 @@ if ($LASTEXITCODE -ne 0) {
 Remove-Item $notesFile -Force -ErrorAction SilentlyContinue
 
 Write-Host ""
-Write-Host "  Done! $tag is live." -ForegroundColor Green
-Write-Host "  First-time users run Setup.exe." -ForegroundColor Green
-Write-Host "  Existing users get a delta update automatically on next launch." -ForegroundColor Green
+if ($Draft) {
+    Write-Host "  Done! $tag is staged as a DRAFT -- not publicly visible, no auto-update will pick it up yet." -ForegroundColor Green
+    Write-Host "  Publish it from https://github.com/kingsupreme89/Bandroom-v1/releases when ready to go live." -ForegroundColor Green
+} else {
+    Write-Host "  Done! $tag is live." -ForegroundColor Green
+    Write-Host "  First-time users run Setup.exe." -ForegroundColor Green
+    Write-Host "  Existing users get a delta update automatically on next launch." -ForegroundColor Green
+}
 Write-Host ""

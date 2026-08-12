@@ -10,7 +10,26 @@ public sealed class TouchdownHelper : IRuleEvaluator
     int? _lastDefenseTdHomeScore;
     int? _lastDefenseTdAwayScore;
 
+    // FIXED 2026-08-12 (audit finding): IsTouchdown (from the non-sticky "situation" OCR region)
+    // and HomeScore/AwayScore (from a separately-sticky OCR region, see GameWatcher.RouteEngineTick)
+    // are two independently-timed reads, same class of split-tick race as the down/yards-to-go gap
+    // DownDistanceBuffer exists for elsewhere in this codebase. The defense-TD detection below is
+    // score-delta-based specifically because the "TOUCHDOWN" banner can get missed for a defensive
+    // score (goes straight to the ensuing kickoff) -- but that means the banner can ALSO arrive
+    // BEFORE the scoreboard catches up, not just after. On that ordering, the old code fired
+    // "Offense: Touchdown Scored" off the banner immediately (no score delta yet to prove
+    // otherwise), and then the score-delta branch correctly fired "Defense: Touchdown Scored" a
+    // tick or two later for the SAME real event once the scoreboard resolved -- two contradictory
+    // cues for one score, wrong side credited first. Now: when the banner edge fires with no score
+    // delta yet visible, buffer briefly instead of assuming offense, so the scoreboard has a chance
+    // to prove it's actually a defensive score before this fires anything.
+    bool _awaitingOffenseScoreConfirm;
+    int _pendingTicksRemaining;
+    const int MaxPendingTicks = 4; // ~1000ms at the 250ms OCR poll interval
+
     public bool CanFire(GameState state) => state.Current.IsTouchdown
+        || state.Previous.IsTouchdown
+        || _awaitingOffenseScoreConfirm
         || state.Current.HomeScore != state.Previous.HomeScore
         || state.Current.AwayScore != state.Previous.AwayScore;
 
@@ -35,6 +54,11 @@ public sealed class TouchdownHelper : IRuleEvaluator
         {
             _lastDefenseTdHomeScore = state.Current.HomeScore;
             _lastDefenseTdAwayScore = state.Current.AwayScore;
+            // The score just resolved to a defensive TD -- if an offense fire was pending on an
+            // earlier tick's banner edge for this exact same event, abandon it permanently. This
+            // is the actual close of the race: without this, the pending timeout below would still
+            // fire a contradictory "Offense: Touchdown Scored" once MaxPendingTicks elapsed.
+            _awaitingOffenseScoreConfirm = false;
             return new TriggerEvent
             {
                 EventKey = "Defense: Touchdown Scored",
@@ -43,8 +67,20 @@ public sealed class TouchdownHelper : IRuleEvaluator
             };
         }
 
-        // Offense touchdown -- still banner-based; the owner only flagged the defensive case
-        // above as unreliable, this path is unchanged.
+        if (_awaitingOffenseScoreConfirm)
+        {
+            // Any score movement at all that ISN'T the defensive pattern above (e.g. the
+            // possessing side's own +6/+7/+8 confirming a normal offensive TD) settles the race in
+            // offense's favor immediately, no need to wait out the rest of the buffer.
+            bool scoreResolved = homeDelta != 0 || awayDelta != 0;
+            if (!scoreResolved && --_pendingTicksRemaining > 0)
+                return null; // keep waiting for the scoreboard to confirm which side actually scored
+
+            _awaitingOffenseScoreConfirm = false;
+            return MakeOffenseEvent(state);
+        }
+
+        // Offense touchdown -- banner-edge triggered.
         if (!state.Current.IsTouchdown || state.Previous.IsTouchdown)
             return null;
 
@@ -54,11 +90,23 @@ public sealed class TouchdownHelper : IRuleEvaluator
         if (state.Current.HomeScore == _lastDefenseTdHomeScore && state.Current.AwayScore == _lastDefenseTdAwayScore)
             return null;
 
-        return new TriggerEvent
+        // Banner is up but the scoreboard hasn't moved yet THIS tick -- can't yet rule out this
+        // being a defensive score whose score-delta simply hasn't landed. Buffer briefly rather
+        // than assuming offense outright (see class-level comment for the race this closes).
+        if (homeDelta == 0 && awayDelta == 0)
         {
-            EventKey = "Offense: Touchdown Scored",
-            Volume = state.Current.BigGame ? 100 : 85,
-            IsEarnedBigEvent = true
-        };
+            _awaitingOffenseScoreConfirm = true;
+            _pendingTicksRemaining = MaxPendingTicks;
+            return null;
+        }
+
+        return MakeOffenseEvent(state);
     }
+
+    static TriggerEvent MakeOffenseEvent(GameState state) => new()
+    {
+        EventKey = "Offense: Touchdown Scored",
+        Volume = state.Current.BigGame ? 100 : 85,
+        IsEarnedBigEvent = true
+    };
 }

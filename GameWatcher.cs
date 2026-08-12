@@ -99,6 +99,22 @@ internal sealed class GameWatcher
                 region.FxX = preset.BannerFxX; region.FxY = preset.BannerFxY;
                 region.FxW = preset.BannerFxW; region.FxH = preset.BannerFxH;
             }
+
+            // AUDIT FIX 2026-08-12: region.Last/LastRawText/CooldownUntil are edge-trigger state
+            // for the OLD crop position -- switching presets mid-session moves the crop to a
+            // physically different part of the screen (see the FxX/FxY/FxW/FxH reassignment right
+            // above), so whatever text/cooldown that region last observed under the PREVIOUS
+            // preset describes pixels that are no longer even being sampled. Left uncleared, two
+            // failure modes: (1) if the new crop happens to read the same text the old crop last
+            // held, the `currentValue != region.Last` edge-trigger check below in RunAsync silently
+            // swallows the first real read under the new preset as "unchanged"; (2) a still-live
+            // CooldownUntil from the old preset can suppress a legitimate first fire under the new
+            // one. Reset unconditionally for every region here (not just the ones whose Fx* changed
+            // above) since preset-switching is rare (a user action, not a per-tick cost) and every
+            // region's on-screen position is preset-dependent in general.
+            region.Last = null;
+            region.LastRawText = null;
+            region.CooldownUntil = default;
         }
     }
 
@@ -212,6 +228,10 @@ internal sealed class GameWatcher
     // doesn't do.
     string? _pendingPossession;
 
+    /// <summary>How many CONSECUTIVE ticks _pendingPossession has matched the newly-sampled side
+    /// -- see ConfirmPossessionFlip. Reset to 0 whenever the sampled side changes.</summary>
+    int _pendingPossessionTicks;
+
     /// <summary>How many CONSECUTIVE ticks the structural-turnover heuristic's full condition has
     /// held -- see its own comment in RouteEngineTick for why this exists (2 required, not 1).</summary>
     int _structuralTurnoverPendingTicks;
@@ -234,7 +254,14 @@ internal sealed class GameWatcher
     // display itself has actually stopped updating (a pause/menu/loading screen). RouteEngineTick
     // is skipped entirely while frozen -- no OCR text is trusted, no events fire -- and resumes
     // the instant the frame starts changing again.
-    const int FrozenFrameTicksThreshold = 4; // ~1s at the 250ms poll interval
+    // LOWERED 2026-08-12 (owner report + screenshot: pausing the game fired 2 spurious events,
+    // both timestamped inside the same second) -- 4 ticks (~1s) left a real exposure window where
+    // the pause menu's completely different layout (a full score-summary box, not the live
+    // scorebug) still got OCR'd/color-sampled as if it were real gameplay before the freeze
+    // streak tripped. 2 ticks (~0.5s) still comfortably rules out real in-play stillness (a
+    // pre-snap huddle still has crowd/camera motion somewhere in the coarse grid every tick) while
+    // roughly halving how much of the paused/menu screen gets processed before detection suspends.
+    const int FrozenFrameTicksThreshold = 2; // ~0.5s at the 250ms poll interval
     int _frozenFrameHash;
     int _frozenFrameStreak;
     bool _frameIsFrozen;
@@ -520,12 +547,58 @@ internal sealed class GameWatcher
         _isFirstEngineTick = true;
         _awaitingPostKickoffSnap = false;
         _pendingPossession = null;
+        _pendingPossessionTicks = 0;
         _pendingAwayTimeoutsRemaining = null;
         _pendingHomeTimeoutsRemaining = null;
         _structuralTurnoverPendingTicks = 0;
         _frozenFrameHash = 0;
         _frozenFrameStreak = 0;
         _frameIsFrozen = false;
+        // AUDIT FIX 2026-08-12: the reset list above only ever covered the fields touched by the
+        // specific live bugs each was added for -- it was never treated as the COMPLETE list of
+        // state that can outlive a single game. Every "sticky, deliberately never nulled on a
+        // blank OCR read" field (that's the whole point of _lastKnownDown/_lastKnownAwayScore/
+        // _lastKnownHomeScore/_lastKnownQuarter/_lastDistanceRaw/_lastPossession -- see their own
+        // doc comments) is EXACTLY the kind of field that then silently survives a Stop-Watching-
+        // then-Start-a-new-game boundary too, since nothing else ever clears them either. A second
+        // game starting with e.g. _lastKnownHomeScore still at the first game's final score (or
+        // _lastPossession/_possessionCooldownUntil still locked from the first game's last flip)
+        // would compute a bogus PlaySnapshot delta on the new game's very first real read and could
+        // fire a phantom scoring/possession event before a single legitimate OCR tick of the new
+        // game has even landed. Reset every one of them here so a new Start() is a genuinely clean
+        // slate, matching the reasoning already given above for _eventRouter/_snapshotPrevious.
+        _lastDistanceRaw = null;
+        _lastFiredDistanceRaw = null;
+        _lossCooldownUntil = default;
+        _pendingDown = null;
+        _pendingDistanceRaw = null;
+        _pendingDownDistanceDeadline = default;
+        _lastPossession = null;
+        _possessionCooldownUntil = default;
+        _lastAwayTimeoutsRemaining = -1;
+        _lastHomeTimeoutsRemaining = -1;
+        _lastKnownDown = null;
+        _lastKnownAwayScore = null;
+        _lastKnownHomeScore = null;
+        _pendingAwayScore = null;
+        _pendingHomeScore = null;
+        _lastKnownQuarter = null;
+        _pendingQuarter = null;
+        ArrowUp = null;
+        _lastPregameEntranceMarker = false;
+        _downChangedThisTick = false;
+        // Per-region edge-trigger/cooldown state (Last/LastRawText/CooldownUntil) lives on the
+        // WatchedRegion instances in _regions, which -- unlike _snapshotPrevious/_snapshotCurrent
+        // above -- are NOT recreated per Start() (the list is built once as a readonly field), so
+        // without this loop a second game would inherit the first game's edge-triggered "Last"
+        // values (suppressing a real first-tick DownChanged/RegionChanged if the new game happens
+        // to start on the same text) and still-live CooldownUntil timestamps.
+        foreach (var region in _regions)
+        {
+            region.Last = null;
+            region.LastRawText = null;
+            region.CooldownUntil = default;
+        }
         _ = RunAsync(_cts.Token);
     }
 
@@ -623,17 +696,11 @@ internal sealed class GameWatcher
                 {
                     if (!region.Calibrated) continue;
 
-                    // Clamp to >= 0 -- a negative fractional region coordinate would otherwise
-                    // produce a crop rectangle with a negative origin, which can throw or read
-                    // garbage when drawn from fullBmp below.
-                    int cropX = Math.Max(0, (int)(winW * region.FxX));
-                    int cropY = Math.Max(0, (int)(winH * region.FxY));
-                    // Clamp to at least 1px -- a tiny/minimized game window (or a preset with a
-                    // very small fractional height) can round FxW/FxH down to 0, and a 0x0
-                    // Bitmap throws ArgumentException, which would otherwise trip the outer
-                    // catch every single poll tick until the window is resized.
-                    int cropW = Math.Max(1, Math.Min((int)(winW * region.FxW), winW - cropX));
-                    int cropH = Math.Max(1, Math.Min((int)(winH * region.FxH), winH - cropY));
+                    // Clamped both low (>= 0) and high (inside the bitmap) -- see ClampCropRect's
+                    // doc comment. Also guards the "tiny/minimized window rounds FxW/FxH to 0"
+                    // case (0x0 Bitmap throws ArgumentException, tripping the outer catch every
+                    // tick until the window is resized) via the Math.Max(1, ...) floor.
+                    var (cropX, cropY, cropW, cropH) = ClampCropRect(winW, winH, region.FxX, region.FxY, region.FxW, region.FxH);
 
                     using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
                     using (var g = Graphics.FromImage(bmp))
@@ -688,6 +755,11 @@ internal sealed class GameWatcher
                         // timeouts above: the arrow readout sits right next to the score digits,
                         // not inside the color-fill area those guards protect.
                         if (!flagActive) await SampleFieldPositionArrowFromWindow(fullBmp, winW, winH, ocrEngine);
+                        // Pregame chevron marker -- same "sample unconditionally" reasoning as
+                        // timeouts/arrow above, not gated on flag/situation/banner: this crop only
+                        // matters during pregame anyway (see PlaySnapshot.IsPregameEntranceMarker),
+                        // well before any of those in-game overlays are relevant.
+                        SamplePregameEntranceFromWindow(fullBmp, winW, winH);
                     }
 
                     var match = region.Pattern.Match(text);
@@ -830,10 +902,23 @@ internal sealed class GameWatcher
     {
         if (fxW <= 0 || fxH <= 0) return -1;
 
-        int cropX = Math.Max(0, (int)(winW * fxX));
-        int cropY = Math.Max(0, (int)(winH * fxY));
-        int cropW = Math.Max(3, Math.Min((int)(winW * fxW), winW - cropX));
-        int cropH = Math.Max(1, Math.Min((int)(winH * fxH), winH - cropY));
+        var (cropX, cropY, cropWRaw, cropH) = ClampCropRect(winW, winH, fxX, fxY, fxW, fxH);
+        // Needs >= 3px (one per timeout segment) rather than ClampCropRect's generic >= 1px floor
+        // -- re-clamp against the same winW - cropX ceiling so this never re-introduces the
+        // beyond-bounds risk ClampCropRect exists to prevent.
+        //
+        // BUG FIX (audit finding, 2nd pass): cropWRaw is already <= winW - cropX (that's what
+        // ClampCropRect guarantees), so Math.Min(cropWRaw, winW - cropX) below was always just
+        // cropWRaw -- a no-op -- and the surrounding Math.Max(3, ...) could then push cropW back
+        // PAST winW - cropX whenever less than 3px of room was actually left (a small/unusual
+        // capture width, or a preset's FxX sitting near the right edge). That handed DrawImage a
+        // source rectangle wider than the bitmap again -- exactly what ClampCropRect exists to
+        // prevent -- despite this comment's claim that it couldn't happen. Take the 3px floor
+        // first, THEN clamp to whatever room is actually available (never re-widening past the
+        // bound); if that leaves fewer than 3px, degrade to what's available instead of reading
+        // out of bounds -- SegmentWidth below already floors at 1px per segment, so a narrower
+        // crop just yields less accurate (not crashing) timeout-segment sampling.
+        int cropW = Math.Min(Math.Max(3, cropWRaw), Math.Max(1, winW - cropX));
 
         using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
@@ -900,6 +985,31 @@ internal sealed class GameWatcher
     /// dash/segment lit-count in its own dedicated crop, not team color), so it's pulled out here
     /// to run unconditionally every tick instead of being gated alongside possession-color
     /// sampling.</summary>
+    /// <summary>Reads the brightness of ScorebugPreset.ChevronMarkerFx* -- the white chevron
+    /// shape flanking the center bowl/rivalry badge on the pregame walkout scorebug (see that
+    /// field's doc comment). No-op (leaves _lastPregameEntranceMarker false) when the active
+    /// preset hasn't calibrated this crop (ChevronMarkerFxW == 0), same "uncalibrated = skip, no
+    /// guess" convention as every other optional region in this file -- GameStateEventHelper's
+    /// quarter/down heuristic is the fallback for those presets. High threshold (200/255) since
+    /// this is meant to be a solid white shape on a dark background, not a soft glow -- a
+    /// near-miss crop landing on darker scorebug chrome should read comfortably below it rather
+    /// than borderline-triggering.</summary>
+    const double PregameChevronBrightnessThreshold = 200;
+    bool _lastPregameEntranceMarker;
+
+    void SamplePregameEntranceFromWindow(Bitmap fullBmp, int winW, int winH)
+    {
+        if (_activePreset.ChevronMarkerFxW <= 0)
+        {
+            _lastPregameEntranceMarker = false;
+            return;
+        }
+        double brightness = SampleCropBrightness(fullBmp, winW, winH,
+            _activePreset.ChevronMarkerFxX, _activePreset.ChevronMarkerFxY,
+            _activePreset.ChevronMarkerFxW, _activePreset.ChevronMarkerFxH);
+        _lastPregameEntranceMarker = brightness >= PregameChevronBrightnessThreshold;
+    }
+
     void SampleTimeoutsFromWindow(Bitmap fullBmp, int winW, int winH)
     {
         CommitTimeoutsRemainingIfConfirmed(SampleTimeoutSegments(fullBmp, winW, winH));
@@ -908,29 +1018,34 @@ internal sealed class GameWatcher
 
     void SamplePossessionFromWindow(Bitmap fullBmp, int winW, int winH)
     {
-        // Underline-brightness method takes priority when the active preset has it calibrated
-        // (see ScorebugPreset.AwayUnderlineFx*/HomeUnderlineFx*) -- correction 2026-08-07: the
-        // real possession signal is a thin lit/dim underline under the team name, not a
-        // team-colored fill box. Falls back to the old color-match method (SamplePossession)
-        // for presets that predate this, e.g. KamsCbsScorebug.
+        // REORDERED 2026-08-12 (owner call, backed by the original "Kam's CBS Scorebug" preset's
+        // own 2026-08-08 finding): color-match on the down-and-distance box now takes priority
+        // when the active preset has it calibrated (see ScorebugPreset.PossessionFx*) -- it's a
+        // solid, discrete team-colored fill specifically meant to key off possession, proven more
+        // reliable than the underline method back when it was actually pointed at the right box
+        // (see ScorebugPreset.KamsCbsScorebugV3's restored PossessionFx* comment for the full
+        // history of why this got dropped and brought back). SamplePossession itself already
+        // "doesn't guess" -- ResolveTeamColor returns null on a near-black or ambiguous sample, in
+        // which case this falls through to the underline method below as a secondary signal for
+        // that tick, rather than reporting nothing.
+        if (_activePreset.PossessionFxW > 0)
+        {
+            int cropX = Math.Max(0, (int)(winW * _activePreset.PossessionFxX));
+            int cropY = Math.Max(0, (int)(winH * _activePreset.PossessionFxY));
+            int cropW = Math.Max(1, Math.Min((int)(winW * _activePreset.PossessionFxW), winW - cropX));
+            int cropH = Math.Max(1, Math.Min((int)(winH * _activePreset.PossessionFxH), winH - cropY));
+
+            using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.DrawImage(fullBmp, new Rectangle(0, 0, cropW, cropH),
+                    new Rectangle(cropX, cropY, cropW, cropH), GraphicsUnit.Pixel);
+            }
+            if (SamplePossession(bmp)) return;
+        }
+
         if (_activePreset.AwayUnderlineFxW > 0 && _activePreset.HomeUnderlineFxW > 0)
-        {
             SamplePossessionByUnderline(fullBmp, winW, winH);
-            return;
-        }
-
-        int cropX = Math.Max(0, (int)(winW * _activePreset.PossessionFxX));
-        int cropY = Math.Max(0, (int)(winH * _activePreset.PossessionFxY));
-        int cropW = Math.Max(1, Math.Min((int)(winW * _activePreset.PossessionFxW), winW - cropX));
-        int cropH = Math.Max(1, Math.Min((int)(winH * _activePreset.PossessionFxH), winH - cropY));
-
-        using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(bmp))
-        {
-            g.DrawImage(fullBmp, new Rectangle(0, 0, cropW, cropH),
-                new Rectangle(cropX, cropY, cropW, cropH), GraphicsUnit.Pixel);
-        }
-        SamplePossession(bmp);
     }
 
     /// <summary>Reads the average brightness of the crop directly under each team's name and
@@ -1060,10 +1175,7 @@ internal sealed class GameWatcher
     static async Task<string> OcrCropAsync(Bitmap fullBmp, int winW, int winH, OcrEngine engine,
         double fxX, double fxY, double fxW, double fxH)
     {
-        int cropX = Math.Max(0, (int)(winW * fxX));
-        int cropY = Math.Max(0, (int)(winH * fxY));
-        int cropW = Math.Max(1, Math.Min((int)(winW * fxW), winW - cropX));
-        int cropH = Math.Max(1, Math.Min((int)(winH * fxH), winH - cropY));
+        var (cropX, cropY, cropW, cropH) = ClampCropRect(winW, winH, fxX, fxY, fxW, fxH);
 
         using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
@@ -1074,16 +1186,30 @@ internal sealed class GameWatcher
         return await OcrBitmapAsync(engine, bmp);
     }
 
-    /// <summary>Requires the SAME side to be sampled on two consecutive ticks before returning
+    /// <summary>Requires the SAME side to be sampled on three consecutive ticks before returning
     /// true -- see _pendingPossession's own doc comment for the live bug this closes. A stray
     /// frame that disagrees with the currently-pending value resets the confirmation instead of
-    /// committing, same "same value twice in a row" rule CommitValueIfConfirmed already applies
-    /// to down/score/quarter.</summary>
+    /// committing, same "same value N times in a row" rule CommitValueIfConfirmed already applies
+    /// to down/score/quarter.
+    /// RAISED 2-&gt;3 consecutive ticks 2026-08-12 (owner report, live game: "Away" credited for a
+    /// TFL and an earned first down that were both actually Home's) -- the checkbox for which
+    /// side the user's team is drawn on was confirmed correct both times, so this wasn't the
+    /// UserTeamOnLeftSide inversion; it matches this method's own doc comment on the 2-tick
+    /// version exactly ("a phantom flip committed off 2 bad-but-agreeing ticks... locks
+    /// _lastPossession wrong... TFL/Fourth Down routed to the wrong side"). Two bad-but-agreeing
+    /// frames (replay overlay, camera cut, brief graphic over the underline crop) are apparently
+    /// still common enough to slip through; a third agreeing tick is much less likely by chance,
+    /// at the cost of ~250ms more latency on every real flip too.</summary>
     bool ConfirmPossessionFlip(string side)
     {
-        if (side == _lastPossession) { _pendingPossession = null; return false; }
-        if (side == _pendingPossession) return true;
+        if (side == _lastPossession) { _pendingPossession = null; _pendingPossessionTicks = 0; return false; }
+        if (side == _pendingPossession)
+        {
+            _pendingPossessionTicks++;
+            return _pendingPossessionTicks >= 2; // 2 here = 3rd agreeing tick overall (this call is the 2nd match after the 1st assignment below)
+        }
         _pendingPossession = side;
+        _pendingPossessionTicks = 0;
         return false;
     }
 
@@ -1126,12 +1252,25 @@ internal sealed class GameWatcher
             Log?.Invoke("[watcher] frame is moving again -- resuming event detection");
     }
 
-    static double SampleCropBrightness(Bitmap fullBmp, int winW, int winH, double fxX, double fxY, double fxW, double fxH)
+    /// <summary>AUDIT FIX 2026-08-12: shared crop-bounds math, factored out of four near-identical
+    /// copies (main capture loop, SampleTimeoutSegments, OcrCropAsync, SampleCropBrightness) that
+    /// had each clamped the origin to >= 0 but NOT to inside the bitmap's high side -- a fractional
+    /// X/Y at or beyond 1.0 (bad calibration data, or any future preset value that's even slightly
+    /// off) could put cropX/cropY at or past winW/winH, handing DrawImage a source rectangle that
+    /// starts outside fullBmp's actual bounds on an unusual window size/aspect ratio. Clamp the
+    /// origin to the last valid pixel first, then size the crop to whatever room is left.</summary>
+    static (int X, int Y, int W, int H) ClampCropRect(int winW, int winH, double fxX, double fxY, double fxW, double fxH)
     {
-        int cropX = Math.Max(0, (int)(winW * fxX));
-        int cropY = Math.Max(0, (int)(winH * fxY));
+        int cropX = Math.Clamp((int)(winW * fxX), 0, Math.Max(0, winW - 1));
+        int cropY = Math.Clamp((int)(winH * fxY), 0, Math.Max(0, winH - 1));
         int cropW = Math.Max(1, Math.Min((int)(winW * fxW), winW - cropX));
         int cropH = Math.Max(1, Math.Min((int)(winH * fxH), winH - cropY));
+        return (cropX, cropY, cropW, cropH);
+    }
+
+    static double SampleCropBrightness(Bitmap fullBmp, int winW, int winH, double fxX, double fxY, double fxW, double fxH)
+    {
+        var (cropX, cropY, cropW, cropH) = ClampCropRect(winW, winH, fxX, fxY, fxW, fxH);
 
         using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
@@ -1152,9 +1291,13 @@ internal sealed class GameWatcher
         return n == 0 ? 0 : (double)luminanceSum / n;
     }
 
-    void SamplePossession(Bitmap bmp)
+    /// <summary>Returns true when the sampled color confidently matched a team (even if the flip
+    /// itself was suppressed by cooldown/confirmation-pending below) -- callers use this to decide
+    /// whether to fall back to a secondary possession signal for this tick, distinct from whether
+    /// a flip actually committed.</summary>
+    bool SamplePossession(Bitmap bmp)
     {
-        if (ResolveTeamColor == null) return;
+        if (ResolveTeamColor == null) return false;
 
         long r = 0, g = 0, b = 0;
         int n = 0;
@@ -1165,17 +1308,18 @@ internal sealed class GameWatcher
             r += px.R; g += px.G; b += px.B;
             n++;
         }
-        if (n == 0) return;
+        if (n == 0) return false;
         var avg = Color.FromArgb((int)(r / n), (int)(g / n), (int)(b / n));
 
         string? side = ResolveTeamColor(avg);
+        if (side == null) return false;
 
         // FIXED: same desync as SamplePossessionByUnderline -- see its comment. _lastPossession
         // must only update together with the PossessionChanged event, or the snapshot
         // (PossessionAway) and WebMainForm's routing side (_possession) drift apart during the
         // cooldown window. Also requires 2-consecutive-tick confirmation via ConfirmPossessionFlip
         // -- see _pendingPossession's doc comment.
-        if (side != null && ConfirmPossessionFlip(side))
+        if (ConfirmPossessionFlip(side))
         {
             if (DateTime.UtcNow < _possessionCooldownUntil)
             {
@@ -1190,6 +1334,7 @@ internal sealed class GameWatcher
                 PossessionChanged?.Invoke(side);
             }
         }
+        return true;
     }
 
     /// <summary>Reads the distance-to-go out of the SAME "down" crop already OCR'd this pass
@@ -1476,6 +1621,9 @@ internal sealed class GameWatcher
             // OCR tick, so PregameHelper's edge-trigger (Previous.IsPregameReady == false &&
             // Current.IsPregameReady == true) reading straight off region.Last is correct here.
             IsPregameReady = pregameReadyRegion?.Last == "ready",
+            // Not sticky, same reasoning as IsPregameReady just above: a one-shot pregame signal,
+            // not a value needing to survive a blank sampling tick.
+            IsPregameEntranceMarker = _lastPregameEntranceMarker,
             IsFieldGoalAttempt = bannerRegion?.Last == "fieldgoal",
             YardLine = 0,
             HomeScore = homeScore,
@@ -1545,6 +1693,7 @@ internal sealed class GameWatcher
             new KickoffHelper(),
             new OffenseAfterOpeningKickHelper(),
             new OffenseDownHelper(),
+            new OffenseFourthDownHelper(),
             new PenaltyHelper(),
             new PregameHelper(),
             new SafetyHelper(),

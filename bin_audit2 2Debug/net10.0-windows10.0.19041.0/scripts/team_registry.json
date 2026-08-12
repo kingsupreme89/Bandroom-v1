@@ -1,0 +1,554 @@
+{
+  "teams": {
+    "Alabama": {
+      "conference": "SEC",
+      "abbreviations": ["ALA", "BAMA"],
+      "band_names": ["Million Dollar Band"],
+      "mascot": "Crimson Tide",
+      "variants": ["Alabama Crimson Tide", "Bama"]
+    },
+    "Arizona": {
+      "conference": "Big 12",
+      "abbreviations": ["ARIZ", "ZONA"],
+      "band_names": ["Pride of Arizona"],
+      "mascot": "Wildcats",
+      "variants": ["Arizona Wildcats"]
+    },
+    "Arizona State": {
+      "conference": "Big 12",
+      "abbreviations": ["ASU"],
+      "band_names": ["Sun Devil Marching Band"],
+      "mascot": "Sun Devils",
+      "variants": ["Arizona State Sun Devils", "ASU"]
+    },
+    "Arkansas": {
+      "conference": "SEC",
+      "abbreviations": ["ARK", "AR"],
+      "band_names": ["Razorback Marching Band"],
+      "mascot": "Razorbacks",
+      "variants": ["Arkansas Razorbacks"]
+    },
+    "Auburn": {
+      "conference": "SEC",
+      "abbreviations": ["AUB"],
+      "band_names": ["Auburn University Marching Band"],
+      "mascot": "Tigers",
+      "variants": ["Auburn Tigers", "War Eagle"]
+    },
+    "BYU": {
+      "conference": "Big 12",
+      "abbreviations": ["BYU"],
+      "band_names": ["BYU Cougar Marching Band"],
+      "mascot": "Cougars",
+      "variants": ["Brigham Young", "BYU Cougars"]
+    },
+    "Baylor": {
+      "conference": "Big 12",
+      "abbreviations": ["BAY", "BU"],
+      "band_names": ["Baylor University Golden Wave Band"],
+      "mascot": "Bears",
+      "variants": ["Baylor Bears"]
+    },
+    "Boston College": {
+      "conference": "ACC",
+      "abbreviations": ["BC"],
+      "band_names": ["Boston College Marching Band"],
+      "mascot": "Eagles",
+      "variants": ["Boston College Eagles", "BC"]
+    },
+    "California": {
+      "conference": "ACC",
+      "abbreviations": ["CAL", "BERK"],
+      "band_names": ["Cal Band"],
+      "mascot": "Golden Bears",
+      "variants": ["Cal", "California Golden Bears", "Berkeley"]
+    },
+    "Cincinnati": {
+      "conference": "Big 12",
+      "abbreviations": ["CIN", "UC"],
+      "band_names": ["UC Bearcat Bands"],
+      "mascot": "Bearcats",
+      "variants": ["Cincinnati Bearcats"]
+    },
+    "Clemson": {
+      "conference": "ACC",
+      "abbreviations": ["CLEM"],
+      "band_names": ["Tiger Band"],
+      "mascot": "Tigers",
+      "variants": ["Clemson Tigers"]
+    },
+    "Colorado": {
+      "conference": "Big 12",
+      "abbreviations": ["COL", "CU"],
+      "band_names": ["Golden Buffalo Marching Band"],
+      "mascot": "Buffaloes",
+      "variants": ["Colorado Buffaloes", "CU Buffs"]
+    },
+    "Duke": {
+      "conference": "ACC",
+      "abbreviations": ["DU", "DUKE"],
+      "band_names": ["Duke University Marching Band"],
+      "mascot": "Blue Devils",
+      "variants": ["Duke Blue Devils"]
+    },
+    "Florida": {
+      "conference": "SEC",
+      "abbreviations": ["UF", "FLA"],
+      "band_names": ["Pride of the Sunshine"],
+      "mascot": "Gators",
+      "variants": ["Florida Gators"]
+    },
+    "Florida State": {
+      "conference": "ACC",
+      "abbreviations": ["FSU"],
+      "band_names": ["Marching Chiefs"],
+      "mascot": "Seminoles",
+      "variants": ["Florida State Seminoles", "FSU"]
+    },
+    "Georgia": {
+      "conference": "SEC",
+      "abbreviations": ["UGA"],
+      "band_names": ["Redcoat Marching Band"],
+      "mascot": "Bulldogs",
+      "variants": ["Georgia Bulldogs"]
+    },
+    "Georgia Tech": {
+      "conference": "ACC",
+      "abbreviations": ["GT"],
+      "band_names": ["Georgia Tech Yellow Jacket Marching Band"],
+      "mascot": "Yellow Jackets",
+      "variants": ["Georgia Tech Yellow Jackets"]
+    },
+    "Houston": {
+      "conference": "Big 12",
+      "abbreviations": ["HOU", "UH"],
+      "band_names": ["Spirit of Houston"],
+      "mascot": "Cougars",
+      "variants": ["Houston Cougars"]
+    },
+    "Illinois": {
+      "conference": "Big Ten",
+      "abbreviations": ["ILL", "UIUC"],
+      "band_names": ["Marching Illini"],
+      "mascot": "Fighting Illini",
+      "variants": ["Illinois Fighting Illini"]
+    },
+    "Indiana": {
+      "conference": "Big Ten",
+      "abbreviations": ["IND", "IU"],
+      "band_names": ["Marching Hundred"],
+      "mascot": "Hoosiers",
+      "variants": ["Indiana Hoosiers"]
+    },
+    "Iowa": {
+      "conference": "Big Ten",
+      "abbreviations": ["IOWA", "UI"],
+      "band_names": ["Hawkeye Marching Band"],
+      "mascot": "Hawkeyes",
+      "variants": ["Iowa Hawkeyes"]
+    },
+    "Iowa State": {
+      "conference": "Big 12",
+      "abbreviations": ["ISU"],
+      "band_names": ["Cyclone Marching Band"],
+      "mascot": "Cyclones",
+      "variants": ["Iowa State Cyclones"]
+    },
+    "Kansas": {
+      "conference": "Big 12",
+      "abbreviations": ["KU", "KAN"],
+      "band_names": ["Marching Jayhawks"],
+      "mascot": "Jayhawks",
+      "variants": ["Kansas Jayhawks"]
+    },
+    "Kansas State": {
+      "conference": "Big 12",
+      "abbreviations": ["KSU", "K-STATE"],
+      "band_names": ["Kansas State University Marching Band"],
+      "mascot": "Wildcats",
+      "variants": ["Kansas State Wildcats", "K-State"]
+    },
+    "Kentucky": {
+      "conference": "SEC",
+      "abbreviations": ["UK", "KY"],
+      "band_names": ["Wildcat Marching Band"],
+      "mascot": "Wildcats",
+      "variants": ["Kentucky Wildcats"]
+    },
+    "LSU": {
+      "conference": "SEC",
+      "abbreviations": ["LSU"],
+      "band_names": ["Tiger Marching Band"],
+      "mascot": "Tigers",
+      "variants": ["LSU Tigers", "Louisiana State"]
+    },
+    "Louisville": {
+      "conference": "ACC",
+      "abbreviations": ["UL", "LOU", "UOFL"],
+      "band_names": ["Cardinal Marching Band"],
+      "mascot": "Cardinals",
+      "variants": ["Louisville Cardinals"]
+    },
+    "Maryland": {
+      "conference": "Big Ten",
+      "abbreviations": ["MARY", "MRLD", "UMD"],
+      "band_names": ["Mighty Sound of Maryland"],
+      "mascot": "Terrapins",
+      "variants": ["Maryland Terrapins", "Terps"]
+    },
+    "Miami": {
+      "conference": "ACC",
+      "abbreviations": ["UM", "MIA"],
+      "band_names": ["Band of the Hour"],
+      "mascot": "Hurricanes",
+      "variants": ["Miami Hurricanes", "The U"]
+    },
+    "Michigan": {
+      "conference": "Big Ten",
+      "abbreviations": ["UM", "MICH"],
+      "band_names": ["Michigan Marching Band"],
+      "mascot": "Wolverines",
+      "variants": ["Michigan Wolverines"]
+    },
+    "Michigan State": {
+      "conference": "Big Ten",
+      "abbreviations": ["MSU"],
+      "band_names": ["Spartan Marching Band"],
+      "mascot": "Spartans",
+      "variants": ["Michigan State Spartans"]
+    },
+    "Minnesota": {
+      "conference": "Big Ten",
+      "abbreviations": ["MIN", "UMN"],
+      "band_names": ["University of Minnesota Marching Band"],
+      "mascot": "Golden Gophers",
+      "variants": ["Minnesota Golden Gophers", "Gophers"]
+    },
+    "Missouri": {
+      "conference": "SEC",
+      "abbreviations": ["MIZZ", "MIZZOU", "MU"],
+      "band_names": ["Marching Mizzou"],
+      "mascot": "Tigers",
+      "variants": ["Missouri Tigers", "Mizzou"]
+    },
+    "NC State": {
+      "conference": "ACC",
+      "abbreviations": ["NCST", "NCSU"],
+      "band_names": ["Power Sound of the South"],
+      "mascot": "Wolfpack",
+      "variants": ["NC State Wolfpack", "North Carolina State"]
+    },
+    "Nebraska": {
+      "conference": "Big Ten",
+      "abbreviations": ["NEB", "NU"],
+      "band_names": ["Cornhusker Marching Band"],
+      "mascot": "Cornhuskers",
+      "variants": ["Nebraska Cornhuskers", "Huskers"]
+    },
+    "North Carolina": {
+      "conference": "ACC",
+      "abbreviations": ["UNC"],
+      "band_names": ["Marching Tar Heels"],
+      "mascot": "Tar Heels",
+      "variants": ["North Carolina Tar Heels", "UNC"]
+    },
+    "Northwestern": {
+      "conference": "Big Ten",
+      "abbreviations": ["NW", "NU"],
+      "band_names": ["Northwestern University Wildcat Marching Band"],
+      "mascot": "Wildcats",
+      "variants": ["Northwestern Wildcats"]
+    },
+    "Ohio State": {
+      "conference": "Big Ten",
+      "abbreviations": ["OSU", "TOSU"],
+      "band_names": ["The Best Damn Band in the Land"],
+      "mascot": "Buckeyes",
+      "variants": ["Ohio State Buckeyes", "The Ohio State University"]
+    },
+    "Oklahoma": {
+      "conference": "SEC",
+      "abbreviations": ["OU", "OKLA"],
+      "band_names": ["Pride of Oklahoma"],
+      "mascot": "Sooners",
+      "variants": ["Oklahoma Sooners"]
+    },
+    "Oklahoma State": {
+      "conference": "Big 12",
+      "abbreviations": ["OKST", "OSU"],
+      "band_names": ["Cowboy Marching Band"],
+      "mascot": "Cowboys",
+      "variants": ["Oklahoma State Cowboys", "OK State"]
+    },
+    "Ole Miss": {
+      "conference": "SEC",
+      "abbreviations": ["OM", "OLEMISS", "MISS"],
+      "band_names": ["Pride of the South"],
+      "mascot": "Rebels",
+      "variants": ["Ole Miss Rebels", "Mississippi"]
+    },
+    "Oregon": {
+      "conference": "Big Ten",
+      "abbreviations": ["ORE", "UO"],
+      "band_names": ["Oregon Marching Band"],
+      "mascot": "Ducks",
+      "variants": ["Oregon Ducks"]
+    },
+    "Oregon State": {
+      "conference": "Pac-12",
+      "abbreviations": ["ORST", "OSU"],
+      "band_names": ["Oregon State University Marching Band"],
+      "mascot": "Beavers",
+      "variants": ["Oregon State Beavers"]
+    },
+    "Penn State": {
+      "conference": "Big Ten",
+      "abbreviations": ["PSU"],
+      "band_names": ["Penn State Blue Band"],
+      "mascot": "Nittany Lions",
+      "variants": ["Penn State Nittany Lions"]
+    },
+    "Pittsburgh": {
+      "conference": "ACC",
+      "abbreviations": ["PITT", "PIT"],
+      "band_names": ["Pitt Band"],
+      "mascot": "Panthers",
+      "variants": ["Pittsburgh Panthers", "Pitt"]
+    },
+    "Purdue": {
+      "conference": "Big Ten",
+      "abbreviations": ["PUR", "PU"],
+      "band_names": ["Purdue All-American Marching Band"],
+      "mascot": "Boilermakers",
+      "variants": ["Purdue Boilermakers"]
+    },
+    "Rutgers": {
+      "conference": "Big Ten",
+      "abbreviations": ["RUT", "RU"],
+      "band_names": ["Marching Scarlet Knights"],
+      "mascot": "Scarlet Knights",
+      "variants": ["Rutgers Scarlet Knights"]
+    },
+    "South Carolina": {
+      "conference": "SEC",
+      "abbreviations": ["SCAR", "SOCAR", "USC", "SC"],
+      "band_names": ["Mighty Sound of the Southeast"],
+      "mascot": "Gamecocks",
+      "variants": ["South Carolina Gamecocks"]
+    },
+    "Stanford": {
+      "conference": "ACC",
+      "abbreviations": ["STAN"],
+      "band_names": ["Leland Stanford Junior University Marching Band"],
+      "mascot": "Cardinal",
+      "variants": ["Stanford Cardinal"]
+    },
+    "Syracuse": {
+      "conference": "ACC",
+      "abbreviations": ["SU", "SYR", "CUSE"],
+      "band_names": ["Syracuse University Marching Band"],
+      "mascot": "Orange",
+      "variants": ["Syracuse Orange"]
+    },
+    "TCU": {
+      "conference": "Big 12",
+      "abbreviations": ["TCU"],
+      "band_names": ["Horned Frog Marching Band"],
+      "mascot": "Horned Frogs",
+      "variants": ["TCU Horned Frogs", "Texas Christian"]
+    },
+    "Tennessee": {
+      "conference": "SEC",
+      "abbreviations": ["TENN", "UT", "TEN"],
+      "band_names": ["Pride of the Southland Band"],
+      "mascot": "Volunteers",
+      "variants": ["Tennessee Volunteers", "Vols"]
+    },
+    "Texas": {
+      "conference": "SEC",
+      "abbreviations": ["TEX", "UT"],
+      "band_names": ["Longhorn Band"],
+      "mascot": "Longhorns",
+      "variants": ["Texas Longhorns", "Horns"]
+    },
+    "Texas A&M": {
+      "conference": "SEC",
+      "abbreviations": ["TAMU", "A&M"],
+      "band_names": ["Fightin' Texas Aggie Band"],
+      "mascot": "Aggies",
+      "variants": ["Texas A&M Aggies", "Texas AM"]
+    },
+    "UCF": {
+      "conference": "Big 12",
+      "abbreviations": ["UCF"],
+      "band_names": ["Marching Knights"],
+      "mascot": "Knights",
+      "variants": ["UCF Knights", "Central Florida"]
+    },
+    "UCLA": {
+      "conference": "Big Ten",
+      "abbreviations": ["UCLA"],
+      "band_names": ["UCLA Bruin Marching Band"],
+      "mascot": "Bruins",
+      "variants": ["UCLA Bruins"]
+    },
+    "USC": {
+      "conference": "Big Ten",
+      "abbreviations": ["USC"],
+      "band_names": ["Spirit of Troy"],
+      "mascot": "Trojans",
+      "variants": ["USC Trojans", "Southern California"]
+    },
+    "Utah": {
+      "conference": "Big 12",
+      "abbreviations": ["UTAH", "UU"],
+      "band_names": ["Pride of Utah"],
+      "mascot": "Utes",
+      "variants": ["Utah Utes"]
+    },
+    "Vanderbilt": {
+      "conference": "SEC",
+      "abbreviations": ["VANDY", "VAN"],
+      "band_names": ["Spirit of Gold Marching Band"],
+      "mascot": "Commodores",
+      "variants": ["Vanderbilt Commodores", "Vandy"]
+    },
+    "Virginia": {
+      "conference": "ACC",
+      "abbreviations": ["UVA", "UV", "UVA"],
+      "band_names": ["Cavalier Marching Band"],
+      "mascot": "Cavaliers",
+      "variants": ["Virginia Cavaliers", "UVA"]
+    },
+    "Virginia Tech": {
+      "conference": "ACC",
+      "abbreviations": ["VT", "VPI"],
+      "band_names": ["Marching Virginians"],
+      "mascot": "Hokies",
+      "variants": ["Virginia Tech Hokies", "VT"]
+    },
+    "Wake Forest": {
+      "conference": "ACC",
+      "abbreviations": ["WF", "WAKE"],
+      "band_names": ["Spirit of the Old Gold and Black"],
+      "mascot": "Demon Deacons",
+      "variants": ["Wake Forest Demon Deacons"]
+    },
+    "Washington": {
+      "conference": "Big Ten",
+      "abbreviations": ["UW", "WASH", "UDUB"],
+      "band_names": ["Husky Marching Band"],
+      "mascot": "Huskies",
+      "variants": ["Washington Huskies", "UDub"]
+    },
+    "Washington State": {
+      "conference": "Pac-12",
+      "abbreviations": ["WSU", "WAZZU"],
+      "band_names": ["Cougar Marching Band"],
+      "mascot": "Cougars",
+      "variants": ["Washington State Cougars", "Wazzu"]
+    },
+    "West Virginia": {
+      "conference": "Big 12",
+      "abbreviations": ["WV", "WVU"],
+      "band_names": ["Pride of West Virginia"],
+      "mascot": "Mountaineers",
+      "variants": ["West Virginia Mountaineers", "WVU"]
+    },
+    "Wisconsin": {
+      "conference": "Big Ten",
+      "abbreviations": ["WISC", "WIS", "UW"],
+      "band_names": ["University of Wisconsin Marching Band"],
+      "mascot": "Badgers",
+      "variants": ["Wisconsin Badgers"]
+    }
+  },
+  "alias_index": {
+    "ALA": "Alabama",
+    "BAMA": "Alabama",
+    "ARIZ": "Arizona",
+    "ASU": "Arizona State",
+    "ARK": "Arkansas",
+    "AUB": "Auburn",
+    "BYU": "BYU",
+    "BAY": "Baylor",
+    "BU": "Baylor",
+    "BC": "Boston College",
+    "CAL": "California",
+    "CIN": "Cincinnati",
+    "UC": "Cincinnati",
+    "CLEM": "Clemson",
+    "COL": "Colorado",
+    "CU": "Colorado",
+    "DU": "Duke",
+    "UF": "Florida",
+    "FSU": "Florida State",
+    "UGA": "Georgia",
+    "GT": "Georgia Tech",
+    "HOU": "Houston",
+    "UH": "Houston",
+    "ILL": "Illinois",
+    "IOWA": "Iowa",
+    "ISU": "Iowa State",
+    "KU": "Kansas",
+    "KSU": "Kansas State",
+    "K-STATE": "Kansas State",
+    "UK": "Kentucky",
+    "LSU": "LSU",
+    "UL": "Louisville",
+    "LOU": "Louisville",
+    "MARY": "Maryland",
+    "UM": "Miami",
+    "MSU": "Michigan State",
+    "MIZZ": "Missouri",
+    "MIZZOU": "Missouri",
+    "NCST": "NC State",
+    "NCSU": "NC State",
+    "NEB": "Nebraska",
+    "UNC": "North Carolina",
+    "NW": "Northwestern",
+    "OU": "Oklahoma",
+    "OKST": "Oklahoma State",
+    "OM": "Ole Miss",
+    "OLEMISS": "Ole Miss",
+    "ORE": "Oregon",
+    "ORST": "Oregon State",
+    "PSU": "Penn State",
+    "PITT": "Pittsburgh",
+    "PUR": "Purdue",
+    "RUT": "Rutgers",
+    "SCAR": "South Carolina",
+    "STAN": "Stanford",
+    "SU": "Syracuse",
+    "TCU": "TCU",
+    "TENN": "Tennessee",
+    "TEX": "Texas",
+    "TAMU": "Texas A&M",
+    "A&M": "Texas A&M",
+    "UCF": "UCF",
+    "UCLA": "UCLA",
+    "USC": "USC",
+    "UTAH": "Utah",
+    "VANDY": "Vanderbilt",
+    "UVA": "Virginia",
+    "VT": "Virginia Tech",
+    "WF": "Wake Forest",
+    "UW": "Washington",
+    "WASH": "Washington",
+    "WSU": "Washington State",
+    "WAZZU": "Washington State",
+    "WV": "West Virginia",
+    "WVU": "West Virginia",
+    "WISC": "Wisconsin",
+    "WIS": "Wisconsin"
+  },
+  "conference_map": {
+    "SEC": ["Alabama", "Arkansas", "Auburn", "Florida", "Georgia", "Kentucky", "LSU", "Missouri", "Oklahoma", "Ole Miss", "South Carolina", "Tennessee", "Texas", "Texas A&M", "Vanderbilt"],
+    "Big Ten": ["Illinois", "Iowa", "Maryland", "Michigan State", "Nebraska", "Northwestern", "Oregon", "Penn State", "Purdue", "Rutgers", "UCLA", "USC", "Washington", "Wisconsin"],
+    "Big 12": ["Arizona", "Arizona State", "BYU", "Baylor", "Cincinnati", "Colorado", "Houston", "Iowa State", "Kansas", "Kansas State", "Oklahoma State", "TCU", "UCF", "Utah", "West Virginia"],
+    "ACC": ["Boston College", "California", "Clemson", "Duke", "Florida State", "Georgia Tech", "Louisville", "Miami", "NC State", "North Carolina", "Pittsburgh", "Stanford", "Syracuse", "Virginia", "Virginia Tech", "Wake Forest"],
+    "Pac-12": ["Oregon State", "Washington State"],
+    "Independent": [],
+    "General": []
+  }
+}

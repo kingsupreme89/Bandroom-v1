@@ -197,6 +197,12 @@ internal sealed class ParametricEqProvider : ISampleProvider
 
     public ParametricEqProvider(ISampleProvider source)
     {
+        // INVARIANT: Read() below walks the buffer as interleaved L/R pairs (i, i+1). Callers
+        // (AudioPlayer.Play) always upmix mono -> stereo before this stage, so this should never
+        // trip -- but failing loudly here (matching ReverbProvider/StereoWidenerProvider's own
+        // guard) beats silently treating two consecutive mono samples as a fake L/R pair if that
+        // upstream guarantee is ever changed.
+        if (source.WaveFormat.Channels != 2) throw new ArgumentException("ParametricEqProvider requires a stereo source.");
         _source = source;
         int sr = source.WaveFormat.SampleRate;
         _chainL = BuildChain(sr);
@@ -239,6 +245,8 @@ internal sealed class MegaphoneEqProvider : ISampleProvider
 
     public MegaphoneEqProvider(ISampleProvider source)
     {
+        // Same interleaved-L/R-pairs invariant as ParametricEqProvider -- see its comment.
+        if (source.WaveFormat.Channels != 2) throw new ArgumentException("MegaphoneEqProvider requires a stereo source.");
         _source = source;
         int sr = source.WaveFormat.SampleRate;
         _hpL = BiQuadFilter.HighPass(sr, 500f, 0.8f);
@@ -301,6 +309,8 @@ internal sealed class TransientShaperProvider : ISampleProvider
 
     public TransientShaperProvider(ISampleProvider source, float attackGainDb = 4f, float sustainGainDb = -1f)
     {
+        // Same interleaved-L/R-pairs invariant as ParametricEqProvider -- see its comment.
+        if (source.WaveFormat.Channels != 2) throw new ArgumentException("TransientShaperProvider requires a stereo source.");
         _source = source;
         _attackGainDb = attackGainDb;
         _sustainGainDb = sustainGainDb;
@@ -610,6 +620,8 @@ internal sealed class SubBassEnhancerProvider : ISampleProvider
 
     public SubBassEnhancerProvider(ISampleProvider source, SubBassIntensity intensity)
     {
+        // Same interleaved-L/R-pairs invariant as ParametricEqProvider -- see its comment.
+        if (source.WaveFormat.Channels != 2) throw new ArgumentException("SubBassEnhancerProvider requires a stereo source.");
         _source = source;
         int sr = source.WaveFormat.SampleRate;
         _lpL = BiQuadFilter.LowPass(sr, 60f, 0.7f);
@@ -643,9 +655,21 @@ internal sealed class SubBassEnhancerProvider : ISampleProvider
 
     float Fold(float x)
     {
+        // SAFEGUARD: this reflects x around +-t until it lands inside the band. For any normal
+        // bounded PCM sample (|x| <= ~a few) that converges in a handful of iterations. But the
+        // reflection 2*t - x maps +Infinity -> -Infinity -> +Infinity forever, so a single non-finite
+        // sample reaching this stage (corrupt/malformed import, or any future upstream DSP change
+        // that can divide-by-near-zero) would hang this real-time audio thread indefinitely -- this
+        // runs on every Tackle-for-Loss clip whenever SubBassLevel != Off. Bail out defensively
+        // instead: drop the sub-bass contribution for that one non-finite/runaway sample rather than
+        // ever spin forever.
+        if (!float.IsFinite(x)) return 0f;
         float t = _foldThreshold;
+        const int MaxIterations = 64; // generous: real audio samples converge in a handful of folds
+        int iterations = 0;
         while (x > t || x < -t)
         {
+            if (++iterations > MaxIterations) return 0f;
             if (x > t) x = 2 * t - x;
             else if (x < -t) x = -2 * t - x;
         }
