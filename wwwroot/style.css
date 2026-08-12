@@ -3,6 +3,12 @@
   src: url("fonts/Outfit-Variable.ttf") format("truetype-variations");
   font-weight: 100 900;
 }
+/* Owner-supplied designer face, tried 2026-08-12 for the matchup-screen team name (see
+   .coverflow-name below) in place of the Arial-Black-plus-CSS-transforms approximation. */
+@font-face {
+  font-family: "Quicksilver";
+  src: url("fonts/Quicksilver.ttf") format("truetype");
+}
 
 :root {
   --accent: #22d3ee;
@@ -3464,21 +3470,40 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
 
 .marketplace-tabs { display: flex; gap: 4px; }
 
+/* Owner request 2026-08-12: "all icons everywhere" should read as rounded/polished/reflective,
+   matching the glossy-tile language .team-swatch already uses for team logos -- .icon-btn was the
+   one other icon-shaped element in the app still flat (transparent bg, no gloss, no depth). Same
+   glass-pill fill + inset highlight + top-sheen gradient as .team-swatch, scaled down for a small
+   30px glyph button instead of a large logo tile. */
 .icon-btn {
   width: 30px; height: 30px;
-  border-radius: 8px;
-  border: none;
-  background: transparent;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text-muted-2);
   font-size: 17px;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
   display: inline-flex; align-items: center; justify-content: center;
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.14),
+    inset -1px -2px 3px rgba(0, 0, 0, 0.3);
+}
+.icon-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.05) 30%, rgba(255, 255, 255, 0) 55%);
+  pointer-events: none;
 }
 /* Author `display` at equal specificity always beats the UA default [hidden]{display:none}, so
    without this an .icon-btn stays visible even with the hidden attribute set -- unexercised until
    #btn-unlock-matchup became the first .icon-btn ever toggled hidden. */
 .icon-btn[hidden] { display: none; }
-.icon-btn:hover { background: rgba(255, 255, 255, 0.06); color: var(--text-primary); }
+.icon-btn:hover { background: rgba(255, 255, 255, 0.1); color: var(--text-primary); }
 
 .header-team-badge { width: 30px; height: 30px; flex: none; }
 
@@ -4782,10 +4807,14 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   /* Owner request 2026-08-11: this used to sit always-visible, right-aligned in normal flow --
      now a popover toggled by the "Game Settings" pill next to the scorebug switcher (see
      wireMatchupGameSettingsPill in app.js), so it's pulled out of flow entirely and anchored to
-     the top-right of the dialog instead. [hidden] already gets display:none for free. */
+     the top-right of the dialog instead. [hidden] already gets display:none for free.
+     REPOSITIONED 2026-08-12 (owner report: right-anchored placement overlapped the away column's
+     search box and coverflow) -- centered over the dialog instead, same width/size as before, just
+     no longer colliding with either side's content. */
   position: absolute;
-  top: 62px;
-  right: clamp(14px, 2vw, 24px);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -4821,9 +4850,16 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   font-weight: 600;
   color: var(--text-muted);
   cursor: pointer;
-  white-space: nowrap;
+  /* FIXED 2026-08-12 (owner report: text overlapping/spilling past the Game Settings popover's
+     edge) -- nowrap forced long labels ("My team is on the LEFT (visiting side) of the scorebug
+     this game") onto one line wider than .matchup-controls-island's 340px, so the tail bled past
+     the rounded border instead of staying inside the pill. Letting the label wrap keeps every
+     toggle's text contained within the popover. */
+  white-space: normal;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
+.pill-toggle input[type="checkbox"] { flex: 0 0 auto; }
+.pill-toggle span { flex: 1 1 auto; min-width: 0; }
 .pill-toggle:hover { background: rgba(255, 255, 255, 0.07); }
 .pill-toggle:has(input:checked) {
   border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, var(--glass-border));
@@ -5236,7 +5272,7 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
      commercial face (only Outfit ships with the app, see AppFonts.cs/wwwroot/fonts), so this
      leans on the closest built-in stack: Arial Black/Arial Narrow Bold/Impact, condensed via
      negative letter-spacing + scaleY to read taller/narrower like the reference. */
-  font-family: "Arial Black", "Arial Narrow Bold", Impact, var(--font-body, "Outfit"), sans-serif;
+  font-family: "Quicksilver", "Arial Black", "Arial Narrow Bold", Impact, var(--font-body, "Outfit"), sans-serif;
   font-weight: 900;
   font-style: italic;
   text-transform: uppercase;

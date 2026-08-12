@@ -1579,7 +1579,13 @@
            above the Cancel/GAMETIME row (see .matchup-ticker/.matchup-footer-bar in style.css). -->
       <div class="matchup-ticker">
         <div class="matchup-ticker-track">
-          <span class="matchup-ticker-scroll">
+          <!-- Owner report 2026-08-12: the old #matchup-subtext paragraph (still populated with a
+               team-specific "Hit GAMETIME..." sentence by updateMatchupSubtext in app.js) was
+               overlapping the coverflow logo above the Cancel/GAMETIME row. That sentence belongs
+               here instead, alongside the rest of the how-to text -- updateMatchupSubtext sets
+               this span's content once both teams are picked (see app.js), otherwise it shows
+               this static default. -->
+          <span class="matchup-ticker-scroll" id="matchup-ticker-scroll-text">
             Do this while you're still on CFB 27's own team-select screen: pick the same two teams
             below, then hit GAMETIME right before kickoff. Each team's own saved profile loads
             automatically, so the right song plays for whichever side actually scores or forces a

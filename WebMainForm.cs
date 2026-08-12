@@ -2971,7 +2971,32 @@ public sealed class WebMainForm : Form
             }
         }
 
+        if (sideAllowed) volumeMultiplier *= FieldPositionVolumeMultiplier(routedSide);
+
         return (routedSide, volumeMultiplier, sideAllowed, reason);
+    }
+
+    /// <summary>Owner request 2026-08-12 ("big game volume system... only on the cfb27 default
+    /// scorebug logic"): CFB27's arrow next to the ball-position number (see
+    /// GameWatcher.ArrowUp's doc comment) flags which half of the field the ball is on. Home plays
+    /// full volume / away plays quieter when the arrow's up, and the reverse when it's down --
+    /// simulates the two teams' band sections being physically seated on opposite ends of the
+    /// stadium, closer to one end zone than the other. Stacks (multiplies) with the existing
+    /// Big-Game-away-quiet multiplier above rather than replacing it, per the owner's explicit call
+    /// to keep tonight's already-confirmed routing/volume logic intact and layer this on top --
+    /// scoped to Big Game + CFB27 only, a no-op (1x) for every other combination. Best-effort OCR
+    /// (see ArrowUp) -- ArrowUp being null (not yet read, wrong preset, ambiguous frame) is a no-op
+    /// on purpose, same "don't guess" philosophy as the rest of this file's possession handling.</summary>
+    float FieldPositionVolumeMultiplier(string side)
+    {
+        if (!_watcher.IsBigGame) return 1f;
+        if (_watcher.ActivePreset.Name != ScorebugPreset.CollegeFootball27.Name) return 1f;
+        if (_watcher.ArrowUp is not bool arrowUp) return 1f;
+
+        bool homeLoud = arrowUp;
+        return side == "home"
+            ? (homeLoud ? 1f : 0.6f)
+            : (homeLoud ? 0.6f : 1f);
     }
 
     /// <summary>Test-hook path (see FireTestEventFromWeb for the simpler unrouted version) --

@@ -1,4 +1,46 @@
-# Bandroom Task Board — Last Updated: 2026-08-08 (Claude orchestrator pass)
+# Bandroom Task Board — Last Updated: 2026-08-12 (Session 54 checkpoint)
+
+## Current State — 2026-08-12 (read this first)
+Event system is in good shape: all 38 active event keys (`ConfigStore.AllEngineEventKeys`) are
+wired, assignable, and routing correctly as of this checkpoint. Full list of active keys is in
+this session's chat log; the retired/blocked ones (bare "1st/2nd/3rd/4th Down", "(Midfield)"
+variants, a few others) are intentionally left out — no real yard-line data yet, or superseded by
+a newer key, see `ConfigStore.RetiredEventKeys`/`BlockedEventKeys` for the full reasoning per key.
+
+**This session's event fixes (Sessions 53-54, uncommitted going into this checkpoint):**
+- New dual-fire pairing `Defense: Second Down Short` (mirrors the existing 3rd-down-short pairing,
+  inverse balance — offense loud/defense ducked here, opposite of 3rd short).
+- `TimeoutHelper` now gates on the actual scorebug "Time Out" banner (`IsTimeout`) instead of a
+  `TimeRemainingSeconds > 240` heuristic that silently dropped early-game timeouts. Follow-up fix
+  same session: extracted `SampleTimeoutsFromWindow` so timeout-segment counts get sampled every
+  tick, independent of the `situationActive` guard that was blocking it from ever seeing the count
+  decrement while the banner was up.
+- `Other: Kickoff` cue restored as a standalone cue independent of `Offense: PAT Made` — previously
+  a missed PAT OCR read meant total silence after a score, no kickoff cue at all.
+- 3rd-down conversions now fire only `Offense: 3rd Down Conversion`, no longer double up with the
+  generic `Offense: Earned First Down` on the same snap (owner wanted just the specific cue).
+- Matchup-screen team-name font pass (SPORTY/TROY reference iterations) — cosmetic, still open:
+  owner asked for a real embedded font (Anton/Racing Sans One/Bungee/Alfa Slab One shortlist) to
+  replace the current Arial-Black-plus-CSS-transform approximation; not picked yet.
+
+**Possession-detection wrong-side-routing bug — investigated, root cause confirmed, NOT fixed:**
+Live reports (Tackle for Loss, Fourth Down) routed to the wrong team's audio. Traced to
+`GameWatcher.cs`: `SamplePossessionByUnderline`/`SamplePossession` require 2 consecutive matching
+ticks to commit a flip (`ConfirmPossessionFlip`), then lock a `Cooldown` (1.2s, NOT 2s as first
+estimated) during which no further possession updates are accepted at all — including correct
+ones. If a replay overlay or camera cut produces 2 bad consecutive ticks that commit a phantom
+flip right as the cooldown starts, `_lastPossession` stays wrong for the full 1.2s, and any
+routed event (`Defense:`/`Offense:` prefix) firing in that window goes to the wrong side.
+A 3-part fix was proposed (shorten/relax cooldown on strong corrective reads, relax margin during
+pending confirmation, add a stability-based tiebreaker) — **deliberately not implemented**. Reason:
+the confirm-gate and cooldown aren't incidental — they're the fix for two OTHER separately
+live-reported bugs (a single-frame phantom commit, and a repeating false-turnover loop during a
+CFB27 pause-menu freeze, both documented inline in `GameWatcher.cs` around `_pendingPossession`'s
+declaration). Loosening either one risks reopening those. Decision: leave as-is, watch for a
+repeat of wrong-side routing during live play, and only revisit with a narrowly-scoped fix if it
+actually recurs — not a preemptive rewrite of the debounce logic.
+
+No manual possession override exists (discussed as a fallback in Session 51, still not built).
 
 ## Claude → Orchestrator (2026-08-08)
 - [FIXED, NEEDS LIVE VERIFICATION] Live testers reported: random song firing on the pause

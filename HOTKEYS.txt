@@ -1,0 +1,145 @@
+============================================================
+BANDROOM AGENT COMMANDS — HOTKEYS & CODEWORDS
+============================================================
+If you're an AI agent working on this project, read this
+entire file before doing anything. Any time the user types
+one of these codewords, follow the instructions exactly.
+============================================================
+
+
+hotkey: hunnybunny
+-----------------
+When the user says "hunnybunny", do NOT answer yet.
+
+First, ask this exact question:
+  "Do you want Knowledge King or a Breakdown?"
+
+Then WAIT for the user to pick one.
+
+Knowledge King = The user wants RESEARCH.
+  • Explain the thing in detail
+  • What is it, how does it work, why does it matter
+  • Use plain English, like you're teaching a 10-year-old
+  • Be thorough but never sound like a textbook
+
+Breakdown = Something broke and the user wants to know
+  what happened.
+  • Tell them (1) what went wrong
+  • Tell them (2) what you did to fix it
+  • Tell them (3) could it happen again or is it really fixed
+  • All in plain English, like you're talking to a 10-year-old
+  • No code unless they ask for it
+
+
+hotkey: 523
+-----------
+The user wants a full project audit. Assign 8 auditors:
+
+  2 auditors → UI (the web interface, app.js, index.html,
+                style.css, anything the user sees and clicks)
+
+  2 auditors → Admin (settings, profiles, config, indexing,
+                system health, database/cloudflare workers,
+                anything that keeps the app running behind
+                the scenes)
+
+  2 auditors → Event Triggers (every evaluator, GameWatcher
+                OCR, event routing, all state machines, any
+                mechanism that detects game events and fires
+                audio)
+
+  2 auditors → Audio (AudioPlayer.cs, DSP pipeline, Sound
+                Booth, volumes, channels, whistle, trimmer,
+                any code that plays or processes sound)
+
+If audio code is present: the Admin auditors must finish
+their audit first, then go back and DOUBLE CHECK every other
+auditor's work.
+
+Each auditor must go AT LEAST 40 levels deep — trace every
+call chain, follow every dependency, check every condition.
+
+For every bug found:
+  (1) Diagnose it
+  (2) Fix it
+  (3) Verify the fix works
+  (4) Create a "bug blocker" — a guard, test, or safeguard
+      that makes sure it can NEVER happen again
+
+When all 8 auditors finish, present a full report broken
+down by each auditor's findings.
+
+
+hotkey: kingpremo
+-----------------
+Push a FULL RELEASE to GitHub so other people can download it.
+
+RULES:
+  • kingpremo can ONLY come after a 523 (the 8-auditor pass).
+    If the user says kingpremo and a 523 hasn't been run yet,
+    STOP and tell them: "523 first, then kingpremo."
+
+  • Run release.ps1 — the full build, tag, package, push to
+    GitHub workflow.
+
+  • If 523 found bugs that aren't fixed yet, STOP and tell
+    the user: "523 found X bugs that need fixing before
+    kingpremo."
+
+
+hotkey: 3089
+------------
+Build the latest code and launch it for testing.
+
+  • dotnet build BandAudioHook.csproj
+  • Kill any running Bandroom.exe so the build can write
+    the DLL
+  • Clear WebView2 cache so stale CSS/JS doesn't fool
+    anyone
+  • Launch Bandroom.exe fresh
+  • Report: 0 errors, 0 warnings, ready to test
+
+This is a DEV build — no git tag, no release, no Squirrel
+package. Just "here's the latest, go test it."
+
+
+hotkey: 888
+-----------
+Create a SESSION HANDOFF file.
+
+  • Summarize everything done this session:
+    - What was fixed
+    - What was seen / investigated
+    - What was worked on
+    - What was diagnosed
+
+  • Include 25 suggestions for what to do or add next
+
+  • Write it in "hunnybunny" style — plain English like
+    you're teaching a 10-year-old. No code. No jargon. If a
+    word would confuse a kid, explain it or use a simpler one.
+
+  • Save it as a new handoff file:
+    docs/Bandroom_Handoff_YYYY-MM-DD_Session##.md
+
+
+hotkey: 1989
+------------
+Zip up the latest dev build so the user can share it.
+
+  • Build: dotnet build BandAudioHook.csproj
+  • Create folder: c:\bandroom\devbuilds (if it doesn't
+    exist yet)
+  • Zip the entire bandroom bin output into a file named:
+    Bandroom_dev_share_YYYY-MM-DD.zip
+  • Save it in: c:\bandroom\devbuilds\
+  • Report the filename and file size so the user knows
+    what to share
+
+This is a DEV SHARE — no git tag, no GitHub release. Just
+a zip file they can send to someone.
+
+
+============================================================
+Add new codewords below this line. Keep the same format.
+============================================================

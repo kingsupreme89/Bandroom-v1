@@ -123,6 +123,18 @@ internal sealed class GameWatcher
     /// 25% (ordinary game, away team only sends a small travel pep band).</summary>
     public bool IsBigGame => _snapshotCurrent.BigGame;
 
+    /// <summary>Added 2026-08-12 for the CFB27-only field-position volume system (owner request,
+    /// live-tested build): CFB27's default scorebug shows a ball-position number with an arrow
+    /// next to it ("26▲"/"35▼", see ScorebugPreset.CollegeFootball27's Possession doc comment) --
+    /// up means the ball is past midfield on the offense's attacking side, down means the
+    /// opposite. Sampled by SampleFieldPositionArrowFromWindow, OCR'd from the same crop already
+    /// used for underline-brightness possession (no new preset fields). Null until a parseable
+    /// read comes in, or whenever the active preset isn't CFB27 -- WebMainForm only applies the
+    /// arrow-based multiplier when this has a value. CAVEAT: OCR reading an arrow GLYPH (not a
+    /// normal font character) is unproven -- best-effort first pass, expect to tune the accepted
+    /// character set and/or the crop box against a live game.</summary>
+    public bool? ArrowUp { get; private set; }
+
     /// <summary>Set alongside UserIsHome (see WebMainForm.SetGameTeamsFromWeb) so the "penalty"
     /// region can determine WHICH team a penalty was called against -- the game's own penalty
     /// decision overlay shows "Against &lt;Team Name&gt;" text, which only means something once
@@ -671,6 +683,11 @@ internal sealed class GameWatcher
                         // SampleTimeoutsFromWindow's own doc comment for why the "Time Out" banner
                         // being up is exactly the window this needs to keep sampling in.
                         SampleTimeoutsFromWindow(fullBmp, winW, winH);
+                        // Field-position arrow (CFB27-only, see ArrowUp's doc comment) -- same
+                        // "sample every down tick regardless of flag/situation/banner" reasoning as
+                        // timeouts above: the arrow readout sits right next to the score digits,
+                        // not inside the color-fill area those guards protect.
+                        if (!flagActive) await SampleFieldPositionArrowFromWindow(fullBmp, winW, winH, ocrEngine);
                     }
 
                     var match = region.Pattern.Match(text);
@@ -981,6 +998,60 @@ internal sealed class GameWatcher
         _possessionCooldownUntil = DateTime.UtcNow + Cooldown;
         Log?.Invoke($"[possession] now: {side} (underline brightness left={leftBrightness:F0} right={rightBrightness:F0}, UserTeamOnLeftSide={UserTeamOnLeftSide})");
         PossessionChanged?.Invoke(side);
+    }
+
+    /// <summary>CFB27-only field-position arrow read (see ArrowUp's doc comment) -- OCR's the same
+    /// two crops SamplePossessionByUnderline already samples for brightness (only one of the two
+    /// slots actually renders ball-position+arrow text at a time, whichever side has the ball), and
+    /// looks for an up/down arrow glyph in whichever crop actually produced text. Deliberately does
+    /// NOT touch _lastPossession/PossessionChanged -- this is a separate signal, read-only side
+    /// effect on ArrowUp. Best-effort: OCR reliably reading a small arrow GLYPH (not a normal
+    /// alphanumeric character) is unconfirmed, so a generous set of likely OCR misreads (^, v, V,
+    /// Λ, and the real ▲/▼ glyphs) is accepted rather than just the exact Unicode arrows.</summary>
+    async Task SampleFieldPositionArrowFromWindow(Bitmap fullBmp, int winW, int winH, OcrEngine engine)
+    {
+        if (_activePreset.Name != ScorebugPreset.CollegeFootball27.Name) { ArrowUp = null; return; }
+        if (_activePreset.AwayUnderlineFxW <= 0 || _activePreset.HomeUnderlineFxW <= 0) return;
+
+        string awayText = await OcrCropAsync(fullBmp, winW, winH, engine,
+            _activePreset.AwayUnderlineFxX, _activePreset.AwayUnderlineFxY,
+            _activePreset.AwayUnderlineFxW, _activePreset.AwayUnderlineFxH);
+        string homeText = await OcrCropAsync(fullBmp, winW, winH, engine,
+            _activePreset.HomeUnderlineFxX, _activePreset.HomeUnderlineFxY,
+            _activePreset.HomeUnderlineFxW, _activePreset.HomeUnderlineFxH);
+
+        bool? awayArrow = ParseFieldPositionArrow(awayText);
+        bool? homeArrow = ParseFieldPositionArrow(homeText);
+        bool? read = awayArrow ?? homeArrow;
+        if (read == null) return; // ambiguous/blank frame -- keep the last known value, same "don't guess" philosophy as possession
+
+        if (read != ArrowUp) Log?.Invoke($"[field-position] arrow now: {(read.Value ? "up" : "down")} (away-slot=\"{awayText.Trim()}\" home-slot=\"{homeText.Trim()}\")");
+        ArrowUp = read;
+    }
+
+    static bool? ParseFieldPositionArrow(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        if (text.IndexOfAny(new[] { '▲', '^', 'Λ', 'ᐱ' }) >= 0) return true;
+        if (text.IndexOfAny(new[] { '▼', 'v', 'V', 'ᐯ' }) >= 0) return false;
+        return null;
+    }
+
+    static async Task<string> OcrCropAsync(Bitmap fullBmp, int winW, int winH, OcrEngine engine,
+        double fxX, double fxY, double fxW, double fxH)
+    {
+        int cropX = Math.Max(0, (int)(winW * fxX));
+        int cropY = Math.Max(0, (int)(winH * fxY));
+        int cropW = Math.Max(1, Math.Min((int)(winW * fxW), winW - cropX));
+        int cropH = Math.Max(1, Math.Min((int)(winH * fxH), winH - cropY));
+
+        using var bmp = new Bitmap(cropW, cropH, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.DrawImage(fullBmp, new Rectangle(0, 0, cropW, cropH),
+                new Rectangle(cropX, cropY, cropW, cropH), GraphicsUnit.Pixel);
+        }
+        return await OcrBitmapAsync(engine, bmp);
     }
 
     /// <summary>Requires the SAME side to be sampled on two consecutive ticks before returning

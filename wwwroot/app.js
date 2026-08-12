@@ -8191,15 +8191,25 @@ function shiftCoverflow(side, dir) {
   renderMatchupCoverflow(side, filter);
 }
 
+// Owner report 2026-08-12: this team-specific sentence used to live in #matchup-subtext, which
+// sat right on top of the coverflow logo and overlapped it. Moved into the ticker
+// (#matchup-ticker-scroll-text) alongside the rest of the how-to copy instead; captured here once
+// so a picked-then-cleared matchup can restore the ticker's static default text.
+const MATCHUP_TICKER_DEFAULT_TEXT = document.getElementById("matchup-ticker-scroll-text")?.textContent || "";
+
 function updateMatchupSubtext() {
   const el = document.getElementById("matchup-subtext");
+  const tickerEl = document.getElementById("matchup-ticker-scroll-text");
   const ready = state.matchupHome && state.matchupAway && state.matchupHome !== state.matchupAway;
   if (!state.matchupHome || !state.matchupAway) {
     el.textContent = "Pick both a home and an away team.";
+    if (tickerEl) tickerEl.textContent = MATCHUP_TICKER_DEFAULT_TEXT;
   } else if (state.matchupHome === state.matchupAway) {
     el.textContent = "Home and away can't be the same team.";
+    if (tickerEl) tickerEl.textContent = MATCHUP_TICKER_DEFAULT_TEXT;
   } else {
-    el.textContent = `${state.matchupAway} (away) at ${state.matchupHome} (home) -- each team's own saved profile loads automatically. Hit GAMETIME while you're still on CFB 27's team-select screen.`;
+    el.textContent = "";
+    if (tickerEl) tickerEl.textContent = `${state.matchupAway} (away) at ${state.matchupHome} (home) -- each team's own saved profile loads automatically. Hit GAMETIME while you're still on CFB 27's team-select screen.`;
   }
   document.getElementById("btn-matchup-confirm").disabled = !ready;
 }
