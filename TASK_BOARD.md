@@ -1,7 +1,28 @@
-# Bandroom Task Board — Last Updated: 2026-08-12 (Session 54 checkpoint)
+# Bandroom Task Board — Last Updated: 2026-08-12 (Session 55 checkpoint)
 
 ## Current State — 2026-08-12 (read this first)
-Event system is in good shape: all 38 active event keys (`ConfigStore.AllEngineEventKeys`) are
+**Session 55 addition:** `Defense: After Opening Kick` was reported live as wrong-team routing
+("home team just opening kicked off in a BG, should've fired for away too") — traced to it being
+correct-as-designed but too narrow: it's a `HomeOnlyAlwaysEventKeys` single-fire cue attributed to
+the KICKING team's defense (confirmed correct-as-designed once already, Session 49). Owner's real
+ask: in a Big Game, both teams should play this moment, same balanced-dual-fire shape as 2nd/3rd
+Down Short — receiving team (offense, has the ball) full 100, kicking team (defense) ducked to 60.
+- New `OffenseAfterOpeningKickHelper` fires `"Offense: After Opening Kick"` (100) on the exact same
+  trigger condition `DefenseFirstDownHelper` already used (first snap after a kickoff-started
+  drive), same-tick dual-fire pairing.
+- `DefenseFirstDownHelper`: volume dropped from 85 to flat 60 (ducked counterpart).
+- `"Defense: After Opening Kick"` removed from `HomeOnlyAlwaysEventKeys` — now routes through
+  ordinary `Defense:*` tiers (home always, away during Big Game at full volume via the new pairing,
+  or 25%/earned-only outside Big Game) instead of never playing for away at all.
+- Registered `"Offense: After Opening Kick"` in `ConfigStore.AllEngineEventKeys` and the new
+  evaluator in `GameWatcher.CreateEventRouter`'s rules array (Windows only — Mac's evaluator list
+  was already missing several other evaluators from prior sessions, pre-existing drift not touched
+  here, same as the Session 53 note for `Defense: Second Down Short`).
+- 2 new unit tests (`OffenseAfterOpeningKickHelper_Fires_OnFirstSnapAfterKickoff`,
+  `..._DoesNotFire_WhenSnapMissed`); existing `DefenseFirstDownHelper` fire test updated to assert
+  the new 60 volume. Build clean, 61/61 Core tests passing (59 + 2 new). Not yet live-verified.
+
+Event system is in good shape otherwise: all 38 active event keys (`ConfigStore.AllEngineEventKeys`, now 39 with the addition above) are
 wired, assignable, and routing correctly as of this checkpoint. Full list of active keys is in
 this session's chat log; the retired/blocked ones (bare "1st/2nd/3rd/4th Down", "(Midfield)"
 variants, a few others) are intentionally left out — no real yard-line data yet, or superseded by

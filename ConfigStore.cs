@@ -1579,6 +1579,11 @@ internal static class ConfigStore
         // Renamed 2026-08-11 (owner audit call) from "Defense: First Down" -- see
         // WebMainForm.RenamedEventKeyAliases for the old-key fallback.
         "Defense: After Opening Kick",
+        // Added 2026-08-12 (owner call, live game, Big Game) -- OffenseAfterOpeningKickHelper's
+        // counterpart to "Defense: After Opening Kick" above, same-tick dual-fire pairing (100 for
+        // the receiving team's offense vs the kicking team's defense at 60 -- same balance as
+        // "Offense/Defense: Second Down Short").
+        "Offense: After Opening Kick",
         "Defense: Third Down Short",
         // Added 2026-08-11 (owner audit call) -- distinct cue for converting a 3rd down
         // specifically, fires alongside the generic Earned First Down cue on the same snap.

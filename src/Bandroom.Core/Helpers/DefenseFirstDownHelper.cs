@@ -1,10 +1,18 @@
 namespace Bandroom.Core.Helpers;
 
-/// <summary>Fires "Defense: First Down" for the one specific moment flagged as unbuilt in
+/// <summary>Fires "Defense: After Opening Kick" for the one specific moment flagged as unbuilt in
 /// docs/CFB27_Session23_Handoff.md: the very first offensive snap of a kickoff-started drive
 /// (the receiving team's fresh 1st & 10 right after the return), attributed to the DEFENSE side
-/// -- the team that just kicked, whose D is about to take the field -- home-only-always gating
-/// (see WebMainForm.ResolveEventRouting's tier 3, never plays for away even during a Big Game).
+/// -- the team that just kicked, whose D is about to take the field.
+///
+/// Owner rule 2026-08-12 (live game, Big Game): both teams should play on this moment, same
+/// balanced-dual-fire shape as 2nd/3rd Down Short -- the receiving team (offense, has the ball)
+/// is the bigger moment, full 100 (see the new sibling "Offense: After Opening Kick" evaluator,
+/// same trigger condition); this Defense side is the ducked counterpart at 60, same balance as
+/// "Defense: Second Down Short". No longer home-only-always (that gating is dropped -- ordinary
+/// Defense:* routing/Big-Game tiers in WebMainForm.ResolveEventRouting now apply like any other
+/// Defense cue).
+///
 /// Neither FirstDownHelper nor OffenseDownHelper fire anything for this exact moment (both
 /// explicitly exclude the opening/kickoff snap), so this is a standalone evaluator, not a
 /// branch on either.
@@ -37,13 +45,10 @@ public sealed class DefenseFirstDownHelper : IRuleEvaluator
         if (state.Current.Down != 1)
             return null;
 
-        // Renamed 2026-08-11 (owner audit call, same session as DriveStarterHelper's renames) --
-        // "Defense: After Opening Kick" is clearer about what this actually is (the receiving
-        // team's D taking the field right after a kickoff return) than the old generic name.
         return new TriggerEvent
         {
             EventKey = "Defense: After Opening Kick",
-            Volume = 85,
+            Volume = 60,
             IsEarnedBigEvent = false
         };
     }

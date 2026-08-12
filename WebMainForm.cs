@@ -2905,7 +2905,10 @@ public sealed class WebMainForm : Form
         // DefenseThirdDownHelper (100%) + OffenseDownHelper's long branch (60%, new
         // "Offense: Third Down" key). Reverses the "rare/subtle enough that even a full away band
         // wouldn't bother" call made earlier the same day.
-        "Defense: After Opening Kick",
+        // "Defense: After Opening Kick" REMOVED 2026-08-12 (owner, live game, Big Game): same
+        // reversal as "Defense: Third Down" above -- now a balanced dual-fire with the new
+        // "Offense: After Opening Kick" (see OffenseAfterOpeningKickHelper), so it needs ordinary
+        // Defense:* routing (home always, away during Big Game) instead of never-plays-for-away.
         // Added 2026-08-11 (owner audit call, same session as the rename) -- home crowd cue for
         // stopping the opponent right after a punt; away's own travel band shouldn't get this one.
         "Defense: After Punt",

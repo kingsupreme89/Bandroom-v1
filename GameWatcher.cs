@@ -1543,6 +1543,7 @@ internal sealed class GameWatcher
             new FirstDownHelper(),
             new GameStateEventHelper(),
             new KickoffHelper(),
+            new OffenseAfterOpeningKickHelper(),
             new OffenseDownHelper(),
             new PenaltyHelper(),
             new PregameHelper(),

@@ -779,6 +779,7 @@ public class EvaluatorTests
         var result = evaluator.Evaluate(t2);
         Assert.NotNull(result);
         Assert.Equal("Defense: After Opening Kick", result!.EventKey);
+        Assert.Equal(60, result.Volume); // ducked side of the 2026-08-12 dual-fire pairing
     }
 
     [Fact]
@@ -789,6 +790,33 @@ public class EvaluatorTests
         evaluator.Evaluate(t1);
 
         // Next non-kickoff tick shows down 2, not a fresh 1st -- the exact snap was missed.
+        var t2 = State(Snap.With(isKickoff: true, down: 0), Snap.With(isKickoff: false, down: 2));
+        Assert.Null(evaluator.Evaluate(t2));
+    }
+
+    // ---------- OffenseAfterOpeningKickHelper ----------
+
+    [Fact]
+    public void OffenseAfterOpeningKickHelper_Fires_OnFirstSnapAfterKickoff()
+    {
+        var evaluator = new OffenseAfterOpeningKickHelper();
+        var t1 = State(Snap.With(isKickoff: false, down: 0), Snap.With(isKickoff: true, down: 0));
+        Assert.Null(evaluator.Evaluate(t1));
+
+        var t2 = State(Snap.With(isKickoff: true, down: 0), Snap.With(isKickoff: false, down: 1));
+        var result = evaluator.Evaluate(t2);
+        Assert.NotNull(result);
+        Assert.Equal("Offense: After Opening Kick", result!.EventKey);
+        Assert.Equal(100, result.Volume); // loud side -- receiving team has the ball
+    }
+
+    [Fact]
+    public void OffenseAfterOpeningKickHelper_DoesNotFire_WhenSnapMissed()
+    {
+        var evaluator = new OffenseAfterOpeningKickHelper();
+        var t1 = State(Snap.With(isKickoff: false, down: 0), Snap.With(isKickoff: true, down: 0));
+        evaluator.Evaluate(t1);
+
         var t2 = State(Snap.With(isKickoff: true, down: 0), Snap.With(isKickoff: false, down: 2));
         Assert.Null(evaluator.Evaluate(t2));
     }
