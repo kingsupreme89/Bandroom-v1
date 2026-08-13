@@ -598,6 +598,7 @@ async function openSituations(category) {
           <button class="bandroom-item-action situation-whistle-toggle${ev.playLeadInWhistle === false ? "" : " active"}" data-act="whistle" title="${ev.playLeadInWhistle === false ? "Lead-in whistle off for this song -- click to turn it back on" : "Lead-in whistle on for this song (when the global toggle is on) -- click to skip it for just this one"}">&#128239;</button>
           <button class="bandroom-item-action situation-whistle-toggle${ev.whistleSpeed && ev.whistleSpeed !== 1 ? " active" : ""}" data-act="whistle-speed" title="${whistleSpeedTitle(ev.whistleSpeed)}">&#127895;<span class="situation-whistle-speed-label">${whistleSpeedLabel(ev.whistleSpeed)}</span></button>
           <button class="bandroom-item-action situation-whistle-toggle${ev.speed2x ? " active" : ""}" data-act="speed2x" title="${ev.speed2x ? "Playing at 1.09x speed -- click to go back to normal speed" : "Play this event's song at 1.09x speed (in-game and preview)"}">&#9193;</button>
+          <button class="bandroom-item-action situation-whistle-toggle${ev.paSpeakerEffect ? " active" : ""}" data-act="pa-effect" title="${ev.paSpeakerEffect ? "Stadium PA speaker sound on for this song -- click to turn it back off" : "Play this event's song like it's coming out of the stadium PA speakers (in-game and preview)"}">&#128226;</button>
           <button class="bandroom-item-action" data-act="track-info" title="Track Info" ${ev.fileName ? "" : "disabled"}>&#8505;</button>
           <div class="situation-share-popover glass" hidden>
             <div class="situation-copy-title">Share this song to&hellip;</div>
@@ -654,6 +655,15 @@ async function openSituations(category) {
         ? "Playing at 1.09x speed -- click to go back to normal speed"
         : "Play this event's song at 1.09x speed (in-game and preview)";
       bridge?.SetEventPlaybackSpeed2x(ev.trigger, nowOn);
+    });
+    row.querySelector('[data-act="pa-effect"]').addEventListener("click", (e) => {
+      const btn = e.currentTarget;
+      const nowOn = !btn.classList.contains("active");
+      btn.classList.toggle("active", nowOn);
+      btn.title = nowOn
+        ? "Stadium PA speaker sound on for this song -- click to turn it back off"
+        : "Play this event's song like it's coming out of the stadium PA speakers (in-game and preview)";
+      bridge?.SetEventPaSpeakerEffect(ev.trigger, nowOn);
     });
     wireSituationVolumePopover(row, ev.trigger);
     list.appendChild(row);

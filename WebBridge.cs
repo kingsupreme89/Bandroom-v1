@@ -1290,6 +1290,7 @@ public sealed class WebBridge
             playLeadInWhistle = e.PlayLeadInWhistle,
             whistleSpeed = e.WhistleSpeed,
             speed2x = e.PlaybackSpeed2x,
+            paSpeakerEffect = e.PaSpeakerEffect,
         }));
 
     public void AssignEvent(string trigger) => _host.OpenAssignTrackFromWeb(trigger);
@@ -1333,6 +1334,7 @@ public sealed class WebBridge
     // click itself.
     public void SetEventPlayLeadInWhistle(string trigger, bool enabled) => _host.SetEventPlayLeadInWhistleFromWeb(trigger, enabled);
     public void SetEventPlaybackSpeed2x(string trigger, bool enabled) => _host.SetEventPlaybackSpeed2xFromWeb(trigger, enabled);
+    public void SetEventPaSpeakerEffect(string trigger, bool enabled) => _host.SetEventPaSpeakerEffectFromWeb(trigger, enabled);
     // Per-event whistle-speed button -- REPLACED BrowseAndSetEventAltWhistle/ClearEventAltWhistle/
     // SaveTrimAsEventAltWhistle 2026-08-12 (owner request: swap the alternate-whistle-clip picker
     // for a whistle-speed toggle). Cycles through WebMainForm.WhistleSpeedPresets, returns the new

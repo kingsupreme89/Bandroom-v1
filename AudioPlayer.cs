@@ -220,7 +220,14 @@ internal static class AudioPlayer
     /// whistle clip alone via SoundTouchSpeedSampleProvider (same tempo-shift technique as the main
     /// clip's speed2x, just scoped to the lead-in provider before it's sequenced with the main
     /// clip), so the whistle's speed is independent of the main clip's own speed2x toggle.</param>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true, Func<float>? liveVolumeSource = null, bool speed2x = false, double whistleSpeed = 1.0, string? channel = null)
+    /// <param name="forcePaEffect">TriggerEntry.PaSpeakerEffect -- forces this clip through the
+    /// Stadium reverb preset regardless of the Sound Booth's global CurrentReverb setting (even
+    /// if that's Off), so one card can have the "coming out of the stadium PA" sound without
+    /// turning reverb on for every other clip. Deliberately Stadium reverb only, not the
+    /// Megaphone EQ (owner: this should sound like open-air speakers, not a radio/megaphone).
+    /// Ignored when isPregameEvent is also true -- the Tunnel treatment already has its own
+    /// reverb stage and takes priority for that one clip.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true, Func<float>? liveVolumeSource = null, bool speed2x = false, double whistleSpeed = 1.0, string? channel = null, bool forcePaEffect = false)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
@@ -280,6 +287,13 @@ internal static class AudioPlayer
                             // clip -- it already includes its own reverb stage, stacking the
                             // user's chosen preset on top would just be mud.
                             source = new TunnelFilterProvider(source);
+                        }
+                        else if (forcePaEffect)
+                        {
+                            // Per-card override -- Stadium reverb only, independent of whatever
+                            // CurrentReverb is globally set to (including Off).
+                            var (roomSize, damp, wet, width) = ReverbPresets.Get(ReverbPreset.Stadium);
+                            source = new ReverbProvider(source, roomSize, damp, wet, width);
                         }
                         else
                         {

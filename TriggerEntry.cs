@@ -53,4 +53,14 @@ public class TriggerEntry
     /// SoundTouchSpeedSampleProvider for how it's applied. Affects both real in-game firing and Preview.
     /// Missing from old saved JSON deserializes to false (default), so no migration needed.</summary>
     public bool PlaybackSpeed2x { get; set; } = false;
+
+    /// <summary>Per-event override that forces this card's main clip through the Stadium reverb
+    /// preset (the "coming out of the stadium PA speakers" sound), regardless of whatever the
+    /// Sound Booth's global Reverb preset is currently set to. Added 2026-08-12 (owner request:
+    /// wanted the PA-speaker effect on exactly one event, not applied globally to every clip via
+    /// the Sound Booth). Deliberately Stadium reverb only, NOT the Megaphone EQ preset -- owner
+    /// clarified this should sound like open-air stadium speakers, not a narrow-band radio/
+    /// megaphone honk. Same on/off-per-card convention as PlaybackSpeed2x above. Missing from old
+    /// saved JSON deserializes to false (default), no migration needed.</summary>
+    public bool PaSpeakerEffect { get; set; } = false;
 }

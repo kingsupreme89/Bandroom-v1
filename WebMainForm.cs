@@ -1266,7 +1266,7 @@ public sealed class WebMainForm : Form
         if (entry == null) return;
         float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
-            AudioPlayer.Play(entry.AudioFile, VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed);
+            AudioPlayer.Play(entry.AudioFile, VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, forcePaEffect: entry.PaSpeakerEffect);
         if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
             AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isPreview: true, liveVolumeSource: () => AudioPlayer.PaVolume * eventVolumeScale);
     }
@@ -1297,6 +1297,19 @@ public sealed class WebMainForm : Form
         var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
         if (entry == null) return;
         entry.PlaybackSpeed2x = enabled;
+        ConfigStore.Save(_config);
+        SaveCurrentTeamProfile();
+        PushCategories();
+    }
+
+    /// <summary>PA/Stadium-speaker toggle on an event card's transport strip -- see
+    /// AudioPlayer.Play's forcePaEffect param. Plain on/off per card, same convention as
+    /// SetEventPlaybackSpeed2xFromWeb above.</summary>
+    public void SetEventPaSpeakerEffectFromWeb(string trigger, bool enabled)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        entry.PaSpeakerEffect = enabled;
         ConfigStore.Save(_config);
         SaveCurrentTeamProfile();
         PushCategories();
@@ -2841,7 +2854,7 @@ public sealed class WebMainForm : Form
             // feature entirely. Back to firing synchronously, same as before that feature existed.
             string paFile = entry.PaAudioFile;
             bool paExists = !string.IsNullOrWhiteSpace(paFile) && File.Exists(paFile);
-            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, channel: channel);
+            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, channel: channel, forcePaEffect: entry.PaSpeakerEffect);
             // PA Announcer layer: plays concurrently with the main cue above, not instead of it,
             // so interruptPrevious MUST be false here -- true would call StopAll() and kill the
             // main clip that was just started a line above. Fired after, not before, the main

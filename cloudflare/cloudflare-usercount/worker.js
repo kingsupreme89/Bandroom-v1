@@ -133,7 +133,7 @@ export default {
       // Cache in KV for 5 minutes -- GitHub's unauthenticated API is rate-limited to 60
       // req/hr per source IP, and every Worker isolate shares this one, so polling it
       // straight from every client's ticker refresh would blow through that fast.
-      const cacheRaw = await env.USERCOUNT.get("downloads_cache");
+      const cacheRaw = await env.USERCOUNT.get("downloads_cache_v2");
       if (cacheRaw) {
         try {
           const cached = JSON.parse(cacheRaw);
@@ -147,28 +147,43 @@ export default {
 
       let count = 0;
       try {
-        const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases`, {
-          headers: { "User-Agent": "bandroom-usercount-worker", Accept: "application/vnd.github+json" },
-        });
-        if (res.ok) {
-          const releases = await res.json();
-          for (const rel of releases) {
-            for (const asset of rel.assets ?? []) {
-              // Only count the actual installer asset. Squirrel.Windows (the auto-update
-              // mechanism) also publishes "RELEASES" and "*.nupkg" assets per release, and the
-              // app itself fetches those automatically on every update check -- counting them
-              // would report auto-update traffic as if it were human downloads (in practice,
-              // >80% of the raw asset total is this noise, not real installs).
-              if (/setup.*\.exe$/i.test(asset.name ?? "")) {
-                count += asset.download_count ?? 0;
-              }
+        // Paginate. The GitHub Releases API defaults to 30 releases per page, so a single
+        // unpaginated fetch silently drops every release older than the 30 newest -- which
+        // under-counts the all-time total (the counter showed 339 instead of the real 520,
+        // with exactly the 181 downloads from releases v1.0.9..v1.0.48 landing on page 2).
+        // Walk pages of 100 until a short page signals the end of history. At Bandroom's
+        // current ~76 releases this is a single request, still far under GitHub's 60/hr limit.
+        const releases = [];
+        for (let page = 1; page <= 20; page++) {
+          const res = await fetch(
+            `https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100&page=${page}`,
+            { headers: { "User-Agent": "bandroom-usercount-worker", Accept: "application/vnd.github+json" } },
+          );
+          if (!res.ok) {
+            // Page 1 failed (rate-limit / GitHub hiccup) -> serve the cached total rather than 0.
+            if (page === 1 && cacheRaw) {
+              return new Response(JSON.stringify({ count: JSON.parse(cacheRaw).count }), {
+                headers: { ...cors, "Content-Type": "application/json" },
+              });
+            }
+            break; // a later page failing just means we keep what we already summed
+          }
+          const batch = await res.json();
+          releases.push(...batch);
+          if (batch.length < 100) break;
+        }
+
+        for (const rel of releases) {
+          for (const asset of rel.assets ?? []) {
+            // Only count the actual installer asset. Squirrel.Windows (the auto-update
+            // mechanism) also publishes "RELEASES" and "*.nupkg" assets per release, and the
+            // app itself fetches those automatically on every update check -- counting them
+            // would report auto-update traffic as if it were human downloads (in practice,
+            // >80% of the raw asset total is this noise, not real installs).
+            if (/setup.*\.exe$/i.test(asset.name ?? "")) {
+              count += asset.download_count ?? 0;
             }
           }
-        } else if (cacheRaw) {
-          // Rate-limited or GitHub hiccup -- serve the last known total rather than 0.
-          return new Response(JSON.stringify({ count: JSON.parse(cacheRaw).count }), {
-            headers: { ...cors, "Content-Type": "application/json" },
-          });
         }
       } catch {
         if (cacheRaw) {
@@ -178,7 +193,7 @@ export default {
         }
       }
 
-      await env.USERCOUNT.put("downloads_cache", JSON.stringify({ count, computedAt: Date.now() }), {
+      await env.USERCOUNT.put("downloads_cache_v2", JSON.stringify({ count, computedAt: Date.now() }), {
         expirationTtl: 3600,
       });
 
