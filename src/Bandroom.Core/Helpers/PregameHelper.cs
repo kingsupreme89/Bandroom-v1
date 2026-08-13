@@ -3,7 +3,12 @@ namespace Bandroom.Core.Helpers;
 /// <summary>Fires once when CFB27's pregame team-intro/"READY" screen first appears --
 /// edge-triggered on the not-ready -> ready transition, same pattern as KickoffHelper's
 /// not-kickoff -> kickoff edge, so a sound fires exactly once per game instead of every tick
-/// the screen happens to still be up.
+/// the screen happens to still be up. UNLIKE most other pregame/situational cues, this one is
+/// deliberately allowed to re-fire multiple times per app session (owner call 2026-08-12): if
+/// the player hits Back on the team-select screen and re-readies, the READY screen genuinely
+/// reappears and this should play again -- see the "pregameready" WatchedRegion being
+/// deliberately left OUT of GameWatcher.EventGatedRegions for how that re-arming happens at the
+/// OCR layer.
 ///
 /// This is a DIFFERENT signal than GameStateEventHelper's "Other: Pregame Take the Field"
 /// (which infers pregame from Quarter 0->1 + Down 0->positive, i.e. after the first snap is

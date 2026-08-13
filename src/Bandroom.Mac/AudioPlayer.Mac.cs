@@ -69,7 +69,7 @@ internal static class AudioPlayer
     private sealed class ActivePlayback
     {
         public int ProcessId;
-        public string FilePath;
+        public string FilePath = "";
         public float BaseVolume;
         public CancellationTokenSource? FadeCts;
     }

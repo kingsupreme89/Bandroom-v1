@@ -1,5 +1,5 @@
 # 🏈 Bandroom — Master Roadmap
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-08-12
 
 > 🔴 = Broken / Needs Fixing | 🟡 = In Progress | 🟢 = Done | ⚪ = Not Started
 
@@ -11,7 +11,7 @@
 |---|---|---|---|
 | `Bandroom.Core.dll` | 0 | 0 | 🟢 GREEN |
 | `Bandroom.dll` (Windows) | 0 | 0 | 🟢 GREEN |
-| `Bandroom.Mac.dll` | **78** | — | 🔴 BROKEN (MacWebBridge.cs calls missing MainWindow methods) |
+| `Bandroom.Mac.dll` | 0 | 0 | � GREEN (the prior "78 errors" was mid-edit WIP, now resolved; evaluators synced 16→24) |
 
 ---
 
@@ -99,8 +99,8 @@ OCR Loop (250ms) → RouteEngineTick() → PlaySnapshot rotation
 | ChangelogService ref | `MacWebBridge.cs` | 🔴 Not in scope on Mac side |
 
 ### Mac Remaining Work (in priority order)
-1. 🔴 **Fix Mac build errors** — finish `MainWindow` stubs for all methods `MacWebBridge` calls: window drag/minimize/maximize/close, profile import/export, changelog, PA/UI click sound, matchup lock, copy-to-all-teams
-2. ⚪ **WebView embedding** — embed `wwwroot/index.html` with JS↔C# bridge (Avalonia WebView)
+1. � **Fix Mac build errors** — DONE 2026-08-12: `MainWindow`/`MacWebBridge` now build clean (0/0), evaluator list synced 16→24 (1:1 with Windows), per-game evaluator-state reuse + pregame first-tick bugs fixed.
+2. ⚪ **Functional OCR parity** — port Windows `GameWatcher.cs`'s real capture pipeline (score/clock/flag/banner/penalty/timeout-dash regions, sticky last-known values, color-based possession) into `MacGameWatcher.cs` + `bandroom_ocr_bridge.py`; needs a real Mac for live testing. (The current Mac watcher only does 4 text regions and hardcodes score/clock/timeouts, so several synced evaluators can't actually fire yet.)
 3. ⚪ **Vision OCR** — port `GameWatcher` OCR from WinRT to macOS Vision framework + ScreenCaptureKit
 4. ⚪ **Full feature parity** — ConfigStore, TeamColors, profiles, Sparkle auto-updater
 

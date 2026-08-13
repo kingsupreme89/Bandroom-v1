@@ -52,7 +52,8 @@ static class Snap
         bool isTouchdown = false,
         bool isNoPuntReturn = false,
         bool isTimeout = false,
-        bool isPregameReady = false) => new PlaySnapshot
+        bool isPregameReady = false,
+        bool isTeamRunOut = false) => new PlaySnapshot
         {
             Down = down,
             YardsToGo = yardsToGo,
@@ -75,5 +76,6 @@ static class Snap
             IsNoPuntReturn = isNoPuntReturn,
             IsTimeout = isTimeout,
             IsPregameReady = isPregameReady,
+            IsTeamRunOut = isTeamRunOut,
         };
 }

@@ -675,26 +675,11 @@
           <input type="range" id="slider-sensitivity" min="0" max="30" value="10" step="1" class="slider" />
           <div class="slider-value"><span id="sensitivity-value">10</span>s until fade-out &mdash; no fade-in</div>
         </div>
-        <!-- Big Game toggle -- REDEFINED 2026-08-10 (was an auto-detect "quarter 4, score within
-             8 points" volume-boost rule; see ConfigStore.BigGameSettings's doc comment). Now a
-             manual per-matchup flag for "both bands are physically here" (e.g. a real Bama @ LSU
-             game) vs. an ordinary game where the away team only sends a small travel pep band.
-             Controls whether the away side plays every situational cue at full volume (Big Game)
-             or only big/earned events at 25% (ordinary) -- see WebMainForm.OnEngineEventsDetected.
-             The "Show banner on matchup screen" toggle controls #matchup-vs-badge's Big Game
-             badge (see updateMatchupSideBar/loadMatchup in app.js), independent of this. -->
-        <div class="panel-section" id="big-game-section">
-          <div class="panel-title">Big Game</div>
-          <label class="toggle-row">
-            <input type="checkbox" id="toggle-big-game-enabled" />
-            <span>Both bands are here (away plays full volume, not just 25% on big plays)</span>
-          </label>
-          <label class="toggle-row">
-            <input type="checkbox" id="toggle-big-game-banner" />
-            <span>Show Big Game badge on the matchup screen</span>
-          </label>
-          <button id="btn-big-game-save" class="btn-ghost btn-block">Save Big Game Setting</button>
-        </div>
+        <!-- Big Game setting REMOVED from this sidebar 2026-08-12 (owner call: having it here AND
+             on the matchup screen's #toggle-matchup-big-game pill was confusing -- two places to
+             set the same ConfigStore.BigGameSettings flag). It now lives ONLY on the matchup
+             screen, right where you're already picking teams before GAMETIME -- see
+             #toggle-matchup-big-game near #matchup-controls-island. -->
         <!-- Reverb moved into the Sound Booth modal's "Reverb & EQ" tab (Session 32 plugin-rack
              redesign) alongside EQ/Sub-Bass, which is where it's actually used from now -- this
              panel-section used to duplicate it here as a quick-access shortcut. -->
@@ -1626,10 +1611,9 @@
              entirely if nothing's been recorded yet (fresh install / never confirmed a matchup). -->
         <button type="button" class="pill matchup-last-pill" id="matchup-last-pill" hidden></button>
         <!-- Owner request: not every game is a Big Game (both bands physically present) -- this
-             needs to be flippable right here per-matchup instead of only buried in the Adjust
-             sidebar's Big Game panel. Same underlying ConfigStore.BigGameSettings flag as
-             #toggle-big-game-enabled (see wireMatchupBigGameToggle in app.js); toggling either one
-             keeps the other in sync and saves immediately, no separate Save step needed here. -->
+             is the ONLY place to set it (2026-08-12: removed the redundant Adjust-sidebar copy of
+             this same control, see index.html's big-game-section removal note). Saves immediately
+             on change, no separate Save step needed -- see applyBigGameEnabled in app.js. -->
         <label class="toggle-row pill-toggle">
           <input type="checkbox" id="toggle-matchup-big-game" />
           <span>Big Game (both bands here)</span>

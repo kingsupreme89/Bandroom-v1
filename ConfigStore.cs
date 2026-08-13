@@ -898,7 +898,7 @@ internal static class ConfigStore
 
     public static void MarkFirstRunDone() => AtomicWriteAllText(FirstRunFlagPath, DateTime.UtcNow.ToString("O"));
 
-    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".ogg" };
+    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".webm", ".ogg" };
 
     /// <summary>Copies a dropped/browsed audio file into Songs\ with its display name
     /// normalized to ALL CAPS, for a consistent library (drag-and-drop import never actually
@@ -1699,6 +1699,11 @@ internal static class ConfigStore
         // specifically, fires alongside the generic Earned First Down cue on the same snap.
         // See ThirdDownConversionHelper.cs.
         "Offense: 3rd Down Conversion",
+        // Added 2026-08-12 (owner's own idea, live game): a big gain on 1st down that still nets
+        // a fresh 1st & 10 -- Down never changes (1 -> 1), so the plain "Offense: Earned First
+        // Down" cue (which only fires on Down 2/3/4 -> 1) can't see it. See
+        // FirstDownOnFirstDownHelper.cs for the play-clock-edge detection this relies on.
+        "Offense: First Down on First Down",
         "Offense: PAT Made",
         "Offense: 2-Point Conversion Made",
         "Offense: Field Goal Made",
@@ -1724,6 +1729,7 @@ internal static class ConfigStore
         "Other: Start of 4th Quarter",
         "Other: Pregame Ready",
         "Other: Pregame Take the Field",
+        "Other: Pregame Tunnel",
         "Other: Opening Kickoff",
         "Other: Second-Half Kickoff",
         // Added 2026-08-11 (owner report, live game): a generic "kickoff after any score" cue,

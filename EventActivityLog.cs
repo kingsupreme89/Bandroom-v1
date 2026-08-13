@@ -139,6 +139,15 @@ internal static class EventActivityLog
         ["Defense: Fourth Down"] = "4th Down",
         ["Offense: Fourth Down"] = "4th Down",
         ["Defense: Fourth Down (Loss)"] = "4th Down After a Loss",
+        // FIXED 2026-08-12 (owner report: log/UI labels showing the bare words "Offense"/
+        // "Defense"/"Other" read as confusing on their own) -- the generic colon-strip fallback
+        // below turns "Penalty: Offense" into just "Offense" with nothing else, since there's no
+        // second word after the prefix to strip down to. Every other EventKey's fallback already
+        // leaves a real phrase behind (e.g. "Other: Opening Kickoff" -> "Opening Kickoff"); these
+        // two are the only ones that don't, so they need an explicit override like the down/
+        // distance keys above.
+        ["Penalty: Offense"] = "Penalty - Your Team",
+        ["Penalty: Defense"] = "Penalty - Opponent",
     };
 
     /// <summary>Turns an internal EventKey like "Offense: Touchdown Scored" or

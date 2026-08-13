@@ -655,6 +655,26 @@ public class EvaluatorTests
         Assert.Null(evaluator.Evaluate(state));
     }
 
+    // ---------- RunOutHelper ----------
+
+    [Fact]
+    public void RunOutHelper_Fires_OnFlagCardEdge()
+    {
+        var evaluator = new RunOutHelper();
+        var state = State(Snap.With(isTeamRunOut: false), Snap.With(isTeamRunOut: true));
+        var result = evaluator.Evaluate(state);
+        Assert.NotNull(result);
+        Assert.Equal("Other: Pregame Tunnel", result!.EventKey);
+    }
+
+    [Fact]
+    public void RunOutHelper_DoesNotRefire_WhileStillShown()
+    {
+        var evaluator = new RunOutHelper();
+        var state = State(Snap.With(isTeamRunOut: true), Snap.With(isTeamRunOut: true));
+        Assert.Null(evaluator.Evaluate(state));
+    }
+
     // ---------- DriveStarterHelper ----------
 
     [Fact]

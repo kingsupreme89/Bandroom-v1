@@ -58,4 +58,24 @@ public sealed class PlaySnapshot
     /// more direct alternative to that heuristic rather than being a separate event/evaluator --
     /// see that class's _didFirePregame guard, which covers both signals with one fire-once flag.</summary>
     public bool IsPregameEntranceMarker { get; init; }
+
+    /// <summary>True while CFB27's "EA SPORTS COLLEGE FOOTBALL 27" flag/title card is on screen --
+    /// the black waving-flag graphic shown at the very start of the pregame broadcast sequence,
+    /// before the chevron tunnel-walk (IsPregameEntranceMarker) and before the READY screen
+    /// (IsPregameReady). Team-neutral by construction: the flag graphic and its text are
+    /// identical for every matchup, no per-team colors involved, so (unlike IsPregameReady) this
+    /// needs no color-independence caveat -- see the "teamrunout" WatchedRegion in GameWatcher.cs
+    /// and RunOutHelper.cs, which fires "Other: Team Run Out" off this flag's edge, distinct from
+    /// and NOT a replacement for the chevron -- the chevron stays dedicated to "Other: Pregame
+    /// Take the Field".</summary>
+    public bool IsTeamRunOut { get; init; }
+
+    /// <summary>True while the play clock box shows a counting number (pre-snap); false while it
+    /// shows literal "--" (from the snap through the live play and any dead-ball overlay, until
+    /// the ribbon is ready for the next snap). See the "playclock" WatchedRegion in GameWatcher.cs
+    /// for the calibration and FirstDownOnFirstDownHelper.cs for why this edge exists: it's the
+    /// only OCR-noise-resistant way to know "a real play just happened" when Down/YardsToGo alone
+    /// can't distinguish a first-down-on-first-down (Down never changes) from ordinary mid-drive
+    /// stillness.</summary>
+    public bool IsPlayClockCounting { get; init; }
 }

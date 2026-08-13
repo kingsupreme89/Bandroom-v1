@@ -137,7 +137,7 @@ internal static class DefaultSongPackService
         }, ct);
     }
 
-    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".ogg" };
+    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".webm", ".ogg" };
 
     public sealed record FolderImportResult(bool Success, string Message, List<string> TeamNames, int SongCount);
 

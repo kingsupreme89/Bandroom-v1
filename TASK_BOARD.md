@@ -1,6 +1,22 @@
-# Bandroom Task Board — Last Updated: 2026-08-12 (Session 55 checkpoint)
+# Bandroom Task Board — Last Updated: 2026-08-12 (Session 60 checkpoint)
 
-## Current State — 2026-08-12 (read this first)
+## ✅ VERIFIED Current Reality — 2026-08-12 Session 60 (deep-audited, not self-reported)
+Below is what was confirmed this session by rebuilding each project and reading the code directly:
+
+- **Builds (all re-run on this machine now):**
+  - `Bandroom.Core` (`src/Bandroom.Core`) → 0 errors / 0 warnings
+  - `Bandroom.Core.Tests` → **62/62 passing**
+  - Windows (`BandAudioHook.csproj` at repo root — NOT `Bandroom.csproj`, which does not exist) → 0 errors / 0 warnings
+  - Mac (`src/Bandroom.Mac/Bandroom.Mac.csproj`) → **0 errors / 0 warnings** (the "78 errors" the board had recorded was a stale mid-edit state, long resolved)
+- **Mac Phase 1 complete:** evaluator list synced 16 → 24, now 1:1 with Windows `GameWatcher.CreateEventRouter` (added DefenseFirstDown / DefenseSecondDownShort / DefenseThirdDown / DefenseThirdDownShort / OffenseAfterOpeningKick / OffenseFourthDown / Pregame / ThirdDownConversion helpers). Also fixed Mac per-game evaluator-state reuse (`_eventRouter ??=` → fresh router) and the pregame first-tick swallow (now `_isFirstEngineTick`, matching Windows).
+- **Session 60 "wrong team" possession fix is real:** `GameWatcher.SamplePossessionFromWindow` reorders color-match first, underline-brightness second (KamsCbsScorebugV3-only).
+- **Session 60 other fixes are real:** pause-freeze threshold halved (`FrozenFrameTicksThreshold = 2`), `Offense: Fourth Down` card via `OffenseFourthDownHelper`, event-log/card-name unification via `EventActivityLog.FriendlyNameOverrides`, v1.1.0 released.
+- **Still open (honest gaps):**
+  - Mac **functional** OCR parity is NOT done — Mac watcher still hardcodes score/clock/timeouts and has only 4 OCR regions, so even the now-synced evaluators (Touchdown/FG/Timeout/Penalty/Pregame) can't actually fire on Mac yet; needs an actual Mac for live testing.
+  - Possession color-match is `KamsCbsScorebugV3`-only; similar-color fallback unverified.
+  - `Cline → Orchestrator` items below (dead legacy `1st/2nd/3rd/4th Down` keys, `DuplicateProfile` crash, `ui-bot.js` prod toast) still need owner decisions.
+
+## Current State — 2026-08-12 Session 55 (historical checkpoint; superseded by the Verified Reality block above)
 **Session 55 addition:** `Defense: After Opening Kick` was reported live as wrong-team routing
 ("home team just opening kicked off in a BG, should've fired for away too") — traced to it being
 correct-as-designed but too narrow: it's a `HomeOnlyAlwaysEventKeys` single-fire cue attributed to
@@ -146,21 +162,19 @@ No manual possession override exists (discussed as a fallback in Session 51, sti
   `TurnoverHelper`/`FieldGoalPATHelper`/`KickoffHelper` emit the exact same EventKey strings
   those mapped to, so no regression there — those events fire fine through the new path.
 
-## Build Status (verified directly, not self-reported)
+## Build Status (verified directly, not self-reported — RE-RUN 2026-08-12 Session 60)
 ```
-Bandroom.Core.dll   → 0 errors, 0 warnings
-Bandroom.dll (Win)  → 0 errors, 0 warnings (all 5 pre-existing warnings cleaned earlier tonight)
-Bandroom.Mac.dll    → 🔴 BROKEN — 78 errors in MacWebBridge.cs (see below)
+Bandroom.Core.dll   (src/Bandroom.Core)       → 0 errors, 0 warnings
+Bandroom.Core.Tests (src/Bandroom.Core.Tests) → 62/62 passing
+Bandroom.dll (Win)  (BandAudioHook.csproj)    → 0 errors, 0 warnings
+Bandroom.Mac.dll    (src/Bandroom.Mac)        → 0 errors, 0 warnings (evaluators synced 16→24)
 ```
 
-## 🚨 Mac build is currently broken — Cline mid-flight on WebView bridge
-`MacWebBridge.cs` calls ~15 methods on `MainWindow` (window drag/minimize/maximize/close,
-profile import/export, changelog, PA/UI click sound, matchup lock, copy-to-all-teams) that
-`MainWindow` doesn't implement yet, plus references `ChangelogService` without it being
-in scope. This is very likely just mid-edit WIP (Cline actively building the WebView bridge,
-Priority 2 item #1), not a regression I introduced — but flagging clearly since "Mac: 0 errors"
-was true earlier tonight and is NOT true right now. Whoever's driving Mac work next should
-either finish `MainWindow`'s missing methods or treat this file as not-yet-integrated.
+## Mac build — RESOLVED 2026-08-12 (the "78 errors" was mid-edit WIP, now green)
+The `MacWebBridge.cs` "78 errors" state recorded above was Cline mid-flight on the WebView bridge.
+It is now resolved: Mac builds clean (0 errors / 0 warnings) with the evaluator list synced to
+Windows (24 evaluators). The only remaining Mac work is functional OCR parity (Phase 2) — see the
+Verified Reality block at the top — NOT a build break.
 
 ## OCR calibration pass (from live screenshots the user provided, 1920x1080 CBS skin)
 - ✅ CALIBRATED — `awayscore`/`homescore`/`clock` regions added (tight positional crops, since

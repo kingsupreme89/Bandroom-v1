@@ -262,6 +262,17 @@ internal sealed class GameWatcher
     // pre-snap huddle still has crowd/camera motion somewhere in the coarse grid every tick) while
     // roughly halving how much of the paused/menu screen gets processed before detection suspends.
     const int FrozenFrameTicksThreshold = 2; // ~0.5s at the 250ms poll interval
+    // SAFETY VALVE added 2026-08-12 (live bug: Pregame Ready fired once, then zero events for the
+    // rest of the game): the freeze detector is supposed to resume "the instant the frame starts
+    // changing again," but the 2-tick (~0.5s) threshold above is aggressive enough that a real,
+    // legitimately-static broadcast moment (a held stats/replay overlay, a post-play freeze-frame,
+    // or the sparse 24x14 sample grid unluckily landing on unchanging pixels for a few ticks) can
+    // trip it, and if the hash then stays flat for any reason detection never comes back for the
+    // rest of the session -- there was previously no upper bound on how long "frozen" could last.
+    // No real gameplay legitimately holds pixel-identical for this long, so force an unfreeze (and
+    // log loudly) if the streak ever exceeds this, regardless of why it got stuck.
+    static readonly TimeSpan MaxFrozenDuration = TimeSpan.FromSeconds(10);
+    DateTime? _frozenSince;
     int _frozenFrameHash;
     int _frozenFrameStreak;
     bool _frameIsFrozen;
@@ -322,7 +333,16 @@ internal sealed class GameWatcher
     // See the pause/unpause re-fire fix in RunAsync below -- these regions only clear their
     // "Last" value (re-arming them to fire again) when the down/distance region actually
     // changes, not just whenever their own OCR read goes blank.
-    static readonly HashSet<string> EventGatedRegions = new(StringComparer.OrdinalIgnoreCase) { "situation", "banner", "quarter", "penaltyagainst", "pregameready" };
+    //
+    // "pregameready" deliberately NOT included (owner call 2026-08-12): unlike situation/banner/
+    // quarter, which need pause/unpause protection because a mid-game pause can blank and restore
+    // the SAME real event's text, the READY screen is reachable by hitting Back on the team-select
+    // screen and re-readying -- the owner explicitly wants that to re-fire "Other: Pregame Ready"
+    // every time, not just once per app session. Leaving it OUT of this set means its region.Last
+    // resets to null the normal way (see the blank-OCR reset branch below) as soon as "READY"
+    // leaves the screen, so the next time it reappears -- whether that's a real new game or a
+    // Back-and-re-ready in the same session -- it reads as a fresh value and fires again.
+    static readonly HashSet<string> EventGatedRegions = new(StringComparer.OrdinalIgnoreCase) { "situation", "banner", "quarter", "penaltyagainst", "teamrunout" };
     bool _downChangedThisTick;
 
     // The "down" WatchedRegion's raw OCR crop is the whole play-by-play ticker line, which goes
@@ -484,28 +504,48 @@ internal sealed class GameWatcher
         // (Auburn @ Georgia Tech) -- estimated by eye from the images, not pixel-measured, so
         // treat these as a starting point that likely needs a small live-tightening pass, not
         // as exact. Same FxY/FxH as the wide band above since the score bug shares one row.
-        // Pregame team-intro/"READY" screen -- UNCALIBRATED PLACEHOLDER. FxX/FxY/FxW/FxH below
-        // are NOT measured from a live screenshot of the CFB27 pregame READY screen and must be
-        // treated as 0 (Calibrated => false, so this region is skipped entirely until someone
-        // fills these in) -- see the "flag"/"banner" regions above for the same honest-flagging
-        // pattern before they got calibrated, and ScorebugPreset.ConsoleScorebugV1's doc comment
-        // for the project's convention of saying so explicitly instead of guessing.
+        // Pregame team-intro/"READY" screen. Calibrated 2026-08-12 from FOUR live in-game
+        // screenshots (owner-provided, 2560x1440): Akron @ Tennessee (home ready), Akron @
+        // Tennessee (away ready), Alabama @ Tennessee (away ready), Ball State @ Texas A&M (away
+        // ready). Confirms the READY prompt replaces whichever side's team-name pill belongs to
+        // the player who's hit ready (NOT a fixed center position -- it can appear in the LEFT
+        // pill, the RIGHT pill, or both once everyone's ready), and that pill BACKGROUND tints to
+        // that team's own color (gold/Akron, crimson/Alabama, red-black/Ball State) with text
+        // color adapting for contrast (white-on-dark vs black-on-light) -- purely cosmetic, the
+        // pill's on-screen position and the literal "READY" text never move. The crop deliberately
+        // spans the full-width band containing BOTH team-name pills (y range confirmed identical
+        // across all 4 screenshots, ~705-805px of a 1125-scaled reference) rather than either
+        // team's individual pill -- this is what keeps it team-neutral/universal: it never anchors
+        // on either team's helmet icon, logo, or pill color, only the OCR regex below matching
+        // literal "READY" text wherever it lands in that shared band.
         //
-        // CRITICAL: when calibrating this for real, the crop box AND the regex below must both
-        // stay anchored on team-color-INDEPENDENT elements only -- the READY screen's side panels
-        // are colored per-matchup (e.g. red/blue for Ohio State vs Michigan, completely different
-        // colors for any other pairing), so this must never key off panel color. Anchor on the
-        // "READY" text's fixed screen position instead (or a center rivalry/game-name badge, or
-        // the ratings-badge layout -- whatever is confirmed team-neutral from a real screenshot).
-        // This project already had to fix three bugs this session caused by exactly the opposite
-        // mistake (color-matching something that isn't actually team-neutral) -- see commit
-        // b6e1c8f ("Fix dead TFL/Defense/BigEvent signal, kickoff OCR word-split, and possession
-        // misread during situation banners"). Do not repeat that pattern here.
+        // CRITICAL: this must stay anchored on team-color-INDEPENDENT elements only -- do not
+        // narrow this crop to one side's pill or key off pill/panel color for any future
+        // tightening pass. This project already had to fix three bugs from exactly that mistake --
+        // see commit b6e1c8f ("Fix dead TFL/Defense/BigEvent signal, kickoff OCR word-split, and
+        // possession misread during situation banners"). Do not repeat that pattern here.
         new WatchedRegion
         {
             Name = "pregameready",
-            FxX = 0, FxY = 0, FxW = 0, FxH = 0,
+            FxX = 0.03, FxY = 0.60, FxW = 0.95, FxH = 0.13,
             Pattern = new Regex(@"\bREADY\b", RegexOptions.IgnoreCase),
+        },
+        // "EA SPORTS COLLEGE FOOTBALL 27" flag/title card. Calibrated 2026-08-12 from a live
+        // in-game screenshot (owner-provided, 2560x1440 full-window capture of the flag screen --
+        // the "COLLEGE FOOTBALL" wordmark spans roughly x:[645,1740] y:[460,700] out of a
+        // 2000x1125-scaled reference, i.e. FxX~0.32-0.87, FxY~0.41-0.62; box below is that range
+        // widened slightly for OCR margin of error, not pixel-exact). This screen appears at the
+        // very start of the pregame broadcast sequence, before the chevron tunnel-walk and before
+        // the READY screen. Team-neutral by construction -- the flag graphic and its text are
+        // identical for every matchup, so (unlike "pregameready") there's no color-independence
+        // caveat here. See RunOutHelper.cs and PlaySnapshot.IsTeamRunOut. Distinct from and does
+        // NOT replace the chevron marker (ScorebugPreset.ChevronMarkerFx*), which stays dedicated
+        // to "Other: Pregame Take the Field" -- see GameStateEventHelper.cs.
+        new WatchedRegion
+        {
+            Name = "teamrunout",
+            FxX = 0.30, FxY = 0.38, FxW = 0.60, FxH = 0.26,
+            Pattern = new Regex(@"COLLEGE\s+FOOTBALL", RegexOptions.IgnoreCase),
         },
         new WatchedRegion
         {
@@ -524,6 +564,26 @@ internal sealed class GameWatcher
             Name = "clock",
             FxX = 0.65, FxY = 0.83, FxW = 0.08, FxH = 0.14,
             Pattern = new Regex(@"\b\d{1,2}:\d{2}\b"),
+        },
+        // Play clock box (the small dark ":30"/":13"-style box between the game clock and the
+        // down/distance box). Calibrated 2026-08-12 from 4 live screenshots (owner-provided,
+        // 2560x1440): shows a counting-down number pre-snap, and switches to literal "--" (two
+        // dashes, not a blank box) the instant the ball is snapped, staying "--" through the live
+        // play AND through dead-ball overlays (FLAG, FIELD GOAL result screen) until the ribbon
+        // is ready for the next snap, when it resumes counting from a fresh number. That
+        // counting -> "--" -> counting cycle is a clean, OCR-noise-resistant "a real play just
+        // happened" edge -- see FirstDownOnFirstDownHelper.cs, which is the reason this region was
+        // added: down/distance alone can't tell a first-down-on-first-down (Down stays at 1, no
+        // edge on Down itself) from mid-drive stillness, but this box provides an unambiguous
+        // play-boundary to gate that comparison on. Box position confirmed identical across all 4
+        // screenshots (grass background, FLAG overlay, and FIELD GOAL recap screen alike).
+        // Pattern intentionally only matches digits, not "--" -- currentValue/region.Last being
+        // null IS the "--"/dead-ball state; no digits means no match.
+        new WatchedRegion
+        {
+            Name = "playclock",
+            FxX = 0.70, FxY = 0.83, FxW = 0.06, FxH = 0.14,
+            Pattern = new Regex(@"\b\d{1,2}\b"),
         },
     };
 
@@ -1247,9 +1307,25 @@ internal sealed class GameWatcher
         bool wasFrozen = _frameIsFrozen;
         _frameIsFrozen = _frozenFrameStreak >= FrozenFrameTicksThreshold;
         if (_frameIsFrozen && !wasFrozen)
+        {
+            _frozenSince = DateTime.UtcNow;
             Log?.Invoke("[watcher] frame appears frozen (paused/menu screen) -- suspending event detection");
+        }
         else if (!_frameIsFrozen && wasFrozen)
+        {
+            _frozenSince = null;
             Log?.Invoke("[watcher] frame is moving again -- resuming event detection");
+        }
+        else if (_frameIsFrozen && _frozenSince.HasValue && DateTime.UtcNow - _frozenSince.Value > MaxFrozenDuration)
+        {
+            // Safety valve -- see MaxFrozenDuration's doc comment. Force-clear the streak too, not
+            // just the flag, so a genuinely still-static frame doesn't immediately re-trip on the
+            // very next tick and silently re-suspend detection right back where it started.
+            Log?.Invoke($"[watcher] frame has appeared frozen for over {MaxFrozenDuration.TotalSeconds:0}s -- forcing detection back on (this shouldn't happen for a real pause/menu screen this long)");
+            _frameIsFrozen = false;
+            _frozenFrameStreak = 0;
+            _frozenSince = null;
+        }
     }
 
     /// <summary>AUDIT FIX 2026-08-12: shared crop-bounds math, factored out of four near-identical
@@ -1473,7 +1549,7 @@ internal sealed class GameWatcher
     }
 
     /// <summary>Builds a PlaySnapshot from the current OCR region state and routes it through
-    /// all 16 evaluators, firing EventsDetected with the results.</summary>
+    /// all evaluators, firing EventsDetected with the results.</summary>
     void RouteEngineTick()
     {
         if (_eventRouter == null) return;
@@ -1482,6 +1558,8 @@ internal sealed class GameWatcher
         var clockRegion = _regions.FirstOrDefault(r => r.Name == "clock");
         var penaltyAgainstRegion = _regions.FirstOrDefault(r => r.Name == "penaltyagainst");
         var pregameReadyRegion = _regions.FirstOrDefault(r => r.Name == "pregameready");
+        var teamRunOutRegion = _regions.FirstOrDefault(r => r.Name == "teamrunout");
+        var playClockRegion = _regions.FirstOrDefault(r => r.Name == "playclock");
         var bannerRegion = _regions.FirstOrDefault(r => r.Name == "banner");
 
         int down = ParseOrdinal(_lastKnownDown);
@@ -1624,6 +1702,13 @@ internal sealed class GameWatcher
             // Not sticky, same reasoning as IsPregameReady just above: a one-shot pregame signal,
             // not a value needing to survive a blank sampling tick.
             IsPregameEntranceMarker = _lastPregameEntranceMarker,
+            // Not sticky, same reasoning as IsPregameReady: a one-shot pregame overlay, and
+            // RunOutHelper's edge-trigger needs region.Last read straight off the current tick.
+            IsTeamRunOut = teamRunOutRegion?.Last == "college football",
+            // Not sticky, same "read straight off region.Last" reasoning as the pregame flags
+            // above -- FirstDownOnFirstDownHelper's edge-trigger needs the real current-tick
+            // state (counting vs "--"), not a value held over from a stale OCR read.
+            IsPlayClockCounting = playClockRegion?.Last != null,
             IsFieldGoalAttempt = bannerRegion?.Last == "fieldgoal",
             YardLine = 0,
             HomeScore = homeScore,
@@ -1689,6 +1774,7 @@ internal sealed class GameWatcher
             new FieldGoalMissedHelper(),
             new FieldGoalPATHelper(),
             new FirstDownHelper(),
+            new FirstDownOnFirstDownHelper(),
             new GameStateEventHelper(),
             new KickoffHelper(),
             new OffenseAfterOpeningKickHelper(),
@@ -1696,6 +1782,7 @@ internal sealed class GameWatcher
             new OffenseFourthDownHelper(),
             new PenaltyHelper(),
             new PregameHelper(),
+            new RunOutHelper(),
             new SafetyHelper(),
             new ThirdDownConversionHelper(),
             new TflHelper(),

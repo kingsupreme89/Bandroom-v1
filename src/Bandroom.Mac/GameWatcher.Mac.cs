@@ -33,6 +33,12 @@ internal sealed class MacGameWatcher
     private PlaySnapshot _snapshotCurrent = new();
     private CancellationTokenSource? _cts;
     private Process? _ocrProcess;
+    // FIXED 2026-08-12 (parity with Windows GameWatcher._isFirstEngineTick): the old
+    // `Previous.Down == 0 && Quarter == 0` guard swallows the entire pregame period (Down/Quarter
+    // legitimately stay 0 until kickoff), so the tick where Quarter flips 0->1 — exactly the
+    // pregame transition GameStateEventHelper needs — was skipped. Track the real first tick with
+    // its own flag instead, same fix already applied to Windows.
+    private bool _isFirstEngineTick = true;
 
     // OCR region definitions — same fractional layout as Windows GameWatcher
     // x, y, w, h are fractions of screen width/height
@@ -52,7 +58,18 @@ internal sealed class MacGameWatcher
     public void Start()
     {
         _cts = new CancellationTokenSource();
-        _eventRouter ??= CreateRouter();
+        // FIXED 2026-08-12: was `_eventRouter ??= CreateRouter()` — only the FIRST Start() in the
+        // process's lifetime built fresh evaluators; a second game reused the SAME instances,
+        // carrying over per-game evaluator state (mirrors the Windows bug fixed in the same spot).
+        // Also reset snapshots, first-tick flag, and OCR-sticky fields so a second game starts on a
+        // genuinely clean slate instead of inheriting the previous game's last reads.
+        _eventRouter = CreateRouter();
+        _snapshotPrevious = new();
+        _snapshotCurrent = new();
+        _isFirstEngineTick = true;
+        _lastPossession = null;
+        _lastDistance = 0;
+        _lastValues.Clear();
         _ = RunAsync(_cts.Token);
     }
 
@@ -77,7 +94,7 @@ internal sealed class MacGameWatcher
         Log?.Invoke("[MacWatcher] Starting screencapture + Python OCR watcher...");
 
         // Locate the Python OCR bridge script
-        string scriptPath = FindOcrBridgeScript();
+        string? scriptPath = FindOcrBridgeScript();
         if (scriptPath == null)
         {
             Log?.Invoke("[MacWatcher] ERROR: bandroom_ocr_bridge.py not found. OCR disabled.");
@@ -141,8 +158,9 @@ internal sealed class MacGameWatcher
                 catch { }
             }, ct);
 
-            // Read OCR results from stdout line by line
-            while (!_ocrProcess.StandardOutput.EndOfStream && !ct.IsCancellationRequested)
+            // Read OCR results from stdout line by line. Ends on null (EOF) rather than probing
+            // EndOfStream, which avoids the sync-over-async CA2024 hazard.
+            while (!ct.IsCancellationRequested)
             {
                 string? line = await _ocrProcess.StandardOutput.ReadLineAsync();
                 if (line == null) break;
@@ -283,8 +301,14 @@ internal sealed class MacGameWatcher
         _snapshotPrevious = _snapshotCurrent;
         _snapshotCurrent = snapshot;
 
-        if (_snapshotPrevious.Down == 0 && _snapshotPrevious.Quarter == 0)
+        // Skip only the true first tick of the game (Previous was a placeholder with no real prior
+        // read) — see _isFirstEngineTick's doc comment for why the old Down==0&&Quarter==0 guard
+        // was wrong (it also swallows the entire pregame period).
+        if (_isFirstEngineTick)
+        {
+            _isFirstEngineTick = false;
             return;
+        }
 
         var state = new GameState
         {
@@ -313,15 +337,36 @@ internal sealed class MacGameWatcher
         _ => 0,
     };
 
+    // FIXED 2026-08-12 (parity with Windows GameWatcher.CreateEventRouter): was 16 evaluators,
+    // missing the 8 added since this list was written. Synced 1:1 with Windows (24 evaluators).
     private static EventRouter CreateRouter()
     {
         return new EventRouter(new IRuleEvaluator[]
         {
-            new BigEventHelper(), new DefenseHelper(), new DownFieldPositionHelper(),
-            new DriveStarterHelper(), new FieldGoalMissedHelper(), new FieldGoalPATHelper(),
-            new FirstDownHelper(), new GameStateEventHelper(), new KickoffHelper(),
-            new OffenseDownHelper(), new PenaltyHelper(), new SafetyHelper(),
-            new TflHelper(), new TimeoutHelper(), new TouchdownHelper(), new TurnoverHelper(),
+            new BigEventHelper(),
+            new DefenseFirstDownHelper(),
+            new DefenseHelper(),
+            new DefenseSecondDownShortHelper(),
+            new DefenseThirdDownHelper(),
+            new DefenseThirdDownShortHelper(),
+            new DownFieldPositionHelper(),
+            new DriveStarterHelper(),
+            new FieldGoalMissedHelper(),
+            new FieldGoalPATHelper(),
+            new FirstDownHelper(),
+            new GameStateEventHelper(),
+            new KickoffHelper(),
+            new OffenseAfterOpeningKickHelper(),
+            new OffenseDownHelper(),
+            new OffenseFourthDownHelper(),
+            new PenaltyHelper(),
+            new PregameHelper(),
+            new SafetyHelper(),
+            new ThirdDownConversionHelper(),
+            new TflHelper(),
+            new TimeoutHelper(),
+            new TouchdownHelper(),
+            new TurnoverHelper(),
         });
     }
 }

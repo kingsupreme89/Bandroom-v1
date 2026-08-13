@@ -114,13 +114,11 @@ public sealed class MacWebBridge
     public string GetTrackLibrary() => _host.GetTrackLibraryFromWeb();
     public void PreviewLocalFile(string path) => _host.PreviewLocalFileFromWeb(path);
     public void AssignTrackFile(string trigger, bool isPa, string path) => _host.AssignTrackFileFromWeb(trigger, isPa, path);
-    // Parity gap found in the 2026-08-11 audit: app.js's "Copy From..." button and sound-start-delay
-    // slider called these bridge method names unconditionally on both platforms, but Mac had no
-    // matching MacWebBridge methods at all -- would throw on click/drag. Mirrors WebBridge.cs's
-    // naming exactly.
+    // Parity gap found in the 2026-08-11 audit: app.js's "Copy From..." button called this bridge
+    // method name unconditionally on both platforms, but Mac had no matching MacWebBridge method --
+    // would throw on click. Mirrors WebBridge.cs's naming exactly. (The sound-start-delay pairing
+    // was removed 2026-08-12 -- that setting is gone app-wide, so its bridge methods are too.)
     public bool CopyEventAssignment(string sourceTrigger, string targetTrigger) => _host.CopyEventAssignmentFromWeb(sourceTrigger, targetTrigger);
-    public void SetSoundStartDelayMs(int ms) => _host.SetSoundStartDelayMsFromWeb(ms);
-    public int GetSoundStartDelayMs() => _host.GetSoundStartDelayMsFromWeb();
     public void ClearTrackAssignment(string trigger, bool isPa) => _host.ClearTrackAssignmentFromWeb(trigger, isPa);
     public string? BrowseForAudioFile() => _host.BrowseForAudioFileFromWeb();
     public void OpenTrimmer(string trigger, bool isPa) => _host.OpenTrimmerFromWeb(trigger, isPa);

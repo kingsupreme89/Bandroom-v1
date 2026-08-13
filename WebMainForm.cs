@@ -16,7 +16,7 @@ namespace SupremeStadiumSoundSelector;
 /// just the window + the JS&lt;-&gt;C# bridge (WebBridge.cs).</summary>
 public sealed class WebMainForm : Form
 {
-    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".ogg" };
+    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".webm", ".ogg" };
     static readonly string[] CategoryOrder = { "Offense", "Defense", "Situations" };
     const int ResizeMargin = 6; // shared between the Form's Padding and the WM_NCHITTEST edge test
 

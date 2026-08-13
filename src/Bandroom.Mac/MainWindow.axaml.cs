@@ -25,7 +25,7 @@ namespace Bandroom.Mac;
 /// </summary>
 public partial class MainWindow : Window
 {
-    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".ogg" };
+    static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".webm", ".ogg" };
 
     // ---- State (mirrors WebMainForm.cs exactly) ----
     private List<TriggerEntry> _config = new();
@@ -34,7 +34,6 @@ public partial class MainWindow : Window
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly MacWebBridge _bridge;
     private bool _watching;
-    private bool _windowFound;
     private TeamColor? _homeTeam, _awayTeam;
     private List<TriggerEntry>? _homeConfig, _awayConfig;
     private string? _possession;
@@ -43,7 +42,6 @@ public partial class MainWindow : Window
 
     // Match Windows: both sides fire now
     private const bool HomeOnlyEventsForNow = false;
-    private bool _useEngineForEvents = true;
 
     public MainWindow()
     {
@@ -103,7 +101,7 @@ public partial class MainWindow : Window
                 };
                 System.Diagnostics.Process.Start(psi);
 
-                LoadingText.Text = $"Bandroom\nhttp://localhost:18765\n17 evaluators · {ConfigStore.AllEngineEventKeys.Length} events";
+                LoadingText.Text = $"Bandroom\nhttp://localhost:18765\n24 evaluators · {ConfigStore.AllEngineEventKeys.Length} events";
             }
             else
             {
@@ -331,10 +329,16 @@ public partial class MainWindow : Window
     }
 
     // ---- Evaluator factory ----
+    // FIXED 2026-08-12 (parity with Windows GameWatcher.CreateEventRouter): was missing the 8
+    // evaluators added since this factory was written. Synced 1:1 with Windows (24 evaluators).
     private static IRuleEvaluator[] AllEvaluators() => new IRuleEvaluator[]
     {
         new Bandroom.Core.Helpers.BigEventHelper(),
+        new Bandroom.Core.Helpers.DefenseFirstDownHelper(),
         new Bandroom.Core.Helpers.DefenseHelper(),
+        new Bandroom.Core.Helpers.DefenseSecondDownShortHelper(),
+        new Bandroom.Core.Helpers.DefenseThirdDownHelper(),
+        new Bandroom.Core.Helpers.DefenseThirdDownShortHelper(),
         new Bandroom.Core.Helpers.DownFieldPositionHelper(),
         new Bandroom.Core.Helpers.DriveStarterHelper(),
         new Bandroom.Core.Helpers.FieldGoalMissedHelper(),
@@ -342,9 +346,13 @@ public partial class MainWindow : Window
         new Bandroom.Core.Helpers.FirstDownHelper(),
         new Bandroom.Core.Helpers.GameStateEventHelper(),
         new Bandroom.Core.Helpers.KickoffHelper(),
+        new Bandroom.Core.Helpers.OffenseAfterOpeningKickHelper(),
         new Bandroom.Core.Helpers.OffenseDownHelper(),
+        new Bandroom.Core.Helpers.OffenseFourthDownHelper(),
         new Bandroom.Core.Helpers.PenaltyHelper(),
+        new Bandroom.Core.Helpers.PregameHelper(),
         new Bandroom.Core.Helpers.SafetyHelper(),
+        new Bandroom.Core.Helpers.ThirdDownConversionHelper(),
         new Bandroom.Core.Helpers.TflHelper(),
         new Bandroom.Core.Helpers.TimeoutHelper(),
         new Bandroom.Core.Helpers.TouchdownHelper(),
@@ -615,19 +623,6 @@ public partial class MainWindow : Window
         return true;
     }
 
-    /// <summary>Mac port of WebMainForm.Get/SetSoundStartDelayMsFromWeb (parity gap found in the
-    /// 2026-08-11 audit). Backed by the same ConfigStore.AudioSettings.SoundStartDelayMs field
-    /// Windows uses, so a saved value round-trips correctly if a user's config file is ever shared
-    /// across platforms.</summary>
-    int _soundStartDelayMs;
-    public int GetSoundStartDelayMsFromWeb() => _soundStartDelayMs;
-    public void SetSoundStartDelayMsFromWeb(int ms)
-    {
-        _soundStartDelayMs = Math.Clamp(ms, 0, 5000);
-        var current = ConfigStore.LoadAudioSettings();
-        ConfigStore.SaveAudioSettings(current with { SoundStartDelayMs = _soundStartDelayMs });
-    }
-
     public string? BrowseForAudioFileFromWeb()
     {
         // ServeBridgeCall (MainWindow's HTTP-RPC endpoint) invokes every bridge method on its own
@@ -840,7 +835,6 @@ public partial class MainWindow : Window
             _hook.Stop();
             _watcher.Stop();
             _watching = false;
-            _windowFound = false;
             _matchupLocked = false;
         }
         else
@@ -1221,7 +1215,6 @@ public partial class MainWindow : Window
         _awayConfig = ConfigStore.ListProfiles().Contains(awayName, StringComparer.OrdinalIgnoreCase)
             ? ConfigStore.LoadProfile(awayName) : ConfigStore.BuildDefault();
         _watcher.UserIsHome = true;
-        _useEngineForEvents = true;
         _possession = null;
 
         // Auto-assign default songs if profile is empty

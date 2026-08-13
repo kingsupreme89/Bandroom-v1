@@ -2604,18 +2604,17 @@ async function refreshCrowdBusSection() {
   document.getElementById("toggle-crowd-bus").disabled = !clipAvailable;
 }
 
-// Big Game panel (Adjust sidebar) -- REDEFINED 2026-08-10: was an editable auto-detect volume
-// rule ("quarter 4, score within 8"); now a manual per-matchup flag for "both bands are
-// physically here" (see ConfigStore.BigGameSettings's doc comment).
+// Big Game control -- REDEFINED 2026-08-10: was an editable auto-detect volume rule ("quarter 4,
+// score within 8"); now a manual per-matchup flag for "both bands are physically here" (see
+// ConfigStore.BigGameSettings's doc comment).
 //
-// BUG FIX: this used to be TWO independently-settable states -- the real gating flag
-// (toggle-big-game-enabled/SaveBigGameSettings, affects actual away-volume/routing behavior)
-// and a separate, purely-cosmetic "banner" flag (toggle-big-game-banner/_bigGameBannerEnabled,
-// only controlled whether the Gameday logo glows). They could silently disagree: unchecking one
-// control left the other's UI (and the logo) looking unchanged, so "did this actually turn off"
-// was never obvious. All three controls (sidebar checkbox, sidebar banner checkbox, matchup
-// pill) now always agree -- toggling ANY of them flips the real flag, the logo glow, and the
-// other two controls together via applyBigGameEnabled below.
+// REMOVED 2026-08-12 (owner call): used to live in BOTH the Adjust sidebar (its own panel-section
+// with an enabled checkbox, a separate "banner" checkbox, and a Save button) AND the matchup
+// screen's #toggle-matchup-big-game pill -- two places to set the same flag was confusing, and the
+// sidebar's "banner" checkbox was never actually independent of "enabled" anyway (both always
+// mirrored the same _bigGameBannerEnabled value, see applyBigGameEnabled below). The matchup pill
+// is now the ONLY control; applyBigGameEnabled/updateMatchupBigGameBadge are unchanged internally,
+// just with the removed sidebar element references dropped.
 let _bigGameBannerEnabled = false;
 
 async function refreshBigGameSection() {
@@ -2633,15 +2632,11 @@ function updateMatchupBigGameBadge() {
   if (badge) badge.classList.toggle("big-game-active", _bigGameBannerEnabled);
 }
 
-/// Single source of truth for all three Big Game controls + the Gameday logo glow. `save: true`
-/// (used by every user-driven toggle) also persists the real flag immediately -- no separate
-/// "Save Big Game Setting" step needed anymore for the checkbox to take effect, that button now
-/// just exists for anyone used to clicking it (re-saves whatever's already showing as checked).
+/// Single source of truth for the Big Game flag + the Gameday logo glow. `save: true` (used by
+/// the matchup pill's own change handler) also persists the real flag immediately.
 function applyBigGameEnabled(isBigGame, { save }) {
   _bigGameBannerEnabled = isBigGame;
   try { localStorage.setItem("bandroom-biggame-banner", isBigGame ? "true" : "false"); } catch (_) {}
-  document.getElementById("toggle-big-game-enabled").checked = isBigGame;
-  document.getElementById("toggle-big-game-banner").checked = isBigGame;
   const matchupToggle = document.getElementById("toggle-matchup-big-game");
   if (matchupToggle) matchupToggle.checked = isBigGame;
   updateMatchupBigGameBadge();
@@ -2654,26 +2649,9 @@ function applyBigGameEnabled(isBigGame, { save }) {
 }
 
 function wireBigGameSection() {
-  document.getElementById("toggle-big-game-banner").addEventListener("change", (e) => {
-    applyBigGameEnabled(e.target.checked, { save: true });
-  });
-  document.getElementById("toggle-big-game-enabled").addEventListener("change", (e) => {
-    applyBigGameEnabled(e.target.checked, { save: true });
-  });
-  document.getElementById("btn-big-game-save").addEventListener("click", async () => {
-    const isBigGame = document.getElementById("toggle-big-game-enabled").checked;
-    try {
-      await bridge?.SaveBigGameSettings(isBigGame);
-      showToast("Big Game setting saved.");
-    } catch (err) {
-      console.error("SaveBigGameSettings failed", err);
-      showToast("Couldn't save Big Game setting -- try again.");
-    }
-  });
-
-  // Matchup-screen Big Game pill -- same ConfigStore.BigGameSettings flag as the sidebar
-  // checkbox above, just reachable without leaving the "pick your two teams" screen right before
-  // GAMETIME, since that's the moment you actually know whether both bands showed up.
+  // Matchup-screen Big Game pill -- the only Big Game control now (see removal note above),
+  // reachable without leaving the "pick your two teams" screen right before GAMETIME, since
+  // that's the moment you actually know whether both bands showed up.
   document.getElementById("toggle-matchup-big-game").addEventListener("change", (e) => {
     applyBigGameEnabled(e.target.checked, { save: true });
   });
@@ -8859,13 +8837,15 @@ const EVENT_FRIENDLY_NAMES = {
   "Offense: Third Down Short": "3rd & Short",
   "Offense: Fourth Down": "4th Down",
   "Offense: 1st Down After Punt": "1st Down After Punt",
+  "Offense: After Opening Kick": "After Opening Kickoff (Your Ball)",
+  "Offense: First Down on First Down": "Big Gain - Fresh 1st Down",
   "Offense: PAT Made": "Extra Point Good",
   "Offense: 2-Point Conversion Made": "2-Point Conversion Good",
   "Offense: Field Goal Made": "Field Goal Good",
   "Offense: Iced Game by First Down": "Game Sealed - Got 1st Down",
   "Offense: Victory in Hand": "Game Won",
   "Offense: Touchdown Scored": "Touchdown",
-  "Defense: After Opening Kick": "Defense After Opening Kick",
+  "Defense: After Opening Kick": "After Opening Kickoff (Their Ball)",
   "Defense: Third Down": "3rd & Long",
   "Defense: Third Down Short": "3rd & Short",
   "Defense: Fourth Down": "4th Down",
@@ -8874,7 +8854,7 @@ const EVENT_FRIENDLY_NAMES = {
   "Defense: Second Down (Midfield)": "2nd Down - Past Midfield",
   "Defense: Second Down (Loss)": "2nd Down After a Loss",
   "Defense: Fourth Down (Loss)": "4th Down After a Loss",
-  "Defense: After Punt": "Defense After Punt",
+  "Defense: After Punt": "After Opponent's Punt",
   "Defense: Field Goal Missed by Opponent": "Opponent Missed Field Goal",
   "Defense: Turnover Forced": "Turnover Forced",
   "Defense: Iced Game by Turnover": "Game Sealed by Turnover",
@@ -8888,13 +8868,16 @@ const EVENT_FRIENDLY_NAMES = {
   "Defense: Timeout (0 Remaining)": "Opponent's Last Timeout Used",
   "Other: Start of 2nd Quarter": "Start of 2nd Quarter",
   "Other: Start of 4th Quarter": "Start of 4th Quarter",
+  "Other: Pregame Ready": "Pregame - Ready Screen",
   "Other: Pregame Take the Field": "Pregame - Team Takes the Field",
+  "Other: Pregame Tunnel": "Pregame - Flag/Tunnel Intro",
   "Other: Opening Kickoff": "Opening Kickoff",
   "Other: Second-Half Kickoff": "Second-Half Kickoff",
+  "Other: Kickoff": "Kickoff",
   "Other: Kickoff on Kick (Receiving)": "Kickoff - Receiving",
   "Other: Kickoff on Kick (Kicking)": "Kickoff - Kicking",
-  "Penalty: Offense": "Penalty on Offense",
-  "Penalty: Defense": "Penalty on Defense",
+  "Penalty: Offense": "Penalty - Your Team",
+  "Penalty: Defense": "Penalty - Opponent",
   "Defense: No Punt Return": "Punt Return Stopped",
 };
 function friendlyEventName(eventKey) {
