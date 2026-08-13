@@ -2830,6 +2830,12 @@ function wireControls() {
   document.getElementById("load-profile-overlay").addEventListener("click", (e) => {
     if (e.target.id === "load-profile-overlay") closeLoadProfileDialog();
   });
+  document.getElementById("btn-publish-team-profile").addEventListener("click", publishTeamProfile);
+  document.getElementById("btn-browse-team-profiles").addEventListener("click", openTeamProfilesDialog);
+  document.getElementById("btn-close-team-profiles").addEventListener("click", closeTeamProfilesDialog);
+  document.getElementById("team-profiles-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "team-profiles-overlay") closeTeamProfilesDialog();
+  });
 
   // Drag the borderless window by pulling on the header center region -- but not when the
   // mousedown started on a real control inside it (e.g. "Set Matchup"), since native drag
@@ -3779,6 +3785,11 @@ async function downloadMarketplaceItem(item) {
       // Server-side download counter, for the "Most Downloaded" sort -- fired only once the
       // download actually completed, same as the local RecordMarketplaceDownload call above.
       recordItemDownload(item);
+      // BUG FIX: same stale-cache issue as the song-pack import fix at ~6537 -- _clipperAssignLibrary
+      // is fetched once and cached (see openClipperAssign), so a song downloaded from the
+      // marketplace never showed up under "Marketplace Downloads" in the Assign panel until the
+      // user switched teams and back. Null it so the next openClipperAssign re-fetches fresh.
+      _clipperAssignLibrary = null;
     }
     return !!result.success;
   } catch (err) {
@@ -8553,6 +8564,73 @@ async function applyMarketplaceProfile(url, name) {
   } catch (err) {
     console.error("applyMarketplaceProfile failed", err);
     showToast("Couldn't apply that profile -- try again.");
+  }
+}
+
+// ---- Publish/Browse Team Profiles (team IDENTITY: name/colors/bio/logo) -------------------
+// Distinct from Share/Load Profile above, which move song ASSIGNMENTS. See
+// PublishTeamProfileToMarketplace/GetMarketplaceTeamProfiles in WebBridge.cs.
+async function publishTeamProfile() {
+  const bio = prompt(`Add a short bio for ${state.activeTeam}'s team profile (optional, 140 chars max):`, "");
+  if (bio === null) return; // user cancelled
+  const btn = document.getElementById("btn-publish-team-profile");
+  btn.disabled = true;
+  btn.textContent = "Publishing...";
+  try {
+    const raw = await bridge?.PublishTeamProfileToMarketplace(bio);
+    const result = raw ? JSON.parse(raw) : null;
+    showToast(result?.success
+      ? `Published ${state.activeTeam}'s team profile to the marketplace!`
+      : (result?.error || "Couldn't publish that team profile -- try again."));
+  } catch (err) {
+    console.error("publishTeamProfile failed", err);
+    showToast("Couldn't publish that team profile -- try again.");
+  }
+  btn.disabled = false;
+  btn.textContent = "Publish Team Profile";
+}
+
+async function openTeamProfilesDialog() {
+  const list = document.getElementById("team-profiles-list");
+  list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">Loading...</div>`;
+  document.getElementById("team-profiles-overlay").hidden = false;
+
+  let items = [];
+  try {
+    const raw = await bridge?.GetMarketplaceTeamProfiles();
+    items = raw ? (JSON.parse(raw).items || []) : [];
+  } catch (err) {
+    console.error("GetMarketplaceTeamProfiles failed", err);
+  }
+
+  list.innerHTML = "";
+  if (!items.length) {
+    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No team profiles published yet -- be the first with Publish Team Profile.</div>`;
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "clipper-assign-row";
+    row.textContent = `${item.school} -- ${new Date(item.uploadedAt).toLocaleDateString()}`;
+    row.addEventListener("click", () => viewMarketplaceTeamProfile(item.url, item.school));
+    list.appendChild(row);
+  }
+}
+
+function closeTeamProfilesDialog() {
+  document.getElementById("team-profiles-overlay").hidden = true;
+}
+
+async function viewMarketplaceTeamProfile(url, school) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+    const profile = await res.json();
+    closeTeamProfilesDialog();
+    showToast(`${profile.team ?? school}: ${profile.bio ? profile.bio : "no bio set"} (${profile.primary ?? "?"} / ${profile.secondary ?? "?"})`);
+  } catch (err) {
+    console.error("viewMarketplaceTeamProfile failed", err);
+    showToast("Couldn't load that team profile -- try again.");
   }
 }
 

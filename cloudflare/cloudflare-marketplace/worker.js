@@ -103,10 +103,14 @@ function sanitizeSegment(s) {
 // validation/sanitization path, just a different bucket in R2/KV), "profile" (a whole team's
 // trigger-assignment JSON, same upload/list/download plumbing as everything else -- just JSON
 // instead of audio/image bytes, so an uploader shares their whole assignment set, not one
-// song at a time). Centralized here so every type-check below (upload/list/leaderboard/like/
-// report/view/download/item) stays in sync instead of copies of the same string-set drifting
-// apart.
-const VALID_TYPES = new Set(["song", "image", "pa", "profile"]);
+// song at a time), "teamprofile" (a team's PUBLIC identity card -- name, primary/secondary
+// colors, bio, logo URL -- published so other users can browse and adopt someone's team
+// branding; distinct from "profile" above, which shares song ASSIGNMENTS not team identity,
+// and distinct from /profile's per-USER account profile further down). Centralized here so
+// every type-check below (upload/list/leaderboard/like/report/view/download/item) stays in
+// sync instead of copies of the same string-set drifting apart.
+const VALID_TYPES = new Set(["song", "image", "pa", "profile", "teamprofile"]);
+const VALID_TYPES_MSG = '"song", "image", "pa", "profile", or "teamprofile"';
 function isValidType(type) {
   return VALID_TYPES.has(type);
 }
@@ -279,7 +283,7 @@ export default {
 
       const type = form.get("type");
       if (!isValidType(type)) {
-        return new Response('type must be "song", "image", "pa", or "profile"', { status: 400, headers: cors() });
+        return new Response(`type must be ${VALID_TYPES_MSG}`, { status: 400, headers: cors() });
       }
       const name = sanitizeSegment(form.get("name"));
       const school = sanitizeSegment(form.get("school"));
@@ -341,7 +345,7 @@ export default {
     if (url.pathname === "/list" && request.method === "GET") {
       const type = url.searchParams.get("type");
       if (!isValidType(type)) {
-        return new Response('type must be "song", "image", "pa", or "profile"', { status: 400, headers: cors() });
+        return new Response(`type must be ${VALID_TYPES_MSG}`, { status: 400, headers: cors() });
       }
       const schoolFilter = url.searchParams.get("school");
       // category/energy/q filter on the optional AudioTrackMetadata blob (see /upload above) --
@@ -405,7 +409,7 @@ export default {
     if (url.pathname === "/leaderboard" && request.method === "GET") {
       const type = url.searchParams.get("type");
       if (!isValidType(type)) {
-        return new Response('type must be "song", "image", "pa", or "profile"', { status: 400, headers: cors() });
+        return new Response(`type must be ${VALID_TYPES_MSG}`, { status: 400, headers: cors() });
       }
 
       let ids;

@@ -446,6 +446,69 @@ public sealed class WebBridge
         }
     }
 
+    // ---- Team profile publishing ("Publish Team Profile" / "Browse Team Profiles") ------------
+    // Distinct from ShareCurrentProfileToMarketplace above (which shares song ASSIGNMENTS): this
+    // publishes a team's IDENTITY -- name, primary/secondary color, bio, logo URL -- as its own
+    // "teamprofile" upload type on the worker (worker.js VALID_TYPES), so other Bandroom users can
+    // browse and adopt someone's team branding without touching their song setup at all.
+    public async Task<string> PublishTeamProfileToMarketplace(string bio)
+    {
+        var team = Theme.ActiveTeam.Name;
+        var primary = ColorHex(Theme.ActiveTeam.Primary ?? Theme.ActiveTeam.Accent);
+        var secondary = ColorHex(Theme.ActiveTeam.Secondary ?? Theme.ActiveTeam.Primary ?? Theme.ActiveTeam.Accent);
+        var logoUrl = LogoUrl(team);
+        var trimmedBio = (bio ?? "").Trim();
+        if (trimmedBio.Length > 140) trimmedBio = trimmedBio[..140];
+
+        try
+        {
+            var json = JsonSerializer.Serialize(new { team, primary, secondary, bio = trimmedBio, logoUrl });
+            using var form = new System.Net.Http.MultipartFormDataContent();
+            AddFormPart(form, new System.Net.Http.StringContent("teamprofile"), "type");
+            AddFormPart(form, new System.Net.Http.StringContent($"{team} team profile"), "name");
+            AddFormPart(form, new System.Net.Http.StringContent(team), "school");
+            var fileContent = new System.Net.Http.ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(json));
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            AddFormPart(form, fileContent, "file", $"{team}-teamprofile.json");
+
+            using var response = await ShareHttp.PostAsync(
+                "https://bandroom-marketplace.bandroom.workers.dev/upload", form);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                CrashLog.Write($"PublishTeamProfileToMarketplace failed for \"{team}\": HTTP {(int)response.StatusCode} {response.ReasonPhrase} -- {body}", new Exception("non-success status"));
+                return JsonSerializer.Serialize(new { success = false, error = "Upload failed -- check your connection and try again." });
+            }
+
+            return JsonSerializer.Serialize(new { success = true, team });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write($"PublishTeamProfileToMarketplace failed for \"{team}\"", ex);
+            return JsonSerializer.Serialize(new { success = false, error = "Upload failed -- check your connection and try again." });
+        }
+    }
+
+    /// <summary>Lists team-identity profiles other people have published, newest first --
+    /// backs the "Browse Team Profiles" pill. Unlike GetMarketplaceProfiles (song assignments,
+    /// scoped to one team), this deliberately returns ALL teams so users can discover branding
+    /// for teams they don't currently have selected.</summary>
+    public async Task<string> GetMarketplaceTeamProfiles()
+    {
+        try
+        {
+            using var response = await ShareHttp.GetAsync(
+                "https://bandroom-marketplace.bandroom.workers.dev/list?type=teamprofile&sort=newest");
+            if (!response.IsSuccessStatusCode) return "{\"items\":[]}";
+            return await response.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("GetMarketplaceTeamProfiles failed", ex);
+            return "{\"items\":[]}";
+        }
+    }
+
     /// <summary>Downloads a shared profile and applies whatever it can match by filename against
     /// this machine's own Songs library (see class-level comment above). Returns
     /// {success, applied, total, unmatched:[eventName,...]} so the UI can tell the user exactly

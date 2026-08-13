@@ -357,6 +357,54 @@ public sealed class MacWebBridge
         catch { return "{\"items\":[]}"; }
     }
 
+    // ---- Team profile publishing (name/colors/bio/logo) -- distinct from song-assignment
+    // profile sharing above. See WebBridge.cs's PublishTeamProfileToMarketplace for the Windows
+    // counterpart and worker.js's "teamprofile" upload type.
+    public async Task<string> PublishTeamProfileToMarketplace(string bio)
+    {
+        var team = Theme.ActiveTeam.Name;
+        var primary = ColorHex(Theme.ActiveTeam.Primary ?? Theme.ActiveTeam.Accent);
+        var secondary = ColorHex(Theme.ActiveTeam.Secondary ?? Theme.ActiveTeam.Primary ?? Theme.ActiveTeam.Accent);
+        var logoUrl = LogoUrl(team);
+        var trimmedBio = (bio ?? "").Trim();
+        if (trimmedBio.Length > 140) trimmedBio = trimmedBio[..140];
+
+        try
+        {
+            var json = JsonSerializer.Serialize(new { team, primary, secondary, bio = trimmedBio, logoUrl });
+            using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+            using var form = new System.Net.Http.MultipartFormDataContent();
+            form.Add(new System.Net.Http.StringContent("teamprofile"), "type");
+            form.Add(new System.Net.Http.StringContent($"{team} team profile"), "name");
+            form.Add(new System.Net.Http.StringContent(team), "school");
+            var fileContent = new System.Net.Http.ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(json));
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            form.Add(fileContent, "file", $"{team}-teamprofile.json");
+
+            using var response = await http.PostAsync("https://bandroom-marketplace.bandroom.workers.dev/upload", form);
+            if (!response.IsSuccessStatusCode)
+                return JsonSerializer.Serialize(new { success = false, error = "Upload failed -- check your connection and try again." });
+
+            return JsonSerializer.Serialize(new { success = true, team });
+        }
+        catch
+        {
+            return JsonSerializer.Serialize(new { success = false, error = "Upload failed -- check your connection and try again." });
+        }
+    }
+
+    public async Task<string> GetMarketplaceTeamProfiles()
+    {
+        try
+        {
+            using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            using var response = await http.GetAsync("https://bandroom-marketplace.bandroom.workers.dev/list?type=teamprofile&sort=newest");
+            if (!response.IsSuccessStatusCode) return "{\"items\":[]}";
+            return await response.Content.ReadAsStringAsync();
+        }
+        catch { return "{\"items\":[]}"; }
+    }
+
     public async Task<string> ApplyMarketplaceProfile(string fileUrl)
     {
         try

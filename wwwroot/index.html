@@ -160,6 +160,13 @@
               <button class="pill pill-marketplace" id="btn-share-profile" title="Share this team's song assignments to the marketplace">Share Profile</button>
               <button class="pill pill-marketplace" id="btn-load-profile">Load Profile from Others</button>
             </div>
+            <!-- Team IDENTITY publishing -- name, colors, bio, logo -- distinct from the
+                 song-assignment "Share Profile" pair above. See PublishTeamProfileToMarketplace/
+                 GetMarketplaceTeamProfiles in WebBridge.cs. -->
+            <div class="profile-io">
+              <button class="pill pill-marketplace" id="btn-publish-team-profile" title="Publish this team's name, colors, bio, and logo to the marketplace">Publish Team Profile</button>
+              <button class="pill pill-marketplace" id="btn-browse-team-profiles">Browse Team Profiles</button>
+            </div>
           </div>
         </div>
       </div>
@@ -328,6 +335,18 @@
             <button id="btn-close-load-profile" class="icon-btn">&times;</button>
           </div>
           <div id="load-profile-list" class="clipper-assign-list"></div>
+        </div>
+      </div>
+
+      <!-- Browse Team Profiles -- lists published team identity cards (name/colors/bio/logo)
+           across every team, distinct from Load Profile from Others (song assignments). -->
+      <div id="team-profiles-overlay" hidden>
+        <div id="team-profiles-dialog" class="glass">
+          <div class="clipper-header">
+            <span class="clipper-title">Browse Team Profiles</span>
+            <button id="btn-close-team-profiles" class="icon-btn">&times;</button>
+          </div>
+          <div id="team-profiles-list" class="clipper-assign-list"></div>
         </div>
       </div>
 
