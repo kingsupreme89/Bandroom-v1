@@ -755,6 +755,12 @@
       <div class="team-picker-header">
         <span>The Bandroom</span>
         <div class="team-picker-header-actions">
+          <!-- Added 2026-08-12 (owner report: no way to upload from the marketplace homepage --
+               the only real entry point was a "+ Upload" tile buried inside a team's own album
+               grid, which the hub's instructions text referenced but never actually linked to).
+               Jumps straight to the active team's album with the upload picker already open --
+               see wireBandroomHubUploadButton in app.js. -->
+          <button id="btn-bandroom-hub-upload" class="pill pill-marketplace" title="Upload a song or background image to your team's Sound Bank">+ Upload</button>
           <button id="btn-forward-bandroom-album" class="icon-btn" title="Forward to last team" hidden>&rarr;</button>
           <button id="btn-close-bandroom" class="icon-btn">&times;</button>
         </div>

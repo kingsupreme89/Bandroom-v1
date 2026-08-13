@@ -2839,6 +2839,20 @@ function wireControls() {
   document.getElementById("btn-close-discord-chat").addEventListener("click", closeDiscordChat);
   document.getElementById("btn-import-local-song")?.addEventListener("click", importLocalSong);
   document.getElementById("btn-close-bandroom").addEventListener("click", closeBandroomMarketplace);
+  // Added 2026-08-12: the hub's own instructions text says "open one and hit + Upload to
+  // contribute," but nothing on the hub screen itself actually got you there -- the only real
+  // upload entry point was a tile buried inside a team's already-open album grid. Jumps straight
+  // to the active team's album and opens the song-upload flow immediately (songs are the common
+  // case; images stay reachable from the album's own "+ Upload Image" tile once there).
+  document.getElementById("btn-bandroom-hub-upload").addEventListener("click", () => {
+    if (!state.activeTeam) {
+      showToast("Pick a team first (search above), then Upload adds to that team's Sound Bank.");
+      document.getElementById("bandroom-search")?.focus();
+      return;
+    }
+    openTeamAlbum(state.activeTeam);
+    uploadSongViaClipper();
+  });
   document.getElementById("bandroom-overlay").addEventListener("click", (e) => {
     if (e.target.id === "bandroom-overlay") closeBandroomMarketplace();
   });
