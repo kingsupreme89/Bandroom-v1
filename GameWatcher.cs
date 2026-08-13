@@ -276,6 +276,33 @@ internal sealed class GameWatcher
     int _frozenFrameHash;
     int _frozenFrameStreak;
     bool _frameIsFrozen;
+    // Average brightness (0-255) of the same sparse grid UpdateFrozenFrameState already samples --
+    // computed as a byproduct of that method (no extra GetPixel pass) so BlackScreenRunout below
+    // can tell "black loading transition" apart from "static but lit" without its own scan.
+    double _lastFrameBrightness = 255;
+
+    // --- Black-screen-timed pregame runout (owner idea, live game 2026-08-12) ---
+    // The chevron tunnel-walk marker (IsPregameEntranceMarker) fires too late for the owner's
+    // taste, and there's no team-neutral fixed-delay "entrance" moment consistent across every
+    // team to time off of instead. What IS consistent, per the owner: a black loading transition
+    // screen appears, and the real team runout begins a reliable ~10s after that black screen
+    // shows up. Tracked entirely here in GameWatcher (wall-clock time, via DateTime, NOT tick
+    // count) rather than as a Bandroom.Core evaluator, specifically so it keeps counting down even
+    // while the frozen-frame detector has suspended RouteEngineTick -- a black loading screen is
+    // exactly the kind of unchanging frame that trips _frameIsFrozen almost immediately, and if
+    // this lived inside the normal evaluator pipeline (which RunAsync skips entirely while frozen,
+    // see "if (!_frameIsFrozen) RouteEngineTick();" below) the countdown would never advance.
+    // Fires "Other: Pregame Take the Field" directly (bypassing the rule engine) once armed and
+    // the delay elapses -- guarded by _pregameTakeFieldFired, a flag shared with the engine's own
+    // chevron/quarter-down/kickoff signals for that same EventKey (see RouteEngineTick's dedupe
+    // check right after routing results) so whichever signal trips first wins and this can never
+    // double-fire the same real-world moment.
+    static readonly double BlackScreenBrightnessThreshold = 10; // near-total black, 0-255 scale
+    static readonly TimeSpan BlackScreenRunoutDelay = TimeSpan.FromSeconds(13); // owner-confirmed live 2026-08-12
+    bool _wasBlackScreen;
+    DateTime? _blackScreenSince;
+    bool _pregameTakeFieldFired;
+    bool _sawPregameReady;
 
     /// <summary>-1 = not yet sampled (TimeoutHelper's own range check, `&lt; 0`, means it
     /// correctly just won't fire until a real reading comes in, rather than defaulting to a
@@ -466,20 +493,23 @@ internal sealed class GameWatcher
             FxX = 0, FxY = 0.83, FxW = 1.0, FxH = 0.14,
             Pattern = new Regex(@"\b(1st|2nd|3rd|4th)\b(?!\s*&)", RegexOptions.IgnoreCase),
         },
-        // Penalty decision overlay -- calibrated 2026-08-07 from a live screenshot: when a flag
-        // is thrown, a separate two-card "PENALTY" overlay appears (accept/decline on one side,
-        // the penalized player + "NEUTRAL ZONE INFRACTION - 5 YDS / Against Georgia Tech" on the
-        // other). "Against <Team Name>" is the ONLY signal available for which side committed
-        // the penalty -- the persistent scorebug's "flag" ribbon (see "flag" region above) is
-        // just yellow, not team-colored, so it can't tell offense/defense apart by itself.
-        // RouteEngineTick compares this region's matched text against HomeTeamName/AwayTeamName
-        // to resolve IsPenaltyOnOffense/IsPenaltyOnDefense. Estimated crop from the one
-        // screenshot seen so far (right-hand card, lower text) -- not guaranteed to be this
-        // overlay's exact position across every penalty type, may need widening once tested live.
+        // Penalty decision overlay -- RECALIBRATED 2026-08-12 (owner report: penalty never fired
+        // live; sent 3 real screenshots from a Montana St @ Montana game, an actual "ENCROACHMENT
+        // - 5 YDS / Against Montana" overlay). The original 2026-08-07 crop (FxY 0.62-0.84,
+        // lower-right) was estimated from a DIFFERENT overlay layout than what CFB27 actually
+        // shows -- the real thing is a two-card layout (left: "<Team> Choosing" Accept/Decline
+        // card; right: player photo + penalty type + "Against <Team>", the card this region
+        // targets) sitting noticeably higher, roughly FxY 0.50-0.84, not 0.62-0.84. "Against <Team
+        // Name>" is still the only signal available for which side committed the penalty -- the
+        // persistent scorebug's "flag" ribbon (see "flag" region above) is just yellow, not
+        // team-colored, so it can't tell offense/defense apart by itself. RouteEngineTick compares
+        // this region's matched text against HomeTeamName/AwayTeamName to resolve
+        // IsPenaltyOnOffense/IsPenaltyOnDefense. Widened generously around the confirmed card
+        // position (only one live matchup's screenshots to calibrate from so far).
         new WatchedRegion
         {
             Name = "penaltyagainst",
-            FxX = 0.65, FxY = 0.62, FxW = 0.32, FxH = 0.22,
+            FxX = 0.65, FxY = 0.50, FxW = 0.34, FxH = 0.34,
             Pattern = new Regex(@"Against\s+[A-Za-z .]{3,30}", RegexOptions.IgnoreCase),
         },
         // The big full-screen scoring banner (e.g. "TOUCHDOWN") -- a wide white ribbon across
@@ -614,6 +644,11 @@ internal sealed class GameWatcher
         _frozenFrameHash = 0;
         _frozenFrameStreak = 0;
         _frameIsFrozen = false;
+        _frozenSince = null;
+        _wasBlackScreen = false;
+        _blackScreenSince = null;
+        _pregameTakeFieldFired = false;
+        _sawPregameReady = false;
         // AUDIT FIX 2026-08-12: the reset list above only ever covered the fields touched by the
         // specific live bugs each was added for -- it was never treated as the COMPLETE list of
         // state that can outlive a single game. Every "sticky, deliberately never nulled on a
@@ -751,6 +786,7 @@ internal sealed class GameWatcher
                 }
 
                 UpdateFrozenFrameState(fullBmp, winW, winH);
+                CheckBlackScreenRunoutTrigger();
 
                 foreach (var region in _regions)
                 {
@@ -824,6 +860,14 @@ internal sealed class GameWatcher
 
                     var match = region.Pattern.Match(text);
                     string? currentValue = match.Success ? NormalizeMatch(region.Name, match.Value) : null;
+
+                    // Owner clarification 2026-08-12: the black screen CheckBlackScreenRunoutTrigger
+                    // times off only ever appears AFTER the READY screen, never before it. Tracked
+                    // right here in the unconditional per-region loop (NOT inside RouteEngineTick,
+                    // which is skipped entirely while _frameIsFrozen -- the READY screen's fairly
+                    // static art is a real candidate for tripping that gate, and this flag needs to
+                    // land even if RouteEngineTick doesn't run for a few ticks).
+                    if (region.Name == "pregameready" && currentValue == "ready") _sawPregameReady = true;
 
                     if (region.Name == "down")
                     {
@@ -1280,6 +1324,8 @@ internal sealed class GameWatcher
     void UpdateFrozenFrameState(Bitmap fullBmp, int winW, int winH)
     {
         const int GridCols = 24, GridRows = 14;
+        double brightnessSum = 0;
+        int sampleCount = 0;
         unchecked
         {
             int hash = 17;
@@ -1289,9 +1335,13 @@ internal sealed class GameWatcher
                 for (int gx = 0; gx < GridCols; gx++)
                 {
                     int x = Math.Min(winW - 1, gx * winW / GridCols);
-                    hash = hash * 31 + fullBmp.GetPixel(x, y).ToArgb();
+                    var px = fullBmp.GetPixel(x, y);
+                    hash = hash * 31 + px.ToArgb();
+                    brightnessSum += (px.R + px.G + px.B) / 3.0;
+                    sampleCount++;
                 }
             }
+            _lastFrameBrightness = sampleCount > 0 ? brightnessSum / sampleCount : 255;
 
             if (hash == _frozenFrameHash)
             {
@@ -1325,6 +1375,41 @@ internal sealed class GameWatcher
             _frameIsFrozen = false;
             _frozenFrameStreak = 0;
             _frozenSince = null;
+        }
+    }
+
+    /// <summary>See the "Black-screen-timed pregame runout" field block's doc comment. Called
+    /// unconditionally every tick (unlike RouteEngineTick, which is skipped while
+    /// _frameIsFrozen) so the countdown advances even through a black loading screen the
+    /// frozen-frame detector has suspended everything else for.</summary>
+    void CheckBlackScreenRunoutTrigger()
+    {
+        if (_pregameTakeFieldFired) return;
+
+        bool isBlackNow = _lastFrameBrightness <= BlackScreenBrightnessThreshold;
+        // Only ARM off a black screen that (a) appears before any real quarter has been read --
+        // once the game is actually underway, a black transition is just a camera cut/replay/etc,
+        // not the pregame loading screen this feature is timing off of -- AND (b) after the READY
+        // screen has actually been seen this game (owner: the real black screen only ever shows up
+        // AFTER Ready, never before). Without these guards, an unrelated black flash (app launch,
+        // a loading screen before Ready even appears, mid-game camera cut) could burn the one-shot
+        // _pregameTakeFieldFired guard on the wrong moment.
+        if (isBlackNow && !_wasBlackScreen && _sawPregameReady && string.IsNullOrEmpty(_lastKnownQuarter))
+        {
+            _blackScreenSince = DateTime.UtcNow;
+            Log?.Invoke("[watcher] black screen detected pre-kickoff -- arming pregame runout timer");
+        }
+        _wasBlackScreen = isBlackNow;
+
+        if (_blackScreenSince.HasValue && DateTime.UtcNow - _blackScreenSince.Value >= BlackScreenRunoutDelay)
+        {
+            _pregameTakeFieldFired = true;
+            _blackScreenSince = null;
+            Log?.Invoke("[watcher] firing Other: Pregame Take the Field (black-screen timer)");
+            EventsDetected?.Invoke(new List<TriggerEvent>
+            {
+                new() { EventKey = "Other: Pregame Take the Field", Volume = 85, IsEarnedBigEvent = true }
+            });
         }
     }
 
@@ -1754,6 +1839,11 @@ internal sealed class GameWatcher
         // doing nothing.
         foreach (var nearMiss in state.NearMisses)
             EventActivityLog.Record("n/a", "n/a", $"(near miss) {nearMiss}");
+
+        // Shared dedupe guard with CheckBlackScreenRunoutTrigger's own direct fire of the same
+        // EventKey -- whichever signal trips first wins, this stops the other from firing again.
+        if (results.Any(r => r.EventKey == "Other: Pregame Take the Field"))
+            _pregameTakeFieldFired = true;
 
         if (results.Count > 0)
             EventsDetected?.Invoke(results);
