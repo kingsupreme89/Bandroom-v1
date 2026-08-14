@@ -19,19 +19,27 @@ internal static class TeamLogo
     static string Sanitize(string teamName) =>
         System.Text.RegularExpressions.Regex.Replace(teamName, @"[^\w\s&-]", "").Trim();
 
-    public static string? FindImagePath(string teamName)
+    public static string? FindImagePath(string teamName) => FindImagePathIn(ConfigStore.TeamLogosFolder, teamName);
+
+    /// <summary>Icon-only variant lookup (see ConfigStore.TeamIconsFolder) -- same name-matching
+    /// rules as FindImagePath, just a different folder. Returns null (never falls back internally)
+    /// so callers can tell "no icon uploaded yet" apart from "no logo at all" and fall back to the
+    /// full logo themselves.</summary>
+    public static string? FindIconImagePath(string teamName) => FindImagePathIn(ConfigStore.TeamIconsFolder, teamName);
+
+    static string? FindImagePathIn(string folder, string teamName)
     {
         string sanitized = Sanitize(teamName);
         foreach (var ext in Extensions)
         {
-            string candidate = Path.Combine(ConfigStore.TeamLogosFolder, sanitized + ext);
+            string candidate = Path.Combine(folder, sanitized + ext);
             if (File.Exists(candidate)) return candidate;
         }
         if (sanitized != teamName)
         {
             foreach (var ext in Extensions)
             {
-                string candidate = Path.Combine(ConfigStore.TeamLogosFolder, teamName + ext);
+                string candidate = Path.Combine(folder, teamName + ext);
                 if (File.Exists(candidate)) return candidate;
             }
         }

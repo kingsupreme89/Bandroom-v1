@@ -437,12 +437,18 @@ async function pollUserCount() {
 // work" even though the exact same helper works fine for grids that render once and stay put.
 // `eager=true` (used by the matchup coverflow specifically) skips lazy-loading for that case;
 // every other caller (100+ team grids/pickers) keeps the lazy default.
-function fillTeamSwatch(el, t, eager = false) {
+// preferIcon (owner request 2026-08-14): the small tile spots (main team-select grid, matchup
+// side-grid, events side-bar) want the text-free icon crop when the team has one uploaded (see
+// SaveCustomTeamLogoIcon/t.iconUrl), falling back to the full logo otherwise. The big coverflow
+// screens (matchup GAMETIME picker, team-picker popup) keep the full logo always -- pass false
+// (the default) there.
+function fillTeamSwatch(el, t, eager = false, preferIcon = false) {
   el.style.background = `linear-gradient(135deg, ${t.primary}, ${t.secondary})`;
   el.style.setProperty("--tile-color", t.primary); // press glow + dock-hover ring use the team's own color
-  if (t.logoUrl) {
+  const src = (preferIcon && t.iconUrl) ? t.iconUrl : t.logoUrl;
+  if (src) {
     const loadingAttr = eager ? "" : ' loading="lazy"';
-    el.innerHTML = `<img src="${t.logoUrl}" alt="${t.name}" class="team-logo-img" draggable="false"${loadingAttr} decoding="async">`;
+    el.innerHTML = `<img src="${src}" alt="${t.name}" class="team-logo-img" draggable="false"${loadingAttr} decoding="async">`;
   } else {
     el.textContent = t.initials ?? "";
   }
@@ -485,7 +491,7 @@ function renderTeamGrid() {
     const configured = state.savedProfiles.includes(t.name);
     sw.className = "team-swatch" + (t.name === state.activeTeam ? " active" : "") + (configured ? " configured" : "");
     sw.title = t.name + (configured ? " ✓" : "");
-    fillTeamSwatch(sw, t);
+    fillTeamSwatch(sw, t, false, true); // preferIcon: main team-select grid wants the icon-only crop
     sw.addEventListener("click", () => selectTeam(t.name));
     grid.appendChild(sw);
   }
@@ -1070,8 +1076,11 @@ function updateMatchupSideBar() {
   document.getElementById("matchup-side-home-name").textContent = `Home: ${state.matchupHome}`;
   const awayLogo = document.getElementById("matchup-side-away-logo");
   const homeLogo = document.getElementById("matchup-side-home-logo");
-  if (awayTeam?.logoUrl) { awayLogo.src = awayTeam.logoUrl; awayLogo.hidden = false; } else { awayLogo.hidden = true; }
-  if (homeTeam?.logoUrl) { homeLogo.src = homeTeam.logoUrl; homeLogo.hidden = false; } else { homeLogo.hidden = true; }
+  // preferIcon: this side-bar wants the icon-only crop when uploaded, like the other small tile spots.
+  const awaySrc = awayTeam?.iconUrl || awayTeam?.logoUrl;
+  const homeSrc = homeTeam?.iconUrl || homeTeam?.logoUrl;
+  if (awaySrc) { awayLogo.src = awaySrc; awayLogo.hidden = false; } else { awayLogo.hidden = true; }
+  if (homeSrc) { homeLogo.src = homeSrc; homeLogo.hidden = false; } else { homeLogo.hidden = true; }
   awayBtn.classList.toggle("active", state.activeTeam === state.matchupAway);
   homeBtn.classList.toggle("active", state.activeTeam === state.matchupHome);
   awayBtn.style.setProperty("--side-glow", awayTeam?.secondary || awayTeam?.primary || "");
@@ -3316,7 +3325,16 @@ function wireControls() {
     // remember, no hidden menu to find) for the one person who actually uses it.
     if (e.ctrlKey && e.altKey && e.shiftKey && e.key.toUpperCase() === "L") {
       e.preventDefault();
-      openBatchLogoImportTool();
+      openBatchLogoImportTool("logo");
+      return;
+    }
+    // Icon-only counterpart (owner request 2026-08-14): same queue/crop mechanic, saves via
+    // SaveCustomTeamLogoIcon instead. Point it at the existing TeamLogos folder to re-crop the
+    // current roster into text-free icon variants -- matchTeamFromFilename matches "Alabama.png"
+    // etc. by exact name, same as any other batch source.
+    if (e.ctrlKey && e.altKey && e.shiftKey && e.key.toUpperCase() === "I") {
+      e.preventDefault();
+      openBatchLogoImportTool("icon");
       return;
     }
     if (e.key !== "Escape") return;
@@ -3677,7 +3695,7 @@ function teamMatchesQuery(team, q) {
   return abbrevs.some((a) => a.toLowerCase().startsWith(q));
 }
 
-function renderTeamGridInto(gridId, filter, onPick, showEditLogo = false) {
+function renderTeamGridInto(gridId, filter, onPick, showEditLogo = false, preferIcon = false) {
   const grid = document.getElementById(gridId);
   grid.innerHTML = "";
   const q = filter.trim().toLowerCase();
@@ -3686,16 +3704,16 @@ function renderTeamGridInto(gridId, filter, onPick, showEditLogo = false) {
     const sw = document.createElement("div");
     sw.className = "team-swatch" + (t.name === state.activeTeam ? " active" : "");
     sw.title = t.name;
-    fillTeamSwatch(sw, t);
+    fillTeamSwatch(sw, t, false, preferIcon);
     sw.addEventListener("click", () => onPick(t.name));
     if (showEditLogo && t.name !== "General") {
       const editBtn = document.createElement("button");
       editBtn.className = "team-swatch-edit-logo";
-      editBtn.title = `Set a custom logo for ${t.name}`;
+      editBtn.title = preferIcon ? `Set a custom icon crop for ${t.name}` : `Set a custom logo for ${t.name}`;
       editBtn.textContent = "✎"; // pencil
       editBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        openLogoCropTool(t.name);
+        openLogoCropTool(t.name, preferIcon ? "icon" : "logo");
       });
       sw.appendChild(editBtn);
 
@@ -7597,7 +7615,7 @@ function renderMatchupSideGrid(side, filter) {
     if (side === "home") state.matchupHome = name; else state.matchupAway = name;
     renderMatchupCoverflow(side, document.getElementById(`matchup-${side}-search`)?.value || "");
     renderMatchupSideGrid(side, filter);
-  });
+  }, false, true); // preferIcon: this scroll strip wants the icon-only crop, unlike the big coverflow next to it
   // Dock hover-magnify (wireMatchupSideGridDock) disabled 2026-08-12 -- owner report: laggy
   // icon-scroll list. It loops getBoundingClientRect() over all ~190 tiles on every mousemove,
   // forcing a layout read that many times per second. Left wireMatchupSideGridWheel (the actual
@@ -7758,6 +7776,7 @@ async function cycleScorebugPreset(dir) {
 // that's what keeps every team's logo uniform across the app no matter what file someone picks.
 const LOGO_CROP_SIZE = 400; // canvas pixel size AND the saved output size
 let _logoCropTeam = null;
+let _logoCropMode = "logo"; // "logo" (full, everywhere) or "icon" (text-free tile variant, see preferIcon)
 let _logoCropImg = null;
 let _logoCropScale = 1; // 1.0 = image's shorter edge exactly fills the square
 let _logoCropOffsetX = 0; // pan offset in canvas pixels
@@ -7765,17 +7784,19 @@ let _logoCropOffsetY = 0;
 let _logoCropDragging = false;
 let _logoCropDragStart = null;
 
-function openLogoCropTool(teamName) {
+function openLogoCropTool(teamName, mode = "logo") {
   _logoCropTeam = teamName;
+  _logoCropMode = mode;
   _logoCropImg = null;
   _logoCropScale = 1;
   _logoCropOffsetX = 0;
   _logoCropOffsetY = 0;
-  document.getElementById("logo-crop-header").textContent = `Set Logo — ${teamName}`;
+  document.getElementById("logo-crop-header").textContent = `${mode === "icon" ? "Set Icon" : "Set Logo"} — ${teamName}`;
   document.getElementById("logo-crop-empty").hidden = false;
   document.getElementById("logo-crop-zoom").disabled = true;
   document.getElementById("logo-crop-zoom").value = 100;
   document.getElementById("btn-logo-crop-confirm").disabled = true;
+  document.getElementById("btn-logo-crop-confirm").textContent = mode === "icon" ? "Save Icon" : "Save Logo";
   clearLogoCropCanvas();
   document.getElementById("logo-crop-overlay").hidden = false;
 }
@@ -8071,33 +8092,45 @@ function wireLogoCropTool() {
     const targetTeam = (_batchLogoQueue.length > 0 && batchSelect) ? batchSelect.value : _logoCropTeam;
     if (!_logoCropImg || !targetTeam) return;
     const confirmBtn = document.getElementById("btn-logo-crop-confirm");
+    const isIcon = _logoCropMode === "icon";
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Saving...";
     try {
       const dataUrl = canvas.toDataURL("image/png");
       const base64 = dataUrl.split(",")[1];
-      const result = bridge ? JSON.parse(await bridge.SaveCustomTeamLogo(targetTeam, base64)) : { ok: false, pushFailed: false };
-      if (result.ok) {
-        showToast(`Saved a new logo for ${targetTeam}.`);
-        // Distinct from the local-save failure above -- the save to disk already succeeded, this
-        // is just the cloud mirror not going through (network/server issue). Doesn't block or
-        // undo the local save; the next successful sync catches up on its own.
-        if (result.pushFailed) showToast(`Logo for ${targetTeam} saved locally but couldn't sync -- will retry.`);
-        await refreshTeamsAfterLogoChange();
-        if (_batchLogoQueue.length > 0) {
-          advanceBatchLogoImport();
+      if (isIcon) {
+        const ok = bridge ? await bridge.SaveCustomTeamLogoIcon(targetTeam, base64) : false;
+        if (ok) {
+          showToast(`Saved a new icon for ${targetTeam}.`);
+          await refreshTeamsAfterLogoChange();
+          if (_batchLogoQueue.length > 0) advanceBatchLogoImport(); else closeLogoCropTool();
         } else {
-          closeLogoCropTool();
+          showToast("Couldn't save that icon -- try again.");
         }
       } else {
-        showToast("Couldn't save that logo -- try again.");
+        const result = bridge ? JSON.parse(await bridge.SaveCustomTeamLogo(targetTeam, base64)) : { ok: false, pushFailed: false };
+        if (result.ok) {
+          showToast(`Saved a new logo for ${targetTeam}.`);
+          // Distinct from the local-save failure above -- the save to disk already succeeded, this
+          // is just the cloud mirror not going through (network/server issue). Doesn't block or
+          // undo the local save; the next successful sync catches up on its own.
+          if (result.pushFailed) showToast(`Logo for ${targetTeam} saved locally but couldn't sync -- will retry.`);
+          await refreshTeamsAfterLogoChange();
+          if (_batchLogoQueue.length > 0) {
+            advanceBatchLogoImport();
+          } else {
+            closeLogoCropTool();
+          }
+        } else {
+          showToast("Couldn't save that logo -- try again.");
+        }
       }
     } catch (err) {
-      console.error("SaveCustomTeamLogo failed", err);
-      showToast("Couldn't save that logo -- try again.");
+      console.error("SaveCustomTeamLogo/Icon failed", err);
+      showToast(`Couldn't save that ${isIcon ? "icon" : "logo"} -- try again.`);
     } finally {
       confirmBtn.disabled = false;
-      confirmBtn.textContent = "Save Logo";
+      confirmBtn.textContent = isIcon ? "Save Icon" : "Save Logo";
     }
   });
 
@@ -8113,6 +8146,7 @@ function wireLogoCropTool() {
 // is no button/menu item anywhere else, on purpose (see that handler's comment).
 let _batchLogoQueue = []; // [{ file, teamName }]
 let _batchLogoIndex = 0;
+let _batchLogoMode = "logo"; // "logo" or "icon" -- see openLogoCropTool's mode param
 
 function normalizeForMatch(s) {
   return String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -8135,11 +8169,12 @@ function matchTeamFromFilename(filename) {
   return contains?.name ?? null;
 }
 
-async function openBatchLogoImportTool() {
+async function openBatchLogoImportTool(mode = "logo") {
   if (!state.teams || state.teams.length === 0) {
     showToast("Teams haven't loaded yet -- try again in a moment.");
     return;
   }
+  _batchLogoMode = mode;
   const input = document.getElementById("batch-logo-folder-input");
   if (!input) return;
   input.value = "";
@@ -8151,7 +8186,7 @@ async function openBatchLogoImportTool() {
     }
     _batchLogoQueue = files.map((file) => ({ file, teamName: matchTeamFromFilename(file.name) }));
     _batchLogoIndex = 0;
-    showToast(`Batch logo import: ${files.length} image(s) queued.`);
+    showToast(`Batch ${mode} import: ${files.length} image(s) queued.`);
     loadCurrentBatchLogoItem();
   };
   input.click();
@@ -8181,9 +8216,9 @@ function loadCurrentBatchLogoItem() {
   const { file, teamName } = _batchLogoQueue[_batchLogoIndex];
   const guessedTeam = teamName ?? state.teams[0].name;
 
-  openLogoCropTool(guessedTeam);
+  openLogoCropTool(guessedTeam, _batchLogoMode);
   document.getElementById("logo-crop-header").textContent =
-    `Batch Import (${_batchLogoIndex + 1}/${_batchLogoQueue.length}) — ${file.name}`;
+    `Batch ${_batchLogoMode === "icon" ? "Icon" : "Logo"} Import (${_batchLogoIndex + 1}/${_batchLogoQueue.length}) — ${file.name}`;
   document.getElementById("batch-logo-team-row").hidden = false;
   populateBatchTeamSelect(guessedTeam);
   if (!teamName) showToast(`Couldn't guess a team for "${file.name}" -- pick one manually.`);
@@ -8757,16 +8792,52 @@ function closeTeamProfilesDialog() {
   document.getElementById("team-profiles-overlay").hidden = true;
 }
 
+/// Owner report 2026-08-14: clicking a browsed team profile just showed a read-only info toast
+/// and stopped -- no way to actually DO anything with it. Team colors aren't user-overridable
+/// (fixed roster in TeamColors.cs), but the logo is, so this now offers to apply the published
+/// logo to that team locally via the same SaveCustomTeamLogo path the crop tool uses -- fetch the
+/// published PNG, base64 it client-side, hand it to the existing bridge call.
 async function viewMarketplaceTeamProfile(url, school) {
+  let profile;
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-    const profile = await res.json();
-    closeTeamProfilesDialog();
-    showToast(`${profile.team ?? school}: ${profile.bio ? profile.bio : "no bio set"} (${profile.primary ?? "?"} / ${profile.secondary ?? "?"})`);
+    profile = await res.json();
   } catch (err) {
     console.error("viewMarketplaceTeamProfile failed", err);
     showToast("Couldn't load that team profile -- try again.");
+    return;
+  }
+  closeTeamProfilesDialog();
+  const team = profile.team ?? school;
+  const bioLine = profile.bio ? profile.bio : "no bio set";
+  const colorLine = `${profile.primary ?? "?"} / ${profile.secondary ?? "?"}`;
+  if (!profile.logoUrl) {
+    showToast(`${team}: ${bioLine} (${colorLine}) -- no logo published to apply.`);
+    return;
+  }
+  const apply = confirm(`${team}: ${bioLine} (${colorLine})\n\nApply this team's published logo to your own ${team}?`);
+  if (!apply) return;
+  try {
+    const imgRes = await fetch(profile.logoUrl);
+    if (!imgRes.ok) throw new Error(`logo fetch failed: ${imgRes.status}`);
+    const blob = await imgRes.blob();
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    const result = bridge ? JSON.parse(await bridge.SaveCustomTeamLogo(team, base64)) : { ok: false };
+    if (result.ok) {
+      showToast(`Applied ${team}'s published logo.`);
+      await refreshTeamsAfterLogoChange();
+    } else {
+      showToast("Couldn't apply that logo -- try again.");
+    }
+  } catch (err) {
+    console.error("Applying marketplace team profile logo failed", err);
+    showToast("Couldn't apply that logo -- try again.");
   }
 }
 

@@ -18,6 +18,7 @@ public sealed class WebBridge
         secondary = ColorHex(t.Secondary ?? t.Primary ?? t.Accent),
         initials = Initials(t.Name),
         logoUrl = LogoUrl(t.Name),
+        iconUrl = IconUrl(t.Name),
     }));
 
     internal static string? LogoUrl(string teamName)
@@ -34,6 +35,15 @@ public sealed class WebBridge
         // last-write-time query param makes the URL genuinely change whenever the file's content
         // changes, regardless of which DOM-update pattern the caller uses.
         return $"https://teamlogo/{Uri.EscapeDataString(Path.GetFileName(path))}?v={File.GetLastWriteTimeUtc(path).Ticks}";
+    }
+
+    /// <summary>Icon-only variant (see ConfigStore.TeamIconsFolder) -- null when the team has no
+    /// icon uploaded yet, so app.js falls back to the full logoUrl for that team.</summary>
+    internal static string? IconUrl(string teamName)
+    {
+        string? path = TeamLogo.FindIconImagePath(teamName);
+        if (path == null) return null;
+        return $"https://teamlogo/Icons/{Uri.EscapeDataString(Path.GetFileName(path))}?v={File.GetLastWriteTimeUtc(path).Ticks}";
     }
 
     /// <summary>Fallback badge text for teams without a logo file in TeamLogos\ (see
@@ -1173,6 +1183,40 @@ public sealed class WebBridge
         {
             CrashLog.Write($"SaveCustomTeamLogo failed for \"{team}\"", ex);
             return JsonSerializer.Serialize(new { ok, pushFailed });
+        }
+    }
+
+    /// <summary>Saves a user-cropped icon-only variant (see ConfigStore.TeamIconsFolder) for
+    /// <paramref name="team"/> -- used by the small tile spots (matchup side-grid, main
+    /// team-select grid, events side-bar) that prefer a text-free crop when one exists. Local-only:
+    /// unlike SaveCustomTeamLogo this doesn't join the CustomTeamLogos cross-device/public sync
+    /// triangle, since it's a per-device convenience crop, not a shared roster asset.</summary>
+    public bool SaveCustomTeamLogoIcon(string team, string base64Png)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(team) || string.IsNullOrWhiteSpace(base64Png)) return false;
+            if (TeamColors.All.All(t => t.Name != team)) return false;
+
+            byte[] bytes = Convert.FromBase64String(base64Png);
+            if (bytes.Length == 0 || bytes.Length > 10 * 1024 * 1024) return false;
+
+            Directory.CreateDirectory(ConfigStore.TeamIconsFolder);
+            string safeTeam = TeamLogo.FindIconImagePath(team) is string existing
+                ? Path.GetFileNameWithoutExtension(existing)
+                : System.Text.RegularExpressions.Regex.Replace(team, @"[^\w\s&-]", "").Trim();
+            foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".webp" })
+            {
+                string oldPath = Path.Combine(ConfigStore.TeamIconsFolder, safeTeam + ext);
+                if (ext != ".png" && File.Exists(oldPath)) File.Delete(oldPath);
+            }
+            File.WriteAllBytes(Path.Combine(ConfigStore.TeamIconsFolder, safeTeam + ".png"), bytes);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write($"SaveCustomTeamLogoIcon failed for \"{team}\"", ex);
+            return false;
         }
     }
 

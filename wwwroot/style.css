@@ -5371,6 +5371,11 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 .matchup-columns .coverflow-track .team-swatch.cf-l2 { transform: translateX(-25vw) scale(0.52) rotateY(38deg); }
 .matchup-columns .coverflow-track .team-swatch.cf-r2 { transform: translateX(25vw) scale(0.52) rotateY(-38deg); }
 .matchup-columns .coverflow-name {
+  /* Owner request 2026-08-14: hidden -- the team logos themselves already have the name baked
+     into the artwork (bottom banner), so this text duplicated it right underneath. Kept the rule
+     (display:none) instead of deleting so the JS that still sets its textContent has nowhere
+     visible to render rather than needing its own follow-up change. */
+  display: none;
   /* Owner report 2026-08-11: this used to sit way below the logo with a big dead gap between them
      (root cause was .coverflow-stage's reserved box being taller than the logo it centers, fixed
      above) -- pulled up further here with a small negative margin now that the box itself is

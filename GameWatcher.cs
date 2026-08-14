@@ -953,7 +953,24 @@ internal sealed class GameWatcher
                     // which is skipped entirely while _frameIsFrozen -- the READY screen's fairly
                     // static art is a real candidate for tripping that gate, and this flag needs to
                     // land even if RouteEngineTick doesn't run for a few ticks).
-                    if (region.Name == "pregameready" && currentValue == "ready") _sawPregameReady = true;
+                    // FIXED 2026-08-14 (owner report, live: runout song never fired) -- this used to
+                    // only flip the guard flag and wait for a LATER black-screen transition to arm
+                    // the countdown (see CheckBlackScreenRunoutTrigger). If that transition is ever
+                    // missed (brightness threshold not hit, frame sampled mid-fade, etc.) the timer
+                    // never starts at all. Owner wants the countdown tied directly to READY instead:
+                    // arm it the instant OCR reads "ready" for the first time this game, full stop.
+                    // CheckBlackScreenRunoutTrigger's own black-screen arm is left in place as a
+                    // no-op fallback for the (now rare) case READY itself was never read but a
+                    // pregame black screen still shows up.
+                    if (region.Name == "pregameready" && currentValue == "ready" && !_sawPregameReady)
+                    {
+                        _sawPregameReady = true;
+                        if (!_pregameTakeFieldFired && _blackScreenSince == null)
+                        {
+                            _blackScreenSince = DateTime.UtcNow;
+                            Log?.Invoke("[watcher] READY detected -- arming pregame runout timer");
+                        }
+                    }
 
                     if (region.Name == "down")
                     {
@@ -1485,7 +1502,12 @@ internal sealed class GameWatcher
         // AFTER Ready, never before). Without these guards, an unrelated black flash (app launch,
         // a loading screen before Ready even appears, mid-game camera cut) could burn the one-shot
         // _pregameTakeFieldFired guard on the wrong moment.
-        if (isBlackNow && !_wasBlackScreen && _sawPregameReady && string.IsNullOrEmpty(_lastKnownQuarter))
+        // FIXED 2026-08-14: the READY OCR hit above now arms _blackScreenSince directly the moment
+        // it's read, which is the primary path now. This black-screen arm is a fallback only for
+        // when READY itself was somehow never read but a pregame black screen still shows up --
+        // `_blackScreenSince == null` here stops it from re-arming (and so restarting) a timer the
+        // READY sighting already started.
+        if (isBlackNow && !_wasBlackScreen && _sawPregameReady && _blackScreenSince == null && string.IsNullOrEmpty(_lastKnownQuarter))
         {
             _blackScreenSince = DateTime.UtcNow;
             Log?.Invoke("[watcher] black screen detected pre-kickoff -- arming pregame runout timer");

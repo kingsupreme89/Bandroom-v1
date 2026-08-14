@@ -48,6 +48,12 @@ internal static class ConfigStore
     public static readonly string LibraryNormalizedMarkerPath = Path.Combine(UserDataRoot, "library_normalized_v1.marker");
     public static readonly string TeamBackgroundsFolder = Path.Combine(UserDataRoot, "TeamBackgrounds");
     public static readonly string TeamLogosFolder = Path.Combine(UserDataRoot, "TeamLogos");
+    /// <summary>Optional icon-only variant of a team's logo (no name-banner text) -- used only by
+    /// the small tile spots (matchup side-grid, main team-select grid, events side-bar) where the
+    /// baked-in text reads too small to matter. Falls back to TeamLogosFolder's full logo when
+    /// absent, so this is purely additive and never required. Local-only for now, not part of the
+    /// CustomTeamLogos cross-device/public sync triangle.</summary>
+    public static readonly string TeamIconsFolder = Path.Combine(TeamLogosFolder, "Icons");
     /// <summary>Images downloaded from the marketplace via the "My Downloads" tab land here --
     /// separate from TeamBackgroundsFolder, which holds only the ONE currently-active background
     /// per team. A downloaded image doesn't become a team's live background until the user
