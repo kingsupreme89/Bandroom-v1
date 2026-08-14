@@ -108,17 +108,6 @@
         <button id="btn-bandroom-cloud" class="nav-rack-item nav-rack-primary" title="Browse The Bandroom">
           <span class="nav-rack-icon">🎵</span><span>The Bandroom</span>
         </button>
-        <!-- Coffee's Corner (2026-08-13, rebranded from "Reader Hub") -- passive dashboard only: a
-             scorebug skin gallery (browsing/showcase, from Coffee's Scorebug Overlay App's own
-             theme-library) plus a live reader connection/game-state status readout. Deliberately
-             NOT where the user manages reader settings/calibration -- neither the RAM reader's nor
-             Coffee's own settings UI is ever exposed here (owner scope decision); the one
-             scorebug-skin choice lives in the inline LOCK IN/GAMETIME prompt
-             (#scorebug-skin-prompt-overlay below) instead. Same nav-rack-primary tier/styling as
-             "The Bandroom" button above -- both are top-level destinations, not secondary items. -->
-        <button id="btn-coffees-corner" class="nav-rack-item nav-rack-primary" title="Scorebug skins + reader connection status">
-          <span class="nav-rack-icon">📺</span><span>Coffee's Corner</span>
-        </button>
         <button id="btn-sound-bank" class="nav-rack-item" title="This team's Sound Bank">
           <span class="nav-rack-icon">🏆</span><span>Sound Bank</span>
         </button>
@@ -825,53 +814,6 @@
           <span class="bandroom-album-col-actions">Actions</span>
         </div>
         <div class="bandroom-album-grid bandroom-album-grid-list" id="bandroom-backgrounds-shelf"><!-- populated by app.js --></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Coffee's Corner (2026-08-13) -- mirrors #bandroom-overlay's glass/dimmer/pill styling exactly
-       (see openCoffeesCorner/closeCoffeesCorner in app.js), but is a much simpler single centered panel
-       -- passive dashboard only, not a browse-and-manage hub. Deliberately NOT a settings surface:
-       see the nav button's own comment above for why the reader's own UI never gets embedded. -->
-  <div id="coffees-corner-overlay" hidden>
-    <div id="coffees-corner-panel" class="glass">
-      <div class="team-picker-header">
-        <span id="coffees-corner-title">Coffee's Corner</span>
-        <div class="team-picker-header-actions">
-          <button id="btn-close-coffees-corner" class="icon-btn">&times;</button>
-        </div>
-      </div>
-      <div class="coffees-corner-body">
-        <div class="coffees-corner-status-panel">
-          <div id="coffees-corner-status-header" class="bandroom-hub-section-label">Connection Status</div>
-          <div class="coffees-corner-status-row">
-            <span id="coffees-corner-status-chip" class="pill pill-marketplace" data-status="notfound">NOT CONNECTED</span>
-          </div>
-          <div class="coffees-corner-live-grid" id="coffees-corner-live-grid"><!-- populated by app.js --></div>
-        </div>
-        <div id="coffees-corner-gallery-header" class="bandroom-hub-section-label">Scorebug Skins</div>
-        <div class="bandroom-album-grid" id="coffees-corner-gallery"><!-- populated by app.js --></div>
-        <p class="bandroom-instructions" id="coffees-corner-empty" hidden>
-          No scorebug skins found yet -- open Coffee's Scorebug Overlay App at least once so it can
-          import its theme library, then reopen Coffee's Corner.
-        </p>
-      </div>
-    </div>
-  </div>
-
-  <!-- The one scorebug-SKIN question BANDroom asks as part of LOCK IN/GAMETIME (owner scope
-       decision 2026-08-13): no resolution/size question (auto-detected from the display), no
-       reader settings UI -- just "which skin," inline, remembered after the first pick. Populated
-       from Coffee's own theme-library via bridge.GetScorebugThemeGallery() (same list Coffee's Corner's
-       gallery shows), never hardcoded. -->
-  <div id="scorebug-skin-prompt-overlay" hidden>
-    <div class="update-dialog glass">
-      <div class="update-header"><span id="scorebug-skin-prompt-title">Choose Your Scorebug</span></div>
-      <p class="update-sub">Pick which scorebug skin to use this game. BANDroom remembers your
-        choice, so it only asks once.</p>
-      <select id="scorebug-skin-select" class="team-picker-search"><!-- populated by app.js --></select>
-      <div class="save-profile-actions">
-        <button id="btn-scorebug-skin-continue" class="gametime-btn">Continue</button>
       </div>
     </div>
   </div>
@@ -1628,14 +1570,24 @@
     <div id="matchup-dialog" class="glass">
       <div class="matchup-header">
         <span>Start a Game</span>
-        <!-- Owner request 2026-08-11: the Big-Game/last-matchup/scorebug-side/away-band toggles
-             used to sit always-visible as their own island -- now tucked behind this pill,
-             toggling .matchup-controls-island open/closed as a popover (see
-             wireMatchupGameSettingsPill in app.js). Owner request 2026-08-13: this used to sit
-             next to a pill+arrows scorebug-LAYOUT switcher (PC CBS vs console presets) -- that's
-             gone now (console presets aren't offered here at all, see the Remote Play toggle
-             inside this island instead), so the pill stands alone in the header. -->
-        <button type="button" class="pill matchup-header-pill-lg" id="btn-matchup-game-settings" title="Game settings for this matchup">Game Settings</button>
+        <!-- Scorebug switcher -- pill + arrows (owner-requested), lets you pick which scorebug
+             layout Bandroom watches for (Kam's CBS vs. College Football 27 console preset) right
+             from the matchup screen instead of only via the gear-icon Settings dialog. Cycles
+             through ScorebugPreset.AllPresets, see loadScorebugSwitcher/cycleScorebugPreset in
+             app.js. Restored 2026-08-14 after the Coffee's Corner UI absorption briefly replaced
+             it with a scorebug-SKIN switcher; that skin switcher and Coffee's Corner have been
+             removed. -->
+        <div class="scorebug-switcher" id="scorebug-switcher" title="Which scorebug layout Bandroom watches for">
+          <button class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-prev" data-dir="-1" title="Previous scorebug layout">&#8249;</button>
+          <span class="pill scorebug-switcher-pill" id="scorebug-switcher-name">...</span>
+          <button class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-next" data-dir="1" title="Next scorebug layout">&#8250;</button>
+          <!-- Owner request 2026-08-11: the Big-Game/last-matchup/scorebug-side/away-band toggles
+               used to sit always-visible as their own island -- now tucked behind this large pill,
+               placed right next to the scorebug switcher per owner request, toggling
+               .matchup-controls-island open/closed as a popover (see wireMatchupGameSettingsPill
+               in app.js). -->
+          <button type="button" class="pill matchup-header-pill-lg" id="btn-matchup-game-settings" title="Game settings for this matchup">Game Settings</button>
+        </div>
         <button id="btn-close-matchup" class="icon-btn">&times;</button>
       </div>
       <!-- Owner request 2026-08-11: was an always-visible paragraph up top competing with the
@@ -1710,24 +1662,6 @@
           <input type="checkbox" id="matchup-remote-play" />
           <span>Remote Play (console/streaming -- skip RAM reader)</span>
         </label>
-        <!-- Scorebug SKIN switcher (owner request 2026-08-13): the visual scorebug overlay skin
-             (ESPN/FOX/NBC/etc, see Coffee's Corner's gallery) now lives right here in Game
-             Settings instead of a separate popup that used to interrupt the LOCK IN/GAMETIME flow
-             (see ensureScorebugSkinChosen -- now a no-op fallback since a choice always exists
-             once this switcher has loaded at least once). Same pill+arrows language as the OCR
-             scorebug-layout switcher above, plus a thumbnail of the selected skin. -->
-        <div class="scorebug-skin-switcher" id="scorebug-skin-switcher">
-          <span class="scorebug-skin-switcher-label">Scorebug Skin</span>
-          <div class="scorebug-skin-switcher-row">
-            <button type="button" class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-skin-prev" data-dir="-1" title="Previous scorebug skin">&#8249;</button>
-            <span class="pill scorebug-switcher-pill" id="scorebug-skin-switcher-name">...</span>
-            <button type="button" class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-skin-next" data-dir="1" title="Next scorebug skin">&#8250;</button>
-          </div>
-          <!-- Owner request 2026-08-13: was a tiny 56x74 thumb squeezed next to the pill/arrows --
-               too small to actually tell skins apart. Full-width preview strip below the switcher
-               instead, spanning the popover so the chosen bug is clearly visible. -->
-          <div class="scorebug-skin-switcher-preview" id="scorebug-skin-switcher-thumb"><span>📺</span></div>
-        </div>
       </div>
       <div class="matchup-columns">
         <!-- Cover-flow team select, same idea as CFB 27's own team-select screen: center tile

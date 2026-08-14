@@ -377,8 +377,20 @@ internal sealed class ScorebugOverlayForm : Form
     // trick for exactly this -- opacity != 1 always requires allocating a brand new compositing
     // layer (it can't reuse a cached opaque one), so toggling it off and back to 1 forces a
     // fresh layer that actually respects the current (transparent) background.
+    // Confirmed live (2026-08-14): the opacity-toggle layer-invalidation trick above only forces
+    // Chromium to SCHEDULE a fresh compositing layer -- ExecuteScriptAsync resolves as soon as the
+    // synchronous JS finishes running, not once the browser has actually PAINTED that new layer.
+    // On FOX 2025 specifically, RenderTickAsync's immediate CapturePreviewAsync right after
+    // ExecuteScriptAsync kept winning that race often enough to still grab the stale opaque-green
+    // frame -- same underlying bug as the doc comment above this constant, just not fully closed by
+    // the opacity toggle alone. Fixed by making the script an explicit Promise that only resolves
+    // after two nested requestAnimationFrame callbacks (the standard "wait for a real committed
+    // paint" pattern -- the first rAF fires before the frame that includes the opacity change is
+    // produced, the second fires only after it's actually been composited), so RenderTickAsync's
+    // await genuinely blocks until a fresh frame exists before capturing it.
     const string ForceTransparentScript =
-        "(function(){function t(el){if(!el)return;" +
+        "(function(){return new Promise(function(resolve){" +
+        "function t(el){if(!el)return;" +
         "el.style.setProperty('background','" + ChromaKeyHex + "','important');" +
         "el.style.setProperty('background-color','" + ChromaKeyHex + "','important');}" +
         "var b=window.CFB27||window.cfb27||window.scorebug;" +
@@ -387,7 +399,9 @@ internal sealed class ScorebugOverlayForm : Form
         "t(document.getElementById('backdrop'));" +
         "document.body.style.setProperty('opacity','0.9999999');" +
         "void document.body.offsetHeight;" +
-        "document.body.style.setProperty('opacity','1');})();";
+        "document.body.style.setProperty('opacity','1');" +
+        "requestAnimationFrame(function(){requestAnimationFrame(resolve);});" +
+        "});})();";
 
     // CHROMA KEY, 2026-08-14 (owner-directed, after seeing Coffee's OWN CFB27 Scoreboard Overlay
     // app's "Green screen" tab -- Reader & live data / Theme & placement / Green screen, with

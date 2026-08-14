@@ -1782,118 +1782,6 @@ input, select, textarea, [contenteditable] {
   gap: 6px;
 }
 
-/* Coffee's Corner (2026-08-13) -- passive scorebug-skin gallery + live status readout, styled to be
-   visually indistinguishable from the marketplace modal it mirrors: same full-screen dimmer,
-   same .glass panel, same team-color neon-pulse (design system rule -- see #bandroom-picker's own
-   neon-pulse above), same .pill/.marketplace-card language, same [id$="-title"]/[id$="-header"]
-   sports-block header treatment (automatic via the app-wide selector, no extra CSS needed here). */
-#coffees-corner-overlay {
-  position: fixed; inset: 0; z-index: 60;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-}
-#coffees-corner-overlay[hidden] { display: none; }
-#coffees-corner-panel {
-  width: min(1000px, 94vw);
-  max-height: 86vh;
-  padding: 20px;
-  border-radius: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  overflow: hidden;
-  animation: neon-pulse 3.2s ease-in-out infinite;
-}
-.coffees-corner-body {
-  overflow-y: auto;
-  padding-right: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.coffees-corner-status-panel {
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-card);
-  padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.coffees-corner-status-row { display: flex; align-items: center; gap: 10px; }
-/* Status chip color follows the same var(--team-glow, var(--accent)) pill language everywhere
-   else in the app uses -- CONNECTED glows the active team's lightest color, WAITING dims to a
-   neutral pulse, ERROR/NOT FOUND read as an explicit off-state rather than a grey nothing. */
-#coffees-corner-status-chip { animation: none; }
-#coffees-corner-status-chip[data-status="connected"] {
-  border-color: var(--team-glow, var(--accent));
-  color: var(--team-glow, #fff);
-  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--team-glow, var(--accent)) 45%, transparent);
-  animation: pill-glow-pulse 3s ease-in-out infinite;
-}
-#coffees-corner-status-chip[data-status="waitingforgamedata"] {
-  border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 45%, var(--glass-border));
-  color: var(--team-glow, var(--text-primary));
-}
-#coffees-corner-status-chip[data-status="notfound"], #coffees-corner-status-chip[data-status="error"] {
-  border-color: var(--glass-border);
-  color: var(--text-primary);
-  opacity: 0.75;
-}
-.coffees-corner-live-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 8px 16px;
-}
-.coffees-corner-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.coffees-corner-stat-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--team-glow, var(--text-muted));
-}
-.coffees-corner-stat-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-.coffees-corner-theme-card { cursor: default; }
-/* Scorebug skin gallery (owner request 2026-08-13, round 2): a small-tile grid made every skin
-   too tiny to actually read/compare -- switched to a single-column list of LARGE rows instead,
-   thumb on the left sized to actually show the (wide/landscape) scorebug clearly, title+dims on
-   the right. */
-#coffees-corner-gallery {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-#coffees-corner-gallery .marketplace-card {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-}
-#coffees-corner-gallery .marketplace-card-thumb {
-  font-size: 32px;
-  width: 260px;
-  aspect-ratio: auto;
-  height: 110px;
-  flex: none;
-}
-#coffees-corner-gallery .marketplace-card-thumb img { object-fit: contain; }
-#coffees-corner-gallery .marketplace-card-body {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-}
-#coffees-corner-gallery .marketplace-card-title { font-size: 16px; }
-.coffees-corner-theme-dims { font-size: 12px; color: var(--team-glow, var(--text-muted)); }
-
 /* My Downloads -- widened to match the hub/album scale instead of the small update-style
    dialogs; still a single flat list (Spotify's "Liked Songs" shape), no sidebar needed. */
 #my-downloads-overlay {
@@ -4748,21 +4636,12 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 /* Update / default-song-pack download dialogs -- #update-overlay, #songpack-prompt-overlay,
    #songpack-progress-overlay all share the same .update-dialog shape but had no CSS anywhere,
    same shipped-with-markup-no-CSS gap as the crop tools above. */
-#update-overlay, #songpack-prompt-overlay, #songpack-progress-overlay, #songpack-import-overlay, #default-profile-prompt-overlay, #scorebug-skin-prompt-overlay {
+#update-overlay, #songpack-prompt-overlay, #songpack-progress-overlay, #songpack-import-overlay, #default-profile-prompt-overlay {
   position: fixed; inset: 0; z-index: 80;
   display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.6);
 }
-#update-overlay[hidden], #songpack-prompt-overlay[hidden], #songpack-progress-overlay[hidden], #songpack-import-overlay[hidden], #default-profile-prompt-overlay[hidden], #scorebug-skin-prompt-overlay[hidden] { display: none; }
-#scorebug-skin-select {
-  width: 100%;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--glass-border);
-  color: var(--text-primary);
-  font-size: 14px;
-}
+#update-overlay[hidden], #songpack-prompt-overlay[hidden], #songpack-progress-overlay[hidden], #songpack-import-overlay[hidden], #default-profile-prompt-overlay[hidden] { display: none; }
 #update-dialog, #songpack-progress-dialog, .update-dialog {
   width: min(420px, 90vw);
   padding: 24px;
@@ -4961,16 +4840,13 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
    unequal-width flex children, `justify-content: space-between` alone doesn't land the middle one
    at the header's true visual center, just at whatever gap distribution falls out of the other
    two items' widths. */
-/* Owner request 2026-08-13: the pill+arrows scorebug-LAYOUT switcher that used to live in this
-   wrapper is gone (console presets aren't offered on the matchup screen at all now -- see the
-   Remote Play toggle in the Game Settings island instead). The Game Settings pill itself
-   (.matchup-header-pill-lg) still needs the same true-center placement this wrapper gave it, so
-   the id stays put as a plain centering hook. */
-#btn-matchup-game-settings {
+.scorebug-switcher {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600;
 }
 .scorebug-switcher-arrow {
   width: 26px; height: 26px;
@@ -5065,50 +4941,6 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 .matchup-controls-island .matchup-last-pill {
   margin: 0;
   text-align: center;
-}
-/* Scorebug SKIN switcher (owner request 2026-08-13) -- same pill+arrows language as the OCR
-   scorebug-layout switcher (.scorebug-switcher), but stacked inline in the Game Settings island
-   with a thumbnail of the selected skin instead of floating in the header. */
-.scorebug-skin-switcher {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding-top: 4px;
-  border-top: 1px solid var(--glass-border);
-}
-.scorebug-skin-switcher-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted-2);
-}
-.scorebug-skin-switcher-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-/* Owner request 2026-08-13 (round 2): was a tiny 56x74 box squeezed next to the pill/arrows --
-   still too small to tell skins apart. Full-width strip spanning the popover instead, placed
-   below the pill/arrows row (see .scorebug-skin-switcher's flex-direction:column), tall enough
-   to read the actual bug clearly. object-fit:contain still avoids cropping the wide/landscape
-   scorebug images. */
-.scorebug-skin-switcher-preview {
-  width: 100%;
-  height: 120px;
-  flex: none;
-  border-radius: 10px;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.04);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 28px;
-  color: var(--text-muted-2);
-  border: 1px solid var(--glass-border);
-}
-.scorebug-skin-switcher-preview img {
-  width: 100%; height: 100%;
-  object-fit: contain;
 }
 /* Pill-shaped toggle chips -- same .pill glow language (secondary-team tint fill, primary-team
    glow pulse border) as every other actionable pill in the app, but built on a checkbox+label

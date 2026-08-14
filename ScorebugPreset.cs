@@ -347,7 +347,13 @@ public sealed class ScorebugPreset
         HomeTimeoutFxX = 0.4702, HomeTimeoutFxY = 0.9006, HomeTimeoutFxW = 0.0203, HomeTimeoutFxH = 0.0066,
     };
 
-    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebugV3, CollegeFootball27, CollegeFootball26Console, Espn2013 };
+    // ESPN 2013 (compact) is NOT in this list (owner request, 2026-08-14): it's a Coffee's-Corner-
+    // era visual skin with real OCR crop calibration, but the underlying broadcast theme it reads
+    // is confirmed "visual only, no live data" (see Session 73 handoff doc) -- it never actually
+    // updates with real scores, so it doesn't belong in the switcher regardless of how good the
+    // crop calibration is. The Espn2013 preset definition above is left in place, unreferenced,
+    // in case a genuinely live ESPN broadcast overlay shows up later to calibrate against instead.
+    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebugV3, CollegeFootball27, CollegeFootball26Console };
 
     /// <summary>Old preset names that got renamed, mapped to their current Name -- a returning
     /// user's saved scorebug_preset.txt (see ConfigStore.LoadScorebugPresetName) still has the

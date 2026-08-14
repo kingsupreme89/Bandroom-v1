@@ -2915,11 +2915,6 @@ function wireControls() {
   });
   document.getElementById("btn-update").addEventListener("click", () => bridge?.ShowUpdate());
   document.getElementById("btn-bandroom-cloud").addEventListener("click", openBandroomMarketplace);
-  document.getElementById("btn-coffees-corner").addEventListener("click", openCoffeesCorner);
-  document.getElementById("btn-close-coffees-corner").addEventListener("click", closeCoffeesCorner);
-  document.getElementById("coffees-corner-overlay").addEventListener("click", (e) => {
-    if (e.target.id === "coffees-corner-overlay") closeCoffeesCorner();
-  });
   document.getElementById("btn-sound-bank").addEventListener("click", () => openTeamAlbum(state.activeTeam));
   document.getElementById("btn-my-downloads").addEventListener("click", openMyDownloads);
   document.getElementById("btn-close-my-downloads").addEventListener("click", closeMyDownloads);
@@ -6706,134 +6701,6 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-let _coffeesCornerStatusInterval = null;
-
-function openCoffeesCorner() {
-  marketplaceGuard(() => {
-    document.getElementById("coffees-corner-overlay").hidden = false;
-    renderCoffeesCornerGallery();
-    refreshCoffeesCornerStatus();
-    if (_coffeesCornerStatusInterval) clearInterval(_coffeesCornerStatusInterval);
-    _coffeesCornerStatusInterval = setInterval(refreshCoffeesCornerStatus, 1000);
-  }, "openCoffeesCorner");
-}
-
-function closeCoffeesCorner() {
-  document.getElementById("coffees-corner-overlay").hidden = true;
-  if (_coffeesCornerStatusInterval) { clearInterval(_coffeesCornerStatusInterval); _coffeesCornerStatusInterval = null; }
-}
-
-async function renderCoffeesCornerGallery() {
-  const grid = document.getElementById("coffees-corner-gallery");
-  const empty = document.getElementById("coffees-corner-empty");
-  let themes = [];
-  try { themes = bridge ? JSON.parse(await bridge.GetScorebugThemeGallery()) : []; }
-  catch (err) { console.error("GetScorebugThemeGallery failed", err); }
-
-  if (!themes || themes.length === 0) {
-    grid.innerHTML = "";
-    empty.hidden = false;
-    return;
-  }
-  empty.hidden = true;
-  // Owner request 2026-08-13: FOX 2021 has no live-data hook at all in Coffee's own file (no
-  // window.updateScorebug bridge, unlike every other bundled skin) -- the GAMETIME overlay can
-  // only ever show its frozen example numbers for this one skin. Badge it rather than hide it
-  // (owner's call) so it's still pickable, just clearly marked.
-  grid.innerHTML = themes.map((t) => `
-    <div class="marketplace-card coffees-corner-theme-card">
-      <div class="marketplace-card-thumb">
-        ${t.thumbnailUrl ? `<img src="${escapeHtml(t.thumbnailUrl)}" alt="${escapeHtml(t.name || "Untitled")}">` : "<span>📺</span>"}
-        ${isComingSoonScorebugSkin(t.name) ? `<span class="card-type-badge">Coming Soon</span>` : ""}
-      </div>
-      <div class="marketplace-card-body">
-        <div class="marketplace-card-title">${escapeHtml(t.name || "Untitled")}</div>
-        <div class="coffees-corner-theme-dims">${t.canvasWidth || "?"} &times; ${t.canvasHeight || "?"}</div>
-      </div>
-    </div>
-  `).join("");
-}
-
-// Owner request 2026-08-13: FOX 2021 is the one bundled scorebug skin with no live-data hook in
-// Coffee's own file (confirmed by reading its source -- no window.updateScorebug/CFB27 bridge at
-// all, unlike ESPN 2020/NBC 2024/NBC 2024 Monochrome/FOX 2025 which all have it). It'll only ever
-// show frozen example numbers in the GAMETIME overlay. Hardcoded by name rather than a new
-// library.json/gallery-DTO field -- this is a one-off caveat about a specific bundled asset, not
-// a general property worth plumbing through the whole data model.
-function isComingSoonScorebugSkin(name) {
-  return name === "FOX 2021";
-}
-
-async function refreshCoffeesCornerStatus() {
-  let status = null;
-  try { status = bridge ? JSON.parse(await bridge.GetScoreboardSourceStatus()) : null; }
-  catch (err) { console.error("GetScoreboardSourceStatus failed", err); }
-  if (!status) return;
-
-  const chip = document.getElementById("coffees-corner-status-chip");
-  const key = String(status.status || "notfound").toLowerCase();
-  chip.dataset.status = key;
-  const labels = { connected: "CONNECTED", waitingforgamedata: "WAITING FOR GAME DATA", notfound: "NOT CONNECTED", error: "ERROR" };
-  chip.textContent = labels[key] || key.toUpperCase();
-
-  const grid = document.getElementById("coffees-corner-live-grid");
-  const clockMin = Math.floor((status.timeRemainingSeconds || 0) / 60);
-  const clockSec = String((status.timeRemainingSeconds || 0) % 60).padStart(2, "0");
-  const stats = [
-    ["Score", `${status.awayScore ?? 0} - ${status.homeScore ?? 0}`],
-    ["Quarter", status.quarter ? `Q${status.quarter}` : "--"],
-    ["Down & Distance", status.down ? `${status.down} & ${status.yardsToGo}` : "--"],
-    ["Yard Line", status.yardLine != null ? status.yardLine : "--"],
-    ["Possession", status.possessionAway ? "Away" : "Home"],
-    ["Clock", `${clockMin}:${clockSec}`],
-  ];
-  grid.innerHTML = stats.map(([label, value]) => `
-    <div class="coffees-corner-stat">
-      <span class="coffees-corner-stat-label">${label}</span>
-      <span class="coffees-corner-stat-value">${value}</span>
-    </div>
-  `).join("");
-}
-
-// ================================================================
-// Scorebug skin picker -- the ONE reader-related question BANDroom ever asks the user, inline in
-// the LOCK IN/GAMETIME flow (confirmMatchup below). No resolution/size question exists anywhere
-// (auto-detected server-side); this is purely "which skin," remembered after the first pick.
-// ================================================================
-function showScorebugSkinPrompt(themes) {
-  return new Promise((resolve) => {
-    const overlay = document.getElementById("scorebug-skin-prompt-overlay");
-    const select = document.getElementById("scorebug-skin-select");
-    select.innerHTML = themes.map((t) => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join("");
-    overlay.hidden = false;
-
-    const btn = document.getElementById("btn-scorebug-skin-continue");
-    const cleanup = () => { overlay.hidden = true; btn.removeEventListener("click", onContinue); };
-    const onContinue = () => { const value = select.value; cleanup(); resolve(value); };
-    btn.addEventListener("click", onContinue);
-  });
-}
-
-/// Ensures a scorebug skin choice exists before GAMETIME proceeds -- if one's already saved
-/// (the common case, every game after the first), this is a single silent bridge round-trip and
-/// no UI ever shows. Only asks when nothing's been picked yet, or the gallery came back empty
-/// (nothing to pick -- reader isn't installed, so this silently no-ops and OCR-only proceeds).
-async function ensureScorebugSkinChosen() {
-  if (!bridge) return;
-  try {
-    const saved = await bridge.GetSavedScorebugSkin();
-    if (saved) return;
-    const themes = JSON.parse(await bridge.GetScorebugThemeGallery());
-    if (!themes || themes.length === 0) return;
-    const chosen = await showScorebugSkinPrompt(themes);
-    if (chosen) await bridge.SaveScorebugSkin(chosen);
-  } catch (err) {
-    console.error("ensureScorebugSkinChosen failed", err);
-    // Best-effort, same reasoning as the default-profile-prompt catch in confirmMatchup -- never
-    // block GAMETIME over this.
-  }
-}
-
 function renderBandroomTeamGrid(filter) {
   renderTeamGridInto("bandroom-team-grid", filter, (name) => openTeamAlbum(name));
 }
@@ -7687,7 +7554,7 @@ function openMatchupDialog() {
   renderMatchupSideGrid("away", "");
   updateMatchupSubtext();
   loadRemotePlayToggle();
-  loadScorebugSkinSwitcher();
+  loadScorebugSwitcher();
   // No re-fetch needed here -- applyBigGameEnabled (see wireBigGameSection) already keeps
   // #toggle-matchup-big-game in sync with the real setting the moment it's loaded at startup
   // (refreshBigGameSection) or changed by any of the three Big Game controls.
@@ -7838,59 +7705,51 @@ async function loadRemotePlayToggle() {
   }
 }
 
-// ---- Scorebug SKIN switcher (matchup screen, Game Settings island) ----------------------
-// Which visual scorebug overlay skin (ESPN/FOX/NBC/etc, from Coffee's Corner's theme gallery)
-// GAMETIME uses -- previously only pickable via a separate popup that interrupted LOCK IN/
-// GAMETIME the first time (see ensureScorebugSkinChosen). Owner asked for it inline here instead,
-// same pill+arrows pattern as loadScorebugSwitcher above, with a thumbnail of the selected skin.
-let _scorebugSkinThemes = [];
-let _scorebugSkinIndex = 0;
-let _scorebugSkinSwitcherBound = false;
+// ---- Scorebug switcher (matchup screen pill + arrows) -----------------------------------
+// Which scorebug layout GameWatcher watches for (Kam's CBS vs. College Football 27 console
+// preset) -- previously only reachable via the gear-icon Settings dialog; owner asked for a
+// pill+arrows switcher on the matchup screen itself, same visual language as the coverflow's
+// own arrows. Restored 2026-08-14 after the Coffee's Corner UI absorption replaced it with a
+// scorebug-SKIN switcher (removed).
+let _scorebugPresetNames = [];
+let _scorebugPresetActive = "";
+let _scorebugSwitcherBound = false;
 
-async function loadScorebugSkinSwitcher() {
+async function loadScorebugSwitcher() {
   if (!bridge) return;
   try {
-    _scorebugSkinThemes = JSON.parse(await bridge.GetScorebugThemeGallery()) || [];
-    const saved = await bridge.GetSavedScorebugSkin();
-    const idx = saved ? _scorebugSkinThemes.findIndex((t) => t.name === saved) : -1;
-    _scorebugSkinIndex = idx === -1 ? 0 : idx;
+    const data = JSON.parse(await bridge.GetScorebugPresets());
+    _scorebugPresetNames = data.names || [];
+    _scorebugPresetActive = data.active || _scorebugPresetNames[0] || "";
   } catch (err) {
-    console.error("loadScorebugSkinSwitcher failed", err);
+    console.error("GetScorebugPresets failed", err);
     return;
   }
-  renderScorebugSkinSwitcher();
-  initScorebugSkinSwitcher();
+  renderScorebugSwitcher();
+  initScorebugSwitcher();
 }
 
-function renderScorebugSkinSwitcher() {
-  const nameEl = document.getElementById("scorebug-skin-switcher-name");
-  const thumb = document.getElementById("scorebug-skin-switcher-thumb");
-  const theme = _scorebugSkinThemes[_scorebugSkinIndex];
-  if (nameEl) {
-    nameEl.textContent = theme?.name
-      ? (isComingSoonScorebugSkin(theme.name) ? `${theme.name} (Coming Soon)` : theme.name)
-      : "None available";
-  }
-  if (thumb) {
-    thumb.innerHTML = theme?.thumbnailUrl
-      ? `<img src="${escapeHtml(theme.thumbnailUrl)}" alt="${escapeHtml(theme.name || "")}">`
-      : "<span>📺</span>";
-  }
+function renderScorebugSwitcher() {
+  const el = document.getElementById("scorebug-switcher-name");
+  if (el) el.textContent = _scorebugPresetActive || "Scorebug";
 }
 
-function initScorebugSkinSwitcher() {
-  if (_scorebugSkinSwitcherBound) return;
-  _scorebugSkinSwitcherBound = true;
-  document.getElementById("btn-scorebug-skin-prev")?.addEventListener("click", () => cycleScorebugSkin(-1));
-  document.getElementById("btn-scorebug-skin-next")?.addEventListener("click", () => cycleScorebugSkin(1));
+function initScorebugSwitcher() {
+  if (_scorebugSwitcherBound) return;
+  _scorebugSwitcherBound = true;
+  document.getElementById("btn-scorebug-prev")?.addEventListener("click", () => cycleScorebugPreset(-1));
+  document.getElementById("btn-scorebug-next")?.addEventListener("click", () => cycleScorebugPreset(1));
 }
 
-async function cycleScorebugSkin(dir) {
-  if (!_scorebugSkinThemes.length || !bridge) return;
-  _scorebugSkinIndex = ((_scorebugSkinIndex + dir) % _scorebugSkinThemes.length + _scorebugSkinThemes.length) % _scorebugSkinThemes.length;
-  renderScorebugSkinSwitcher();
-  try { await bridge.SaveScorebugSkin(_scorebugSkinThemes[_scorebugSkinIndex].name); }
-  catch (err) { console.error("SaveScorebugSkin failed", err); }
+async function cycleScorebugPreset(dir) {
+  if (!_scorebugPresetNames.length || !bridge) return;
+  let idx = _scorebugPresetNames.indexOf(_scorebugPresetActive);
+  if (idx === -1) idx = 0;
+  idx = ((idx + dir) % _scorebugPresetNames.length + _scorebugPresetNames.length) % _scorebugPresetNames.length;
+  _scorebugPresetActive = _scorebugPresetNames[idx];
+  renderScorebugSwitcher();
+  try { await bridge.SetScorebugPreset(_scorebugPresetActive); }
+  catch (err) { console.error("SetScorebugPreset failed", err); }
 }
 
 // ---- Custom team logo crop tool ---------------------------------------------------------
@@ -8585,12 +8444,6 @@ async function confirmMatchup() {
     // Best-effort -- if the check itself fails, fall through to the normal confirm flow rather
     // than blocking GAMETIME entirely over a broken informational prompt.
   }
-
-  // The one reader-related question BANDroom ever asks -- "which scorebug skin," inline right
-  // here in the LOCK IN/GAMETIME sequence. Silent no-op once a skin's already saved (every game
-  // after the first) or if the reader isn't installed (empty gallery). Resolution is never asked
-  // -- WebMainForm.StartWatchingIfMatchupSet auto-detects it from the current display.
-  await ensureScorebugSkinChosen();
 
   const userTeamOnLeft = document.getElementById("matchup-screen-side-left")?.checked ?? false;
   await bridge?.SetUserTeamScreenSide(userTeamOnLeft);
@@ -9840,7 +9693,7 @@ document.addEventListener("keydown", (e) => {
       "hotkey-panel", "discord-chat-overlay", "my-downloads-overlay", "sound-booth-overlay",
       "load-profile-overlay", "situations-panel", "quick-load-confirm-overlay",
       "add-school-overlay", "public-profile-overlay", "band-director-settings-overlay",
-      "band-director-overlay", "coffees-corner-overlay", "scorebug-skin-prompt-overlay"
+      "band-director-overlay"
     ];
     for (const id of overlays) {
       const el = document.getElementById(id);
