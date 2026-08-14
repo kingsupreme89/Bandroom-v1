@@ -80,6 +80,20 @@ internal sealed class KeyboardHook
                 else if (isUp)
                     _pressed.Remove(vk);
             }
+            else if (vk == Native.VK_OEM_6) // ']' -- Home Take the Field, plain key, no modifier
+            {
+                if (isDown && _pressed.Add(vk))
+                    KeyCombo?.Invoke("]");
+                else if (isUp)
+                    _pressed.Remove(vk);
+            }
+            else if (vk == Native.VK_OEM_4) // '[' -- Away Take the Field, plain key, no modifier
+            {
+                if (isDown && _pressed.Add(vk))
+                    KeyCombo?.Invoke("[");
+                else if (isUp)
+                    _pressed.Remove(vk);
+            }
         }
         return Native.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
     }

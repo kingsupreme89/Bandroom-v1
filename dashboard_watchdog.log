@@ -145,3 +145,7 @@
 2026-08-07 23:38:00 Dashboard not reachable on :8765 - starting serve_dashboard.py
 2026-08-07 23:39:54 Dashboard not reachable on :8765 - starting serve_dashboard.py
 2026-08-07 23:41:59 Dashboard not reachable on :8765 - starting serve_dashboard.py
+2026-08-14 08:33:15 Watchdog started.
+2026-08-14 08:33:17 Dashboard unhealthy on :8765 (attempt 1) - starting serve_dashboard.py
+2026-08-14 08:33:19 Started serve_dashboard.py (pid 10924)
+2026-08-14 08:33:22 Dashboard healthy after restart.

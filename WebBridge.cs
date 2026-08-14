@@ -1353,6 +1353,7 @@ public sealed class WebBridge
             paSpeakerEffect = e.PaSpeakerEffect,
             fadeStartSecondsOverride = e.FadeStartSecondsOverride,
             fadeOutDurationOverride = e.FadeOutDurationOverride,
+            noFade = e.NoFade,
         }));
 
     public void AssignEvent(string trigger) => _host.OpenAssignTrackFromWeb(trigger);
@@ -1398,6 +1399,7 @@ public sealed class WebBridge
     public void SetEventPlaybackSpeed2x(string trigger, bool enabled) => _host.SetEventPlaybackSpeed2xFromWeb(trigger, enabled);
     public void SetEventPaSpeakerEffect(string trigger, bool enabled) => _host.SetEventPaSpeakerEffectFromWeb(trigger, enabled);
     public void SetEventFadeOverride(string trigger, double? fadeStartSeconds, double? fadeOutDuration) => _host.SetEventFadeOverrideFromWeb(trigger, fadeStartSeconds, fadeOutDuration);
+    public void SetEventNoFade(string trigger, bool noFade) => _host.SetEventNoFadeFromWeb(trigger, noFade);
     // Per-event whistle-speed button -- REPLACED BrowseAndSetEventAltWhistle/ClearEventAltWhistle/
     // SaveTrimAsEventAltWhistle 2026-08-12 (owner request: swap the alternate-whistle-clip picker
     // for a whistle-speed toggle). Cycles through WebMainForm.WhistleSpeedPresets, returns the new
@@ -1503,6 +1505,10 @@ public sealed class WebBridge
     /// BuildDefault if none) so this is safe to call even if the team already has SOME
     /// assignments -- ImportDefaultPackForTeam only ever fills empty slots, never overwrites.</summary>
     public int ApplyDefaultProfileForTeam(string teamName) => _host.ApplyDefaultProfileForTeamFromWeb(teamName);
+    /// <summary>Owner request 2026-08-14 -- opponent-side counterpart for a team you never set up
+    /// yourself, fills from the shared Generic profile instead of the team-specific Default Song
+    /// Pack. See WebMainForm.ApplyGenericProfileForTeamFromWeb.</summary>
+    public int ApplyGenericProfileForTeam(string teamName) => _host.ApplyGenericProfileForTeamFromWeb(teamName);
     /// <summary>Overwrite counterpart for the Events-page Auto-Assign "Overwrite" confirm flow --
     /// see WebMainForm.ApplyDefaultProfileForTeamOverwriteFromWeb.</summary>
     public int ApplyDefaultProfileForTeamOverwrite(string teamName) => _host.ApplyDefaultProfileForTeamOverwriteFromWeb(teamName);

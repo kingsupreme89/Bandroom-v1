@@ -772,6 +772,31 @@ public sealed class WebMainForm : Form
         return assigned;
     }
 
+    /// <summary>Owner request 2026-08-14: opponent-side counterpart to ApplyDefaultProfileForTeamFromWeb
+    /// for the "I didn't set up this team, just use Generic" case at the GAMETIME prompt -- fills
+    /// only empty slots from ConfigStore.GetGenericProfile() (the same shared fallback pack
+    /// ResolveEntryForEvent already reaches for per-event when a team has nothing assigned) rather
+    /// than the team-specific Default Song Pack. Never overwrites anything the team already has.</summary>
+    public int ApplyGenericProfileForTeamFromWeb(string teamName)
+    {
+        var config = ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(teamName) : ConfigStore.BuildDefault();
+        var generic = ConfigStore.GetGenericProfile();
+        int assigned = 0;
+        foreach (var entry in config)
+        {
+            if (!string.IsNullOrWhiteSpace(entry.AudioFile)) continue;
+            var genericEntry = generic.FirstOrDefault(e => e.Event == entry.Event);
+            if (genericEntry == null || string.IsNullOrWhiteSpace(genericEntry.AudioFile)) continue;
+            entry.AudioFile = genericEntry.AudioFile;
+            assigned++;
+        }
+        if (assigned > 0) ConfigStore.SaveProfile(teamName, config);
+        RefreshHomeAwayConfigIfNeeded(teamName);
+        RefreshActiveConfigIfNeeded(teamName, config);
+        return assigned;
+    }
+
     /// <summary>Overwrite variant of ApplyDefaultProfileForTeamFromWeb (Events-page Auto-Assign
     /// "Overwrite" confirm flow) -- replaces EVERY slot the default pack has a file for, not just
     /// empty ones. JS is responsible for getting an explicit yes/no from the user before calling
@@ -1073,6 +1098,27 @@ public sealed class WebMainForm : Form
 
         // Try the team's own profile first, then fall back to the Generic profile
         var entry = config.FirstOrDefault(e => e.Event == eventName);
+
+        // FIXED 2026-08-14 (owner report: song visibly assigned via Assign/Edit, engine still
+        // logged "no song assigned" for Home) -- when a Home/Away/BigGame preset file already
+        // exists for this team, GameplayProfileKey/LoadGameplayProfile always loads THAT preset
+        // for gameplay, never the plain base profile. An assignment made while editing the base
+        // profile (no preset selected) is invisible to gameplay unless it's ALSO present in the
+        // preset file -- same class of bug as the earlier home/away-only routing fix, just one
+        // layer up: the assignment landed in the wrong FILE, not the wrong SIDE. Falls back to
+        // the base per-team profile before the cross-team Generic pack below, since a team's own
+        // base assignment is more specific than a shared default.
+        if (entry == null || string.IsNullOrWhiteSpace(entry.AudioFile))
+        {
+            string? teamName = side == "home" ? _homeTeam?.Name : _awayTeam?.Name;
+            if (!string.IsNullOrEmpty(teamName) && ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase))
+            {
+                var baseEntry = ConfigStore.LoadProfile(teamName).FirstOrDefault(e => e.Event == eventName);
+                if (baseEntry != null && !string.IsNullOrWhiteSpace(baseEntry.AudioFile))
+                    entry = baseEntry;
+            }
+        }
+
         if (entry == null || string.IsNullOrWhiteSpace(entry.AudioFile))
         {
             // Fall back to Generic profile for shared default sounds
@@ -1492,7 +1538,7 @@ public sealed class WebMainForm : Form
         if (entry == null) return;
         float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
-            AudioPlayer.Play(entry.AudioFile, VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, forcePaEffect: entry.PaSpeakerEffect, fadeStartOverride: entry.FadeStartSecondsOverride, fadeOutDurationOverride: entry.FadeOutDurationOverride);
+            AudioPlayer.Play(entry.AudioFile, VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, forcePaEffect: entry.PaSpeakerEffect, fadeStartOverride: entry.FadeStartSecondsOverride, fadeOutDurationOverride: entry.FadeOutDurationOverride, noFade: entry.NoFade);
         if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
             AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isPreview: true, liveVolumeSource: () => AudioPlayer.PaVolume * eventVolumeScale);
     }
@@ -1575,6 +1621,19 @@ public sealed class WebMainForm : Form
         if (entry == null) return;
         entry.FadeStartSecondsOverride = fadeStartSeconds;
         entry.FadeOutDurationOverride = fadeOutDuration;
+        ConfigStore.Save(_config);
+        SaveCurrentTeamProfile();
+        PushCategories();
+    }
+
+    /// <summary>Per-event fade kill switch, set from the event card's settings pill -- when true,
+    /// this card's clip always plays straight through with no fade, overriding FadeStartSecondsOverride/
+    /// FadeOutDurationOverride and the global Audio Timing fade settings alike.</summary>
+    public void SetEventNoFadeFromWeb(string trigger, bool noFade)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        entry.NoFade = noFade;
         ConfigStore.Save(_config);
         SaveCurrentTeamProfile();
         PushCategories();
@@ -3095,7 +3154,7 @@ public sealed class WebMainForm : Form
             // feature entirely. Back to firing synchronously, same as before that feature existed.
             string paFile = entry.PaAudioFile;
             bool paExists = !string.IsNullOrWhiteSpace(paFile) && File.Exists(paFile);
-            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, channel: channel, forcePaEffect: entry.PaSpeakerEffect, fadeStartOverride: entry.FadeStartSecondsOverride, fadeOutDurationOverride: entry.FadeOutDurationOverride);
+            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, channel: channel, forcePaEffect: entry.PaSpeakerEffect, fadeStartOverride: entry.FadeStartSecondsOverride, fadeOutDurationOverride: entry.FadeOutDurationOverride, noFade: entry.NoFade);
             // PA Announcer layer: plays concurrently with the main cue above, not instead of it,
             // so interruptPrevious MUST be false here -- true would call StopAll() and kill the
             // main clip that was just started a line above. Fired after, not before, the main
@@ -3334,13 +3393,21 @@ public sealed class WebMainForm : Form
                 // still returns above and waits for a real read, preserving the STATE_MACHINE_
                 // ANALYSIS.md Race #3 fix (guessing "home" there misroutes a defensive/offensive
                 // cue to the wrong team -- that risk doesn't apply to a side-agnostic cue).
+                // Fire for BOTH sides, not just "home": events like the pregame walkout apply to
+                // both bands, and each side's song is assigned under that side's own config tab.
+                // Found 2026-08-14: hardcoding "home" here meant a song assigned under the Away
+                // tab was invisible to ResolveEntryForEvent("home", ...), which always looked in
+                // _homeConfig -- logged as "no song assigned" even though the away song existed.
                 bool otherFiredYet = false;
                 foreach (var evt in events.Where(e => e.EventKey.StartsWith("Other:")))
                 {
-                    string result = FireEventForSide("home", evt.EventKey, interruptPrevious: !otherFiredYet);
-                    if (result.StartsWith("fired:")) otherFiredYet = true;
-                    OnLog($"[engine] {evt.EventKey} -> home (no possession read yet): {result}");
-                    RecordFireResult(evt.EventKey, "home", result);
+                    foreach (var otherSide in new[] { "home", "away" })
+                    {
+                        string result = FireEventForSide(otherSide, evt.EventKey, interruptPrevious: !otherFiredYet);
+                        if (result.StartsWith("fired:")) otherFiredYet = true;
+                        OnLog($"[engine] {evt.EventKey} -> {otherSide} (no possession read yet): {result}");
+                        RecordFireResult(evt.EventKey, otherSide, result);
+                    }
                 }
                 return;
             }
@@ -3448,10 +3515,39 @@ public sealed class WebMainForm : Form
 
     void OnKeyCombo(string keyCombo)
     {
+        // ']' / '[' are reserved, global, plain-key hotkeys for manually firing "Other: Pregame
+        // Take the Field" per side -- checked first (not routed through the "key:" config lookup
+        // below) since they're a fixed app feature, not a user-assignable trigger like everything
+        // else KeyboardHook.KeyCombo carries.
+        if (keyCombo == "]") { ManualFireTakeTheField("home"); return; }
+        if (keyCombo == "[") { ManualFireTakeTheField("away"); return; }
+
         RunOnUi(() =>
         {
             var entry = _config.FirstOrDefault(e => e.Trigger.Equals($"key:{keyCombo}", StringComparison.OrdinalIgnoreCase));
             if (entry != null) FireEvent(entry);
+        });
+    }
+
+    /// <summary>Manually fires "Other: Pregame Take the Field" for one side via the ']'/'[' hotkeys,
+    /// instead of waiting on GameWatcher's automatic READY/black-screen timer -- lets the owner cue
+    /// the walkout song themselves if the timer's guessed delay doesn't line up with what's actually
+    /// happening on screen. Marks GameWatcher's one-shot guard so the automatic timer (armed or not)
+    /// can't also fire this same event later and double the song.</summary>
+    void ManualFireTakeTheField(string side)
+    {
+        RunOnUi(() =>
+        {
+            const string eventKey = "Other: Pregame Take the Field";
+            _watcher.MarkPregameTakeFieldFiredManually();
+            // bypassCooldown: true -- these hotkeys are a deliberate manual re-cue (e.g. testing,
+            // or the owner wants the walkout song to play again), not an accidental duplicate
+            // engine detection. AudioPlayer.FireCooldown exists to stop the automatic/engine path
+            // from double-firing the same clip within a few seconds; that protection shouldn't
+            // also block a human explicitly pressing the button again.
+            string result = FireEventForSide(side, eventKey, bypassCooldown: true, interruptPrevious: true);
+            OnLog($"[hotkey] {eventKey} -> {side} (manual): {result}");
+            RecordFireResult(eventKey, side, result);
         });
     }
 

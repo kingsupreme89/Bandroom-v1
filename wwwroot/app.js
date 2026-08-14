@@ -601,7 +601,7 @@ async function openSituations(category) {
           <button class="bandroom-item-action" data-act="preview" title="Play" ${ev.fileName ? "" : "disabled"}>&#9654;</button>
           <button class="bandroom-item-action" data-act="stop" title="Stop">&#9209;</button>
           <button class="bandroom-item-action" data-act="volume" title="Adjust this event's own volume">&#128266;</button>
-          <button class="bandroom-item-action situation-whistle-toggle${(ev.playLeadInWhistle === false) || (ev.whistleSpeed && ev.whistleSpeed !== 1) || ev.speed2x || ev.paSpeakerEffect || ev.fadeStartSecondsOverride != null || ev.fadeOutDurationOverride != null ? " active" : ""}" data-act="settings" title="Event settings (whistle, speed, PA effect, fade)">&#9881;</button>
+          <button class="bandroom-item-action situation-whistle-toggle${(ev.playLeadInWhistle === false) || (ev.whistleSpeed && ev.whistleSpeed !== 1) || ev.speed2x || ev.paSpeakerEffect || ev.fadeStartSecondsOverride != null || ev.fadeOutDurationOverride != null || ev.noFade ? " active" : ""}" data-act="settings" title="Event settings (whistle, speed, PA effect, fade)">&#9881;</button>
           <button class="bandroom-item-action" data-act="track-info" title="Track Info" ${ev.fileName ? "" : "disabled"}>&#8505;</button>
           <div class="situation-share-popover glass" hidden>
             <div class="situation-copy-title">Share this song to&hellip;</div>
@@ -638,6 +638,10 @@ async function openSituations(category) {
             <label class="situation-settings-row situation-settings-fade-fields" ${ev.fadeStartSecondsOverride != null || ev.fadeOutDurationOverride != null ? "" : "hidden"}>
               <span>Fade duration (sec)</span>
               <input type="number" min="0" max="30" step="0.5" data-field="fade-duration" value="${ev.fadeOutDurationOverride ?? 4.5}" />
+            </label>
+            <label class="situation-settings-row">
+              <span>No fade (always play full song)</span>
+              <input type="checkbox" data-field="no-fade" ${ev.noFade ? "checked" : ""} />
             </label>
             <button class="situation-settings-close" title="Close">&times;</button>
           </div>
@@ -776,11 +780,12 @@ function wireSituationSettingsPopover(row, ev) {
   const fadeFieldsRows = popover.querySelectorAll(".situation-settings-fade-fields");
   const fadeStartInput = popover.querySelector('[data-field="fade-start"]');
   const fadeDurationInput = popover.querySelector('[data-field="fade-duration"]');
+  const noFadeInput = popover.querySelector('[data-field="no-fade"]');
 
   const closePopover = () => closeCardPopover(popover);
   const refreshGearActiveState = () => {
     const isActive = !whistleInput.checked || (ev.whistleSpeed && ev.whistleSpeed !== 1) ||
-      speed2xInput.checked || paEffectInput.checked || fadeOverrideInput.checked;
+      speed2xInput.checked || paEffectInput.checked || fadeOverrideInput.checked || noFadeInput.checked;
     btn.classList.toggle("active", !!isActive);
   };
 
@@ -836,6 +841,12 @@ function wireSituationSettingsPopover(row, ev) {
   });
   fadeStartInput.addEventListener("change", pushFadeOverride);
   fadeDurationInput.addEventListener("change", pushFadeOverride);
+
+  noFadeInput.addEventListener("change", () => {
+    bridge?.SetEventNoFade(ev.trigger, noFadeInput.checked);
+    ev.noFade = noFadeInput.checked;
+    refreshGearActiveState();
+  });
 }
 
 /// Volume button on an event card pops out a small slider (+ close/X) instead of a permanent
@@ -1801,6 +1812,7 @@ function wireProfileSettingsTab() {
       FadeStartSeconds: Number(document.getElementById("settings-fade-start").value) || 0,
       FadeOutDuration: Number(document.getElementById("settings-fade-duration").value) || 0,
       CooldownSeconds: Number(document.getElementById("settings-cooldown").value) || 0,
+      PregameRunoutDelaySeconds: Math.min(45, Math.max(15, Number(document.getElementById("settings-pregame-runout").value) || 15)),
     };
     try {
       await bridge.SavePlaybackTimingSettings(JSON.stringify(settings));
@@ -8461,18 +8473,24 @@ async function confirmMatchup() {
   try {
     const needsDefault = bridge ? JSON.parse(await bridge.GetTeamsNeedingDefaultProfile(state.matchupHome, state.matchupAway)) : [];
     if (needsDefault.length > 0) {
-      const proceed = await showDefaultProfilePrompt(needsDefault);
-      if (!proceed) return; // user chose to assign songs themselves first -- matchup stays unlocked
+      const choice = await showDefaultProfilePrompt(needsDefault);
+      if (!choice) return; // user chose to assign songs themselves first -- matchup stays unlocked
       // Explicitly apply now (rather than relying on ConfirmGametime's own silent safety-net
       // fallback, which would do the same thing invisibly) so we can report real numbers and so
-      // the "Use Starter Profile" button actually does what it says instead of being a no-op that
-      // just trusts a side effect elsewhere.
+      // the buttons actually do what they say instead of being a no-op that just trusts a side
+      // effect elsewhere. "generic" (owner request 2026-08-14 -- an opponent team you never set
+      // up yourself) fills from the shared Generic profile instead of the team-specific Default
+      // Song Pack.
+      const label = choice === "generic" ? "Generic profile" : "Default Song Pack";
       let totalAssigned = 0;
       for (const name of needsDefault) {
-        try { totalAssigned += (await bridge?.ApplyDefaultProfileForTeam(name)) ?? 0; }
-        catch (err) { console.error(`ApplyDefaultProfileForTeam(${name}) failed`, err); }
+        try {
+          totalAssigned += (choice === "generic"
+            ? await bridge?.ApplyGenericProfileForTeam(name)
+            : await bridge?.ApplyDefaultProfileForTeam(name)) ?? 0;
+        } catch (err) { console.error(`Apply${choice === "generic" ? "Generic" : "Default"}ProfileForTeam(${name}) failed`, err); }
       }
-      if (totalAssigned > 0) showToast(`Filled ${totalAssigned} starter song${totalAssigned === 1 ? "" : "s"} from the Default Song Pack.`);
+      if (totalAssigned > 0) showToast(`Filled ${totalAssigned} song${totalAssigned === 1 ? "" : "s"} from the ${label}.`);
     }
   } catch (err) {
     console.error("GetTeamsNeedingDefaultProfile failed", err);
@@ -8535,6 +8553,9 @@ async function confirmMatchup() {
 /// don't have one yet), false if they'd rather back out and assign songs themselves first.
 /// Reuses #default-profile-prompt-overlay's markup (see index.html), matching the rest of the
 /// app's glass-island/pill styling instead of a plain confirm() dialog.
+/// Resolves "starter" (team-specific Default Song Pack), "generic" (shared Generic profile --
+/// owner request 2026-08-14, for an opponent team you never set up yourself), or false (skip,
+/// assign manually later).
 function showDefaultProfilePrompt(teamNames) {
   return new Promise((resolve) => {
     const overlay = document.getElementById("default-profile-prompt-overlay");
@@ -8544,13 +8565,17 @@ function showDefaultProfilePrompt(teamNames) {
     const cleanup = () => {
       overlay.hidden = true;
       btnApply.removeEventListener("click", onApply);
+      btnGeneric.removeEventListener("click", onGeneric);
       btnSkip.removeEventListener("click", onSkip);
     };
-    const onApply = () => { cleanup(); resolve(true); };
+    const onApply = () => { cleanup(); resolve("starter"); };
+    const onGeneric = () => { cleanup(); resolve("generic"); };
     const onSkip = () => { cleanup(); resolve(false); };
     const btnApply = document.getElementById("btn-default-profile-apply");
+    const btnGeneric = document.getElementById("btn-default-profile-generic");
     const btnSkip = document.getElementById("btn-default-profile-skip");
     btnApply.addEventListener("click", onApply);
+    btnGeneric.addEventListener("click", onGeneric);
     btnSkip.addEventListener("click", onSkip);
   });
 }
@@ -9937,6 +9962,8 @@ const HOTKEYS = [
   { label: "Profile", keys: ["Ctrl", "P"], action: openProfile },
   { label: "Undo", keys: ["Ctrl", "Z"], action: undoLastAction },
   { label: "Tips", keys: ["Ctrl", "T"], action: showNextTip },
+  { label: "Take the Field (Home)", keys: ["]"], action: null },
+  { label: "Take the Field (Away)", keys: ["["], action: null },
 ];
 function openHotkeyPanel() {
   const panel = document.getElementById("hotkey-panel");

@@ -232,7 +232,10 @@ internal static class AudioPlayer
     /// before these params existed. Non-null lets one card override just its own fade timing.</param>
     /// <param name="fadeOutDurationOverride">TriggerEntry.FadeOutDurationOverride -- see
     /// fadeStartOverride above.</param>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true, Func<float>? liveVolumeSource = null, bool speed2x = false, double whistleSpeed = 1.0, string? channel = null, bool forcePaEffect = false, double? fadeStartOverride = null, double? fadeOutDurationOverride = null)
+    /// <param name="noFade">TriggerEntry.NoFade -- when true, skips the fade entirely (clip plays
+    /// straight through to its natural end / a hard cutoff), regardless of fadeStartOverride/
+    /// fadeOutDurationOverride or the global FadeStartSeconds/FadeOutDuration.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true, Func<float>? liveVolumeSource = null, bool speed2x = false, double whistleSpeed = 1.0, string? channel = null, bool forcePaEffect = false, double? fadeStartOverride = null, double? fadeOutDurationOverride = null, bool noFade = false)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
@@ -273,7 +276,7 @@ internal static class AudioPlayer
                 // try can't skip it, but everything that can fail now has a matching finally.
                 lock (Lock) ActiveOutputs.Add((output, channel));
 
-                double effectiveFadeStart = fadeStartOverride ?? FadeStartSeconds;
+                double effectiveFadeStart = noFade ? double.MaxValue : (fadeStartOverride ?? FadeStartSeconds);
                 double effectiveFadeOutDuration = fadeOutDurationOverride ?? FadeOutDuration;
 
                 try

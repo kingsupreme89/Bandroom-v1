@@ -73,4 +73,12 @@ public class TriggerEntry
     /// with WhistleSpeed/PlaybackSpeed2x/PaSpeakerEffect in the event card's settings pill.</summary>
     public double? FadeStartSecondsOverride { get; set; } = null;
     public double? FadeOutDurationOverride { get; set; } = null;
+
+    /// <summary>Per-event kill switch for fading entirely -- when true, this card's clip always
+    /// plays straight through (or to a hard cutoff/natural end) with no volume ramp-down,
+    /// regardless of the global Audio Timing fade settings or FadeStartSecondsOverride/
+    /// FadeOutDurationOverride above. Added 2026-08-14 (owner request: some songs shouldn't ever
+    /// fade out). Missing from old saved JSON deserializes to false (default), no migration
+    /// needed -- every existing assignment keeps fading exactly as before.</summary>
+    public bool NoFade { get; set; } = false;
 }

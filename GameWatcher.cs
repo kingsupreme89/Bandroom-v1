@@ -233,6 +233,51 @@ internal sealed class GameWatcher
 
     static readonly string[] RamGameProcessNames = { "CollegeFB27", "CollegeFB27_Trial" };
 
+    // FIXED 2026-08-14 (real live bug, owner-confirmed): RAM reported down=1/distance=0/
+    // possession=home unchanged for minutes while OCR correctly tracked the game moving to 2nd &
+    // 7 with Away in possession. RAM was still "connected" -- fresh updatedAt, passing
+    // RamReaderValidator's document-level 20s freshness check -- but this game's down/distance/
+    // possession locators had silently broken and kept re-reporting their last good value
+    // forever. The 2026-08-14 -1/HavePossession sentinel fixes above (see the two RELIABILITY
+    // FIX comments in RouteEngineTick) only protect against a field that NEVER resolved; they
+    // can't tell "resolved once, correctly, then got stuck" apart from "still correct, unchanged
+    // because the play genuinely hasn't advanced."
+    //
+    // A pure "RAM unchanged for N seconds" check is NOT safe on its own -- a real down/distance
+    // legitimately holds the same value for 20-40s between plays while the play clock runs, so
+    // that alone would misfire on a perfectly healthy RAM reader constantly. This requires BOTH
+    // sides to agree something's actually wrong: RAM frozen on one value past RamFieldStaleThreshold
+    // AND OCR independently SETTLED on a different value for at least OcrFieldCorroborationWindow
+    // (not just a single noisy misread -- one stray OCR digit glitch resets its own clock the
+    // instant the value changes again, so a flickering/inconsistent OCR read can never trigger
+    // this). Only once both are true does RouteEngineTick fall back to OCR for that one field,
+    // same as if RAM had never resolved it. Self-heals the instant RAM's value changes again,
+    // whether because its locator recovered or the game really did reach that down/distance/
+    // possession.
+    static readonly TimeSpan RamFieldStaleThreshold = TimeSpan.FromSeconds(5);
+    static readonly TimeSpan OcrFieldCorroborationWindow = TimeSpan.FromSeconds(1.5);
+    int? _ramDownStableValue; DateTime? _ramDownStableSince;
+    int? _ramYardsToGoStableValue; DateTime? _ramYardsToGoStableSince;
+    bool? _ramPossessionStableValue; DateTime? _ramPossessionStableSince;
+    int? _ocrDownStableValue; DateTime? _ocrDownStableSince;
+    int? _ocrYardsToGoStableValue; DateTime? _ocrYardsToGoStableSince;
+    bool? _ocrPossessionStableValue; DateTime? _ocrPossessionStableSince;
+
+    /// <summary>True once <paramref name="value"/> has been unchanged for at least
+    /// <paramref name="threshold"/>. Updates the tracking state as a side effect -- resets the
+    /// clock the instant the value changes, whether that's a real play advancing (RAM side) or a
+    /// one-off misread settling back down (OCR side).</summary>
+    static bool IsFieldStableFor<T>(T value, ref T? stableValue, ref DateTime? stableSince, DateTime now, TimeSpan threshold) where T : struct, IEquatable<T>
+    {
+        if (stableValue is not { } prev || !prev.Equals(value))
+        {
+            stableValue = value;
+            stableSince = now;
+            return false;
+        }
+        return stableSince.HasValue && now - stableSince.Value >= threshold;
+    }
+
     /// <summary>Best-effort PID lookup for RamReaderValidator's expectedGameProcessId check --
     /// process names confirmed from Coffee's own main.js `exactProcessNames` default
     /// (['CollegeFB27.exe', 'CollegeFB27_Trial.exe']; Process.GetProcessesByName wants the name
@@ -376,6 +421,16 @@ internal sealed class GameWatcher
     DateTime? _blackScreenSince;
     bool _pregameTakeFieldFired;
     bool _sawPregameReady;
+
+    /// <summary>Called when the owner manually fires "Other: Pregame Take the Field" via the ']'/'['
+    /// hotkeys instead of waiting on the automatic READY/black-screen timer -- sets the same one-shot
+    /// guard the automatic paths use so the timer (if already armed) can't also fire and double the
+    /// song. Safe to call even if the timer never armed at all.</summary>
+    public void MarkPregameTakeFieldFiredManually()
+    {
+        _pregameTakeFieldFired = true;
+        _blackScreenSince = null;
+    }
 
     /// <summary>-1 = not yet sampled (TimeoutHelper's own range check, `&lt; 0`, means it
     /// correctly just won't fire until a real reading comes in, rather than defaulting to a
@@ -722,6 +777,12 @@ internal sealed class GameWatcher
         _blackScreenSince = null;
         _pregameTakeFieldFired = false;
         _sawPregameReady = false;
+        _ramDownStableValue = null; _ramDownStableSince = null;
+        _ramYardsToGoStableValue = null; _ramYardsToGoStableSince = null;
+        _ramPossessionStableValue = null; _ramPossessionStableSince = null;
+        _ocrDownStableValue = null; _ocrDownStableSince = null;
+        _ocrYardsToGoStableValue = null; _ocrYardsToGoStableSince = null;
+        _ocrPossessionStableValue = null; _ocrPossessionStableSince = null;
         // AUDIT FIX 2026-08-12: the reset list above only ever covered the fields touched by the
         // specific live bugs each was added for -- it was never treated as the COMPLETE list of
         // state that can outlive a single game. Every "sticky, deliberately never nulled on a
@@ -1898,6 +1959,14 @@ internal sealed class GameWatcher
         int ocrDown = down, ocrYardsToGo = yardsToGo, ocrAwayScore = awayScore, ocrHomeScore = homeScore;
         bool ocrPossessionAway = _lastPossession == "away";
 
+        // OCR-side half of the stale-RAM-field fallback below -- tracks whether OCR has settled
+        // on its current down/distance/possession reading (as opposed to a one-tick misread), so
+        // a frozen RAM value only ever gets overridden by a corroborated OCR reading, never noise.
+        DateTime nowUtc = DateTime.UtcNow;
+        bool ocrDownSettled = IsFieldStableFor(ocrDown, ref _ocrDownStableValue, ref _ocrDownStableSince, nowUtc, OcrFieldCorroborationWindow);
+        bool ocrYardsToGoSettled = IsFieldStableFor(ocrYardsToGo, ref _ocrYardsToGoStableValue, ref _ocrYardsToGoStableSince, nowUtc, OcrFieldCorroborationWindow);
+        bool ocrPossessionSettled = IsFieldStableFor(ocrPossessionAway, ref _ocrPossessionStableValue, ref _ocrPossessionStableSince, nowUtc, OcrFieldCorroborationWindow);
+
         // Reader takes over score/possession/yard line/down/distance/timeouts when CONNECTED --
         // see the ScoreboardStatus field's own doc comment. Event flags (situation/banner/etc)
         // stay OCR-owned always; structural-turnover/penalty inference below still reads the OCR
@@ -1947,6 +2016,35 @@ internal sealed class GameWatcher
         // screen-JSON reader). See LogRamOcrCrosscheck's own doc comment.
         if (ramSnapshot is { } ramForWatchdog)
             LogRamOcrCrosscheck(ocrDown, ocrYardsToGo, ocrAwayScore, ocrHomeScore, ocrPossessionAway, ramForWatchdog);
+
+        // Stale-RAM-field fallback (2026-08-14) -- see the tracking fields' own doc comment above
+        // RamFieldStaleThreshold for the full story. Deliberately scoped to down/distance/
+        // possession only (the fields actually observed stuck live); score/timeouts/yard line
+        // already have their own -1-sentinel "never resolved" protection and haven't shown this
+        // failure mode. Runs AFTER the rs-driven assignments above so it can override them back to
+        // OCR once both RAM-frozen and OCR-settled are confirmed true -- otherwise this is a no-op
+        // and RAM's value is used exactly as before this fix existed.
+        if (ramSnapshot is { } ramForStaleness)
+        {
+            if (ocrDown != 0 && ocrDown != ramForStaleness.Down && ocrDownSettled
+                && IsFieldStableFor(ramForStaleness.Down, ref _ramDownStableValue, ref _ramDownStableSince, nowUtc, RamFieldStaleThreshold))
+            {
+                Log?.Invoke($"[RAM watchdog] down stuck at {ramForStaleness.Down} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {ocrDown} -- falling back to OCR for this field");
+                down = ocrDown;
+            }
+            if (ocrDown != 0 && ocrYardsToGo != ramForStaleness.YardsToGo && ocrYardsToGoSettled
+                && IsFieldStableFor(ramForStaleness.YardsToGo, ref _ramYardsToGoStableValue, ref _ramYardsToGoStableSince, nowUtc, RamFieldStaleThreshold))
+            {
+                Log?.Invoke($"[RAM watchdog] distance stuck at {ramForStaleness.YardsToGo} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {ocrYardsToGo} -- falling back to OCR for this field");
+                yardsToGo = ocrYardsToGo;
+            }
+            if (readerPossessionAway.HasValue && ocrPossessionAway != ramForStaleness.PossessionAway && ocrPossessionSettled
+                && IsFieldStableFor(ramForStaleness.PossessionAway, ref _ramPossessionStableValue, ref _ramPossessionStableSince, nowUtc, RamFieldStaleThreshold))
+            {
+                Log?.Invoke($"[RAM watchdog] possession stuck at {(ramForStaleness.PossessionAway ? "away" : "home")} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {(ocrPossessionAway ? "away" : "home")} -- falling back to OCR for this field");
+                readerPossessionAway = ocrPossessionAway;
+            }
+        }
 
         // REDEFINED 2026-08-10: BigGame used to be an auto-detect "close score, late quarter"
         // heuristic. Replaced with a pure manual read of ConfigStore.BigGameSettings.Enabled --

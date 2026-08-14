@@ -902,6 +902,7 @@ public sealed class MacWebBridge
     public string GetTeamsNeedingDefaultProfile(string home, string away) =>
         JsonSerializer.Serialize(_host.GetTeamsNeedingDefaultProfileFromWeb(home, away));
     public int ApplyDefaultProfileForTeam(string teamName) => _host.ApplyDefaultProfileForTeamFromWeb(teamName);
+    public int ApplyGenericProfileForTeam(string teamName) => _host.ApplyGenericProfileForTeamFromWeb(teamName);
     public int ApplyDefaultProfileForTeamOverwrite(string teamName) => _host.ApplyDefaultProfileForTeamOverwriteFromWeb(teamName);
     public int ApplyConferencePackForTeam(string teamName, bool overwrite) => _host.ApplyConferencePackForTeamFromWeb(teamName, overwrite);
 

@@ -1159,6 +1159,29 @@ public partial class MainWindow : Window
         return assigned;
     }
 
+    /// <summary>Mirrors WebMainForm.ApplyGenericProfileForTeamFromWeb (Windows) -- opponent-side
+    /// counterpart for a team you never set up yourself, fills empty slots from the shared Generic
+    /// profile instead of the team-specific Default Song Pack.</summary>
+    public int ApplyGenericProfileForTeamFromWeb(string teamName)
+    {
+        var config = ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase)
+            ? ConfigStore.LoadProfile(teamName) : ConfigStore.BuildDefault();
+        var generic = ConfigStore.GetGenericProfile();
+        int assigned = 0;
+        foreach (var entry in config)
+        {
+            if (!string.IsNullOrWhiteSpace(entry.AudioFile)) continue;
+            var genericEntry = generic.FirstOrDefault(e => e.Event == entry.Event);
+            if (genericEntry == null || string.IsNullOrWhiteSpace(genericEntry.AudioFile)) continue;
+            entry.AudioFile = genericEntry.AudioFile;
+            assigned++;
+        }
+        if (assigned > 0) ConfigStore.SaveProfile(teamName, config);
+        RefreshHomeAwayConfigIfNeeded(teamName);
+        RefreshActiveConfigIfNeeded(teamName, config);
+        return assigned;
+    }
+
     public int ApplyDefaultProfileForTeamOverwriteFromWeb(string teamName)
     {
         var config = ConfigStore.ListProfiles().Contains(teamName, StringComparer.OrdinalIgnoreCase)
