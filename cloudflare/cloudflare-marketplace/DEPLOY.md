@@ -1,30 +1,39 @@
 # Deploying the Bandroom marketplace worker
 
-Same account as `cloudflare-usercount` -- if you've already done `wrangler login` for that one,
-you don't need to log in again. One-time setup:
+The KV namespace id and R2 bucket name are **already set** in `wrangler.toml` — do not create or
+edit them again. Just deploy (needs Node.js + a one-time `wrangler login`).
 
 ```bash
 cd cloudflare-marketplace
-npx wrangler r2 bucket create bandroom-marketplace-files
-npx wrangler kv namespace create MARKETPLACE_META
-```
-
-The KV command prints something like:
-
-```
-{ binding = "MARKETPLACE_META", id = "abcd1234..." }
-```
-
-Copy that `id` into `wrangler.toml`, replacing `REPLACE_WITH_KV_NAMESPACE_ID`. Then:
-
-```bash
+npx wrangler login               # once, opens a browser to authorize
+npx wrangler secret put ADMIN_TOKEN        # once, paste the admin token (see below)
 npx wrangler deploy
 ```
 
-It'll print your live URL, something like:
+It prints a live URL like:
 
 ```
 https://bandroom-marketplace.<your-subdomain>.workers.dev
 ```
 
-Send me that URL and I'll wire it into the app (upload flow + Sound Bank/Trophy Room grids).
+## One required secret: ADMIN_TOKEN
+`/item` DELETE/PATCH supports an admin override that bypasses upload ownership. The worker reads
+it from `env.ADMIN_TOKEN`. Set it with:
+
+```bash
+npx wrangler secret put ADMIN_TOKEN
+# paste the SAME value stored in the app's admin_token.local.txt
+```
+
+(If it's not set, admin-token operations simply fail closed at 403; regular uploader owner-token
+operations still work.)
+
+## Verify after deploy
+```
+# empty-but-valid list (may be [] on a fresh account)
+curl "https://bandroom-marketplace.<subdomain>.workers.dev/list?type=song"
+# -> { "items": [] }
+```
+
+## Full endpoint + secret reference
+See `cloudflare/SECRETS_CHECKLIST.md`.

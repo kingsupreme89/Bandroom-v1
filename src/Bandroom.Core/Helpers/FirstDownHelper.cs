@@ -26,6 +26,10 @@ public sealed class FirstDownHelper : IRuleEvaluator
 {
     bool _awaitingFourthDownPossessionConfirm;
     int _pendingTicksRemaining;
+    // Captured the moment buffering starts (see the Previous.Down==4 branch below) -- the side
+    // that had the ball facing that 4th down. Used as a same-side sanity check at timeout time,
+    // see the FIXED 2026-08-13 comment on the timeout branch for why this exists.
+    bool _possessionAwayAtBufferStart;
     // FIXED 2026-08-11 (live bug recurred: "Earned First Down" still fired after a punt): this
     // was 3 ticks (~750ms), way too short. GameWatcher's own possession commit isn't instant --
     // ConfirmPossessionFlip alone needs 2 consecutive matching ticks (~500ms), AND a flip is
@@ -58,9 +62,28 @@ public sealed class FirstDownHelper : IRuleEvaluator
             if (--_pendingTicksRemaining > 0)
                 return null; // keep waiting
 
-            // Timed out with no possession change ever confirmed -- genuinely a 4th-down
-            // conversion by the same team. Fire now, delayed by up to MaxPendingTicks.
             _awaitingFourthDownPossessionConfirm = false;
+
+            // FIXED 2026-08-13 (live bug, real game log: "Earned First Down" fired for the WRONG
+            // side ~4 seconds before DriveStarterHelper's own correct fire for the team that
+            // actually took over -- two "Earned First Down" events, opposite sides, seconds apart,
+            // for what was really one punt). Root cause: Delta.NewPossession is a single-tick edge
+            // (Previous.PossessionAway != Current.PossessionAway on the SAME tick) -- if the OCR
+            // possession-color read never lands on the exact tick the flip happens (a real punt
+            // return can easily run past MaxPendingTicks' ~1.75-2.75s window, especially with
+            // ConfirmPossessionFlip's own 2-tick debounce and GameWatcher.Cooldown's lockout
+            // stacked on top), the edge is silently missed and this timeout assumed "no flip ever
+            // happened" -- a genuine 4th-down conversion -- when the ball had actually changed
+            // hands. Belt-and-suspenders fix: at timeout, also directly compare Current.
+            // PossessionAway against the side captured when buffering started. If it still matches,
+            // nobody's disputing this was a real conversion (fire as before). If it doesn't --
+            // Current possession already reads as the OTHER side even though the single-tick edge
+            // was never caught -- this was a punt/turnover-on-downs after all; abandon silently and
+            // let DriveStarterHelper (which reads Current.PossessionAway directly, not an edge) own
+            // that moment whenever it resolves, however many ticks that takes.
+            if (state.Current.PossessionAway != _possessionAwayAtBufferStart)
+                return null;
+
             return MakeFirstDownEvent(state);
         }
 
@@ -96,6 +119,7 @@ public sealed class FirstDownHelper : IRuleEvaluator
         {
             _awaitingFourthDownPossessionConfirm = true;
             _pendingTicksRemaining = MaxPendingTicks;
+            _possessionAwayAtBufferStart = state.Current.PossessionAway;
             return null;
         }
 

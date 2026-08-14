@@ -215,7 +215,13 @@ def ocr_tesseract(image_path):
 # =============================================================================
 
 def process_regions(image_path, regions):
-    """Capture once, crop each region, OCR, emit JSON to stdout."""
+    """Capture once, crop each region, OCR, emit JSON to stdout.
+
+    Emits one {"region":..., "text":...} line per region that produced text, then a
+    {"type":"cycle_end"} marker after every region has been processed. The C# MacGameWatcher
+    eats the cycle_end marker to route exactly one PlaySnapshot per full screen-scan (instead of
+    once per region line, which was the old routing behavior).
+    """
     try:
         # Crop each region
         for region in regions:
@@ -244,6 +250,9 @@ def process_regions(image_path, regions):
                         os.unlink(cropped_path)
                     except OSError:
                         pass
+
+        # Signal the end of this scan so the C# side routes a full snapshot once per pass.
+        print(json.dumps({"type": "cycle_end"}), flush=True)
     finally:
         try:
             os.unlink(image_path)

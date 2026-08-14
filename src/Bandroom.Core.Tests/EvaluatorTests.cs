@@ -46,6 +46,23 @@ public class EvaluatorTests
     }
 
     [Fact]
+    public void BigEventHelper_FourthDown_NewPossession_Fires_FourthDownStopKey()
+    {
+        // Added 2026-08-13 (owner report, real game log): this used to share the same
+        // "Defense: Fourth Down" key OffenseDownHelper fires just for FACING a 4th down, causing
+        // two evaluators to fire the identical key/song at two different real moments a few ticks
+        // apart -- reported live as "4th Down (Home BG) fired twice at the same timestamp, no
+        // penalty around it." Split into its own "Defense: Fourth Down Stop" key (see
+        // BigEventHelper.cs's own comment on the split).
+        var prev = Snap.With(down: 4, possessionAway: false);
+        var cur = Snap.With(down: 4, possessionAway: true);
+        var evaluator = new BigEventHelper();
+        var result = evaluator.Evaluate(State(prev, cur));
+        Assert.NotNull(result);
+        Assert.Equal("Defense: Fourth Down Stop", result!.EventKey);
+    }
+
+    [Fact]
     public void BigEventHelper_FourthDownLoss_NoLongerFiresOwnKey_RetiredInFavorOfTflAndFourthDownStop()
     {
         // Retired 2026-08-11 (owner audit call, same reasoning as Third Down (Loss) below):
@@ -368,6 +385,57 @@ public class EvaluatorTests
                            Snap.With(down: 1, yardsToGo: 10, possessionAway: true));
         Assert.Null(evaluator.Evaluate(state));
     }
+
+    [Fact]
+    public void FirstDownHelper_FourthDownBuffer_TimesOut_SameSideStillPossesses_Fires()
+    {
+        // A genuine 4th-down conversion: Down stays ambiguous long enough that the buffer times
+        // out, but the SAME side still has the ball the whole time (PossessionAway never flips) --
+        // should fire as a real earned first down once the buffer gives up waiting for a
+        // possession change that was never coming.
+        var evaluator = new FirstDownHelper();
+        var start = State(Snap.With(down: 4, yardsToGo: 2, possessionAway: false),
+                           Snap.With(down: 1, yardsToGo: 10, possessionAway: false));
+        Assert.Null(evaluator.Evaluate(start)); // buffering
+
+        TriggerEvent? result = null;
+        for (int i = 0; i < FirstDownHelperMaxPendingTicks; i++)
+        {
+            var tick = State(Snap.With(down: 1, yardsToGo: 10, possessionAway: false),
+                              Snap.With(down: 1, yardsToGo: 10, possessionAway: false));
+            result = evaluator.Evaluate(tick);
+        }
+        Assert.NotNull(result);
+        Assert.Equal("Offense: Earned First Down", result!.EventKey);
+    }
+
+    [Fact]
+    public void FirstDownHelper_FourthDownBuffer_TimesOut_ButPossessionAlreadyFlipped_DoesNotFire()
+    {
+        // FIXED 2026-08-13 (live bug, real game log): a punt/turnover-on-downs whose single-tick
+        // NewPossession edge got missed by OCR (a real return can easily outlast the buffer
+        // window) used to fall through the timeout and fire a false "Offense: Earned First Down"
+        // for the team that actually just lost the ball -- reported live as two "Earned First
+        // Down" events, opposite sides, ~4 seconds apart, for what was really one punt. Now checks
+        // Current.PossessionAway against the side captured when buffering started; if it no longer
+        // matches (even without the edge itself ever being observed), abandon instead of guessing.
+        var evaluator = new FirstDownHelper();
+        var start = State(Snap.With(down: 4, yardsToGo: 2, possessionAway: false),
+                           Snap.With(down: 1, yardsToGo: 10, possessionAway: false));
+        Assert.Null(evaluator.Evaluate(start)); // buffering, side starts as "home has the ball"
+
+        for (int i = 0; i < FirstDownHelperMaxPendingTicks; i++)
+        {
+            // Possession quietly reads as flipped every tick (no edge on any single tick since it
+            // was already "away" the very next read) -- Delta.NewPossession never fires, but
+            // Current.PossessionAway no longer matches what it was at buffer-start.
+            var tick = State(Snap.With(down: 1, yardsToGo: 10, possessionAway: true),
+                              Snap.With(down: 1, yardsToGo: 10, possessionAway: true));
+            Assert.Null(evaluator.Evaluate(tick)); // includes the final timed-out tick -- still null
+        }
+    }
+
+    const int FirstDownHelperMaxPendingTicks = 7;
 
     // ---------- TouchdownHelper ----------
 
@@ -697,6 +765,46 @@ public class EvaluatorTests
     public void DriveStarterHelper_DoesNotFire_OnKickoff()
     {
         var evaluator = new DriveStarterHelper();
+        var state = State(Snap.With(down: 0, possessionAway: false),
+                           Snap.With(down: 1, yardsToGo: 10, possessionAway: true, isKickoff: true));
+        Assert.Null(evaluator.Evaluate(state));
+    }
+
+    // ---------- OffenseAfterPuntHelper ----------
+
+    [Fact]
+    public void OffenseAfterPuntHelper_Fires_ForAwayTeamsOwnDriveStart()
+    {
+        // Added 2026-08-13 (owner report, real game log: "needed an event that was the away bg
+        // off after punt"). DriveStarterHelper's own "Offense: Earned First Down" branch only
+        // ever fires for the user's/home's own drive start -- this is the missing counterpart for
+        // when it's the AWAY team's fresh drive (e.g. after receiving a punt), same tick as
+        // DriveStarterHelper's own "Defense: After Punt" fire for the same real moment.
+        var evaluator = new OffenseAfterPuntHelper();
+        var state = State(Snap.With(down: 1, yardsToGo: 5, possessionAway: false),
+                           Snap.With(down: 1, yardsToGo: 10, possessionAway: true, isKickoff: false, isTurnover: false),
+                           userIsHome: true);
+        var result = evaluator.Evaluate(state);
+        Assert.NotNull(result);
+        Assert.Equal("Offense: Earned First Down", result!.EventKey);
+    }
+
+    [Fact]
+    public void OffenseAfterPuntHelper_DoesNotFire_ForUsersOwnDriveStart()
+    {
+        // DriveStarterHelper's existing Offense branch already owns this moment -- avoids a
+        // same-tick duplicate "Offense: Earned First Down" fire for the user's own side.
+        var evaluator = new OffenseAfterPuntHelper();
+        var state = State(Snap.With(down: 1, yardsToGo: 5, possessionAway: true),
+                           Snap.With(down: 1, yardsToGo: 10, possessionAway: false, isKickoff: false, isTurnover: false),
+                           userIsHome: true);
+        Assert.Null(evaluator.Evaluate(state));
+    }
+
+    [Fact]
+    public void OffenseAfterPuntHelper_DoesNotFire_OnKickoff()
+    {
+        var evaluator = new OffenseAfterPuntHelper();
         var state = State(Snap.With(down: 0, possessionAway: false),
                            Snap.With(down: 1, yardsToGo: 10, possessionAway: true, isKickoff: true));
         Assert.Null(evaluator.Evaluate(state));

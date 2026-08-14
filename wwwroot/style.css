@@ -296,7 +296,13 @@ button:focus-visible, .team-swatch:focus-visible,
   }
 }
 
-/* Header: 20px blur, subtle neon pulse */
+/* Header: 20px blur, subtle neon pulse. Header only keeps its BOTTOM border (top/left/right
+   are turned off below, since it spans the full window edge-to-edge) -- the shared neon-pulse
+   keyframe glows all 4 sides via box-shadow though, which put a hard rectangular glow along the
+   top/left/right edges where there's no border to justify it. That's the "box glow" bug: a flat
+   rectangular halo bleeding through behind rounded pills near the header edge (e.g. the LIVE
+   pill), instead of the soft pill-shaped glow those pills already have on their own. Scoped to a
+   bottom-only box-shadow (positive Y offset, no spread) so the header's glow matches its border. */
 #header-bar {
   height: var(--header-h);
   flex: 0 0 auto;
@@ -309,7 +315,17 @@ button:focus-visible, .team-swatch:focus-visible,
   border-top: none;
   backdrop-filter: blur(20px) saturate(150%);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
-  animation: neon-pulse 3.2s ease-in-out infinite;
+  animation: header-bar-glow-pulse 3.2s ease-in-out infinite;
+}
+@keyframes header-bar-glow-pulse {
+  0%, 100% {
+    border-color: color-mix(in srgb, var(--team-secondary) 45%, var(--glass-border));
+    box-shadow: 0 2px 10px -2px color-mix(in srgb, var(--team-secondary) 35%, transparent);
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--team-secondary) 85%, var(--glass-border));
+    box-shadow: 0 2px 18px -1px color-mix(in srgb, var(--team-secondary) 60%, transparent);
+  }
 }
 
 /* Side panels: 32px blur */
@@ -597,7 +613,15 @@ input, select, textarea, [contenteditable] {
 #band-director-settings-overlay[hidden] { display: none; }
 #band-director { width: min(1000px, 92vw); max-height: 88vh; overflow-y: auto; }
 .bd-panel-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
-.bd-panel { padding: 10px; min-height: 160px; display: flex; flex-direction: column; }
+/* Owner request 2026-08-13: dashboard islands (bd-panel) and pills (bd-conn-pill) were plain
+   grey/.glass with no team-color tint at all -- every other panel/pill in the app already tints
+   with --team-primary per the 2026-08-09 design system rule, this screen was just never updated
+   when that rule was adopted. */
+.bd-panel {
+  padding: 10px; min-height: 160px; display: flex; flex-direction: column;
+  border-color: color-mix(in srgb, var(--team-primary, var(--accent)) 30%, var(--glass-border));
+  background: color-mix(in srgb, var(--team-primary, var(--accent)) 8%, var(--glass-fill));
+}
 .bd-panel-title { font-weight: 600; margin-bottom: 6px; opacity: 0.85; }
 .bd-panel-list { flex: 1; overflow-y: auto; font-size: 13px; }
 .bd-list-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
@@ -609,9 +633,12 @@ input, select, textarea, [contenteditable] {
 .bd-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin: 14px 0; }
 .bd-status-item { display: flex; align-items: center; gap: 6px; }
 .bd-toggle { cursor: pointer; }
-.bd-conn-pill[data-connected="false"] { border-color: rgba(255,255,255,0.15); color: var(--text-secondary, #8b95a1); }
+.bd-conn-pill[data-connected="false"] { border-color: color-mix(in srgb, var(--team-primary, var(--accent)) 25%, var(--glass-border)); color: var(--text-secondary, #8b95a1); }
 .bd-conn-pill[data-connected="true"] { border-color: #22c55e; color: #22c55e; }
-.bd-overlay-preview { margin-top: 10px; padding: 12px; }
+.bd-overlay-preview {
+  margin-top: 10px; padding: 12px;
+  border-color: color-mix(in srgb, var(--team-primary, var(--accent)) 30%, var(--glass-border));
+}
 .bd-overlay-preview-box { border: 1px solid var(--glass-border); border-radius: 8px; padding: 10px; margin: 8px 0; }
 .bd-overlay-preview-situation, .bd-overlay-preview-requester { font-size: 12.5px; opacity: 0.7; margin-top: 4px; }
 .bd-overlay-preview-actions { display: flex; gap: 8px; }
@@ -1101,6 +1128,19 @@ input, select, textarea, [contenteditable] {
   animation: tip-enter 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 #tip-widget[hidden] { display: none; }
+.tip-close-btn {
+  position: absolute;
+  top: 8px; right: 8px;
+  width: 20px; height: 20px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px; line-height: 1;
+  cursor: pointer;
+}
+.tip-close-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
 @keyframes tip-enter {
   from { opacity: 0; transform: translateX(20px) scale(0.95); }
   to { opacity: 1; transform: translateX(0) scale(1); }
@@ -1741,6 +1781,118 @@ input, select, textarea, [contenteditable] {
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
 }
+
+/* Coffee's Corner (2026-08-13) -- passive scorebug-skin gallery + live status readout, styled to be
+   visually indistinguishable from the marketplace modal it mirrors: same full-screen dimmer,
+   same .glass panel, same team-color neon-pulse (design system rule -- see #bandroom-picker's own
+   neon-pulse above), same .pill/.marketplace-card language, same [id$="-title"]/[id$="-header"]
+   sports-block header treatment (automatic via the app-wide selector, no extra CSS needed here). */
+#coffees-corner-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#coffees-corner-overlay[hidden] { display: none; }
+#coffees-corner-panel {
+  width: min(1000px, 94vw);
+  max-height: 86vh;
+  padding: 20px;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+  animation: neon-pulse 3.2s ease-in-out infinite;
+}
+.coffees-corner-body {
+  overflow-y: auto;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.coffees-corner-status-panel {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.coffees-corner-status-row { display: flex; align-items: center; gap: 10px; }
+/* Status chip color follows the same var(--team-glow, var(--accent)) pill language everywhere
+   else in the app uses -- CONNECTED glows the active team's lightest color, WAITING dims to a
+   neutral pulse, ERROR/NOT FOUND read as an explicit off-state rather than a grey nothing. */
+#coffees-corner-status-chip { animation: none; }
+#coffees-corner-status-chip[data-status="connected"] {
+  border-color: var(--team-glow, var(--accent));
+  color: var(--team-glow, #fff);
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--team-glow, var(--accent)) 45%, transparent);
+  animation: pill-glow-pulse 3s ease-in-out infinite;
+}
+#coffees-corner-status-chip[data-status="waitingforgamedata"] {
+  border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 45%, var(--glass-border));
+  color: var(--team-glow, var(--text-primary));
+}
+#coffees-corner-status-chip[data-status="notfound"], #coffees-corner-status-chip[data-status="error"] {
+  border-color: var(--glass-border);
+  color: var(--text-primary);
+  opacity: 0.75;
+}
+.coffees-corner-live-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px 16px;
+}
+.coffees-corner-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.coffees-corner-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--team-glow, var(--text-muted));
+}
+.coffees-corner-stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.coffees-corner-theme-card { cursor: default; }
+/* Scorebug skin gallery (owner request 2026-08-13, round 2): a small-tile grid made every skin
+   too tiny to actually read/compare -- switched to a single-column list of LARGE rows instead,
+   thumb on the left sized to actually show the (wide/landscape) scorebug clearly, title+dims on
+   the right. */
+#coffees-corner-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#coffees-corner-gallery .marketplace-card {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+#coffees-corner-gallery .marketplace-card-thumb {
+  font-size: 32px;
+  width: 260px;
+  aspect-ratio: auto;
+  height: 110px;
+  flex: none;
+}
+#coffees-corner-gallery .marketplace-card-thumb img { object-fit: contain; }
+#coffees-corner-gallery .marketplace-card-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+#coffees-corner-gallery .marketplace-card-title { font-size: 16px; }
+.coffees-corner-theme-dims { font-size: 12px; color: var(--team-glow, var(--text-muted)); }
 
 /* My Downloads -- widened to match the hub/album scale instead of the small update-style
    dialogs; still a single flat list (Spotify's "Liked Songs" shape), no sidebar needed. */
@@ -3108,6 +3260,56 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
 }
 .situation-copy-close:hover { color: var(--text-primary); }
 
+/* Event card settings popover (gear icon) -- consolidates lead-in whistle/whistle-speed/2x
+   speed/PA effect/fade-override into one panel instead of five separate transport-strip icons.
+   Same fixed-position/reparent-to-body shape as .situation-share-popover above. */
+.situation-settings-popover {
+  position: fixed;
+  z-index: 500;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--panel-bg, #1a1d24);
+  border: 1px solid color-mix(in srgb, var(--team-secondary, var(--accent)) 40%, var(--glass-border));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translateX(-18px);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.situation-settings-popover.slide-open { opacity: 1; transform: translateX(0); pointer-events: auto; }
+.situation-settings-popover[hidden] { display: none; }
+.situation-settings-title {
+  font-size: 12px; font-weight: 700; color: var(--team-glow, var(--accent)); margin-bottom: 2px;
+}
+.situation-settings-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 12.5px; color: var(--text-primary); cursor: pointer;
+}
+.situation-settings-row input[type="checkbox"] { accent-color: var(--team-primary, var(--accent)); width: 15px; height: 15px; flex: 0 0 auto; }
+.situation-settings-row input[type="number"] {
+  width: 60px; padding: 3px 6px; border-radius: 6px;
+  border: 1px solid var(--glass-border); background: rgba(10, 14, 18, 0.72);
+  color: var(--text-primary); font-size: 12px;
+}
+.situation-settings-cycle-btn {
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--team-primary, var(--accent)) 45%, var(--glass-border));
+  background: color-mix(in srgb, var(--team-secondary, var(--accent)) 16%, rgba(255, 255, 255, 0.04));
+  color: #fff; font-size: 11.5px; font-weight: 600; cursor: pointer;
+}
+.situation-settings-cycle-btn:hover { background: color-mix(in srgb, var(--team-secondary, var(--accent)) 28%, rgba(255, 255, 255, 0.08)); }
+.situation-settings-divider { height: 1px; background: var(--glass-border); margin: 2px 0; }
+.situation-settings-close {
+  align-self: flex-end;
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 17px; line-height: 1; padding: 0 2px; margin-top: 2px;
+}
+.situation-settings-close:hover { color: var(--text-primary); }
+
 .toggle-row { display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
 .toggle-row input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
 
@@ -3346,24 +3548,31 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
   width: 100%;
   padding: 9px 10px;
   border-radius: 10px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--text-muted-2);
+  /* Design system: no grey text -- glow always follows the active team's lightest color, same
+     var(--team-glow, var(--accent)) fallback pattern the rest of the app uses. */
+  color: var(--team-glow, var(--accent));
   font-size: 13px;
   font-weight: 600;
   text-align: left;
   cursor: pointer;
   white-space: nowrap;
 }
-.nav-rack-item:hover { background: rgba(255, 255, 255, 0.06); color: var(--text-primary); }
+.nav-rack-item:hover {
+  background: color-mix(in srgb, var(--team-glow, var(--accent)) 14%, transparent);
+  border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 40%, transparent);
+  color: var(--team-glow, var(--accent));
+}
 .nav-rack-icon { font-size: 15px; line-height: 1; flex: 0 0 auto; }
 /* "The Bandroom" is the hub entry point -- gets the same standout treatment .pill-rainbow gave
    it in the old toolbar, just as a solid fill instead of a pill outline. */
 .nav-rack-primary {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: color-mix(in srgb, var(--team-glow, var(--accent)) 16%, transparent);
   color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 45%, transparent);
 }
-.nav-rack-primary:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+.nav-rack-primary:hover { background: color-mix(in srgb, var(--team-glow, var(--accent)) 26%, transparent); }
 .nav-rack-divider {
   height: 1px;
   background: var(--glass-border);
@@ -3374,7 +3583,7 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-muted);
+  color: color-mix(in srgb, var(--team-glow, var(--accent)) 65%, transparent);
   padding: 4px 10px 6px;
 }
 .nav-rack-sub { padding-left: 10px; font-size: 12.5px; }
@@ -3446,7 +3655,7 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
 .pill:hover { background: color-mix(in srgb, var(--team-secondary, var(--accent)) 28%, rgba(255, 255, 255, 0.08)); color: #fff; }
 /* Design system rule 2026-08-09: pills keep colored borders/glow but text always stays white
    -- these three used to tint their own text (cyan/gold), overriding the base .pill white. */
-.pill-marketplace { border-color: rgba(34, 211, 238, 0.3); color: #fff; }
+.pill-marketplace { border-color: color-mix(in srgb, var(--team-secondary, var(--accent)) 40%, var(--glass-border)); color: #fff; }
 /* Auto-Assign pill (matchup-side-bar) -- glows the active team's color, same --team-secondary
    token the wordmark/side-bar active state already use, so it visually belongs to "the team
    you're currently assigning for" rather than reading as a generic action button. */
@@ -3536,15 +3745,15 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
   -webkit-appearance: none;
   width: 16px; height: 16px;
   border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 8px 2px rgba(34, 211, 238, 0.5);
+  background: var(--team-primary, var(--accent));
+  box-shadow: 0 0 8px 2px color-mix(in srgb, var(--team-primary, var(--accent)) 50%, transparent);
   cursor: pointer;
 }
 .slider::-moz-range-thumb {
   width: 16px; height: 16px;
   border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 8px 2px rgba(34, 211, 238, 0.5);
+  background: var(--team-primary, var(--accent));
+  box-shadow: 0 0 8px 2px color-mix(in srgb, var(--team-primary, var(--accent)) 50%, transparent);
   border: none;
   cursor: pointer;
 }
@@ -4539,12 +4748,21 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 /* Update / default-song-pack download dialogs -- #update-overlay, #songpack-prompt-overlay,
    #songpack-progress-overlay all share the same .update-dialog shape but had no CSS anywhere,
    same shipped-with-markup-no-CSS gap as the crop tools above. */
-#update-overlay, #songpack-prompt-overlay, #songpack-progress-overlay, #songpack-import-overlay, #default-profile-prompt-overlay {
+#update-overlay, #songpack-prompt-overlay, #songpack-progress-overlay, #songpack-import-overlay, #default-profile-prompt-overlay, #scorebug-skin-prompt-overlay {
   position: fixed; inset: 0; z-index: 80;
   display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.6);
 }
-#update-overlay[hidden], #songpack-prompt-overlay[hidden], #songpack-progress-overlay[hidden], #songpack-import-overlay[hidden], #default-profile-prompt-overlay[hidden] { display: none; }
+#update-overlay[hidden], #songpack-prompt-overlay[hidden], #songpack-progress-overlay[hidden], #songpack-import-overlay[hidden], #default-profile-prompt-overlay[hidden], #scorebug-skin-prompt-overlay[hidden] { display: none; }
+#scorebug-skin-select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  font-size: 14px;
+}
 #update-dialog, #songpack-progress-dialog, .update-dialog {
   width: min(420px, 90vw);
   padding: 24px;
@@ -4743,13 +4961,16 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
    unequal-width flex children, `justify-content: space-between` alone doesn't land the middle one
    at the header's true visual center, just at whatever gap distribution falls out of the other
    two items' widths. */
-.scorebug-switcher {
+/* Owner request 2026-08-13: the pill+arrows scorebug-LAYOUT switcher that used to live in this
+   wrapper is gone (console presets aren't offered on the matchup screen at all now -- see the
+   Remote Play toggle in the Game Settings island instead). The Game Settings pill itself
+   (.matchup-header-pill-lg) still needs the same true-center placement this wrapper gave it, so
+   the id stays put as a plain centering hook. */
+#btn-matchup-game-settings {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  display: flex; align-items: center; gap: 6px;
-  font-size: 13px; font-weight: 600;
 }
 .scorebug-switcher-arrow {
   width: 26px; height: 26px;
@@ -4844,6 +5065,50 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 .matchup-controls-island .matchup-last-pill {
   margin: 0;
   text-align: center;
+}
+/* Scorebug SKIN switcher (owner request 2026-08-13) -- same pill+arrows language as the OCR
+   scorebug-layout switcher (.scorebug-switcher), but stacked inline in the Game Settings island
+   with a thumbnail of the selected skin instead of floating in the header. */
+.scorebug-skin-switcher {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--glass-border);
+}
+.scorebug-skin-switcher-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted-2);
+}
+.scorebug-skin-switcher-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Owner request 2026-08-13 (round 2): was a tiny 56x74 box squeezed next to the pill/arrows --
+   still too small to tell skins apart. Full-width strip spanning the popover instead, placed
+   below the pill/arrows row (see .scorebug-skin-switcher's flex-direction:column), tall enough
+   to read the actual bug clearly. object-fit:contain still avoids cropping the wide/landscape
+   scorebug images. */
+.scorebug-skin-switcher-preview {
+  width: 100%;
+  height: 120px;
+  flex: none;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px;
+  color: var(--text-muted-2);
+  border: 1px solid var(--glass-border);
+}
+.scorebug-skin-switcher-preview img {
+  width: 100%; height: 100%;
+  object-fit: contain;
 }
 /* Pill-shaped toggle chips -- same .pill glow language (secondary-team tint fill, primary-team
    glow pulse border) as every other actionable pill in the app, but built on a checkbox+label

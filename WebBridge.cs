@@ -20,7 +20,7 @@ public sealed class WebBridge
         logoUrl = LogoUrl(t.Name),
     }));
 
-    static string? LogoUrl(string teamName)
+    internal static string? LogoUrl(string teamName)
     {
         string? path = TeamLogo.FindImagePath(teamName);
         if (path == null) return null;
@@ -73,6 +73,19 @@ public sealed class WebBridge
     public string SwitchTeamPreset(string preset) => _host.SwitchTeamPresetFromWeb(preset);
     public bool CopyTeamPreset(string fromPreset, string toPreset) => _host.CopyTeamPresetFromWeb(fromPreset, toPreset);
     public string GetTeamPresetStatus() => _host.GetTeamPresetStatusFromWeb();
+
+    // Scoreboard reader integration (2026-08-13) -- Reader Hub modal is read-only/passive by
+    // design (owner scope decision: never expose the reader's own settings/calibration UI), so
+    // this surface is intentionally small: a live status readout, a scorebug skin gallery, and
+    // the one "what size is your scorebug" choice asked once at GAMETIME.
+    public string GetScoreboardSourceStatus() => _host.GetScoreboardSourceStatusFromWeb();
+    public string GetScorebugThemeGallery() => _host.GetScorebugThemeGalleryFromWeb();
+    /// <summary>Empty until the user has picked a scorebug skin once (inline in the LOCK IN /
+    /// GAMETIME flow, or via Reader Hub) -- see ConfigStore.LoadSavedScorebugSkin's own doc
+    /// comment. No resolution/size question exists anywhere -- that's auto-detected from the
+    /// current display, never asked.</summary>
+    public string GetSavedScorebugSkin() => ConfigStore.LoadSavedScorebugSkin();
+    public void SaveScorebugSkin(string skinName) => ConfigStore.SaveScorebugSkinChoice(skinName);
 
     public string? GetTeamBackgroundUrl(string teamName)
     {
@@ -428,20 +441,23 @@ public sealed class WebBridge
         }
     }
 
-    /// <summary>Lists profiles other people have shared for a given school -- backs the
-    /// "Load Profile from Others" pill.</summary>
-    public async Task<string> GetMarketplaceProfiles(string school)
+    /// <summary>Lists every profile anyone has shared to the marketplace, newest first -- backs
+    /// the "Load Profile" pill. Deliberately NOT scoped to the caller's own school/team: song
+    /// assignments are useful across teams (bands share arrangements with rivals, new directors
+    /// borrow a starting point), and a school filter here just meant most users saw an empty
+    /// list. Each item's "school" field is still returned so the UI can show provenance.</summary>
+    public async Task<string> GetMarketplaceProfiles()
     {
         try
         {
             using var response = await ShareHttp.GetAsync(
-                $"https://bandroom-marketplace.bandroom.workers.dev/list?type=profile&school={Uri.EscapeDataString(school)}&sort=newest");
+                "https://bandroom-marketplace.bandroom.workers.dev/list?type=profile&sort=newest");
             if (!response.IsSuccessStatusCode) return "{\"items\":[]}";
             return await response.Content.ReadAsStringAsync();
         }
         catch (Exception ex)
         {
-            CrashLog.Write($"GetMarketplaceProfiles failed for \"{school}\"", ex);
+            CrashLog.Write("GetMarketplaceProfiles failed", ex);
             return "{\"items\":[]}";
         }
     }
@@ -1291,6 +1307,8 @@ public sealed class WebBridge
             whistleSpeed = e.WhistleSpeed,
             speed2x = e.PlaybackSpeed2x,
             paSpeakerEffect = e.PaSpeakerEffect,
+            fadeStartSecondsOverride = e.FadeStartSecondsOverride,
+            fadeOutDurationOverride = e.FadeOutDurationOverride,
         }));
 
     public void AssignEvent(string trigger) => _host.OpenAssignTrackFromWeb(trigger);
@@ -1335,6 +1353,7 @@ public sealed class WebBridge
     public void SetEventPlayLeadInWhistle(string trigger, bool enabled) => _host.SetEventPlayLeadInWhistleFromWeb(trigger, enabled);
     public void SetEventPlaybackSpeed2x(string trigger, bool enabled) => _host.SetEventPlaybackSpeed2xFromWeb(trigger, enabled);
     public void SetEventPaSpeakerEffect(string trigger, bool enabled) => _host.SetEventPaSpeakerEffectFromWeb(trigger, enabled);
+    public void SetEventFadeOverride(string trigger, double? fadeStartSeconds, double? fadeOutDuration) => _host.SetEventFadeOverrideFromWeb(trigger, fadeStartSeconds, fadeOutDuration);
     // Per-event whistle-speed button -- REPLACED BrowseAndSetEventAltWhistle/ClearEventAltWhistle/
     // SaveTrimAsEventAltWhistle 2026-08-12 (owner request: swap the alternate-whistle-clip picker
     // for a whistle-speed toggle). Cycles through WebMainForm.WhistleSpeedPresets, returns the new
@@ -1524,5 +1543,5 @@ public sealed class WebBridge
         }
     }
 
-    static string ColorHex(System.Drawing.Color c) => $"#{c.R:x2}{c.G:x2}{c.B:x2}";
+    internal static string ColorHex(System.Drawing.Color c) => $"#{c.R:x2}{c.G:x2}{c.B:x2}";
 }

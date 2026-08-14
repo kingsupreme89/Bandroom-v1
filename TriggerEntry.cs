@@ -63,4 +63,14 @@ public class TriggerEntry
     /// megaphone honk. Same on/off-per-card convention as PlaybackSpeed2x above. Missing from old
     /// saved JSON deserializes to false (default), no migration needed.</summary>
     public bool PaSpeakerEffect { get; set; } = false;
+
+    /// <summary>Per-event override for AudioPlayer.FadeStartSeconds/FadeOutDuration -- null (the
+    /// default) means this card just follows the Sound Booth's global Audio Timing settings,
+    /// same as before these fields existed. Set means this one card fades on its own schedule
+    /// regardless of the global value, for events that need to cut earlier/later or ramp out
+    /// faster/slower than the rest of the profile (e.g. a short stinger vs. a long fight song).
+    /// Missing from old saved JSON deserializes to null, no migration needed. Surfaced together
+    /// with WhistleSpeed/PlaybackSpeed2x/PaSpeakerEffect in the event card's settings pill.</summary>
+    public double? FadeStartSecondsOverride { get; set; } = null;
+    public double? FadeOutDurationOverride { get; set; } = null;
 }

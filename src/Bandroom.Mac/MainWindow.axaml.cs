@@ -38,7 +38,6 @@ public partial class MainWindow : Window
     private List<TriggerEntry>? _homeConfig, _awayConfig;
     private string? _possession;
     private bool _matchupLocked;
-    private readonly EventRouter _router;
 
     // Match Windows: both sides fire now
     private const bool HomeOnlyEventsForNow = false;
@@ -48,10 +47,10 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         _bridge = new MacWebBridge(this);
-        _router = new EventRouter(AllEvaluators());
 
         _hook.KeyCombo += OnKeyCombo;
         _watcher.EventsDetected += OnEngineEventsDetected;
+        _watcher.PossessionChanged += OnPossessionChanged;
         _watcher.Log += OnLog;
 
         ConfigStore.MigrateFromVersionedFolderIfNeeded();
@@ -101,7 +100,7 @@ public partial class MainWindow : Window
                 };
                 System.Diagnostics.Process.Start(psi);
 
-                LoadingText.Text = $"Bandroom\nhttp://localhost:18765\n24 evaluators · {ConfigStore.AllEngineEventKeys.Length} events";
+                LoadingText.Text = $"Bandroom\nhttp://localhost:18765\n26 evaluators · {ConfigStore.AllEngineEventKeys.Length} events";
             }
             else
             {
@@ -328,38 +327,16 @@ public partial class MainWindow : Window
         return null;
     }
 
-    // ---- Evaluator factory ----
-    // FIXED 2026-08-12 (parity with Windows GameWatcher.CreateEventRouter): was missing the 8
-    // evaluators added since this factory was written. Synced 1:1 with Windows (24 evaluators).
-    private static IRuleEvaluator[] AllEvaluators() => new IRuleEvaluator[]
-    {
-        new Bandroom.Core.Helpers.BigEventHelper(),
-        new Bandroom.Core.Helpers.DefenseFirstDownHelper(),
-        new Bandroom.Core.Helpers.DefenseHelper(),
-        new Bandroom.Core.Helpers.DefenseSecondDownShortHelper(),
-        new Bandroom.Core.Helpers.DefenseThirdDownHelper(),
-        new Bandroom.Core.Helpers.DefenseThirdDownShortHelper(),
-        new Bandroom.Core.Helpers.DownFieldPositionHelper(),
-        new Bandroom.Core.Helpers.DriveStarterHelper(),
-        new Bandroom.Core.Helpers.FieldGoalMissedHelper(),
-        new Bandroom.Core.Helpers.FieldGoalPATHelper(),
-        new Bandroom.Core.Helpers.FirstDownHelper(),
-        new Bandroom.Core.Helpers.GameStateEventHelper(),
-        new Bandroom.Core.Helpers.KickoffHelper(),
-        new Bandroom.Core.Helpers.OffenseAfterOpeningKickHelper(),
-        new Bandroom.Core.Helpers.OffenseDownHelper(),
-        new Bandroom.Core.Helpers.OffenseFourthDownHelper(),
-        new Bandroom.Core.Helpers.PenaltyHelper(),
-        new Bandroom.Core.Helpers.PregameHelper(),
-        new Bandroom.Core.Helpers.SafetyHelper(),
-        new Bandroom.Core.Helpers.ThirdDownConversionHelper(),
-        new Bandroom.Core.Helpers.TflHelper(),
-        new Bandroom.Core.Helpers.TimeoutHelper(),
-        new Bandroom.Core.Helpers.TouchdownHelper(),
-        new Bandroom.Core.Helpers.TurnoverHelper(),
-    };
-
     // ---- Event handlers (mirrors WebMainForm) ----
+
+    private void OnPossessionChanged(string? side)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            _possession = side;
+            OnLog($"[possession] now: {side ?? "unknown"}");
+        });
+    }
 
     private void OnEngineEventsDetected(IReadOnlyList<TriggerEvent> events)
     {
@@ -1215,6 +1192,10 @@ public partial class MainWindow : Window
         _awayConfig = ConfigStore.ListProfiles().Contains(awayName, StringComparer.OrdinalIgnoreCase)
             ? ConfigStore.LoadProfile(awayName) : ConfigStore.BuildDefault();
         _watcher.UserIsHome = true;
+        _watcher.HomeTeamName = _homeTeam?.Name;
+        _watcher.AwayTeamName = _awayTeam?.Name;
+        _watcher.HomeTeamMascot = _homeTeam?.Mascot;
+        _watcher.AwayTeamMascot = _awayTeam?.Mascot;
         _possession = null;
 
         // Auto-assign default songs if profile is empty
@@ -1307,8 +1288,77 @@ public partial class MainWindow : Window
         ConfigStore.Save(_config);
     }
 
-    public void ExportProfileFromWeb() { }
-    public void ImportProfileFromWeb() { }
+    /// <summary>Mac counterpart of WebMainForm.ExportProfileFromWeb -- was a no-op stub, so
+    /// "Export Profile" silently did nothing on Mac. Mirrors the Windows flow: save the active
+    /// team's current assignments, then copy that saved file to wherever the user picks.</summary>
+    public void ExportProfileFromWeb()
+    {
+        var teamName = SupremeStadiumSoundSelector.Theme.ActiveTeam.Name;
+        var picked = Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            return await StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
+            {
+                Title = "Export Profile",
+                SuggestedFileName = teamName,
+                DefaultExtension = "json",
+                FileTypeChoices = new[]
+                {
+                    new Avalonia.Platform.Storage.FilePickerFileType("Bandroom Profile") { Patterns = new[] { "*.json" } },
+                },
+            });
+        }).GetAwaiter().GetResult();
+        var destPath = picked?.TryGetLocalPath();
+        if (destPath == null) return;
+
+        ConfigStore.SaveProfile(teamName, _config);
+        File.Copy(Path.Combine(ConfigStore.ProfilesFolder, teamName + ".json"), destPath, overwrite: true);
+    }
+
+    /// <summary>Mac counterpart of WebMainForm.ImportProfileFromWeb -- was a no-op stub. Imports
+    /// straight into targetTeamName (picked in the Load Profile dialog before this runs, same as
+    /// Windows), updating the live UI if that team happens to be active right now.</summary>
+    public void ImportProfileFromWeb(string targetTeamName)
+    {
+        if (string.IsNullOrWhiteSpace(targetTeamName)) return;
+
+        var picked = Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            return await StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
+            {
+                Title = $"Import Profile for {targetTeamName}",
+                AllowMultiple = false,
+                FileTypeFilter = new[]
+                {
+                    new Avalonia.Platform.Storage.FilePickerFileType("Bandroom Profile") { Patterns = new[] { "*.json" } },
+                },
+            });
+        }).GetAwaiter().GetResult();
+        var sourcePath = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
+        if (sourcePath == null) return;
+
+        try
+        {
+            var imported = JsonSerializer.Deserialize<List<TriggerEntry>>(
+                File.ReadAllText(sourcePath),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (imported == null || imported.Count == 0) return;
+
+            ConfigStore.SaveProfile(targetTeamName, imported);
+            RefreshHomeAwayConfigIfNeeded(targetTeamName);
+
+            if (string.Equals(targetTeamName, SupremeStadiumSoundSelector.Theme.ActiveTeam.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                _config = imported;
+                ConfigStore.Save(_config);
+            }
+        }
+        catch
+        {
+            // Swallowed like the Windows counterpart's MessageBox path -- there's no native
+            // dialog host wired up here, so a bad file just leaves the target team's profile
+            // untouched rather than crashing the RPC call.
+        }
+    }
     public void ExportUserProfileFromWeb() { }
     public void ImportUserProfileFromWeb() { }
 

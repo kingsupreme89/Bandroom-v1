@@ -342,13 +342,13 @@ public sealed class MacWebBridge
         }
     }
 
-    public async Task<string> GetMarketplaceProfiles(string school)
+    public async Task<string> GetMarketplaceProfiles()
     {
         try
         {
             using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             using var response = await http.GetAsync(
-                $"https://bandroom-marketplace.bandroom.workers.dev/list?type=profile&school={Uri.EscapeDataString(school)}&sort=newest");
+                "https://bandroom-marketplace.bandroom.workers.dev/list?type=profile&sort=newest");
             if (!response.IsSuccessStatusCode) return "{\"items\":[]}";
             return await response.Content.ReadAsStringAsync();
         }
@@ -704,7 +704,7 @@ public sealed class MacWebBridge
     public void CopyCurrentToAllTeams() => _host.CopyCurrentToAllTeamsFromWeb();
     public void DeleteCurrentProfile() => _host.DeleteCurrentProfileFromWeb();
     public void ExportProfile() => _host.ExportProfileFromWeb();
-    public void ImportProfile() => _host.ImportProfileFromWeb();
+    public void ImportProfile(string targetTeamName) => _host.ImportProfileFromWeb(targetTeamName);
 
     // ---- Test hooks ----
 

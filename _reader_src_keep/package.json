@@ -1,0 +1,13 @@
+ay side.
+{
+  "name": "cfb27-scoreboard-overlay-version-1",
+  "version": "1.4.0-test.4",
+  "private": true,
+  "description": "College Football 27 scorebug overlay with fail-closed, read-only RAM data extraction",
+  "author": "CFB27 Scoreboard Overlay Contributors",
+  "main": "src/main.js",
+  "type": "commonjs",
+  "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "pngjs": "^7.0.0",
+    "tesseract.js": "^7.0.0

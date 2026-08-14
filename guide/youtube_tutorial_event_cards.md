@@ -1,4 +1,4 @@
-# 🎬 THE BANDROOM EVENT CARD & CLIPPER — FULL WALKTHROUGH
+ess# 🎬 THE BANDROOM EVENT CARD & CLIPPER — FULL WALKTHROUGH
 ## A YouTube Tutorial Script (8+ minutes)
 ### Tone: Funny, witty, sarcastic — but you'll actually learn something
 

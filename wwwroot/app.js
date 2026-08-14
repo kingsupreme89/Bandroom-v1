@@ -595,15 +595,45 @@ async function openSituations(category) {
           <button class="bandroom-item-action" data-act="preview" title="Play" ${ev.fileName ? "" : "disabled"}>&#9654;</button>
           <button class="bandroom-item-action" data-act="stop" title="Stop">&#9209;</button>
           <button class="bandroom-item-action" data-act="volume" title="Adjust this event's own volume">&#128266;</button>
-          <button class="bandroom-item-action situation-whistle-toggle${ev.playLeadInWhistle === false ? "" : " active"}" data-act="whistle" title="${ev.playLeadInWhistle === false ? "Lead-in whistle off for this song -- click to turn it back on" : "Lead-in whistle on for this song (when the global toggle is on) -- click to skip it for just this one"}">&#128239;</button>
-          <button class="bandroom-item-action situation-whistle-toggle${ev.whistleSpeed && ev.whistleSpeed !== 1 ? " active" : ""}" data-act="whistle-speed" title="${whistleSpeedTitle(ev.whistleSpeed)}">&#127895;<span class="situation-whistle-speed-label">${whistleSpeedLabel(ev.whistleSpeed)}</span></button>
-          <button class="bandroom-item-action situation-whistle-toggle${ev.speed2x ? " active" : ""}" data-act="speed2x" title="${ev.speed2x ? "Playing at 1.09x speed -- click to go back to normal speed" : "Play this event's song at 1.09x speed (in-game and preview)"}">&#9193;</button>
-          <button class="bandroom-item-action situation-whistle-toggle${ev.paSpeakerEffect ? " active" : ""}" data-act="pa-effect" title="${ev.paSpeakerEffect ? "Stadium PA speaker sound on for this song -- click to turn it back off" : "Play this event's song like it's coming out of the stadium PA speakers (in-game and preview)"}">&#128226;</button>
+          <button class="bandroom-item-action situation-whistle-toggle${(ev.playLeadInWhistle === false) || (ev.whistleSpeed && ev.whistleSpeed !== 1) || ev.speed2x || ev.paSpeakerEffect || ev.fadeStartSecondsOverride != null || ev.fadeOutDurationOverride != null ? " active" : ""}" data-act="settings" title="Event settings (whistle, speed, PA effect, fade)">&#9881;</button>
           <button class="bandroom-item-action" data-act="track-info" title="Track Info" ${ev.fileName ? "" : "disabled"}>&#8505;</button>
           <div class="situation-share-popover glass" hidden>
             <div class="situation-copy-title">Share this song to&hellip;</div>
             <div class="situation-copy-list"></div>
             <button class="situation-copy-close" title="Close">&times;</button>
+          </div>
+          <div class="situation-settings-popover glass" hidden>
+            <div class="situation-settings-title">Event Settings</div>
+            <label class="situation-settings-row">
+              <span>Lead-in whistle</span>
+              <input type="checkbox" data-field="whistle" ${ev.playLeadInWhistle === false ? "" : "checked"} />
+            </label>
+            <label class="situation-settings-row">
+              <span>Whistle speed</span>
+              <button class="situation-settings-cycle-btn" data-field="whistle-speed">${whistleSpeedLabel(ev.whistleSpeed)}</button>
+            </label>
+            <label class="situation-settings-row">
+              <span>1.09x playback speed</span>
+              <input type="checkbox" data-field="speed2x" ${ev.speed2x ? "checked" : ""} />
+            </label>
+            <label class="situation-settings-row">
+              <span>Stadium PA speaker effect</span>
+              <input type="checkbox" data-field="pa-effect" ${ev.paSpeakerEffect ? "checked" : ""} />
+            </label>
+            <div class="situation-settings-divider"></div>
+            <label class="situation-settings-row">
+              <span>Override fade for this event</span>
+              <input type="checkbox" data-field="fade-override" ${ev.fadeStartSecondsOverride != null || ev.fadeOutDurationOverride != null ? "checked" : ""} />
+            </label>
+            <label class="situation-settings-row situation-settings-fade-fields" ${ev.fadeStartSecondsOverride != null || ev.fadeOutDurationOverride != null ? "" : "hidden"}>
+              <span>Fade starts at (sec)</span>
+              <input type="number" min="0" max="120" step="0.5" data-field="fade-start" value="${ev.fadeStartSecondsOverride ?? 10}" />
+            </label>
+            <label class="situation-settings-row situation-settings-fade-fields" ${ev.fadeStartSecondsOverride != null || ev.fadeOutDurationOverride != null ? "" : "hidden"}>
+              <span>Fade duration (sec)</span>
+              <input type="number" min="0" max="30" step="0.5" data-field="fade-duration" value="${ev.fadeOutDurationOverride ?? 4.5}" />
+            </label>
+            <button class="situation-settings-close" title="Close">&times;</button>
           </div>
         </span>
         <div class="situation-volume-popover" hidden>
@@ -622,49 +652,7 @@ async function openSituations(category) {
     row.querySelector('[data-act="preview"]').addEventListener("click", () => { _previewAudio?.pause(); bridge?.PreviewEvent(ev.trigger); });
     row.querySelector('[data-act="stop"]').addEventListener("click", () => bridge?.StopPreview());
     row.querySelector('[data-act="track-info"]').addEventListener("click", () => openTrackInfoDrawer(ev.trigger, ev.fileName));
-    row.querySelector('[data-act="whistle"]').addEventListener("click", (e) => {
-      const btn = e.currentTarget;
-      const nowOn = !btn.classList.contains("active");
-      btn.classList.toggle("active", nowOn);
-      btn.title = nowOn
-        ? "Lead-in whistle on for this song (when the global toggle is on) -- click to skip it for just this one"
-        : "Lead-in whistle off for this song -- click to turn it back on";
-      bridge?.SetEventPlayLeadInWhistle(ev.trigger, nowOn);
-    });
-    // Per-event whistle-speed button -- REPLACED the alternate-whistle-clip picker 2026-08-12
-    // (owner request: same button, now cycles the whistle's playback speed for this event through
-    // a fixed preset list instead of swapping which clip plays). Same global whistle clip always
-    // plays; only how fast/slow it plays changes. Server returns the new value so the button can
-    // relabel itself immediately without a full re-render.
-    row.querySelector('[data-act="whistle-speed"]').addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const btn = e.currentTarget;
-      const newSpeed = await bridge?.CycleEventWhistleSpeed(ev.trigger);
-      if (newSpeed == null) return;
-      ev.whistleSpeed = newSpeed;
-      btn.classList.toggle("active", newSpeed !== 1);
-      btn.title = whistleSpeedTitle(newSpeed);
-      const label = btn.querySelector(".situation-whistle-speed-label");
-      if (label) label.textContent = whistleSpeedLabel(newSpeed);
-    });
-    row.querySelector('[data-act="speed2x"]').addEventListener("click", (e) => {
-      const btn = e.currentTarget;
-      const nowOn = !btn.classList.contains("active");
-      btn.classList.toggle("active", nowOn);
-      btn.title = nowOn
-        ? "Playing at 1.09x speed -- click to go back to normal speed"
-        : "Play this event's song at 1.09x speed (in-game and preview)";
-      bridge?.SetEventPlaybackSpeed2x(ev.trigger, nowOn);
-    });
-    row.querySelector('[data-act="pa-effect"]').addEventListener("click", (e) => {
-      const btn = e.currentTarget;
-      const nowOn = !btn.classList.contains("active");
-      btn.classList.toggle("active", nowOn);
-      btn.title = nowOn
-        ? "Stadium PA speaker sound on for this song -- click to turn it back off"
-        : "Play this event's song like it's coming out of the stadium PA speakers (in-game and preview)";
-      bridge?.SetEventPaSpeakerEffect(ev.trigger, nowOn);
-    });
+    wireSituationSettingsPopover(row, ev);
     wireSituationVolumePopover(row, ev.trigger);
     list.appendChild(row);
   }
@@ -763,6 +751,85 @@ function wireSituationShareToPopover(row, ev, events) {
     openCardPopover(btn, popover);
   });
   closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
+}
+
+/// Settings (gear) button on an event card -- consolidates the lead-in whistle toggle, whistle
+/// speed cycle, 1.09x playback speed toggle, PA speaker effect toggle, and per-event fade
+/// override (all previously separate icon buttons cluttering the transport strip) into one
+/// popover. Owner request 2026-08-13: "make the event card have a settings pill and put all the
+/// settings we have like whistle speed etc inside the pill."
+function wireSituationSettingsPopover(row, ev) {
+  const btn = row.querySelector('[data-act="settings"]');
+  const popover = row.querySelector(".situation-settings-popover");
+  const closeBtn = popover.querySelector(".situation-settings-close");
+  const whistleInput = popover.querySelector('[data-field="whistle"]');
+  const whistleSpeedBtn = popover.querySelector('[data-field="whistle-speed"]');
+  const speed2xInput = popover.querySelector('[data-field="speed2x"]');
+  const paEffectInput = popover.querySelector('[data-field="pa-effect"]');
+  const fadeOverrideInput = popover.querySelector('[data-field="fade-override"]');
+  const fadeFieldsRows = popover.querySelectorAll(".situation-settings-fade-fields");
+  const fadeStartInput = popover.querySelector('[data-field="fade-start"]');
+  const fadeDurationInput = popover.querySelector('[data-field="fade-duration"]');
+
+  const closePopover = () => closeCardPopover(popover);
+  const refreshGearActiveState = () => {
+    const isActive = !whistleInput.checked || (ev.whistleSpeed && ev.whistleSpeed !== 1) ||
+      speed2xInput.checked || paEffectInput.checked || fadeOverrideInput.checked;
+    btn.classList.toggle("active", !!isActive);
+  };
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!popover.hidden) { closePopover(); return; }
+    document.querySelectorAll(".situation-settings-popover, .situation-share-popover").forEach((p) => { p.hidden = true; p.classList.remove("slide-open"); });
+    openCardPopover(btn, popover);
+  });
+  closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
+  popover.addEventListener("click", (e) => e.stopPropagation());
+
+  whistleInput.addEventListener("change", () => {
+    bridge?.SetEventPlayLeadInWhistle(ev.trigger, whistleInput.checked);
+    ev.playLeadInWhistle = whistleInput.checked;
+    refreshGearActiveState();
+  });
+  whistleSpeedBtn.addEventListener("click", async () => {
+    const newSpeed = await bridge?.CycleEventWhistleSpeed(ev.trigger);
+    if (newSpeed == null) return;
+    ev.whistleSpeed = newSpeed;
+    whistleSpeedBtn.textContent = whistleSpeedLabel(newSpeed);
+    refreshGearActiveState();
+  });
+  speed2xInput.addEventListener("change", () => {
+    bridge?.SetEventPlaybackSpeed2x(ev.trigger, speed2xInput.checked);
+    ev.speed2x = speed2xInput.checked;
+    refreshGearActiveState();
+  });
+  paEffectInput.addEventListener("change", () => {
+    bridge?.SetEventPaSpeakerEffect(ev.trigger, paEffectInput.checked);
+    ev.paSpeakerEffect = paEffectInput.checked;
+    refreshGearActiveState();
+  });
+
+  const pushFadeOverride = () => {
+    if (!fadeOverrideInput.checked) {
+      ev.fadeStartSecondsOverride = null;
+      ev.fadeOutDurationOverride = null;
+      bridge?.SetEventFadeOverride(ev.trigger, null, null);
+      return;
+    }
+    const start = Number(fadeStartInput.value) || 0;
+    const duration = Number(fadeDurationInput.value) || 0;
+    ev.fadeStartSecondsOverride = start;
+    ev.fadeOutDurationOverride = duration;
+    bridge?.SetEventFadeOverride(ev.trigger, start, duration);
+  };
+  fadeOverrideInput.addEventListener("change", () => {
+    fadeFieldsRows.forEach((r) => { r.hidden = !fadeOverrideInput.checked; });
+    pushFadeOverride();
+    refreshGearActiveState();
+  });
+  fadeStartInput.addEventListener("change", pushFadeOverride);
+  fadeDurationInput.addEventListener("change", pushFadeOverride);
 }
 
 /// Volume button on an event card pops out a small slider (+ close/X) instead of a permanent
@@ -1455,7 +1522,21 @@ function setBandroomViewerImage(url, first) {
   _bvActiveLayer = _bvActiveLayer === "a" ? "b" : "a";
 }
 
-function shiftBandroomViewer(dir) {
+async function shiftBandroomViewer(dir) {
+  // Owner request 2026-08-13: once a matchup is locked in (Game Day mode), the arrows stay
+  // scoped to the current team's own photo gallery -- switching teams there is the Away/Home
+  // bar's job (btn-side-away/btn-side-home). Outside locked-in mode there's no matchup to
+  // constrain browsing to, so the arrows instead walk the FULL team roster, one bandroom at a
+  // time, so it's a real "browse every team's bandroom" gallery rather than being stuck cycling
+  // just the active team's own images.
+  if (!state.matchupLocked && state.teams?.length > 1) {
+    const teams = state.teams;
+    const currentIdx = teams.findIndex((t) => t.name === state.activeTeam);
+    const nextIdx = ((currentIdx === -1 ? 0 : currentIdx) + dir + teams.length) % teams.length;
+    await selectTeam(teams[nextIdx].name);
+    await openBandroomViewer();
+    return;
+  }
   if (!_bvImages.length) return;
   _bvIndex = ((_bvIndex + dir) % _bvImages.length + _bvImages.length) % _bvImages.length;
   setBandroomViewerImage(_bvImages[_bvIndex]);
@@ -1681,6 +1762,7 @@ async function refreshProfileSettingsTab() {
     document.getElementById("settings-fade-start").value = timing.FadeStartSeconds;
     document.getElementById("settings-fade-duration").value = timing.FadeOutDuration;
     document.getElementById("settings-cooldown").value = timing.CooldownSeconds;
+    document.getElementById("settings-pregame-runout").value = timing.PregameRunoutDelaySeconds ?? 15;
 
     document.getElementById("settings-volume").value = volume;
     document.getElementById("settings-volume-value").textContent = `${volume}%`;
@@ -2833,6 +2915,11 @@ function wireControls() {
   });
   document.getElementById("btn-update").addEventListener("click", () => bridge?.ShowUpdate());
   document.getElementById("btn-bandroom-cloud").addEventListener("click", openBandroomMarketplace);
+  document.getElementById("btn-coffees-corner").addEventListener("click", openCoffeesCorner);
+  document.getElementById("btn-close-coffees-corner").addEventListener("click", closeCoffeesCorner);
+  document.getElementById("coffees-corner-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "coffees-corner-overlay") closeCoffeesCorner();
+  });
   document.getElementById("btn-sound-bank").addEventListener("click", () => openTeamAlbum(state.activeTeam));
   document.getElementById("btn-my-downloads").addEventListener("click", openMyDownloads);
   document.getElementById("btn-close-my-downloads").addEventListener("click", closeMyDownloads);
@@ -3434,9 +3521,14 @@ function closeImportTargetTeamDialog() {
 }
 
 function renderImportTargetTeamGrid(filter) {
-  renderTeamGridInto("import-target-team-grid", filter, (name) => {
+  renderTeamGridInto("import-target-team-grid", filter, async (name) => {
     closeImportTargetTeamDialog();
-    bridge?.ImportProfile(name);
+    // Windows pushes "bandroom:profileschanged" itself once the native import dialog resolves
+    // (WebMainForm.ImportProfileFromWeb's ExecuteScriptAsync call). The Mac build serves this
+    // page over plain HTTP with no such push channel, so dispatch it here too once the awaited
+    // RPC call returns -- redundant-but-harmless on Windows, the only signal on Mac.
+    await bridge?.ImportProfile(name);
+    window.dispatchEvent(new CustomEvent("bandroom:profileschanged"));
   });
 }
 
@@ -6602,6 +6694,146 @@ function closeBandroomMarketplace() {
   document.getElementById("btn-forward-bandroom-album").hidden = true;
 }
 
+// ================================================================
+// Coffee's Corner (2026-08-13) -- passive dashboard only: scorebug skin gallery (browsing/showcase,
+// read from Coffee's Scorebug Overlay App's own theme-library) + a live reader connection/game-
+// state status readout. Never a settings/calibration surface -- see the modal's own comment in
+// index.html for why. Mirrors openBandroomMarketplace/closeBandroomMarketplace's structure.
+// ================================================================
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = String(text ?? "");
+  return div.innerHTML;
+}
+
+let _coffeesCornerStatusInterval = null;
+
+function openCoffeesCorner() {
+  marketplaceGuard(() => {
+    document.getElementById("coffees-corner-overlay").hidden = false;
+    renderCoffeesCornerGallery();
+    refreshCoffeesCornerStatus();
+    if (_coffeesCornerStatusInterval) clearInterval(_coffeesCornerStatusInterval);
+    _coffeesCornerStatusInterval = setInterval(refreshCoffeesCornerStatus, 1000);
+  }, "openCoffeesCorner");
+}
+
+function closeCoffeesCorner() {
+  document.getElementById("coffees-corner-overlay").hidden = true;
+  if (_coffeesCornerStatusInterval) { clearInterval(_coffeesCornerStatusInterval); _coffeesCornerStatusInterval = null; }
+}
+
+async function renderCoffeesCornerGallery() {
+  const grid = document.getElementById("coffees-corner-gallery");
+  const empty = document.getElementById("coffees-corner-empty");
+  let themes = [];
+  try { themes = bridge ? JSON.parse(await bridge.GetScorebugThemeGallery()) : []; }
+  catch (err) { console.error("GetScorebugThemeGallery failed", err); }
+
+  if (!themes || themes.length === 0) {
+    grid.innerHTML = "";
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+  // Owner request 2026-08-13: FOX 2021 has no live-data hook at all in Coffee's own file (no
+  // window.updateScorebug bridge, unlike every other bundled skin) -- the GAMETIME overlay can
+  // only ever show its frozen example numbers for this one skin. Badge it rather than hide it
+  // (owner's call) so it's still pickable, just clearly marked.
+  grid.innerHTML = themes.map((t) => `
+    <div class="marketplace-card coffees-corner-theme-card">
+      <div class="marketplace-card-thumb">
+        ${t.thumbnailUrl ? `<img src="${escapeHtml(t.thumbnailUrl)}" alt="${escapeHtml(t.name || "Untitled")}">` : "<span>📺</span>"}
+        ${isComingSoonScorebugSkin(t.name) ? `<span class="card-type-badge">Coming Soon</span>` : ""}
+      </div>
+      <div class="marketplace-card-body">
+        <div class="marketplace-card-title">${escapeHtml(t.name || "Untitled")}</div>
+        <div class="coffees-corner-theme-dims">${t.canvasWidth || "?"} &times; ${t.canvasHeight || "?"}</div>
+      </div>
+    </div>
+  `).join("");
+}
+
+// Owner request 2026-08-13: FOX 2021 is the one bundled scorebug skin with no live-data hook in
+// Coffee's own file (confirmed by reading its source -- no window.updateScorebug/CFB27 bridge at
+// all, unlike ESPN 2020/NBC 2024/NBC 2024 Monochrome/FOX 2025 which all have it). It'll only ever
+// show frozen example numbers in the GAMETIME overlay. Hardcoded by name rather than a new
+// library.json/gallery-DTO field -- this is a one-off caveat about a specific bundled asset, not
+// a general property worth plumbing through the whole data model.
+function isComingSoonScorebugSkin(name) {
+  return name === "FOX 2021";
+}
+
+async function refreshCoffeesCornerStatus() {
+  let status = null;
+  try { status = bridge ? JSON.parse(await bridge.GetScoreboardSourceStatus()) : null; }
+  catch (err) { console.error("GetScoreboardSourceStatus failed", err); }
+  if (!status) return;
+
+  const chip = document.getElementById("coffees-corner-status-chip");
+  const key = String(status.status || "notfound").toLowerCase();
+  chip.dataset.status = key;
+  const labels = { connected: "CONNECTED", waitingforgamedata: "WAITING FOR GAME DATA", notfound: "NOT CONNECTED", error: "ERROR" };
+  chip.textContent = labels[key] || key.toUpperCase();
+
+  const grid = document.getElementById("coffees-corner-live-grid");
+  const clockMin = Math.floor((status.timeRemainingSeconds || 0) / 60);
+  const clockSec = String((status.timeRemainingSeconds || 0) % 60).padStart(2, "0");
+  const stats = [
+    ["Score", `${status.awayScore ?? 0} - ${status.homeScore ?? 0}`],
+    ["Quarter", status.quarter ? `Q${status.quarter}` : "--"],
+    ["Down & Distance", status.down ? `${status.down} & ${status.yardsToGo}` : "--"],
+    ["Yard Line", status.yardLine != null ? status.yardLine : "--"],
+    ["Possession", status.possessionAway ? "Away" : "Home"],
+    ["Clock", `${clockMin}:${clockSec}`],
+  ];
+  grid.innerHTML = stats.map(([label, value]) => `
+    <div class="coffees-corner-stat">
+      <span class="coffees-corner-stat-label">${label}</span>
+      <span class="coffees-corner-stat-value">${value}</span>
+    </div>
+  `).join("");
+}
+
+// ================================================================
+// Scorebug skin picker -- the ONE reader-related question BANDroom ever asks the user, inline in
+// the LOCK IN/GAMETIME flow (confirmMatchup below). No resolution/size question exists anywhere
+// (auto-detected server-side); this is purely "which skin," remembered after the first pick.
+// ================================================================
+function showScorebugSkinPrompt(themes) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("scorebug-skin-prompt-overlay");
+    const select = document.getElementById("scorebug-skin-select");
+    select.innerHTML = themes.map((t) => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name)}</option>`).join("");
+    overlay.hidden = false;
+
+    const btn = document.getElementById("btn-scorebug-skin-continue");
+    const cleanup = () => { overlay.hidden = true; btn.removeEventListener("click", onContinue); };
+    const onContinue = () => { const value = select.value; cleanup(); resolve(value); };
+    btn.addEventListener("click", onContinue);
+  });
+}
+
+/// Ensures a scorebug skin choice exists before GAMETIME proceeds -- if one's already saved
+/// (the common case, every game after the first), this is a single silent bridge round-trip and
+/// no UI ever shows. Only asks when nothing's been picked yet, or the gallery came back empty
+/// (nothing to pick -- reader isn't installed, so this silently no-ops and OCR-only proceeds).
+async function ensureScorebugSkinChosen() {
+  if (!bridge) return;
+  try {
+    const saved = await bridge.GetSavedScorebugSkin();
+    if (saved) return;
+    const themes = JSON.parse(await bridge.GetScorebugThemeGallery());
+    if (!themes || themes.length === 0) return;
+    const chosen = await showScorebugSkinPrompt(themes);
+    if (chosen) await bridge.SaveScorebugSkin(chosen);
+  } catch (err) {
+    console.error("ensureScorebugSkinChosen failed", err);
+    // Best-effort, same reasoning as the default-profile-prompt catch in confirmMatchup -- never
+    // block GAMETIME over this.
+  }
+}
+
 function renderBandroomTeamGrid(filter) {
   renderTeamGridInto("bandroom-team-grid", filter, (name) => openTeamAlbum(name));
 }
@@ -7454,7 +7686,8 @@ function openMatchupDialog() {
   renderMatchupSideGrid("home", "");
   renderMatchupSideGrid("away", "");
   updateMatchupSubtext();
-  loadScorebugSwitcher();
+  loadRemotePlayToggle();
+  loadScorebugSkinSwitcher();
   // No re-fetch needed here -- applyBigGameEnabled (see wireBigGameSection) already keeps
   // #toggle-matchup-big-game in sync with the real setting the moment it's loaded at startup
   // (refreshBigGameSection) or changed by any of the three Big Game controls.
@@ -7586,49 +7819,78 @@ function wireMatchupSideGridDock(gridId) {
   grid.addEventListener("mouseleave", () => apply(null));
 }
 
-// ---- Scorebug switcher (matchup screen pill + arrows) -----------------------------------
-// Which scorebug layout GameWatcher watches for (PC CBS skins vs. Console/Remote Play) --
-// previously only reachable via the gear-icon Settings dialog; owner asked for a pill+arrows
-// switcher on the matchup screen itself, same visual language as the coverflow's own arrows.
-let _scorebugPresetNames = [];
-let _scorebugPresetActive = "";
-let _scorebugSwitcherBound = false;
+// ---- Remote Play toggle (matchup screen, Game Settings island) --------------------------
+// Replaces the old pill+arrows scorebug-LAYOUT switcher (PC CBS vs console presets) that used
+// to sit in the matchup header -- console presets aren't offered on this screen at all now.
+// This is just a standing "skip the RAM reader" preference for console/streaming players (see
+// ConfigStore.RemotePlayModePath's doc comment on the C# side).
+let _remotePlayToggleBound = false;
 
-async function loadScorebugSwitcher() {
+async function loadRemotePlayToggle() {
+  if (!bridge) return;
+  const el = document.getElementById("matchup-remote-play");
+  if (!el) return;
+  try { el.checked = !!(await bridge.GetRemotePlayMode()); }
+  catch (err) { console.error("GetRemotePlayMode failed", err); }
+  if (!_remotePlayToggleBound) {
+    _remotePlayToggleBound = true;
+    el.addEventListener("change", (e) => bridge?.SetRemotePlayMode(e.target.checked));
+  }
+}
+
+// ---- Scorebug SKIN switcher (matchup screen, Game Settings island) ----------------------
+// Which visual scorebug overlay skin (ESPN/FOX/NBC/etc, from Coffee's Corner's theme gallery)
+// GAMETIME uses -- previously only pickable via a separate popup that interrupted LOCK IN/
+// GAMETIME the first time (see ensureScorebugSkinChosen). Owner asked for it inline here instead,
+// same pill+arrows pattern as loadScorebugSwitcher above, with a thumbnail of the selected skin.
+let _scorebugSkinThemes = [];
+let _scorebugSkinIndex = 0;
+let _scorebugSkinSwitcherBound = false;
+
+async function loadScorebugSkinSwitcher() {
   if (!bridge) return;
   try {
-    const data = JSON.parse(await bridge.GetScorebugPresets());
-    _scorebugPresetNames = data.names || [];
-    _scorebugPresetActive = data.active || _scorebugPresetNames[0] || "";
+    _scorebugSkinThemes = JSON.parse(await bridge.GetScorebugThemeGallery()) || [];
+    const saved = await bridge.GetSavedScorebugSkin();
+    const idx = saved ? _scorebugSkinThemes.findIndex((t) => t.name === saved) : -1;
+    _scorebugSkinIndex = idx === -1 ? 0 : idx;
   } catch (err) {
-    console.error("GetScorebugPresets failed", err);
+    console.error("loadScorebugSkinSwitcher failed", err);
     return;
   }
-  renderScorebugSwitcher();
-  initScorebugSwitcher();
+  renderScorebugSkinSwitcher();
+  initScorebugSkinSwitcher();
 }
 
-function renderScorebugSwitcher() {
-  const el = document.getElementById("scorebug-switcher-name");
-  if (el) el.textContent = _scorebugPresetActive || "Scorebug";
+function renderScorebugSkinSwitcher() {
+  const nameEl = document.getElementById("scorebug-skin-switcher-name");
+  const thumb = document.getElementById("scorebug-skin-switcher-thumb");
+  const theme = _scorebugSkinThemes[_scorebugSkinIndex];
+  if (nameEl) {
+    nameEl.textContent = theme?.name
+      ? (isComingSoonScorebugSkin(theme.name) ? `${theme.name} (Coming Soon)` : theme.name)
+      : "None available";
+  }
+  if (thumb) {
+    thumb.innerHTML = theme?.thumbnailUrl
+      ? `<img src="${escapeHtml(theme.thumbnailUrl)}" alt="${escapeHtml(theme.name || "")}">`
+      : "<span>📺</span>";
+  }
 }
 
-function initScorebugSwitcher() {
-  if (_scorebugSwitcherBound) return;
-  _scorebugSwitcherBound = true;
-  document.getElementById("btn-scorebug-prev")?.addEventListener("click", () => cycleScorebugPreset(-1));
-  document.getElementById("btn-scorebug-next")?.addEventListener("click", () => cycleScorebugPreset(1));
+function initScorebugSkinSwitcher() {
+  if (_scorebugSkinSwitcherBound) return;
+  _scorebugSkinSwitcherBound = true;
+  document.getElementById("btn-scorebug-skin-prev")?.addEventListener("click", () => cycleScorebugSkin(-1));
+  document.getElementById("btn-scorebug-skin-next")?.addEventListener("click", () => cycleScorebugSkin(1));
 }
 
-async function cycleScorebugPreset(dir) {
-  if (!_scorebugPresetNames.length || !bridge) return;
-  let idx = _scorebugPresetNames.indexOf(_scorebugPresetActive);
-  if (idx === -1) idx = 0;
-  idx = ((idx + dir) % _scorebugPresetNames.length + _scorebugPresetNames.length) % _scorebugPresetNames.length;
-  _scorebugPresetActive = _scorebugPresetNames[idx];
-  renderScorebugSwitcher();
-  try { await bridge.SetScorebugPreset(_scorebugPresetActive); }
-  catch (err) { console.error("SetScorebugPreset failed", err); }
+async function cycleScorebugSkin(dir) {
+  if (!_scorebugSkinThemes.length || !bridge) return;
+  _scorebugSkinIndex = ((_scorebugSkinIndex + dir) % _scorebugSkinThemes.length + _scorebugSkinThemes.length) % _scorebugSkinThemes.length;
+  renderScorebugSkinSwitcher();
+  try { await bridge.SaveScorebugSkin(_scorebugSkinThemes[_scorebugSkinIndex].name); }
+  catch (err) { console.error("SaveScorebugSkin failed", err); }
 }
 
 // ---- Custom team logo crop tool ---------------------------------------------------------
@@ -8324,6 +8586,12 @@ async function confirmMatchup() {
     // than blocking GAMETIME entirely over a broken informational prompt.
   }
 
+  // The one reader-related question BANDroom ever asks -- "which scorebug skin," inline right
+  // here in the LOCK IN/GAMETIME sequence. Silent no-op once a skin's already saved (every game
+  // after the first) or if the reader isn't installed (empty gallery). Resolution is never asked
+  // -- WebMainForm.StartWatchingIfMatchupSet auto-detects it from the current display.
+  await ensureScorebugSkinChosen();
+
   const userTeamOnLeft = document.getElementById("matchup-screen-side-left")?.checked ?? false;
   await bridge?.SetUserTeamScreenSide(userTeamOnLeft);
   await bridge?.ConfirmGametime(state.matchupHome, state.matchupAway);
@@ -8516,14 +8784,14 @@ async function shareCurrentProfile() {
 }
 
 async function openLoadProfileDialog() {
-  document.getElementById("load-profile-title").textContent = `Load Profile from Others -- for ${state.activeTeam}`;
+  document.getElementById("load-profile-title").textContent = `Load Profile from The Bandroom -- apply to ${state.activeTeam}`;
   const list = document.getElementById("load-profile-list");
   list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">Loading...</div>`;
   document.getElementById("load-profile-overlay").hidden = false;
 
   let items = [];
   try {
-    const raw = await bridge?.GetMarketplaceProfiles(state.activeTeam);
+    const raw = await bridge?.GetMarketplaceProfiles();
     items = raw ? (JSON.parse(raw).items || []) : [];
   } catch (err) {
     console.error("GetMarketplaceProfiles failed", err);
@@ -8531,16 +8799,29 @@ async function openLoadProfileDialog() {
 
   list.innerHTML = "";
   if (!items.length) {
-    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No one's shared a profile for ${state.activeTeam} yet -- be the first with Share Profile.</div>`;
+    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No one's shared a profile yet -- be the first with Share Profile.</div>`;
     return;
   }
   for (const item of items) {
     const row = document.createElement("div");
     row.className = "clipper-assign-row";
-    row.textContent = `${item.name} -- ${new Date(item.uploadedAt).toLocaleDateString()}`;
-    row.addEventListener("click", () => applyMarketplaceProfile(item.url, item.name));
+    const label = document.createElement("span");
+    label.textContent = `${item.school ? `${item.school} -- ` : ""}${item.name} -- ${new Date(item.uploadedAt).toLocaleDateString()}`;
+    row.appendChild(label);
+    row.addEventListener("click", () => confirmApplyMarketplaceProfile(item.url, item.name));
     list.appendChild(row);
   }
+}
+
+/// Preview step before ApplyMarketplaceProfile actually reassigns anything -- the item's own
+/// name already carries the song count (see ShareCurrentProfileToMarketplace's upload name), so
+/// this just surfaces it as an explicit "are you sure" instead of applying on first click.
+function confirmApplyMarketplaceProfile(url, name) {
+  closeLoadProfileDialog();
+  if (!confirm(`Apply "${name}" to ${state.activeTeam}?\n\nSongs will be matched by filename against your own Songs library -- anything that doesn't match stays unassigned.`)) {
+    return;
+  }
+  applyMarketplaceProfile(url, name);
 }
 
 function closeLoadProfileDialog() {
@@ -8873,6 +9154,7 @@ const EVENT_FRIENDLY_NAMES = {
   "Defense: Third Down": "3rd & Long",
   "Defense: Third Down Short": "3rd & Short",
   "Defense: Fourth Down": "4th Down",
+  "Defense: Fourth Down Stop": "4th Down Stop",
   "Defense: Second Down": "2nd & Long",
   "Defense: Second Down Short": "2nd & Short",
   "Defense: Second Down (Midfield)": "2nd Down - Past Midfield",
@@ -9363,6 +9645,10 @@ document.getElementById("tip-never-show")?.addEventListener("click", () => {
   showToast("Tips disabled. Re-enable from Settings.");
 });
 document.getElementById("tip-next")?.addEventListener("click", showNextTip);
+document.getElementById("tip-close")?.addEventListener("click", () => {
+  document.getElementById("tip-widget").hidden = true;
+  clearTimeout(_tipTimer);
+});
 
 // ================================================================
 // LEADERBOARDS
@@ -9554,7 +9840,7 @@ document.addEventListener("keydown", (e) => {
       "hotkey-panel", "discord-chat-overlay", "my-downloads-overlay", "sound-booth-overlay",
       "load-profile-overlay", "situations-panel", "quick-load-confirm-overlay",
       "add-school-overlay", "public-profile-overlay", "band-director-settings-overlay",
-      "band-director-overlay"
+      "band-director-overlay", "coffees-corner-overlay", "scorebug-skin-prompt-overlay"
     ];
     for (const id of overlays) {
       const el = document.getElementById(id);

@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Bandroom Crop Calibrator</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; background: #111; color: #eee; margin: 0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.hint { color: #aaa; font-size: 13px; margin: 4px 0 16px; }
+  #dropzone {
+    border: 2px dashed #555; border-radius: 8px; padding: 40px; text-align: center;
+    color: #888; margin-bottom: 16px; cursor: pointer;
+  }
+  #dropzone.drag { border-color: #4af; color: #4af; }
+  #canvasWrap { position: relative; display: inline-block; max-width: 100%; }
+  canvas { max-width: 100%; display: block; cursor: crosshair; border: 1px solid #444; }
+  #controls { margin: 12px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  select, button, input[type=text] {
+    background: #222; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 6px 10px; font-size: 13px;
+  }
+  button { cursor: pointer; }
+  button:hover { background: #333; }
+  #list { margin-top: 16px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  td, th { border: 1px solid #333; padding: 6px 8px; text-align: left; }
+  th { background: #1a1a1a; }
+  #output {
+    width: 100%; height: 220px; background: #0a0a0a; color: #8f8; font-family: Consolas, monospace;
+    font-size: 12px; border: 1px solid #444; border-radius: 4px; padding: 8px; margin-top: 12px; white-space: pre;
+  }
+  .del { color: #f66; cursor: pointer; }
+  .field-newHome { color: #4af; }
+</style>
+</head>
+<body>
+
+<h1>Bandroom Crop Calibrator</h1>
+<p class="hint">
+  Load a FULL, uncropped game screenshot (e.g. 2560x1440). Pick a field name below, then click-drag a
+  tight box around that element on the image. Repeat for every field you want calibrated. When done,
+  copy the C# output at the bottom straight into <code>ScorebugPreset.cs</code> as a new preset block.
+</p>
+
+<div id="dropzone">Click to choose an image, or drag one here</div>
+<input type="file" id="fileInput" accept="image/*" style="display:none">
+
+<div id="controls" style="display:none">
+  <label>Field:</label>
+  <select id="fieldSelect">
+    <optgroup label="Score band">
+      <option value="AwayScoreFx">AwayScoreFx (away score digits)</option>
+      <option value="HomeScoreFx">HomeScoreFx (home score digits)</option>
+      <option value="ClockFx">ClockFx (game clock)</option>
+      <option value="BandFx">BandFx (whole scorebug strip)</option>
+    </optgroup>
+    <optgroup label="Down / distance / banners">
+      <option value="BannerFx">BannerFx (TOUCHDOWN/FG banner, full width)</option>
+      <option value="PenaltyAgainstFx">PenaltyAgainstFx (penalty decision box)</option>
+      <option value="ChevronMarkerFx">ChevronMarkerFx (possession chevron)</option>
+    </optgroup>
+    <optgroup label="Possession underline">
+      <option value="AwayUnderlineFx">AwayUnderlineFx</option>
+      <option value="HomeUnderlineFx">HomeUnderlineFx</option>
+    </optgroup>
+    <optgroup label="Timeouts (the field that's been broken)">
+      <option value="AwayTimeoutFx">AwayTimeoutFx (away timeout dashes)</option>
+      <option value="HomeTimeoutFx">HomeTimeoutFx (home timeout dashes)</option>
+    </optgroup>
+    <optgroup label="Other / custom">
+      <option value="custom">Custom name...</option>
+    </optgroup>
+  </select>
+  <input type="text" id="customName" placeholder="custom field name" style="display:none">
+  <button id="undoBtn">Undo last box</button>
+  <button id="clearBtn">Clear all</button>
+  <label style="margin-left:12px;"><input type="checkbox" id="showGrid"> show grid</label>
+</div>
+
+<div id="canvasWrap">
+  <canvas id="canvas"></canvas>
+</div>
+
+<div id="list"></div>
+
+<h3 style="margin-top:20px;">C# output</h3>
+<textarea id="output" readonly placeholder="Draw a box to see output here..."></textarea>
+<div style="margin-top:8px;">
+  <button id="copyBtn">Copy to clipboard</button>
+  <span id="copyMsg" style="color:#8f8; margin-left:8px;"></span>
+</div>
+
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const controls = document.getElementById('controls');
+const fieldSelect = document.getElementById('fieldSelect');
+const customName = document.getElementById('customName');
+const listDiv = document.getElementById('list');
+const output = document.getElementById('output');
+const showGrid = document.getElementById('showGrid');
+
+let img = null;
+let natW = 0, natH = 0; // natural (real) pixel dimensions of the loaded image
+let scale = 1; // canvas-displayed-px per natural-px
+let boxes = []; // { name, x, y, w, h } all in NATURAL pixel units
+let dragStart = null;
+let dragCurrent = null;
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); });
+
+function loadFile(file) {
+  const url = URL.createObjectURL(file);
+  const image = new Image();
+  image.onload = () => {
+    img = image;
+    natW = image.naturalWidth;
+    natH = image.naturalHeight;
+    const maxW = Math.min(window.innerWidth - 40, 1600);
+    scale = Math.min(1, maxW / natW);
+    canvas.width = natW * scale;
+    canvas.height = natH * scale;
+    controls.style.display = 'flex';
+    dropzone.textContent = `${file.name} — ${natW}x${natH}px (loaded, scaled ${(scale*100).toFixed(0)}% for display)`;
+    boxes = [];
+    redraw();
+  };
+  image.src = url;
+}
+
+fieldSelect.addEventListener('change', () => {
+  customName.style.display = fieldSelect.value === 'custom' ? 'inline-block' : 'none';
+});
+
+canvas.addEventListener('mousedown', e => {
+  if (!img) return;
+  const rect = canvas.getBoundingClientRect();
+  const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+  dragStart = { x: cx / scale, y: cy / scale };
+});
+canvas.addEventListener('mousemove', e => {
+  if (!dragStart) return;
+  const rect = canvas.getBoundingClientRect();
+  const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+  dragCurrent = { x: cx / scale, y: cy / scale };
+  redraw();
+});
+window.addEventListener('mouseup', () => {
+  if (!dragStart || !dragCurrent) { dragStart = null; dragCurrent = null; return; }
+  const x = Math.min(dragStart.x, dragCurrent.x);
+  const y = Math.min(dragStart.y, dragCurrent.y);
+  const w = Math.abs(dragCurrent.x - dragStart.x);
+  const h = Math.abs(dragCurrent.y - dragStart.y);
+  if (w > 2 && h > 2) {
+    let name = fieldSelect.value;
+    if (name === 'custom') name = customName.value.trim() || 'CustomFx';
+    boxes.push({ name, x, y, w, h });
+    updateOutput();
+  }
+  dragStart = null;
+  dragCurrent = null;
+  redraw();
+});
+
+document.getElementById('undoBtn').addEventListener('click', () => { boxes.pop(); updateOutput(); redraw(); });
+document.getElementById('clearBtn').addEventListener('click', () => { boxes = []; updateOutput(); redraw(); });
+showGrid.addEventListener('change', redraw);
+
+function redraw() {
+  if (!img) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  if (showGrid.checked) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 10; i++) {
+      const x = canvas.width * i / 10;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      const y = canvas.height * i / 10;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+    }
+  }
+
+  ctx.lineWidth = 2;
+  boxes.forEach((b, i) => {
+    ctx.strokeStyle = '#4af';
+    ctx.strokeRect(b.x * scale, b.y * scale, b.w * scale, b.h * scale);
+    ctx.fillStyle = '#4af';
+    ctx.font = '12px monospace';
+    ctx.fillText(b.name, b.x * scale + 2, b.y * scale - 4 < 10 ? b.y * scale + 14 : b.y * scale - 4);
+  });
+
+  if (dragStart && dragCurrent) {
+    const x = Math.min(dragStart.x, dragCurrent.x) * scale;
+    const y = Math.min(dragStart.y, dragCurrent.y) * scale;
+    const w = Math.abs(dragCurrent.x - dragStart.x) * scale;
+    const h = Math.abs(dragCurrent.y - dragStart.y) * scale;
+    ctx.strokeStyle = '#fa4';
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  renderList();
+}
+
+function renderList() {
+  if (boxes.length === 0) { listDiv.innerHTML = ''; return; }
+  let html = '<table><tr><th>Field</th><th>FxX</th><th>FxY</th><th>FxW</th><th>FxH</th><th></th></tr>';
+  boxes.forEach((b, i) => {
+    const fx = (b.x / natW).toFixed(4);
+    const fy = (b.y / natH).toFixed(4);
+    const fw = (b.w / natW).toFixed(4);
+    const fh = (b.h / natH).toFixed(4);
+    html += `<tr><td>${b.name}</td><td>${fx}</td><td>${fy}</td><td>${fw}</td><td>${fh}</td>` +
+      `<td class="del" onclick="removeBox(${i})">remove</td></tr>`;
+  });
+  html += '</table>';
+  listDiv.innerHTML = html;
+}
+
+function removeBox(i) {
+  boxes.splice(i, 1);
+  updateOutput();
+  redraw();
+}
+window.removeBox = removeBox;
+
+function updateOutput() {
+  if (boxes.length === 0) { output.value = ''; return; }
+  let lines = [];
+  boxes.forEach(b => {
+    const fx = (b.x / natW).toFixed(4);
+    const fy = (b.y / natH).toFixed(4);
+    const fw = (b.w / natW).toFixed(4);
+    const fh = (b.h / natH).toFixed(4);
+    lines.push(`${b.name}X = ${fx}, ${b.name}Y = ${fy}, ${b.name}W = ${fw}, ${b.name}H = ${fh},`);
+  });
+  output.value = lines.join('\n');
+}
+
+document.getElementById('copyBtn').addEventListener('click', () => {
+  output.select();
+  document.execCommand('copy');
+  const msg = document.getElementById('copyMsg');
+  msg.textContent = 'Copied!';
+  setTimeout(() => msg.textContent = '', 1500);
+});
+</script>
+
+</body>
+</html>

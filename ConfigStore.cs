@@ -60,6 +60,20 @@ internal static class ConfigStore
     static readonly string UserProfilePath = Path.Combine(UserDataRoot, "user_profile.json");
     static readonly string FirstRunFlagPath = Path.Combine(UserDataRoot, ".firstrun_done");
     static readonly string ScorebugPresetPath = Path.Combine(UserDataRoot, "scorebug_preset.txt");
+    /// <summary>The single scorebug-size choice asked once at GAMETIME instead of exposing any of
+    /// the reader's own settings UI -- see LoadSavedScorebugSize's doc comment.</summary>
+    static readonly string ScorebugSizeChoicePath = Path.Combine(UserDataRoot, "scorebug_size_choice.txt");
+    /// <summary>One-time opt-in for the reader's RAM-read mode (default off -- see
+    /// ScoreboardReaderHost's doc comment: RAM mode reads CFB27's own process memory, which the
+    /// reader's own instructions restrict to "offline/modded play only"). Presence of "true" means
+    /// the user has already seen and accepted the one-time warning dialog.</summary>
+    static readonly string ScoreboardReaderRamModeEnabledPath = Path.Combine(UserDataRoot, "scoreboard_reader_ram_enabled.txt");
+    /// <summary>Owner request 2026-08-13: console/remote-play streamers have no local CFB27
+    /// process to read memory from, so RAM mode is moot for them -- this is a standing "never even
+    /// try" preference, separate from ScoreboardReaderRamModeEnabledPath's own opt-in accuracy
+    /// toggle, so flipping this off never has the side effect of opting a user INTO RAM mode.
+    /// False by default (most players are on PC/local).</summary>
+    static readonly string RemotePlayModePath = Path.Combine(UserDataRoot, "remote_play_mode.txt");
     /// <summary>User-created "TeamBuilder" schools (custom/team-builder "add school" v1) --
     /// name + colors only, never mapped to in-game OCR/matching. Kept in their own manifest
     /// rather than folded into triggers.json/user_profile.json so TeamColors can load them at
@@ -242,9 +256,9 @@ internal static class ConfigStore
     /// used "Apply Timing" in the old dialog. Defaults here match those statics' own defaults
     /// (AudioPlayer.cs: PreRollSeconds=0.0, FadeStartSeconds=10.0, FadeOutDuration=4.5;
     /// GameWatcher.cs: Cooldown=2.0s).</summary>
-    public record PlaybackTimingSettings(double PreRollSeconds, double FadeStartSeconds, double FadeOutDuration, double CooldownSeconds)
+    public record PlaybackTimingSettings(double PreRollSeconds, double FadeStartSeconds, double FadeOutDuration, double CooldownSeconds, double PregameRunoutDelaySeconds = 15.0)
     {
-        public static readonly PlaybackTimingSettings Default = new(0.0, 10.0, 4.5, 2.0);
+        public static readonly PlaybackTimingSettings Default = new(0.0, 10.0, 4.5, 2.0, 15.0);
     }
 
     static PlaybackTimingSettings? _playbackTimingSettingsCache;
@@ -486,6 +500,42 @@ internal static class ConfigStore
     {
         Directory.CreateDirectory(UserDataRoot);
         AtomicWriteAllText(LeadInWhistleEnabledPath, enabled ? "true" : "false");
+    }
+
+    /// <summary>The one simple "which scorebug skin" choice, part of the LOCK IN / GAMETIME flow
+    /// (owner scope decision 2026-08-13: never expose the reader's own multi-tab settings/
+    /// calibration UI, and never ask about resolution -- that's auto-detected). Empty means "not
+    /// chosen yet," which is what triggers the inline picker; once chosen it's remembered and the
+    /// picker is skipped on every future GAMETIME unless the user reopens Reader Hub to change it.</summary>
+    public static string LoadSavedScorebugSkin() =>
+        File.Exists(ScorebugSizeChoicePath) ? File.ReadAllText(ScorebugSizeChoicePath).Trim() : "";
+
+    public static void SaveScorebugSkinChoice(string skinName)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        AtomicWriteAllText(ScorebugSizeChoicePath, skinName);
+    }
+
+    /// <summary>One-time opt-in acceptance for the reader's RAM-read mode -- see
+    /// ScoreboardReaderRamModeEnabledPath's own doc comment. False (and no warning shown yet) by
+    /// default; screen-mode is always the default regardless of this flag.</summary>
+    public static bool LoadScoreboardReaderRamModeEnabled() =>
+        File.Exists(ScoreboardReaderRamModeEnabledPath) && File.ReadAllText(ScoreboardReaderRamModeEnabledPath).Trim() == "true";
+
+    public static void SaveScoreboardReaderRamModeEnabled(bool enabled)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        AtomicWriteAllText(ScoreboardReaderRamModeEnabledPath, enabled ? "true" : "false");
+    }
+
+    /// <summary>See RemotePlayModePath's doc comment. False by default.</summary>
+    public static bool LoadRemotePlayModeEnabled() =>
+        File.Exists(RemotePlayModePath) && File.ReadAllText(RemotePlayModePath).Trim() == "true";
+
+    public static void SaveRemotePlayModeEnabled(bool enabled)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        AtomicWriteAllText(RemotePlayModePath, enabled ? "true" : "false");
     }
 
     sealed record SupabaseSettings(string Url, string AnonKey);
@@ -1712,6 +1762,12 @@ internal static class ConfigStore
         "Offense: Touchdown Scored",
         "Defense: Third Down",
         "Defense: Fourth Down",
+        // Added 2026-08-13 (owner report, real game log) -- BigEventHelper's turnover-on-downs
+        // stop cue split out of the plain "Defense: Fourth Down" facing-the-down key so the two
+        // distinct moments (facing 4th down vs. actually stopping the offense on it) each get
+        // their own assignable song instead of double-firing one shared card. See
+        // BigEventHelper.cs's own comment on this split.
+        "Defense: Fourth Down Stop",
         "Defense: Second Down",
         "Defense: Second Down (Loss)", // Implemented 2026-08-07 (DefenseHelper.cs)
         "Defense: Field Goal Missed by Opponent",

@@ -23,7 +23,9 @@ public sealed class WebMainForm : Form
     List<TriggerEntry> _config = new();
     readonly KeyboardHook _hook = new();
     readonly GameWatcher _watcher = new();
+    readonly ScoreboardReaderHost _scoreboardReaderHost = new();
     readonly LocalOverlayServer _overlayServer = new();
+    ScorebugOverlayForm? _scorebugOverlay;
     readonly CancellationTokenSource _lifetimeCts = new();
     WebView2 _webView = null!;
     bool _updateAvailable;
@@ -211,7 +213,7 @@ public sealed class WebMainForm : Form
         NormalizeExistingLibraryOnce();
 
         _overlayServer.Start();
-        FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); FlushOcrLog(); _overlayServer.Stop(); };
+        FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); _scoreboardReaderHost.Stop(); FlushOcrLog(); _overlayServer.Stop(); _scorebugOverlay?.Dispose(); };
 
         Load += async (_, _) =>
         {
@@ -219,6 +221,16 @@ public sealed class WebMainForm : Form
             InitAutoUpdater();
             UserCountService.StartHeartbeat(_lifetimeCts.Token);
             PlayDraftChime();
+            // Owner request 2026-08-13 ("cant we just have it on or refresh by default"):
+            // previously the RAM reader only ever launched from StartWatchingFromWeb (below),
+            // which meant every fresh app launch needed an explicit Start Watching/GAMETIME
+            // click before live data worked at all -- easy to forget mid-testing and easy to
+            // misread as "RAM mode is broken" when it was really just "never started yet".
+            // Auto-launching here means it's already warm the moment watching actually starts.
+            // Still gated behind the same opt-in/anti-cheat-safety flags as before -- this
+            // moves WHEN it launches, not the underlying risk decision.
+            if (ConfigStore.LoadScoreboardReaderRamModeEnabled() && !ConfigStore.LoadRemotePlayModeEnabled())
+                _scoreboardReaderHost.TryStartRamReader();
             // Public (everyone-sees-it) team logo sync -- fire-and-forget, works whether or not
             // this device is signed in (pulling the public index needs no auth, only pushing
             // does). Refreshes whatever team is currently showing so a newly-applied public logo
@@ -342,6 +354,11 @@ public sealed class WebMainForm : Form
         core.SetVirtualHostNameToFolderMapping("avatar", ConfigStore.AvatarFolder, CoreWebView2HostResourceAccessKind.Allow);
         Directory.CreateDirectory(ConfigStore.TrimSourceFolder);
         core.SetVirtualHostNameToFolderMapping("trimsrc", ConfigStore.TrimSourceFolder, CoreWebView2HostResourceAccessKind.Allow);
+        // Coffee's Corner scorebug skin thumbnails (2026-08-13) -- bundled preview images, one per
+        // theme, referenced by library.json's "thumbnail" field (see GetScorebugThemeGalleryFromWeb).
+        string scorebugThumbs = Path.Combine(AppContext.BaseDirectory, "Assets", "ScoreboardReader", "theme-library", "thumbs");
+        if (Directory.Exists(scorebugThumbs))
+            core.SetVirtualHostNameToFolderMapping("scorebugthumbs", scorebugThumbs, CoreWebView2HostResourceAccessKind.Allow);
 
         core.AddHostObjectToScript("bandroom", new WebBridge(this));
 
@@ -494,9 +511,167 @@ public sealed class WebMainForm : Form
         return true;
     }
 
-    /// <summary>Which of the active team's three presets actually have a saved profile on disk --
-    /// drives the "configured" dot on each pill (same idea as .team-swatch.configured elsewhere).
-    /// JSON object: {"Home":bool,"Away":bool,"BigGame":bool}.</summary>
+    /// <summary>Coffee's Corner status panel -- live CONNECTED/WAITING FOR GAME DATA/NOT
+    /// FOUND/ERROR chip plus the currently normalized numeric GameState, sourced straight off
+    /// GameWatcher's own status/CurrentSnapshot (doubles as a live verification tool for the
+    /// reader integration itself). Prefers the bundled RAM reader's status when RAM mode is
+    /// connected (more authoritative -- direct process-memory read, not OCR/JSON-file guessing);
+    /// falls back to the screen-JSON reader's status otherwise. Never exposes anything about
+    /// either reader's own settings UI -- see Coffee's Corner's own doc comment in index.html.</summary>
+    public string GetScoreboardSourceStatusFromWeb()
+    {
+        var snapshot = _watcher.CurrentSnapshot;
+        var effectiveStatus = _watcher.RamReaderStatus == ScoreboardReaderStatus.Connected
+            ? _watcher.RamReaderStatus
+            : _watcher.ScoreboardStatus;
+        return JsonSerializer.Serialize(new
+        {
+            status = effectiveStatus.ToString(),
+            down = snapshot.Down,
+            yardsToGo = snapshot.YardsToGo,
+            yardLine = snapshot.YardLine,
+            homeScore = snapshot.HomeScore,
+            awayScore = snapshot.AwayScore,
+            quarter = snapshot.Quarter,
+            timeRemainingSeconds = snapshot.TimeRemainingSeconds,
+            possessionAway = snapshot.PossessionAway,
+        });
+    }
+
+    /// <summary>Read-only scorebug skin gallery for Coffee's Corner. 2026-08-13: bundled
+    /// (Assets\ScoreboardReader\theme-library\, shipped inside BANDroom itself -- see
+    /// ScoreboardReaderPaths.ResolveBundledThemeLibraryJsonPath) is now the PRIMARY source, so the
+    /// 5 themes Coffee shipped at bundling time (FOX 2021/2025, ESPN 2020, NBC 2024, NBC 2024
+    /// Monochrome) always render even with no reader installed anywhere on the machine. Coffee's
+    /// separate external install (if the user or Coffee happens to have one) is merged in as
+    /// EXTRAS on top, never a replacement -- dedup by name so a theme that exists in both places
+    /// only shows once. Empty array (not an error) only if even the bundled read fails somehow.</summary>
+    public string GetScorebugThemeGalleryFromWeb()
+    {
+        var bundled = ReadThemeLibraryEntries(ScoreboardReaderPaths.ResolveBundledThemeLibraryJsonPath());
+        var external = ReadThemeLibraryEntries(ScoreboardReaderPaths.ResolveThemeLibraryJsonPath());
+
+        var byName = new Dictionary<string, (string? name, int canvasWidth, int canvasHeight, string? thumbnail)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in bundled.Concat(external))
+        {
+            string name = entry.name ?? "Untitled";
+            if (!byName.ContainsKey(name)) byName[name] = entry;
+        }
+        var result = byName.Values.Select(e => new
+        {
+            name = e.name,
+            canvasWidth = e.canvasWidth,
+            canvasHeight = e.canvasHeight,
+            thumbnailUrl = e.thumbnail != null ? $"https://scorebugthumbs/{e.thumbnail}" : null,
+        });
+        return JsonSerializer.Serialize(result);
+    }
+
+    List<(string? name, int canvasWidth, int canvasHeight, string? thumbnail)> ReadThemeLibraryEntries(string? path)
+    {
+        var results = new List<(string?, int, int, string?)>();
+        if (path == null || !File.Exists(path)) return results;
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            if (!doc.RootElement.TryGetProperty("themes", out var themes)) return results;
+            foreach (var t in themes.EnumerateArray())
+            {
+                results.Add((
+                    t.TryGetProperty("name", out var n) ? n.GetString() : "Untitled",
+                    t.TryGetProperty("canvasWidth", out var w) ? w.GetInt32() : 0,
+                    t.TryGetProperty("canvasHeight", out var h) ? h.GetInt32() : 0,
+                    t.TryGetProperty("thumbnail", out var th) ? th.GetString() : null));
+            }
+        }
+        catch (Exception ex)
+        {
+            OnLog($"[CoffeesCorner] failed to read theme-library at {path}: {ex.Message}");
+        }
+        return results;
+    }
+
+    /// <summary>Resolves the currently-saved scorebug skin (ConfigStore.LoadSavedScorebugSkin) to
+    /// its real HTML file + authored canvas size, checking the bundled library first then the
+    /// external one -- same bundled-then-external precedence GetScorebugThemeGalleryFromWeb
+    /// already uses, just returning the actual file path instead of gallery metadata. Used by
+    /// ScorebugOverlayForm to load Coffee's real theme file directly (not a BANDroom
+    /// reimplementation -- see that class's own doc comment). Null if no skin is saved yet, or the
+    /// saved skin's file can't be found (deleted external install, corrupt library.json, etc).</summary>
+    internal (string htmlPath, int canvasWidth, int canvasHeight)? ResolveActiveScorebugThemeFile()
+    {
+        string skinName = ConfigStore.LoadSavedScorebugSkin();
+        if (string.IsNullOrWhiteSpace(skinName)) return null;
+
+        foreach (string? libPath in new[] { ScoreboardReaderPaths.ResolveBundledThemeLibraryJsonPath(), ScoreboardReaderPaths.ResolveThemeLibraryJsonPath() })
+        {
+            if (libPath == null || !File.Exists(libPath)) continue;
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(libPath));
+                if (!doc.RootElement.TryGetProperty("themes", out var themes)) continue;
+                foreach (var t in themes.EnumerateArray())
+                {
+                    string? name = t.TryGetProperty("name", out var n) ? n.GetString() : null;
+                    if (!string.Equals(name, skinName, StringComparison.OrdinalIgnoreCase)) continue;
+                    string? relPath = t.TryGetProperty("relativePath", out var rp) ? rp.GetString() : null;
+                    if (relPath == null) continue;
+
+                    string baseDir = Path.GetDirectoryName(libPath)!;
+                    string htmlPath = Path.Combine(baseDir, relPath.Replace('/', Path.DirectorySeparatorChar));
+                    if (!File.Exists(htmlPath)) continue;
+
+                    int w = t.TryGetProperty("canvasWidth", out var cw) ? cw.GetInt32() : 900;
+                    int h = t.TryGetProperty("canvasHeight", out var ch) ? ch.GetInt32() : 120;
+                    return (htmlPath, w, h);
+                }
+            }
+            catch (Exception ex) { OnLog($"[ScorebugOverlay] failed to resolve theme file at {libPath}: {ex.Message}"); }
+        }
+        return null;
+    }
+
+    /// <summary>Live data payload for ScorebugOverlayForm, pushed into the loaded theme's own
+    /// `window.updateScorebug` bridge on a timer. Field names match exactly what Coffee's theme
+    /// files' own `F` state object + ALIAS table expect (confirmed by reading the ESPN 2020 /
+    /// NBC 2024 theme source directly) -- quarter/down/distance are sent RAW (the theme's own
+    /// quarterText()/downDistanceText() do the "4TH"/"1ST &amp; 10" formatting), clock is
+    /// pre-formatted here since the theme just stringifies whatever it's given. Reuses the exact
+    /// same data sources GetScoreboardSourceStatusFromWeb/GetLastMatchupFromWeb/WebBridge.GetTeams
+    /// already use -- no separate/duplicate data path.</summary>
+    internal string BuildScorebugOverlayPayloadJson()
+    {
+        var snapshot = _watcher.CurrentSnapshot;
+        var last = ConfigStore.LoadLastMatchup();
+        string awayName = last?.AwayName ?? "";
+        string homeName = last?.HomeName ?? "";
+
+        var awayTeam = TeamColors.All.FirstOrDefault(t => t.Name == awayName);
+        var homeTeam = TeamColors.All.FirstOrDefault(t => t.Name == homeName);
+
+        int minutes = Math.Max(0, snapshot.TimeRemainingSeconds) / 60;
+        int seconds = Math.Max(0, snapshot.TimeRemainingSeconds) % 60;
+
+        return JsonSerializer.Serialize(new
+        {
+            awayName,
+            homeName,
+            awayScore = snapshot.AwayScore,
+            homeScore = snapshot.HomeScore,
+            awayColor = !string.IsNullOrEmpty(awayTeam.Name) ? WebBridge.ColorHex(awayTeam.Accent) : null,
+            homeColor = !string.IsNullOrEmpty(homeTeam.Name) ? WebBridge.ColorHex(homeTeam.Accent) : null,
+            awayLogo = WebBridge.LogoUrl(awayName),
+            homeLogo = WebBridge.LogoUrl(homeName),
+            possession = snapshot.PossessionAway ? "away" : "home",
+            awayTimeouts = snapshot.AwayTimeoutsRemaining,
+            homeTimeouts = snapshot.HomeTimeoutsRemaining,
+            quarter = snapshot.Quarter,
+            clock = $"{minutes}:{seconds:D2}",
+            down = snapshot.Down,
+            distance = snapshot.YardsToGo,
+        });
+    }
+
     public string GetTeamPresetStatusFromWeb()
     {
         string teamName = Theme.ActiveTeam.Name;
@@ -1067,6 +1242,7 @@ public sealed class WebMainForm : Form
             // Stop Watching is the one explicit "this game is over" signal (see _matchupLocked) --
             // unlock so a new GAMETIME press can pick a different matchup for the next game.
             _matchupLocked = false;
+            HideScorebugOverlay();
         }
         else
         {
@@ -1112,12 +1288,53 @@ public sealed class WebMainForm : Form
         ControllerRumbleService.Start(_watcher);
         CrowdBusService.Start(_watcher);
 
+        // Auto-launch the bundled RAM reader, opportunistically -- best-effort only, never blocks
+        // GAMETIME (see ScoreboardReaderHost's own doc comment). Screen-mode/OCR needs nothing
+        // launched at all (that's BANDroom's own existing GameWatcher path). RAM mode stays OFF by
+        // default behind ConfigStore.LoadScoreboardReaderRamModeEnabled() -- an anti-cheat safety
+        // decision, not something this bundling change reverses. The scorebug SKIN choice (see
+        // confirmMatchup in app.js) is a passive Coffee's Corner preference only now -- the
+        // bundled exe's real invocation contract (`--service seedPath statusPath pid`) has no
+        // resolution/theme args, so nothing about that choice is passed to the process.
+        if (ConfigStore.LoadScoreboardReaderRamModeEnabled() && !ConfigStore.LoadRemotePlayModeEnabled())
+            _scoreboardReaderHost.TryStartRamReader();
+
         _hook.Start();
         _watcher.Start();
+        ShowScorebugOverlay();
         return null;
     }
 
     string WatchStateString() => !_watching ? "off" : _windowFound ? "watching" : "waiting";
+
+    /// <summary>See ScorebugOverlayForm's own doc comment -- the actual live "Coffee's bug" popup,
+    /// shown the moment watching starts (GAMETIME or manual Start Watching), hidden on Stop
+    /// Watching. Lazily created once and reused (Show/Hide) rather than recreated every game, same
+    /// reasoning as every other long-lived overlay in this app.</summary>
+    void ShowScorebugOverlay()
+    {
+        try
+        {
+            if (_scorebugOverlay == null || _scorebugOverlay.IsDisposed)
+            {
+                _scorebugOverlay = new ScorebugOverlayForm(this);
+            }
+            else
+            {
+                // Reused instance from a previous game -- the skin choice may have changed since
+                // then (Load only fires once per form lifetime, so re-navigate explicitly).
+                _scorebugOverlay.RefreshForCurrentSkin();
+            }
+            _scorebugOverlay.Show();
+        }
+        catch (Exception ex) { CrashLog.Write("ShowScorebugOverlay failed", ex); }
+    }
+
+    void HideScorebugOverlay()
+    {
+        try { _scorebugOverlay?.Hide(); }
+        catch (Exception ex) { CrashLog.Write("HideScorebugOverlay failed", ex); }
+    }
 
     /// <summary>Settings modal migration: these used to be inline lambdas built inline inside
     /// OpenSettingsFromWeb (native SettingsForm.cs, now deleted) -- extracted into named
@@ -1204,6 +1421,15 @@ public sealed class WebMainForm : Form
         ConfigStore.SaveScorebugPresetName(name);
     }
 
+    /// <summary>Game Settings toggle on the matchup screen (owner request 2026-08-13, replacing
+    /// the old pill+arrows scorebug-layout switcher that used to sit in the matchup header --
+    /// console presets are gone from that surface entirely now, everyone just uses Kam's CBS).
+    /// Checked means "I'm on console/remote-play streaming" -- see RemotePlayModePath's doc
+    /// comment for why this never implicitly turns RAM mode ON, only ever forces it off.</summary>
+    public bool GetRemotePlayModeFromWeb() => ConfigStore.LoadRemotePlayModeEnabled();
+
+    public void SetRemotePlayModeFromWeb(bool enabled) => ConfigStore.SaveRemotePlayModeEnabled(enabled);
+
     void ClearAll()
     {
         foreach (var entry in _config) entry.AudioFile = "";
@@ -1266,7 +1492,7 @@ public sealed class WebMainForm : Form
         if (entry == null) return;
         float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
-            AudioPlayer.Play(entry.AudioFile, VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, forcePaEffect: entry.PaSpeakerEffect);
+            AudioPlayer.Play(entry.AudioFile, VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, forcePaEffect: entry.PaSpeakerEffect, fadeStartOverride: entry.FadeStartSecondsOverride, fadeOutDurationOverride: entry.FadeOutDurationOverride);
         if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
             AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isPreview: true, liveVolumeSource: () => AudioPlayer.PaVolume * eventVolumeScale);
     }
@@ -1337,6 +1563,21 @@ public sealed class WebMainForm : Form
         SaveCurrentTeamProfile();
         PushCategories();
         return entry.WhistleSpeed;
+    }
+
+    /// <summary>Per-event fade override, set from the event card's settings pill. Pass null for
+    /// either value to clear that override back to "follow the global Audio Timing setting" --
+    /// same null-means-unset convention TriggerEntry.FadeStartSecondsOverride/
+    /// FadeOutDurationOverride already use.</summary>
+    public void SetEventFadeOverrideFromWeb(string trigger, double? fadeStartSeconds, double? fadeOutDuration)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return;
+        entry.FadeStartSecondsOverride = fadeStartSeconds;
+        entry.FadeOutDurationOverride = fadeOutDuration;
+        ConfigStore.Save(_config);
+        SaveCurrentTeamProfile();
+        PushCategories();
     }
 
     public void StopPreviewFromWeb() => AudioPlayer.StopAll();
@@ -2854,7 +3095,7 @@ public sealed class WebMainForm : Form
             // feature entirely. Back to firing synchronously, same as before that feature existed.
             string paFile = entry.PaAudioFile;
             bool paExists = !string.IsNullOrWhiteSpace(paFile) && File.Exists(paFile);
-            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, channel: channel, forcePaEffect: entry.PaSpeakerEffect);
+            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, channel: channel, forcePaEffect: entry.PaSpeakerEffect, fadeStartOverride: entry.FadeStartSecondsOverride, fadeOutDurationOverride: entry.FadeOutDurationOverride);
             // PA Announcer layer: plays concurrently with the main cue above, not instead of it,
             // so interruptPrevious MUST be false here -- true would call StopAll() and kill the
             // main clip that was just started a line above. Fired after, not before, the main
@@ -3010,13 +3251,15 @@ public sealed class WebMainForm : Form
     /// stadium, closer to one end zone than the other. Stacks (multiplies) with the existing
     /// Big-Game-away-quiet multiplier above rather than replacing it, per the owner's explicit call
     /// to keep tonight's already-confirmed routing/volume logic intact and layer this on top --
-    /// scoped to Big Game + CFB27 only, a no-op (1x) for every other combination. Best-effort OCR
-    /// (see ArrowUp) -- ArrowUp being null (not yet read, wrong preset, ambiguous frame) is a no-op
-    /// on purpose, same "don't guess" philosophy as the rest of this file's possession handling.</summary>
+    /// scoped to Big Game + CFB27 (and, per owner request 2026-08-13, CFB 26 Console the same way)
+    /// only, a no-op (1x) for every other combination. Best-effort OCR (see ArrowUp) -- ArrowUp
+    /// being null (not yet read, wrong preset, ambiguous frame) is a no-op on purpose, same "don't
+    /// guess" philosophy as the rest of this file's possession handling.</summary>
     float FieldPositionVolumeMultiplier(string side)
     {
         if (!_watcher.IsBigGame) return 1f;
-        if (_watcher.ActivePreset.Name != ScorebugPreset.CollegeFootball27.Name) return 1f;
+        if (_watcher.ActivePreset.Name != ScorebugPreset.CollegeFootball27.Name
+            && _watcher.ActivePreset.Name != ScorebugPreset.CollegeFootball26Console.Name) return 1f;
         if (_watcher.ArrowUp is not bool arrowUp) return 1f;
 
         bool homeLoud = arrowUp;

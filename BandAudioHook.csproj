@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>Bandroom</AssemblyName>
     <DefaultItemExcludes>$(DefaultItemExcludes);src\**\*</DefaultItemExcludes>
     <RootNamespace>Bandroom</RootNamespace>
@@ -73,6 +74,11 @@
          fetches the pack separately (DefaultSongPackService) after install. Defaults to true so
          local dev builds keep working exactly as before. -->
     <Content Include="Songs\Default\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="Songs\Default" Condition="'$(BundleDefaultSongs)' != 'false'" />
+    <!-- Assets\ScoreboardReader\: bundled read-only RAM reader (owner-approved absorption of
+         Coffee's CollegeFB27RamReader.exe, 2026-08-13): standalone/self-contained, zero DLL deps,
+         shipped with its own ram-live-profile.json sidecar so BANDroom never depends on Coffee's
+         separate Electron install being present. Launched as a child process by
+         ScoreboardReaderHost, covered by this same glob, no separate Content entry needed. -->
     <Content Include="Assets\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

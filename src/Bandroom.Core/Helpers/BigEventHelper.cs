@@ -27,11 +27,25 @@ public sealed class BigEventHelper : IRuleEvaluator
 
         // A missed field goal is also a 4th-down possession flip -- FieldGoalMissedHelper already
         // covers that specific case with its own cue, so skip here to avoid both firing together.
+        //
+        // SPLIT OFF 2026-08-13 (owner report, real game log): this branch used to fire the SAME
+        // "Defense: Fourth Down" key OffenseDownHelper fires when the offense merely FACES a 4th
+        // down (down 3->4 transition, no possession change yet -- see that file's down==4 case).
+        // Those are two genuinely different moments (facing 4th down vs. the stop/turnover-on-
+        // downs actually completing a few ticks later once NewPossession resolves), sharing one
+        // key with one assigned song -- reported live as "4th Down (Home BG) fired twice at the
+        // same timestamp, same song, no penalty around it," because EventRouter's same-tick dedupe
+        // only catches same-tick collisions, not two evaluators firing the identical key a few
+        // ticks apart. Owner's explicit ask: split this into its own "Defense: Fourth Down Stop"
+        // event/card so a defensive 4th-down stop (turnover on downs) has its own distinct song
+        // slot instead of double-firing the plain "Defense: Fourth Down" facing-the-down cue.
+        // "Defense: Fourth Down" itself is untouched -- OffenseDownHelper's facing-4th-down cue is
+        // a real, separate, still-wanted moment the owner did not ask to remove.
         if (state.Current.Down == 4 && state.Delta.NewPossession && !state.Current.IsFieldGoalAttempt && !state.Current.IsTurnover)
         {
             return new TriggerEvent
             {
-                EventKey = "Defense: Fourth Down",
+                EventKey = "Defense: Fourth Down Stop",
                 Volume = state.Current.BigGame ? 100 : 80,
                 IsEarnedBigEvent = state.Current.BigGame
             };

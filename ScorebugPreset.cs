@@ -60,6 +60,37 @@ public sealed class ScorebugPreset
     public double HomeScoreFxW { get; init; } = 0.05;
     public double ClockFxX { get; init; } = 0.65;
     public double ClockFxW { get; init; } = 0.08;
+    /// <summary>Added 2026-08-14, same reasoning as AwayScoreFxY -- null means "use BandFxY/
+    /// BandFxH like every preset before this one." Only Espn2013 sets these (its clock isn't on
+    /// the shared band either).</summary>
+    public double? ClockFxY { get; init; }
+    public double? ClockFxH { get; init; }
+
+    /// <summary>Added 2026-08-14 for Espn2013 (compact/vertical-stack widget) -- every preset until
+    /// now assumed away/home scores sit SIDE BY SIDE at the same Y (the shared BandFxY/BandFxH
+    /// band, differing only in X). That's false for a vertically-stacked layout where away sits in
+    /// its own row above home. Null (the default for every existing preset) means "use BandFxY/
+    /// BandFxH like before" -- see GameWatcher's crop-assignment site, which does
+    /// `preset.AwayScoreFxY ?? preset.BandFxY`. Only set these when a preset's away/home scores
+    /// genuinely aren't on the same horizontal strip.</summary>
+    public double? AwayScoreFxY { get; init; }
+    public double? AwayScoreFxH { get; init; }
+    public double? HomeScoreFxY { get; init; }
+    public double? HomeScoreFxH { get; init; }
+
+    /// <summary>Added 2026-08-14 -- the "playclock" WatchedRegion's crop was HARDCODED
+    /// (FxX=0.70/FxY=0.83/FxW=0.06/FxH=0.14, calibrated 2026-08-12 against CFB27's console default
+    /// HUD only) and never repositioned per preset the way awayscore/homescore/clock/down/
+    /// situation/quarter/flag all are in GameWatcher's crop-assignment loop -- meaning every
+    /// non-CFB27-console preset (ESPN, NBC, Fox, CBS) was reading the CFB27 console's play-clock
+    /// position regardless of its own actual layout. That's the root cause of "play clock
+    /// wasn't working" reports on other presets -- it was never broken exactly, it was reading the
+    /// wrong box entirely. Defaults below match the old hardcoded constants exactly so
+    /// CollegeFootball27 (and every preset that doesn't override this) is unaffected.</summary>
+    public double PlayClockFxX { get; init; } = 0.70;
+    public double PlayClockFxY { get; init; } = 0.83;
+    public double PlayClockFxW { get; init; } = 0.06;
+    public double PlayClockFxH { get; init; } = 0.14;
 
     /// <summary>Tight crop directly under each team's name for possession sampling by brightness
     /// comparison (GameWatcher.SamplePossessionByUnderline), NOT color matching -- correction
@@ -274,7 +305,49 @@ public sealed class ScorebugPreset
         HomeTimeoutFxX = 0.565, HomeTimeoutFxY = 0.905, HomeTimeoutFxW = 0.08, HomeTimeoutFxH = 0.025,
     };
 
-    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebugV3, CollegeFootball27, CollegeFootball26Console };
+    /// <summary>Added 2026-08-14 -- REAL calibration, not eyeballed. Ported directly from Coffee's
+    /// own production app (CFB27-Scoreboard-Overlay-v1.0.26-OPEN-BETA, UserData\settings.json's
+    /// capture.readerCalibration block), which the owner confirmed corresponds to the compact
+    /// ESPN-2013-style scorebug widget positioned in the bottom-RIGHT corner of the screen (a
+    /// portrait-shaped ~130x148px box at 1080p, NOT the wide horizontal bar the other presets in
+    /// this file assume -- see that settings.json's "readRegion" being only 6.8% wide / 13.7% tall
+    /// of the full frame, with all fields stacked vertically inside it).
+    /// Conversion math: his calibration format nests each field's ROI as a fraction WITHIN
+    /// readRegion (roiSpace: "read-region"), not the full frame directly -- every X/Y/W/H below is
+    /// readRegion.{x,y,width,height} composed with each field's own roi fraction
+    /// (absX = readRegion.x + roi.x * readRegion.width, etc), computed once and baked in here as
+    /// plain full-frame fractions to match how every other preset in this file already works.
+    /// Timeouts here are REAL measured crops (not the guessed-placeholder mirror every other
+    /// preset in this file has) -- this is the one preset where Home timeouts should actually be
+    /// trustworthy out of the box.
+    /// NOT YET CALIBRATED for this preset: BannerFx*/PenaltyAgainstFx*/ChevronMarkerFx*/
+    /// PossessionFx* (his calibration only exposes ONE combined "away.possession" region, not the
+    /// separate Away/Home underline-brightness pair GameWatcher's possession detection expects) --
+    /// left at defaults. Get a live screenshot showing possession flip and a penalty/banner overlay
+    /// on this skin before relying on those specific signals.</summary>
+    public static readonly ScorebugPreset Espn2013 = new()
+    {
+        Name = "ESPN 2013 (compact)",
+        // Whole-widget bounding box (readRegion itself) -- still used by the down/situation/
+        // quarter/flag regions, which DO stay on one shared band even in this vertical layout
+        // (see DownDistance's single row at the bottom of readRegion).
+        BandFxY = 0.8342, BandFxH = 0.1367,
+        // Away/home scores are STACKED rows, not side-by-side -- same X, different Y/H (see
+        // AwayScoreFxY's doc comment on why this needed a new field at all).
+        AwayScoreFxX = 0.4691, AwayScoreFxW = 0.0245, AwayScoreFxY = 0.8627, AwayScoreFxH = 0.0234,
+        HomeScoreFxX = 0.4691, HomeScoreFxW = 0.0245, HomeScoreFxY = 0.9109, HomeScoreFxH = 0.0234,
+        // Clock and play clock sit in their own row near the bottom, side by side -- both REAL
+        // measured crops now (ClockFxY/PlayClockFx* overrides added 2026-08-14 specifically to
+        // support this).
+        ClockFxX = 0.4913, ClockFxW = 0.0203, ClockFxY = 0.9329, ClockFxH = 0.0178,
+        PlayClockFxX = 0.5118, PlayClockFxY = 0.9329, PlayClockFxW = 0.0203, PlayClockFxH = 0.0178,
+        AwayTimeoutFxX = 0.4702, AwayTimeoutFxY = 0.8519, AwayTimeoutFxW = 0.0203, AwayTimeoutFxH = 0.0066,
+        // REAL measured crop (see class doc comment) -- not a mirrored guess like every other
+        // preset's HomeTimeoutFx*.
+        HomeTimeoutFxX = 0.4702, HomeTimeoutFxY = 0.9006, HomeTimeoutFxW = 0.0203, HomeTimeoutFxH = 0.0066,
+    };
+
+    public static readonly List<ScorebugPreset> AllPresets = new() { KamsCbsScorebugV3, CollegeFootball27, CollegeFootball26Console, Espn2013 };
 
     /// <summary>Old preset names that got renamed, mapped to their current Name -- a returning
     /// user's saved scorebug_preset.txt (see ConfigStore.LoadScorebugPresetName) still has the

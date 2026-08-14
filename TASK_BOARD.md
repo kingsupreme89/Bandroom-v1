@@ -1,4 +1,77 @@
-# Bandroom Task Board — Last Updated: 2026-08-12 (Session 60 checkpoint)
+# Bandroom Task Board — Last Updated: 2026-08-13 (Session 61 deep-audit checkpoint)
+
+> 🟢 **SESSION 61 DEEP-AUDIT (2026-08-13) — board/roadmap were STALE by several sessions.**
+> Correcting the record below with what was actually verified against the code + fresh rebuilds.
+
+## ✅ SESSION 61 CORRECTIONS (2026-08-13, deep-audited against actual code)
+These items were still listed as OPEN on the board/roadmap but are ALREADY IMPLEMENTED in the code:
+
+- **B1 — dead legacy "1st/2nd/3rd/4th Down" keys → ALREADY FIXED.** `WebMainForm.LegacyDownEventAlias`
+  (WebMainForm.cs:860-872) maps `Offense: Earned First Down`/`Second Down`/`Third Down`/`Fourth Down`
+  (and the Short variants) back to the legacy `down:1st`/`2nd`/`3rd`/`4th` Trigger slots, so
+  already-assigned legacy files (incl. the shipped `dies irie 0.wav`) fire through the engine path.
+  Verified in `ResolveEntryForEvent` (WebMainForm.cs:894-924).
+- **B2 — `bridge.DuplicateProfile(...)` throws → ALREADY FIXED.** `WebBridge.DuplicateProfile`
+  (WebBridge.cs) now delegates to `WebMainForm.DuplicateProfileFromWeb`, which is implemented
+  (load-then-save-under-a-new-name). No longer an unresolved host-object call.
+- **B3 — `ui-bot.js` production toast → ALREADY GATED.** `wwwroot/ui-bot.js:496-509` only auto-runs
+  when the URL contains `?debug`/`#debug` (gated 2026-08-08). No production toast.
+- **B5 — `_lastDistanceRaw` not sticky → ALREADY STICKY.** Only nulled in `GameWatcher.Start()`
+  (line 665) and only committed from a real parsed value via `CommitDownAndDistance`
+  (GameWatcher.cs:1527-1547). `RouteEngineTick` reads `_lastDistanceRaw` (line 1654-1656), never the
+  blank-able `region.Last`.
+- **B6 — `PlaySoundboardSlot` + `ScanDynastySave` missing → ALREADY STUBBED.** Both exist in
+  `WebBridge.cs` and `WebMainForm.cs` (`PlaySoundboardSlotFromWeb` implemented; `ScanDynastySaveFromWeb`
+  returns an honest null rather than throwing). Same fix already mirrored on Mac.
+- **Crowd Ducking ("AudioDuckingController is dead code") → ALREADY FULLY WIRED.** `AudioPlayer.DuckingEnabled`
+  ↔ `AudioDuckingController.Enabled`, UI toggle via `WebBridge.GetDuckingEnabled`/`SetDuckingEnabled`,
+  and the real playback loop calls `OnHighPriorityEventFired()` + `GetGainMultiplier()` on every
+  Touchdown/Turnover/Safety fire (AudioPlayer.cs). The "100% dead code" note on the board/ROADMAP is stale.
+
+## ✅ SESSION 61 ACTION TAKEN (the one genuinely-open item)
+- **Dashboard durability (was genuinely missing).** `serve_dashboard_watchdog.ps1` now uses a fast
+  TCP probe (replacing slow `Test-NetConnection`), logs start/fail events to `dashboard_watchdog.log`,
+  and is registered to auto-start at logon via
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` ("Bandroom Dashboard Watchdog") — no admin
+  needed. (A `schtasks` logon task would've been preferred but requires an elevated terminal.)
+
+## ✅ SESSION 64 MAC OCR PARITY — deep-audited 2026-08-13 (late-8/12 unrecorded session)
+A late-8/12 working session (after the Session 63 handoff, which never got a writeup) made substantial
+Mac-port changes; the board/docs were stale until now. Deep-audited against the code + a fresh build:
+
+- **Build:** `dotnet build src/Bandroom.Mac/Bandroom.Mac.csproj` -> 0 errors / 0 warnings (re-run now).
+- **OCR regions: 4 -> 13.** `GameWatcher.Mac.cs` `BuildRegions` now carries all 12 Windows regions
+  (down/flag/situation/quarter/penaltyagainst/banner/pregameready/teamrunout/awayscore/homescore/
+  clock/playclock) + one Mac-only `possession` region. Coordinates resolve via the active
+  `ScorebugPreset` fields, identical to Windows `ApplyScorebugPreset` at runtime. VERIFIED 1:1.
+- **Evaluators: 24 -> 26, byte-for-byte identical order with Windows `GameWatcher.CreateEventRouter`**
+  (GameWatcher.cs:1852-1884; added FirstDownOnFirstDownHelper + RunOutHelper). VERIFIED.
+- **Sticky/confirm discipline ported faithfully** (matches Windows): `_lastKnownDown/_lastDistanceRaw/
+  _lastKnownAwayScore/_lastKnownHomeScore/_lastKnownQuarter`, two-tick `CommitValueIfConfirmed`,
+  paired `CommitDownAndDistance` (750ms), gated stickies (situation/banner/penaltyagainst/teamrunout).
+  `bandroom_ocr_bridge.py` emits a `cycle_end` marker so ONE snapshot routes per full scan.
+
+**Remaining honest Mac gaps (still NOT live-tested; no real Mac run yet):**
+- Possession is OCR-only ("HOME"/"AWAY" literal text the scorebug does not render) — Windows'
+  color/underline pixel sampling is NOT ported, so `_lastPossession` effectively stays null and
+  possession-dependent routing (penalty side, Defense- vs Offense-side) mostly cannot resolve.
+- `AwayTimeoutsRemaining`/`HomeTimeoutsRemaining` = -1 (no timeout-dash sampling);
+  `IsPregameEntranceMarker` = false (no chevron sampling); `YardLine` = 0.
+
+**Windows-side drift found while auditing parity (NOT a Mac bug; recorded only):**
+`GameWatcher.cs:512` "RECALIBRATED 2026-08-12" moves the `penaltyagainst` initializer to
+FxY=0.50/FxH=0.34, but `ScorebugPreset.cs` PenaltyAgainstFxY/FxH still holds 0.62/0.22, and
+`WebMainForm.cs:189` sets `ActivePreset` at startup (its setter runs `ApplyScorebugPreset`, which
+overwrites the initializer with the stale preset values). Net: that recalibration is dead at runtime;
+Windows actually runs 0.62/0.22 — same as Mac. A Windows-only initializer-vs-preset mismatch to reconcile.
+
+## ✅ Build Status — RE-RUN 2026-08-13 Session 61
+```
+Bandroom.Core.dll   (src/Bandroom.Core)       → 0 errors, 0 warnings
+Bandroom.Core.Tests (src/Bandroom.Core.Tests) → 64/64 passing (was 62/62 last session)
+Bandroom.dll (Win)  (BandAudioHook.csproj)    → 0 errors, 0 warnings
+Bandroom.Mac.dll    (src/Bandroom.Mac)        → 0 errors, 0 warnings
+```
 
 ## ✅ VERIFIED Current Reality — 2026-08-12 Session 60 (deep-audited, not self-reported)
 Below is what was confirmed this session by rebuilding each project and reading the code directly:
@@ -12,7 +85,9 @@ Below is what was confirmed this session by rebuilding each project and reading 
 - **Session 60 "wrong team" possession fix is real:** `GameWatcher.SamplePossessionFromWindow` reorders color-match first, underline-brightness second (KamsCbsScorebugV3-only).
 - **Session 60 other fixes are real:** pause-freeze threshold halved (`FrozenFrameTicksThreshold = 2`), `Offense: Fourth Down` card via `OffenseFourthDownHelper`, event-log/card-name unification via `EventActivityLog.FriendlyNameOverrides`, v1.1.0 released.
 - **Still open (honest gaps):**
-  - Mac **functional** OCR parity is NOT done — Mac watcher still hardcodes score/clock/timeouts and has only 4 OCR regions, so even the now-synced evaluators (Touchdown/FG/Timeout/Penalty/Pregame) can't actually fire on Mac yet; needs an actual Mac for live testing.
+  - Mac OCR parity (Phase 2) is now IMPLEMENTED in code (13 regions, 26 evaluators, sticky confirm
+    discipline) by an unrecorded late-8/12 session — see the SESSION 64 MAC OCR PARITY block near the
+    top. Still NOT live-tested on a real Mac; possession remains OCR-only (see that block).
   - Possession color-match is `KamsCbsScorebugV3`-only; similar-color fallback unverified.
   - `Cline → Orchestrator` items below (dead legacy `1st/2nd/3rd/4th Down` keys, `DuplicateProfile` crash, `ui-bot.js` prod toast) still need owner decisions.
 
@@ -173,8 +248,10 @@ Bandroom.Mac.dll    (src/Bandroom.Mac)        → 0 errors, 0 warnings (evaluato
 ## Mac build — RESOLVED 2026-08-12 (the "78 errors" was mid-edit WIP, now green)
 The `MacWebBridge.cs` "78 errors" state recorded above was Cline mid-flight on the WebView bridge.
 It is now resolved: Mac builds clean (0 errors / 0 warnings) with the evaluator list synced to
-Windows (24 evaluators). The only remaining Mac work is functional OCR parity (Phase 2) — see the
-Verified Reality block at the top — NOT a build break.
+Windows (26 evaluators, byte-for-byte identical order) and the OCR region set expanded to 13
+(12 Windows-parity + 1 Mac-only possession). OCR parity (Phase 2) is now IMPLEMENTED but NOT
+live-tested — possession sampling is still OCR-only. See the SESSION 64 MAC OCR PARITY block near
+the top. NOT a build break.
 
 ## OCR calibration pass (from live screenshots the user provided, 1920x1080 CBS skin)
 - ✅ CALIBRATED — `awayscore`/`homescore`/`clock` regions added (tight positional crops, since

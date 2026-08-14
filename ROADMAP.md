@@ -1,7 +1,11 @@
 # 🏈 Bandroom — Master Roadmap
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-13 (Session 61 deep-audit)
 
 > 🔴 = Broken / Needs Fixing | 🟡 = In Progress | 🟢 = Done | ⚪ = Not Started
+>
+> 🟢 **SESSION 61 (2026-08-13):** Several bugs below (B1/B2/B3/B5/B6, crowd ducking, dashboard
+> persistence) were still listed OPEN but are already implemented — verified against actual code +
+> fresh rebuilds. See the "SESSION 61 CORRECTIONS" block at the top of TASK_BOARD.md for specifics.
 
 ---
 
@@ -76,13 +80,13 @@ OCR Loop (250ms) → RouteEngineTick() → PlaySnapshot rotation
 | Yard line number | ⚪ NOT BUILT | **Blocker**: YardLine always 0, disables Midfield variants |
 
 ### Known OCR Limitations
-- **Pause menu blanking**: OCR drops to 0 on pause/replay/cutscene screens → fixed with sticky `_lastKnown` pattern for scores/quarter, but `_lastDistanceRaw` is NOT sticky
+- **Pause menu blanking**: OCR drops to 0 on pause/replay/cutscene screens → fixed with sticky `_lastKnown` pattern for scores/quarter/distance
 - **No yard line**: Midfield position variants gated behind `YardLine > 0` — all dormant until YardLine OCR is built
 - **No FG attempt text**: `FieldGoalMissedHelper` must infer misses from possession flip + no score change
 
 ---
 
-## 4. MAC PORT (🔴 BLOCKED — 78 BUILD ERRORS)
+## 4. MAC PORT (🟡 BLOCKED ONLY ON OCR PARITY — build is green)
 
 ### What Exists
 | Component | File | Status |
@@ -94,9 +98,9 @@ OCR Loop (250ms) → RouteEngineTick() → PlaySnapshot rotation
 | Platform stubs | `PlatformStubs.Mac.cs` | 🟢 |
 | KeyboardHook | `KeyboardHook.Mac.cs` | 🟢 Carbon/CGEvent port |
 | GameWatcher Mac | `GameWatcher.Mac.cs` | 🟡 Evaluator router built |
-| WebView bridge | `MacWebBridge.cs` | 🔴 **78 ERRORS** — calls methods on MainWindow that don't exist yet |
-| MainWindow | `MainWindow.axaml` + `.cs` | 🔴 Missing ~15 methods WebBridge expects |
-| ChangelogService ref | `MacWebBridge.cs` | 🔴 Not in scope on Mac side |
+| WebView bridge | `MacWebBridge.cs` | � Builds clean (0/0) — the 78-error state was mid-edit WIP, resolved |
+| MainWindow | `MainWindow.axaml` + `.cs` | � All WebBridge methods stubbed |
+| ChangelogService ref | `MacWebBridge.cs` | � Resolved |
 
 ### Mac Remaining Work (in priority order)
 1. � **Fix Mac build errors** — DONE 2026-08-12: `MainWindow`/`MacWebBridge` now build clean (0/0), evaluator list synced 16→24 (1:1 with Windows), per-game evaluator-state reuse + pregame first-tick bugs fixed.
@@ -112,17 +116,17 @@ OCR Loop (250ms) → RouteEngineTick() → PlaySnapshot rotation
 
 | # | Bug | Impact | Location | Fix |
 |---|---|---|---|---|
-| B1 | **Legacy trigger keys (1st/2nd/3rd/4th Down) permanently dead** | `_useEngineForEvents` is always true, so `OnDownChanged` always returns immediately. No evaluator emits bare `"1st Down"`/`"2nd Down"`/`"3rd Down"`/`"4th Down"` keys. Users with assigned songs to these slots hear NOTHING. App ships dead UI slots with default sounds. | `WebMainForm.cs:962` | Either (a) remove legacy Down entries from `BuildDefault` + migrate, or (b) add compatibility alias in `FireEventForSide` |
-| B2 | **`bridge.DuplicateProfile(...)` throws on click** | Right-click context menu item calls a `WebBridge` method that doesn't exist — user-reachable crash | `app.js:1305` → `WebBridge.cs` | Implement `DuplicateProfile` or remove the menu item |
-| B3 | **`ui-bot.js` auto-runs in production** | Pops "UI Bot: N critical, N warnings" toast 1.5s after every page load — looks like dev diagnostic in shipped build | `wwwroot/ui-bot.js` | Gate behind debug flag or remove before next push |
+| B1 | ~~Legacy trigger keys (1st/2nd/3rd/4th Down) permanently dead~~ | ✅ FIXED — `LegacyDownEventAlias` (WebMainForm.cs:860-872) maps engine down keys back to legacy `down:*` triggers; verified in `ResolveEntryForEvent`. | `WebMainForm.cs` | Done |
+| B2 | ~~`bridge.DuplicateProfile(...)` throws on click~~ | ✅ FIXED — `WebBridge.DuplicateProfile` → `WebMainForm.DuplicateProfileFromWeb`, both implemented. | `WebBridge.cs` | Done |
+| B3 | ~~`ui-bot.js` auto-runs in production~~ | ✅ FIXED — gated behind `?debug`/`#debug` (ui-bot.js:496-509, gated 2026-08-08). | `wwwroot/ui-bot.js` | Done |
 
 ### High (Silent Failures / Wrong Behavior)
 
 | # | Bug | Impact | Location | Fix |
 |---|---|---|---|---|
 | B4 | **Legacy `SideAwareEvents` permanently dead** | `OnRegionChanged`'s touchdown/turnover/pat_good/kickoff fallback gated on `_useEngineForEvents` — permanently dead. No regression in practice (engine covers these exactly), but dead code. | `WebMainForm.cs` | Clean up or remove dead paths |
-| B5 | **`_lastDistanceRaw` not sticky** | Can go null during pause menus. Post-resume, TFL/first-down evaluators get incorrect YardsToGo. | `GameWatcher.cs` | Apply sticky pattern: only update on valid parse |
-| B6 | **`PlaySoundboardSlot` / `ScanDynastySave` don't exist** | Soundboard UI hidden (unreachable), Dynasty scan has no caller (unreachable). Same class of bug as B2 but not user-triggerable. | `app.js` → `WebBridge.cs` | Implement or remove |
+| B5 | ~~`_lastDistanceRaw` not sticky~~ | ✅ FIXED — only nulled in `Start()`; committed from real parsed values via `CommitDownAndDistance`; read by `RouteEngineTick` (never blank-able `region.Last`). | `GameWatcher.cs` | Done |
+| B6 | ~~`PlaySoundboardSlot` / `ScanDynastySave` don't exist~~ | ✅ FIXED — both stubbed in `WebBridge`/`WebMainForm` (`PlaySoundboardSlotFromWeb` implemented; `ScanDynastySaveFromWeb` returns honest null). Mirrored on Mac. | `WebBridge.cs` | Done |
 
 ### Medium (Edge Cases)
 
@@ -277,12 +281,12 @@ Search debounce, lazy loading, team data validation fallback, init() error handl
 |---|---|
 | Cloudflare Workers Paid Plan | 🟢 Active ($5/mo) |
 | Marketplace worker deployed | 🟢 `https://bandroom-marketplace.bandroom.workers.dev` |
-| Dashboard server (`serve_dashboard.py`) | 🟡 Running but NOT persistent — dies and needs manual restart |
+| Dashboard server (`serve_dashboard.py`) | 🟢 Persistent — watchdog registered at logon (HKCU Run) with fast TCP probe, auto-restarts on crash |
 | Scheduled health check | 🟢 File-based (TASK_BOARD freshness, file presence, build timestamps) |
 | `.gitignore` | 🟢 Added (covers secrets, bin/obj, WebView2Data) |
 | Git repo | ⚪ Not initialized yet — DO NOT `git init` without `.gitignore` in place |
 | Default song pack download | ⚪ 1 GB — download-on-first-launch needed |
-| `AudioDuckingController.cs` | 🟡 Fully built but NEVER instantiated — 100% dead code |
+| `AudioDuckingController.cs` | 🟢 Fully wired — `AudioPlayer.DuckingEnabled` ↔ `Enabled`, UI toggle via bridge, called from the real Play() loop on Touchdown/Turnover/Safety |
 | `ReverbProvider.cs` | 🟢 Built, see Sprint 3.1 for dynamic scaling |
 | `ProfileSyncService.cs` | 🟢 Built, extendable to team profiles (Sprint 4.9) |
 
@@ -290,22 +294,16 @@ Search debounce, lazy loading, team data validation fallback, init() error handl
 
 ## 13. IMMEDIATE NEXT ACTIONS (This Session / Next Session Priority)
 
-### 🔴 BLOCKING — Do First
-1. **Rebuild `BandAudioHook.csproj`** — verify 0 errors before trusting any fix is live (`.exe` was running, locking the output DLL at last check)
-2. **Fix Mac 78 build errors** — finish `MainWindow` stubs for `MacWebBridge` methods
-3. **Fix B1 (dead legacy trigger keys)** — product decision needed: migrate or add compatibility alias
+> ✅ All prior BLOCKING/HIGH items (rebuild, Mac 78 errors, B1/B2/B3/B5, crowd ducking, dashboard
+> durability) are DONE as of Session 61 — see the corrections block at the top of TASK_BOARD.md.
 
-### 🟡 HIGH — Do Next
-4. **Verify OCR calibrations live** — scores, clock, flag, penaltyagainst, banner, timeout dashes
-5. **Fix B2 (DuplicateProfile crash)** — user-reachable
-6. **Fix B3 (ui-bot.js in production)** — gate or remove
-7. **Fix B5 (sticky `_lastDistanceRaw`)** — prevent spurious events after pause/resume
-8. **Dashboard durability** — auto-restart `serve_dashboard.py` on crash
+### 🟡 REMAINING — Do Next
+1. **Verify OCR calibrations live** — scores, clock, flag, penaltyagainst, banner, timeout dashes
+2. **Functional OCR parity (Mac)** — port Windows GameWatcher capture pipeline to Mac (needs a real Mac)
 
 ### 🟢 SPRINT 1 — Start Building
-9. **Crowd Audio Ducking** (#1 owner priority)
-10. **Test Fire Button** (#2 — makes assigning songs 10x faster)
-11. **Scorebug LED** (#3 — instant visual feedback)
+3. **Test Fire Button** (#2 — makes assigning songs 10x faster)
+4. **Scorebug LED** (#3 — instant visual feedback)
 
 ---
 

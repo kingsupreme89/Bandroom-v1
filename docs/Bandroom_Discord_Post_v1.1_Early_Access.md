@@ -1,20 +1,4 @@
-🎺 **Bandroom v1.1 — Early Access**
-
-This isn't a patch. It's a rebuild.
-
-We've been quiet since v1.0.40. Here's everything that's new after 16 sessions of live-fire development — built, tested, and fixed during real games. This is the biggest update Bandroom has ever shipped.
-
----
-
-## 🎛️ A Completely New Look
-
-Every pixel got touched. Bandroom now runs on a custom glassmorphism theme — frosted-glass panels, team-color reactive glows pulsing through every surface, and a Spotify-style navigation rack. The entire app shifts color instantly to match whatever team you're looking at. It doesn't just feel different — it feels like a real product now.
-
-- **Navigation rack** — icon + label sidebar (like Spotify) replacing the old horizontal pill row
-- **Shiny glass team swatches** — every team tile has rounded corners and a reflective highlight, old-iPhone-icon style
-- **Coverflow team picker** — big center logo with a neon-glow team name, side scroll list, search box, all synced
-- **True A-to-Z sorting** — all 184 teams (134 FBS + 50 FCS) mixed alphabetically. No more "all the small schools stuck at the end" grouping
-- **Side list no longer skips teams** — scrolling fast used to randomly jump to the opposite end of the list (real bug); fixed
+🎺 i must not 
 - **Search box fixed** — no longer cut off by the header bar
 - **Game Settings popover actually works now** — real bug, not confusing UI. Fixed
 

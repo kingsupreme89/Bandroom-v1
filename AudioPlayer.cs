@@ -227,7 +227,12 @@ internal static class AudioPlayer
     /// Megaphone EQ (owner: this should sound like open-air speakers, not a radio/megaphone).
     /// Ignored when isPregameEvent is also true -- the Tunnel treatment already has its own
     /// reverb stage and takes priority for that one clip.</param>
-    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true, Func<float>? liveVolumeSource = null, bool speed2x = false, double whistleSpeed = 1.0, string? channel = null, bool forcePaEffect = false)
+    /// <param name="fadeStartOverride">TriggerEntry.FadeStartSecondsOverride -- null (default)
+    /// means this clip fades on the global FadeStartSeconds/FadeOutDuration schedule, same as
+    /// before these params existed. Non-null lets one card override just its own fade timing.</param>
+    /// <param name="fadeOutDurationOverride">TriggerEntry.FadeOutDurationOverride -- see
+    /// fadeStartOverride above.</param>
+    public static void Play(string path, float? volumeOverride = null, bool interruptPrevious = false, bool isPreview = false, bool isHighPriorityEvent = false, bool isBigHitEvent = false, bool isPregameEvent = false, bool playLeadInWhistle = true, Func<float>? liveVolumeSource = null, bool speed2x = false, double whistleSpeed = 1.0, string? channel = null, bool forcePaEffect = false, double? fadeStartOverride = null, double? fadeOutDurationOverride = null)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
 
@@ -267,6 +272,9 @@ internal static class AudioPlayer
                 // and the list itself would just grow. Add is its own lock so a throw before the
                 // try can't skip it, but everything that can fail now has a matching finally.
                 lock (Lock) ActiveOutputs.Add((output, channel));
+
+                double effectiveFadeStart = fadeStartOverride ?? FadeStartSeconds;
+                double effectiveFadeOutDuration = fadeOutDurationOverride ?? FadeOutDuration;
 
                 try
                 {
@@ -364,9 +372,9 @@ internal static class AudioPlayer
                         // mid-clip just because a slider moved.
                         float liveVolume = isPreview ? (liveVolumeSource?.Invoke() ?? MasterVolume) : volume;
 
-                        if (elapsed >= FadeStartSeconds)
+                        if (elapsed >= effectiveFadeStart)
                         {
-                            double fadeProgress = FadeOutDuration <= 0 ? 1.0 : (elapsed - FadeStartSeconds) / FadeOutDuration;
+                            double fadeProgress = effectiveFadeOutDuration <= 0 ? 1.0 : (elapsed - effectiveFadeStart) / effectiveFadeOutDuration;
                             if (fadeProgress >= 1.0)
                             {
                                 output.Stop();

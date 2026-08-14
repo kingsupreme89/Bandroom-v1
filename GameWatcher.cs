@@ -73,17 +73,30 @@ internal sealed class GameWatcher
             else if (region.Name == "awayscore")
             {
                 region.FxX = preset.AwayScoreFxX; region.FxW = preset.AwayScoreFxW;
-                region.FxY = preset.BandFxY; region.FxH = preset.BandFxH;
+                // Vertical-stack presets (e.g. Espn2013) override Y/H since away/home aren't on
+                // the same horizontal strip there -- see ScorebugPreset.AwayScoreFxY's doc comment.
+                region.FxY = preset.AwayScoreFxY ?? preset.BandFxY;
+                region.FxH = preset.AwayScoreFxH ?? preset.BandFxH;
             }
             else if (region.Name == "homescore")
             {
                 region.FxX = preset.HomeScoreFxX; region.FxW = preset.HomeScoreFxW;
-                region.FxY = preset.BandFxY; region.FxH = preset.BandFxH;
+                region.FxY = preset.HomeScoreFxY ?? preset.BandFxY;
+                region.FxH = preset.HomeScoreFxH ?? preset.BandFxH;
             }
             else if (region.Name == "clock")
             {
                 region.FxX = preset.ClockFxX; region.FxW = preset.ClockFxW;
-                region.FxY = preset.BandFxY; region.FxH = preset.BandFxH;
+                region.FxY = preset.ClockFxY ?? preset.BandFxY;
+                region.FxH = preset.ClockFxH ?? preset.BandFxH;
+            }
+            // FIXED 2026-08-14: playclock's crop used to be hardcoded (never reached this loop at
+            // all) -- see ScorebugPreset.PlayClockFx*'s doc comment for why that silently broke
+            // play clock on every preset except CollegeFootball27.
+            else if (region.Name == "playclock")
+            {
+                region.FxX = preset.PlayClockFxX; region.FxY = preset.PlayClockFxY;
+                region.FxW = preset.PlayClockFxW; region.FxH = preset.PlayClockFxH;
             }
             // penaltyagainst/banner added 2026-08-11 -- previously hardcoded once in the _regions
             // initializer below and never repositioned per preset at all, so every non-CBS preset
@@ -139,6 +152,12 @@ internal sealed class GameWatcher
     /// 25% (ordinary game, away team only sends a small travel pep band).</summary>
     public bool IsBigGame => _snapshotCurrent.BigGame;
 
+    /// <summary>Read-only peek at the most recent tick's PlaySnapshot -- for the Reader Hub status
+    /// panel (WebMainForm.GetScoreboardSourceStatusFromWeb) only. PlaySnapshot is init-only/
+    /// immutable, so exposing the live reference is safe; nothing outside RouteEngineTick ever
+    /// mutates it.</summary>
+    public PlaySnapshot CurrentSnapshot => _snapshotCurrent;
+
     /// <summary>Added 2026-08-12 for the CFB27-only field-position volume system (owner request,
     /// live-tested build): CFB27's default scorebug shows a ball-position number with an arrow
     /// next to it ("26▲"/"35▼", see ScorebugPreset.CollegeFootball27's Possession doc comment) --
@@ -180,6 +199,56 @@ internal sealed class GameWatcher
     /// backwards for the whole game -- reported live as "wrong side's song played," a full-game
     /// systematic inversion, not a per-tick flicker (2026-08-11).</summary>
     public bool UserTeamOnLeftSide { get; set; }
+
+    // --- Scoreboard reader integration (2026-08-13) ---
+    // Coffee's "Scorebug Overlay App" writes an atomic `live-scoreboard.json` with exact scores/
+    // possession/yard line/timeouts, read here as a second, PREFERRED snapshot source -- when
+    // it's CONNECTED, its normalized fields replace the OCR/pixel guesses for score/possession/
+    // yard line/down/distance/timeouts in RouteEngineTick's snapshot; when it's stale/disconnected,
+    // the existing OCR path is used unchanged, exactly as before this feature existed. Event flags
+    // (touchdown/kickoff/etc) stay OCR-owned always -- see PlaySnapshot's own IsTouchdown/etc
+    // fields, none of which the reader ever supplies (A5 of the integration plan: reader
+    // score-change events only corroborate/log, never fire an event flag on their own).
+    readonly ScoreboardJsonReader _scoreboardReader = new();
+    readonly GameStateNormalizer _scoreboardNormalizer = new();
+    string? _scoreboardJsonPath;
+    /// <summary>Exposed for WebBridge.GetScoreboardSourceStatus -- lets app.js show a live
+    /// CONNECTED/WAITING FOR GAME DATA/NOT FOUND/ERROR chip without polling the file itself.</summary>
+    public ScoreboardReaderStatus ScoreboardStatus { get; private set; } = ScoreboardReaderStatus.NotFound;
+    ScoreboardReaderState? _lastScoreboardReaderState;
+
+    // --- Bundled RAM reader (2026-08-13 owner-approved absorption) ---
+    // Direct process-memory read of the running CollegeFB27(.exe), validated by
+    // Bandroom.Core.RamReaderValidator BEFORE anything here trusts a single field out of it (see
+    // that class's own doc comment for the exact port of Coffee's status/PID/freshness/per-field
+    // provenance checks). Takes priority over the screen-JSON reader above when CONNECTED (more
+    // authoritative -- memory, not OCR/JSON-file guessing); both still fall back to plain OCR when
+    // neither reader is usable. OFF by default -- see ConfigStore.LoadScoreboardReaderRamModeEnabled.
+    readonly GameStateNormalizer _ramNormalizer = new();
+    string? _ramLiveDataPath;
+    bool _ramModeEnabled;
+    /// <summary>Exposed for WebBridge.GetScoreboardSourceStatus, same reasoning as ScoreboardStatus
+    /// above.</summary>
+    public ScoreboardReaderStatus RamReaderStatus { get; private set; } = ScoreboardReaderStatus.NotFound;
+
+    static readonly string[] RamGameProcessNames = { "CollegeFB27", "CollegeFB27_Trial" };
+
+    /// <summary>Best-effort PID lookup for RamReaderValidator's expectedGameProcessId check --
+    /// process names confirmed from Coffee's own main.js `exactProcessNames` default
+    /// (['CollegeFB27.exe', 'CollegeFB27_Trial.exe']; Process.GetProcessesByName wants the name
+    /// without ".exe"). Returns null (not a failure) when the game process isn't found yet --
+    /// RamReaderValidator treats a null expected PID as "accept whatever the document claims,"
+    /// same as Coffee's own runtime.game.pid being unset early in acquisition.</summary>
+    static int? FindRamGameProcessId()
+    {
+        foreach (string name in RamGameProcessNames)
+        {
+            var proc = System.Diagnostics.Process.GetProcessesByName(name).FirstOrDefault();
+            if (proc != null) return proc.Id;
+        }
+        return null;
+    }
+
     // FIXED 2026-08-11 (found from live screenshots, not caught by the code-only audit earlier
     // this session): "3rd & inches" and "1st & Goal" both render with no digit at all -- the
     // original digit-only pattern simply never matched either, silently leaving YardsToGo frozen
@@ -298,7 +367,11 @@ internal sealed class GameWatcher
     // check right after routing results) so whichever signal trips first wins and this can never
     // double-fire the same real-world moment.
     static readonly double BlackScreenBrightnessThreshold = 10; // near-total black, 0-255 scale
-    static readonly TimeSpan BlackScreenRunoutDelay = TimeSpan.FromSeconds(13); // owner-confirmed live 2026-08-12
+    /// <summary>User-adjustable via the Audio Timing settings panel (15-45s range) -- default 15s.
+    /// Was a hardcoded 13s constant confirmed live 2026-08-12, but that game's timing doesn't hold
+    /// across every matchup/OS load time, so the owner wants it tunable instead of re-hardcoded.</summary>
+    static TimeSpan BlackScreenRunoutDelay =>
+        TimeSpan.FromSeconds(Math.Clamp(ConfigStore.LoadPlaybackTimingSettings().PregameRunoutDelaySeconds, 15.0, 45.0));
     bool _wasBlackScreen;
     DateTime? _blackScreenSince;
     bool _pregameTakeFieldFired;
@@ -680,6 +753,19 @@ internal sealed class GameWatcher
         _lastKnownQuarter = null;
         _pendingQuarter = null;
         ArrowUp = null;
+        // Same "new Start() is a genuinely clean slate" reasoning as every sticky OCR field above,
+        // applied to the reader-side sticky cache -- a second game must not inherit the first
+        // game's last-known reader score/down/possession.
+        _scoreboardNormalizer.Reset();
+        _scoreboardReader.ClearCache();
+        _scoreboardJsonPath = ScoreboardReaderPaths.ResolveLiveScoreboardJsonPath();
+        ScoreboardStatus = ScoreboardReaderStatus.NotFound;
+        _lastScoreboardReaderState = null;
+
+        _ramNormalizer.Reset();
+        _ramModeEnabled = ConfigStore.LoadScoreboardReaderRamModeEnabled();
+        _ramLiveDataPath = Path.Combine(ScoreboardReaderPaths.ResolveRamReaderDataDirectory(), "live-game-data.json");
+        RamReaderStatus = ScoreboardReaderStatus.NotFound;
         _lastPregameEntranceMarker = false;
         _downChangedThisTick = false;
         // Per-region edge-trigger/cooldown state (Last/LastRawText/CooldownUntil) lives on the
@@ -1239,17 +1325,22 @@ internal sealed class GameWatcher
         PossessionChanged?.Invoke(side);
     }
 
-    /// <summary>CFB27-only field-position arrow read (see ArrowUp's doc comment) -- OCR's the same
-    /// two crops SamplePossessionByUnderline already samples for brightness (only one of the two
-    /// slots actually renders ball-position+arrow text at a time, whichever side has the ball), and
-    /// looks for an up/down arrow glyph in whichever crop actually produced text. Deliberately does
-    /// NOT touch _lastPossession/PossessionChanged -- this is a separate signal, read-only side
-    /// effect on ArrowUp. Best-effort: OCR reliably reading a small arrow GLYPH (not a normal
-    /// alphanumeric character) is unconfirmed, so a generous set of likely OCR misreads (^, v, V,
-    /// Λ, and the real ▲/▼ glyphs) is accepted rather than just the exact Unicode arrows.</summary>
+    /// <summary>CFB27/CFB26-Console-only field-position arrow read (see ArrowUp's doc comment) --
+    /// OCR's the same two crops SamplePossessionByUnderline already samples for brightness (only
+    /// one of the two slots actually renders ball-position+arrow text at a time, whichever side has
+    /// the ball), and looks for an up/down arrow glyph in whichever crop actually produced text.
+    /// Deliberately does NOT touch _lastPossession/PossessionChanged -- this is a separate signal,
+    /// read-only side effect on ArrowUp. Best-effort: OCR reliably reading a small arrow GLYPH (not
+    /// a normal alphanumeric character) is unconfirmed, so a generous set of likely OCR misreads
+    /// (^, v, V, Λ, and the real ▲/▼ glyphs) is accepted rather than just the exact Unicode arrows.
+    /// Wired to CollegeFootball26Console the same way as CFB27 (owner request 2026-08-13) -- that
+    /// preset's underline coordinates are still the unverified/cloned placeholders flagged on
+    /// CollegeFootball26Console's own doc comment, so this inherits that same caveat until a real
+    /// CFB 26 console screenshot is used to re-calibrate them.</summary>
     async Task SampleFieldPositionArrowFromWindow(Bitmap fullBmp, int winW, int winH, OcrEngine engine)
     {
-        if (_activePreset.Name != ScorebugPreset.CollegeFootball27.Name) { ArrowUp = null; return; }
+        if (_activePreset.Name != ScorebugPreset.CollegeFootball27.Name
+            && _activePreset.Name != ScorebugPreset.CollegeFootball26Console.Name) { ArrowUp = null; return; }
         if (_activePreset.AwayUnderlineFxW <= 0 || _activePreset.HomeUnderlineFxW <= 0) return;
 
         string awayText = await OcrCropAsync(fullBmp, winW, winH, engine,
@@ -1633,11 +1724,120 @@ internal sealed class GameWatcher
         return minutes * 60 + seconds;
     }
 
+    /// <summary>Reads and validates the bundled RAM reader's status document -- no retry/grace
+    /// window needed here unlike ScoreboardJsonReader (the screen-JSON path): the RAM reader only
+    /// writes on a real change and Coffee's own 20s freshness rule (ported in RamReaderValidator)
+    /// already covers staleness, so a single mid-write partial read just self-heals on the next
+    /// ~250ms tick rather than needing a cached fallback.</summary>
+    (ScoreboardReaderStatus, ScoreboardReaderState?) ReadRamDocument(string path)
+    {
+        if (!File.Exists(path)) return (ScoreboardReaderStatus.NotFound, null);
+        try
+        {
+            string json = File.ReadAllText(path);
+            var (state, fields) = RamReaderValidator.Validate(json, FindRamGameProcessId(), DateTime.UtcNow);
+            return state != null
+                ? (ScoreboardReaderStatus.Connected, state)
+                : (ScoreboardReaderStatus.WaitingForGameData, null);
+        }
+        catch (IOException)
+        {
+            return (ScoreboardReaderStatus.WaitingForGameData, null); // mid-write race -- self-heals next tick
+        }
+        catch (Exception ex)
+        {
+            Log?.Invoke($"[RamReader] read failed: {ex.Message}");
+            return (ScoreboardReaderStatus.Error, null);
+        }
+    }
+
+    /// <summary>A5 of the integration plan: compares this tick's OCR-driven score delta against
+    /// what the reader independently reports, purely for the Event Log -- never fires or
+    /// suppresses an actual event. Easily disabled by removing the one call site above.</summary>
+    void LogScoreCorroboration(PlaySnapshot previous, PlaySnapshot current, ScoreboardReaderState readerState)
+    {
+        int awayDelta = current.AwayScore - previous.AwayScore;
+        int homeDelta = current.HomeScore - previous.HomeScore;
+        if (awayDelta == 0 && homeDelta == 0) return;
+
+        int? readerAway = readerState.Away?.Score;
+        int? readerHome = readerState.Home?.Score;
+        bool agrees = (awayDelta == 0 || readerAway == current.AwayScore)
+            && (homeDelta == 0 || readerHome == current.HomeScore);
+        EventActivityLog.Record("n/a", "n/a", agrees
+            ? "(reader corroboration) OCR score change confirmed by reader"
+            : $"(reader corroboration) OCR score change NOT confirmed by reader -- reader reports away={readerAway?.ToString() ?? "?"} home={readerHome?.ToString() ?? "?"}");
+    }
+
+    // OCR/RAM watchdog dedup -- see LogRamOcrCrosscheck. Only re-logs when the mismatch SET
+    // actually changes, not every ~250ms tick it happens to still be true, so a genuinely wrong-
+    // game-attached RAM reader doesn't spam the Event Log once per tick for an entire game.
+    string? _lastRamOcrMismatchSignature;
+
+    /// <summary>2026-08-13 reliability addition: RAM stays authoritative/primary for PlaySnapshot
+    /// whenever it's CONNECTED (unchanged) -- this is a SILENT cross-check underneath it, not a
+    /// second validation gate. BANDroom's own OCR keeps sampling every tick regardless of which
+    /// source is primary (nothing here turns OCR off), so comparing "what OCR independently saw"
+    /// against "what RAM says" costs nothing extra to compute -- both values already exist in
+    /// RouteEngineTick's locals before the RAM override overwrites them. Purely diagnostic: logged
+    /// via EventActivityLog, never blocks/overrides the RAM-sourced PlaySnapshot and never changes
+    /// any trigger/event behavior. Skips entirely until OCR has read something real this game
+    /// (avoids "mismatch" noise from pregame's all-zero OCR state).</summary>
+    void LogRamOcrCrosscheck(int ocrDown, int ocrYardsToGo, int ocrAwayScore, int ocrHomeScore, bool ocrPossessionAway, ReaderNumericSnapshot ram)
+    {
+        if (ocrDown == 0 && ocrAwayScore == 0 && ocrHomeScore == 0) return;
+
+        var mismatches = new List<string>();
+        if (ocrAwayScore != ram.AwayScore) mismatches.Add($"away score RAM={ram.AwayScore} OCR={ocrAwayScore}");
+        if (ocrHomeScore != ram.HomeScore) mismatches.Add($"home score RAM={ram.HomeScore} OCR={ocrHomeScore}");
+        if (ocrDown != 0 && ocrDown != ram.Down) mismatches.Add($"down RAM={ram.Down} OCR={ocrDown}");
+        if (ocrDown != 0 && ocrYardsToGo != ram.YardsToGo) mismatches.Add($"distance RAM={ram.YardsToGo} OCR={ocrYardsToGo}");
+        if (ocrPossessionAway != ram.PossessionAway) mismatches.Add($"possession RAM={(ram.PossessionAway ? "away" : "home")} OCR={(ocrPossessionAway ? "away" : "home")}");
+
+        if (mismatches.Count == 0) { _lastRamOcrMismatchSignature = null; return; }
+
+        string signature = string.Join("|", mismatches);
+        if (signature == _lastRamOcrMismatchSignature) return;
+        _lastRamOcrMismatchSignature = signature;
+        EventActivityLog.Record("n/a", "n/a", $"(RAM/OCR watchdog) RAM is primary but disagrees with OCR -- {string.Join("; ", mismatches)}");
+    }
+
     /// <summary>Builds a PlaySnapshot from the current OCR region state and routes it through
     /// all evaluators, firing EventsDetected with the results.</summary>
     void RouteEngineTick()
     {
         if (_eventRouter == null) return;
+
+        // Poll the reader on the same cadence RouteEngineTick itself runs at (~250ms, gated by
+        // the "down" region's own poll delay -- see the Task.Delay(250) comment near the bottom
+        // of RunAsync). Reads null status/state when nothing's ever been resolved/found -- see
+        // ScoreboardJsonReader.Read and ScoreboardReaderPaths' own doc comments for why this is
+        // always a safe no-op fallback to OCR rather than a hard dependency.
+        var (readerStatus, readerState) = _scoreboardJsonPath != null
+            ? _scoreboardReader.Read(_scoreboardJsonPath)
+            : (ScoreboardReaderStatus.NotFound, null);
+        ScoreboardStatus = readerStatus;
+        _lastScoreboardReaderState = readerState;
+        ReaderNumericSnapshot? readerSnapshot = readerStatus == ScoreboardReaderStatus.Connected
+            ? _scoreboardNormalizer.Normalize(readerState)
+            : null;
+
+        // Bundled RAM reader, same cadence, polled independently of the screen-JSON reader above
+        // -- takes priority when CONNECTED (see this field's own doc comment for why). OFF
+        // entirely (never polls the file at all) unless the user has opted in.
+        ReaderNumericSnapshot? ramSnapshot = null;
+        if (_ramModeEnabled && _ramLiveDataPath != null)
+        {
+            var (ramStatus, ramState) = ReadRamDocument(_ramLiveDataPath);
+            RamReaderStatus = ramStatus;
+            if (ramStatus == ScoreboardReaderStatus.Connected)
+                ramSnapshot = _ramNormalizer.Normalize(ramState);
+        }
+        else
+        {
+            RamReaderStatus = ScoreboardReaderStatus.NotFound;
+        }
+        readerSnapshot = ramSnapshot ?? readerSnapshot;
 
         var situationRegion = _regions.FirstOrDefault(r => r.Name == "situation");
         var clockRegion = _regions.FirstOrDefault(r => r.Name == "clock");
@@ -1661,6 +1861,70 @@ internal sealed class GameWatcher
         int awayScore = int.TryParse(_lastKnownAwayScore, out int aScore) ? aScore : 0;
         int homeScore = int.TryParse(_lastKnownHomeScore, out int hScore) ? hScore : 0;
         int timeRemainingSeconds = ParseClockToSeconds(clockRegion?.Last);
+        // Previously hardcoded 0 (dead code disabling every red-zone/field-position evaluator) --
+        // OCR has no yard-line region calibrated, so this only ever gets a real value from the
+        // reader below.
+        int yardLine = 0;
+        int awayTimeoutsRemaining = _lastAwayTimeoutsRemaining;
+        int homeTimeoutsRemaining = _lastHomeTimeoutsRemaining;
+        bool? readerPossessionAway = null;
+
+        // Captured BEFORE the reader override below can overwrite these locals -- OCR keeps
+        // sampling every tick regardless of which source ends up primary (nothing turns it off),
+        // so these are exactly "what OCR independently saw this tick," used only by the RAM/OCR
+        // watchdog cross-check further down. Never fed into the actual snapshot when RAM is primary.
+        int ocrDown = down, ocrYardsToGo = yardsToGo, ocrAwayScore = awayScore, ocrHomeScore = homeScore;
+        bool ocrPossessionAway = _lastPossession == "away";
+
+        // Reader takes over score/possession/yard line/down/distance/timeouts when CONNECTED --
+        // see the ScoreboardStatus field's own doc comment. Event flags (situation/banner/etc)
+        // stay OCR-owned always; structural-turnover/penalty inference below still reads the OCR
+        // possession color (_lastPossession) exactly as before, since those are OCR-specific
+        // safety nets keyed to the OCR situation text, not simple pass-through fields.
+        if (readerSnapshot is { } rs)
+        {
+            down = rs.Down != 0 ? rs.Down : down;
+            quarter = rs.Quarter != 0 ? rs.Quarter : quarter;
+            // RELIABILITY FIX 2026-08-14 (real bug, not speculative -- traced from the Session 72
+            // handoff's "awayTimeouts/homeTimeouts... successfulReads:0" symptom back to its root
+            // cause): these four used to be unconditional overwrites. GameStateNormalizer's sticky
+            // cache defaulted YardsToGo/YardLine/HomeScore/AwayScore to 0 when a field had NEVER
+            // resolved from the reader -- indistinguishable from "reader confirms it's really 0."
+            // Whenever RAM connected (status "live", at least ONE field validated -- e.g. just
+            // team names/clock) but its own per-field locator hadn't separately locked score/yard-
+            // age/yard-line yet (exactly the intermittent per-session locator failure the handoff
+            // doc documents for timeouts), this silently stomped a correct, already-confirmed OCR
+            // score/distance down to 0 every tick, killing every score-delta evaluator
+            // (TouchdownHelper/FieldGoalPATHelper/SafetyHelper/etc all read Current.HomeScore/
+            // AwayScore) for the rest of the game. GameStateNormalizer now returns -1 for these
+            // fields until they've genuinely resolved at least once (same -1-sentinel convention
+            // AwayTimeoutsRemaining/HomeTimeoutsRemaining already used below), so this now falls
+            // back to the OCR-derived local exactly like Down/Quarter/Timeouts already did.
+            if (rs.YardsToGo >= 0) yardsToGo = rs.YardsToGo;
+            if (rs.AwayScore >= 0) awayScore = rs.AwayScore;
+            if (rs.HomeScore >= 0) homeScore = rs.HomeScore;
+            timeRemainingSeconds = rs.TimeRemainingSeconds != 0 ? rs.TimeRemainingSeconds : timeRemainingSeconds;
+            if (rs.YardLine >= 0) yardLine = rs.YardLine;
+            if (rs.AwayTimeoutsRemaining >= 0) awayTimeoutsRemaining = rs.AwayTimeoutsRemaining;
+            if (rs.HomeTimeoutsRemaining >= 0) homeTimeoutsRemaining = rs.HomeTimeoutsRemaining;
+            // RELIABILITY FIX 2026-08-14 (same bug class, arguably higher-impact -- possession
+            // drives which side's Offense/Defense audio fires): ReaderNumericSnapshot.PossessionAway
+            // is a plain bool, so it used to default to false ("home has it") the instant ANY
+            // reader field connected, even on ticks where possession specifically had never once
+            // resolved. That unconditionally overrode GameWatcher's own OCR color-sampled
+            // _lastPossession for the rest of the game (readerPossessionAway ?? ... below only
+            // falls back to OCR when readerPossessionAway is null, and it was never null once
+            // connected). Now only trusts the reader's possession bit once HavePossession
+            // confirms it has genuinely resolved at least once; otherwise stays null so OCR's own
+            // possession tracking is used, unchanged.
+            if (rs.HavePossession) readerPossessionAway = rs.PossessionAway;
+        }
+
+        // RAM-primary watchdog (2026-08-13): silent, log-only OCR cross-check -- only meaningful
+        // when RAM is what's actually driving the snapshot this tick (ramSnapshot, not just the
+        // screen-JSON reader). See LogRamOcrCrosscheck's own doc comment.
+        if (ramSnapshot is { } ramForWatchdog)
+            LogRamOcrCrosscheck(ocrDown, ocrYardsToGo, ocrAwayScore, ocrHomeScore, ocrPossessionAway, ramForWatchdog);
 
         // REDEFINED 2026-08-10: BigGame used to be an auto-detect "close score, late quarter"
         // heuristic. Replaced with a pure manual read of ConfigStore.BigGameSettings.Enabled --
@@ -1770,7 +2034,7 @@ internal sealed class GameWatcher
             Down = down,
             YardsToGo = yardsToGo,
             Quarter = quarter,
-            PossessionAway = _lastPossession == "away",
+            PossessionAway = readerPossessionAway ?? (_lastPossession == "away"),
             IsKickoff = situation == "kickoff",
             IsPAT = situation == "pat_good",
             IsTouchdown = situation == "touchdown",
@@ -1795,14 +2059,21 @@ internal sealed class GameWatcher
             // state (counting vs "--"), not a value held over from a stale OCR read.
             IsPlayClockCounting = playClockRegion?.Last != null,
             IsFieldGoalAttempt = bannerRegion?.Last == "fieldgoal",
-            YardLine = 0,
+            YardLine = yardLine,
             HomeScore = homeScore,
             AwayScore = awayScore,
             TimeRemainingSeconds = timeRemainingSeconds,
-            AwayTimeoutsRemaining = _lastAwayTimeoutsRemaining,
-            HomeTimeoutsRemaining = _lastHomeTimeoutsRemaining,
+            AwayTimeoutsRemaining = awayTimeoutsRemaining,
+            HomeTimeoutsRemaining = homeTimeoutsRemaining,
             BigGame = isBigGame,
         };
+
+        // A5 of the integration plan: reader corroboration is log-only, never wired into
+        // EventRouter -- raises confidence / catches a missed OCR trigger without ever being able
+        // to fire an event flag by itself. Only meaningful when OCR (not the reader) produced this
+        // tick's score, since a reader-primary tick's score IS the reader's own number already.
+        if (readerSnapshot == null && readerState != null)
+            LogScoreCorroboration(_snapshotCurrent, snapshot, readerState);
 
         _snapshotPrevious = _snapshotCurrent;
         _snapshotCurrent = snapshot;
@@ -1868,6 +2139,7 @@ internal sealed class GameWatcher
             new GameStateEventHelper(),
             new KickoffHelper(),
             new OffenseAfterOpeningKickHelper(),
+            new OffenseAfterPuntHelper(),
             new OffenseDownHelper(),
             new OffenseFourthDownHelper(),
             new PenaltyHelper(),
