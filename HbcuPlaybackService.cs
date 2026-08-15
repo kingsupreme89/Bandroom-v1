@@ -286,25 +286,43 @@ internal sealed class HbcuPlaybackService : IDisposable
         _advanceTimer = new System.Threading.Timer(_ => PlayNext(), null, delay, System.Threading.Timeout.InfiniteTimeSpan);
     }
 
-    void Refill(string side, Queue<ConfigStore.HbcuPotSong> queue)
+    /// <summary>Pot/pack lookup for one team name -- own-pot first, own-downloaded-pack second
+    /// (same two-tier lookup Refill always did), factored out so Refill can walk it for more than
+    /// one team name in a row.</summary>
+    static List<ConfigStore.HbcuPotSong> PoolForTeam(string team)
     {
-        bool useGeneric = side == "home" ? _homeUseGenericPack : _awayUseGenericPack;
-        string team = useGeneric ? GenericPackTeamName : (side == "home" ? _homeTeam : _awayTeam);
         var pool = ConfigStore.GetHbcuPot(team)
             .GroupBy(s => s.FilePath, StringComparer.OrdinalIgnoreCase).Select(g => g.First())
             .Where(s => File.Exists(s.FilePath)).ToList();
+        if (pool.Count > 0) return pool;
 
-        if (pool.Count == 0)
-        {
-            // Fallback pack files never went through the normal per-event assignment path (see
-            // WebMainForm.NormalizeAssignmentInBackground), so they'd otherwise be un-normalized
-            // and stick out as louder/quieter than everything else -- normalize on the way in,
-            // same target/cache LoudnessNormalizationService already uses for real assignments.
-            pool = ConfigStore.GetPackFilesForSchool(team)
-                .Where(File.Exists)
-                .Select(f => new ConfigStore.HbcuPotSong { FilePath = LoudnessNormalizationService.NormalizeToTarget(f, LoudnessKind.Song) })
-                .ToList();
-        }
+        // Fallback pack files never went through the normal per-event assignment path (see
+        // WebMainForm.NormalizeAssignmentInBackground), so they'd otherwise be un-normalized
+        // and stick out as louder/quieter than everything else -- normalize on the way in,
+        // same target/cache LoudnessNormalizationService already uses for real assignments.
+        return ConfigStore.GetPackFilesForSchool(team)
+            .Where(File.Exists)
+            .Select(f => new ConfigStore.HbcuPotSong { FilePath = LoudnessNormalizationService.NormalizeToTarget(f, LoudnessKind.Song) })
+            .ToList();
+    }
+
+    void Refill(string side, Queue<ConfigStore.HbcuPotSong> queue)
+    {
+        bool useGeneric = side == "home" ? _homeUseGenericPack : _awayUseGenericPack;
+        string team = side == "home" ? _homeTeam : _awayTeam;
+        string otherTeam = side == "home" ? _awayTeam : _homeTeam;
+
+        // Owner request 2026-08-15: a side with no pot/pack of its own (typically the HBCU-
+        // opponent side, e.g. an FBS team with nothing HBCU-specific assigned) used to just sit
+        // silent all game unless someone remembered to flip "Use Generic Pack" on it by hand.
+        // Same "vs" idea as the explicit Generic toggle already had (side-specific team-name
+        // lookup, see _homeUseGenericPack/_awayUseGenericPack above) -- now automatic: an explicit
+        // "Use Generic Pack" toggle still goes straight to Generic (owner's forced override stays
+        // absolute), but otherwise an empty side first borrows from the OTHER side's pot/pack
+        // (playing your own team's songs beats silence) before finally falling back to Generic.
+        var pool = useGeneric ? PoolForTeam(GenericPackTeamName) : PoolForTeam(team);
+        if (pool.Count == 0 && !useGeneric) pool = PoolForTeam(otherTeam);
+        if (pool.Count == 0 && !useGeneric) pool = PoolForTeam(GenericPackTeamName);
 
         // Fisher-Yates -- avoids repeating a track until the whole pool has played once.
         for (int i = pool.Count - 1; i > 0; i--)

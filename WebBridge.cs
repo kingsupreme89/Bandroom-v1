@@ -211,6 +211,15 @@ public sealed class WebBridge
     public bool RemoveMyDownload(string id) =>
         ConfigStore.RemoveMarketplaceDownload(id) || ConfigStore.RemoveLocalTrack(id);
 
+    /// <summary>Renames a "My Downloads" entry's display title -- same either-manifest lookup as
+    /// RemoveMyDownload. Local-only: never touches the file on disk or (for marketplace-sourced
+    /// entries) the original listing on the worker.</summary>
+    public bool RenameMyDownload(string id, string newName)
+    {
+        if (string.IsNullOrWhiteSpace(newName)) return false;
+        return ConfigStore.RenameMarketplaceDownload(id, newName.Trim()) || ConfigStore.RenameLocalTrack(id, newName.Trim());
+    }
+
     /// <summary>End-user "import my own song" pipeline (item 21) -- runs the whole native flow
     /// (choose file, name the track, trim/normalize via the existing TrimmerForm) on the UI
     /// thread since it's all modal dialogs. Returns {success, path?, name?} on completion, or

@@ -464,14 +464,14 @@
     },
     "Alabama A&M": {
       "conference": "SWAC",
-      "abbreviations": ["AAMU"],
+      "abbreviations": ["AAMU", "AAM"],
       "band_names": ["Marching Maroon and White"],
       "mascot": "Bulldogs",
       "variants": ["Alabama A&M Bulldogs", "Alabama AM"]
     },
     "Alabama State": {
       "conference": "SWAC",
-      "abbreviations": ["ALST", "ALSTATE"],
+      "abbreviations": ["ALST", "ALSTATE", "ALABAMAST"],
       "band_names": ["Mighty Marching Hornets"],
       "mascot": "Hornets",
       "variants": ["Alabama State Hornets"]
@@ -485,7 +485,7 @@
     },
     "Arkansas-Pine Bluff": {
       "conference": "SWAC",
-      "abbreviations": ["UAPB", "PINEBLUFF"],
+      "abbreviations": ["UAPB", "PINEBLUFF", "ARKPB"],
       "band_names": ["Marching Musical Machine of the Mid-South"],
       "mascot": "Golden Lions",
       "variants": ["Arkansas Pine Bluff", "UAPB Golden Lions"]
@@ -499,98 +499,98 @@
     },
     "Florida A&M": {
       "conference": "SWAC",
-      "abbreviations": ["FAMU"],
+      "abbreviations": ["FAMU", "FAM"],
       "band_names": ["Marching 100"],
       "mascot": "Rattlers",
       "variants": ["Florida A&M Rattlers", "Florida AM", "FAMU Rattlers"]
     },
     "Grambling State": {
       "conference": "SWAC",
-      "abbreviations": ["GSU", "GRAM"],
+      "abbreviations": ["GSU", "GRAM", "GRAMBLING"],
       "band_names": ["World Famed Tiger Marching Band"],
       "mascot": "Tigers",
       "variants": ["Grambling State Tigers", "Grambling"]
     },
     "Jackson State": {
       "conference": "SWAC",
-      "abbreviations": ["JSU"],
+      "abbreviations": ["JSU", "JACKSONST"],
       "band_names": ["Sonic Boom of the South"],
       "mascot": "Tigers",
       "variants": ["Jackson State Tigers"]
     },
     "Mississippi Valley State": {
       "conference": "SWAC",
-      "abbreviations": ["MVSU"],
+      "abbreviations": ["MVSU", "MVSC"],
       "band_names": ["Mean Green Marching Machine"],
       "mascot": "Delta Devils",
       "variants": ["Mississippi Valley State Delta Devils", "Miss Valley State", "MVSU Delta Devils"]
     },
     "Prairie View A&M": {
       "conference": "SWAC",
-      "abbreviations": ["PVAMU"],
+      "abbreviations": ["PVAMU", "PV", "PVU"],
       "band_names": ["Marching Storm"],
       "mascot": "Panthers",
       "variants": ["Prairie View A&M Panthers", "Prairie View", "Prairie View AM"]
     },
     "Southern University": {
       "conference": "SWAC",
-      "abbreviations": ["SUBR"],
+      "abbreviations": ["SUBR", "SOUTHERNU"],
       "band_names": ["Human Jukebox"],
       "mascot": "Jaguars",
       "variants": ["Southern University Jaguars", "Southern Jaguars", "Southern Baton Rouge"]
     },
     "Texas Southern": {
       "conference": "SWAC",
-      "abbreviations": ["TSU"],
+      "abbreviations": ["TSU", "TXSU", "TXSO"],
       "band_names": ["Ocean of Soul"],
       "mascot": "Tigers",
       "variants": ["Texas Southern Tigers"]
     },
     "Delaware State": {
       "conference": "MEAC",
-      "abbreviations": ["DSU", "DEST"],
+      "abbreviations": ["DSU", "DEST", "DELST"],
       "band_names": ["Approaching Storm Marching Band"],
       "mascot": "Hornets",
       "variants": ["Delaware State Hornets"]
     },
     "Howard": {
       "conference": "MEAC",
-      "abbreviations": ["HU"],
+      "abbreviations": ["HU", "HOWARDU"],
       "band_names": ["Showtime Marching Band"],
       "mascot": "Bison",
       "variants": ["Howard Bison", "Howard University"]
     },
     "Morgan State": {
       "conference": "MEAC",
-      "abbreviations": ["MORGAN"],
+      "abbreviations": ["MORGAN", "MORGANST"],
       "band_names": ["Magnificent Marching Machine"],
       "mascot": "Bears",
       "variants": ["Morgan State Bears"]
     },
     "Norfolk State": {
       "conference": "MEAC",
-      "abbreviations": ["NSU"],
+      "abbreviations": ["NSU", "NORFOLKST"],
       "band_names": ["Spartan Legion"],
       "mascot": "Spartans",
       "variants": ["Norfolk State Spartans"]
     },
     "North Carolina A&T": {
       "conference": "MEAC",
-      "abbreviations": ["NCAT"],
+      "abbreviations": ["NCAT", "NCATU"],
       "band_names": ["Blue and Gold Marching Machine"],
       "mascot": "Aggies",
       "variants": ["North Carolina A&T Aggies", "NC A&T", "North Carolina AT Aggies"]
     },
     "North Carolina Central": {
       "conference": "MEAC",
-      "abbreviations": ["NCCU"],
+      "abbreviations": ["NCCU", "NCCENTRAL"],
       "band_names": ["Sound Machine"],
       "mascot": "Eagles",
       "variants": ["North Carolina Central Eagles", "NCCU Eagles", "NC Central"]
     },
     "South Carolina State": {
       "conference": "MEAC",
-      "abbreviations": ["SCSU"],
+      "abbreviations": ["SCSU", "SCST"],
       "band_names": ["Marching 101"],
       "mascot": "Bulldogs",
       "variants": ["South Carolina State Bulldogs"]
@@ -675,30 +675,49 @@
     "WISC": "Wisconsin",
     "WIS": "Wisconsin",
     "AAMU": "Alabama A&M",
+    "AAM": "Alabama A&M",
     "ALST": "Alabama State",
     "ALSTATE": "Alabama State",
+    "ALABAMAST": "Alabama State",
     "ALCORN": "Alcorn State",
     "ALCORNST": "Alcorn State",
     "UAPB": "Arkansas-Pine Bluff",
     "PINEBLUFF": "Arkansas-Pine Bluff",
+    "ARKPB": "Arkansas-Pine Bluff",
     "BCU": "Bethune-Cookman",
     "BCC": "Bethune-Cookman",
     "FAMU": "Florida A&M",
+    "FAM": "Florida A&M",
     "GSU": "Grambling State",
     "GRAM": "Grambling State",
+    "GRAMBLING": "Grambling State",
     "JSU": "Jackson State",
+    "JACKSONST": "Jackson State",
     "MVSU": "Mississippi Valley State",
+    "MVSC": "Mississippi Valley State",
     "PVAMU": "Prairie View A&M",
+    "PV": "Prairie View A&M",
+    "PVU": "Prairie View A&M",
     "SUBR": "Southern University",
+    "SOUTHERNU": "Southern University",
     "TSU": "Texas Southern",
+    "TXSU": "Texas Southern",
+    "TXSO": "Texas Southern",
     "DSU": "Delaware State",
     "DEST": "Delaware State",
+    "DELST": "Delaware State",
     "HU": "Howard",
+    "HOWARDU": "Howard",
     "MORGAN": "Morgan State",
+    "MORGANST": "Morgan State",
     "NSU": "Norfolk State",
+    "NORFOLKST": "Norfolk State",
     "NCAT": "North Carolina A&T",
+    "NCATU": "North Carolina A&T",
     "NCCU": "North Carolina Central",
-    "SCSU": "South Carolina State"
+    "NCCENTRAL": "North Carolina Central",
+    "SCSU": "South Carolina State",
+    "SCST": "South Carolina State"
   },
   "conference_map": {
     "SEC": ["Alabama", "Arkansas", "Auburn", "Florida", "Georgia", "Kentucky", "LSU", "Missouri", "Oklahoma", "Ole Miss", "South Carolina", "Tennessee", "Texas", "Texas A&M", "Vanderbilt"],

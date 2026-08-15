@@ -514,6 +514,13 @@
                   <input type="checkbox" id="hbcu-pot-use-generic" />
                   <span>Use Generic Pack</span>
                 </label>
+                <!-- Owner request 2026-08-15: no way to actually add/remove/edit the songs INSIDE
+                     the shared Generic pack itself -- only whether a team is pointed at it. Since
+                     "Generic" is just a sentinel team name the pot backend already treats like any
+                     real team (see ConfigStore's GetHbcuPot/AddToHbcuPot doc comment), this just
+                     re-points the same panel at that pseudo-team via app.js's
+                     _hbcuPotViewingGeneric toggle, with a clear "back to my team" way out. -->
+                <button id="btn-hbcu-pot-edit-generic" class="pill" title="View and edit the shared Generic pack's songs directly">Edit Generic Pack</button>
                 <button id="btn-hbcu-pot-add" class="pill">+ Add Song</button>
               </div>
               <div class="hbcu-pot-list" id="hbcu-pot-list"><!-- populated by app.js --></div>
@@ -832,7 +839,7 @@
              app.js (renderBandroomHub) so the counts stay live. -->
         <div class="bandroom-hero-row" id="bandroom-hub-hero-row"><!-- populated by app.js --></div>
         <div class="bandroom-hub-section-label">
-          Popular Songs
+          <span id="bandroom-hub-section-label-text">Popular Songs</span>
           <select id="bandroom-hub-sort" class="bandroom-hub-sort">
             <option value="newest">Newest</option>
             <option value="views">Most Viewed</option>
@@ -1373,7 +1380,7 @@
       <!-- End-user "import my own song" pipeline (item 21) -- picks a local file, names it,
            trims/normalizes it through the same tool a marketplace track uses, and it lands
            right here alongside real downloads. -->
-      <button id="btn-import-local-song" class="btn-ghost bandroom-import-song-btn">+ Import Your Own Song</button>
+      <button id="btn-import-local-song" class="btn-ghost bandroom-import-song-btn" title="Adds it to your own library only -- use the Share button that appears on it here to also post it to the public Market.">+ Import Your Own Song (just for you)</button>
       <!-- Same column-header treatment as Sound Bank (#bandroom-songs-grid) -- group headers
            (per-school when "Group by school" is on) still span the full row above these labels. -->
       <div class="bandroom-album-list-header">

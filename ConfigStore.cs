@@ -1338,6 +1338,22 @@ internal static class ConfigStore
         }
     }
 
+    /// <summary>Renames a "My Downloads" entry's display title -- local-only, doesn't touch the
+    /// underlying file on disk or the marketplace listing it was downloaded from. Returns false
+    /// if the id wasn't found.</summary>
+    public static bool RenameMarketplaceDownload(string id, string newName)
+    {
+        lock (MarketplaceDownloadsLock)
+        {
+            var entries = LoadMarketplaceDownloadsUnlocked();
+            int idx = entries.FindIndex(e => e.Id == id);
+            if (idx < 0) return false;
+            entries[idx] = entries[idx] with { Name = newName };
+            SaveMarketplaceDownloads(entries);
+            return true;
+        }
+    }
+
     /// <summary>One entry in "My Downloads" for a track the user imported/trimmed themselves
     /// (item 21's local-import pipeline), as opposed to a marketplace download
     /// (MarketplaceDownloadEntry above). Kept as its own manifest/type rather than folded into
@@ -1413,6 +1429,21 @@ internal static class ConfigStore
             entries.Remove(entry);
             SaveLocalTracks(entries);
             try { if (File.Exists(entry.Path)) File.Delete(entry.Path); } catch { /* best-effort */ }
+            return true;
+        }
+    }
+
+    /// <summary>Renames a locally-imported track's display title -- same local-only semantics as
+    /// RenameMarketplaceDownload, doesn't touch the file on disk. Returns false if the id isn't found.</summary>
+    public static bool RenameLocalTrack(string id, string newName)
+    {
+        lock (LocalTracksLock)
+        {
+            var entries = LoadLocalTracksUnlocked();
+            int idx = entries.FindIndex(e => e.Id == id);
+            if (idx < 0) return false;
+            entries[idx] = entries[idx] with { Name = newName };
+            SaveLocalTracks(entries);
             return true;
         }
     }

@@ -568,12 +568,9 @@ function renderTeamGrid() {
     fillTeamSwatch(sw, t, false, true); // preferIcon: main team-select grid wants the icon-only crop
     sw.addEventListener("click", () => selectTeam(t.name));
 
-    const editBtn = document.createElement("button");
-    editBtn.className = "team-swatch-edit-colors";
-    editBtn.title = "Edit this team's colors";
-    editBtn.textContent = "✎"; // pencil
-    editBtn.addEventListener("click", (e) => { e.stopPropagation(); openTeamColorEditor(t, sw); });
-    sw.appendChild(editBtn);
+    // Edit-colors pencil button removed from the team grid per owner request (2026-08-15) --
+    // openTeamColorEditor/closeTeamColorEditor and the popover markup stay intact/unused so the
+    // feature can come back with one line if needed later.
 
     grid.appendChild(sw);
   }
@@ -679,19 +676,43 @@ function hbcuFriendlyEventName(eventKey) {
 /// currently active team -- same team the event cards on the left are being edited for. Click a
 /// row to load it into the shared Clip Preview bar; the trash icon removes it from the pot
 /// (ConfigStore.RemoveFromHbcuPot) without touching the file on disk.
+// Which pot the panel currently shows -- state.activeTeam's own pot (default), or the shared
+// "Generic" pseudo-team pot (owner request 2026-08-15: needed a way to actually edit the songs
+// INSIDE the Generic pack, not just toggle a team onto it). "Generic" is a plain sentinel team
+// name the whole ConfigStore pot backend already treats like any real team, so viewing/editing it
+// is just a matter of passing that string through everywhere renderHbcuPot used to hardcode
+// state.activeTeam.
+let _hbcuPotViewingGeneric = false;
+function hbcuPotViewTeam() { return _hbcuPotViewingGeneric ? "Generic" : state.activeTeam; }
+
 async function renderHbcuPot() {
-  document.getElementById("hbcu-pot-title").textContent = `${state.activeTeam}'s Team Pot`;
-  const genericToggle = document.getElementById("hbcu-pot-use-generic");
-  try { genericToggle.checked = bridge ? await bridge.GetHbcuUseGenericPack(state.activeTeam) : false; }
-  catch (err) { console.error("GetHbcuUseGenericPack failed", err); }
+  const viewTeam = hbcuPotViewTeam();
+  document.getElementById("hbcu-pot-title").textContent = _hbcuPotViewingGeneric
+    ? "Generic Pack (shared)" : `${viewTeam}'s Team Pot`;
+  const genericEditBtn = document.getElementById("btn-hbcu-pot-edit-generic");
+  if (genericEditBtn) {
+    genericEditBtn.textContent = _hbcuPotViewingGeneric ? "← Back to My Team's Pot" : "Edit Generic Pack";
+    genericEditBtn.classList.toggle("pill-active", _hbcuPotViewingGeneric);
+  }
+  // The "Use Generic Pack" toggle only makes sense for a real team deciding whether to point at
+  // the shared pool -- meaningless while looking at the Generic pot itself, so hide it there.
+  const genericWrap = document.getElementById("hbcu-pot-generic-wrap");
+  if (genericWrap) genericWrap.hidden = _hbcuPotViewingGeneric;
+  if (!_hbcuPotViewingGeneric) {
+    const genericToggle = document.getElementById("hbcu-pot-use-generic");
+    try { genericToggle.checked = bridge ? await bridge.GetHbcuUseGenericPack(viewTeam) : false; }
+    catch (err) { console.error("GetHbcuUseGenericPack failed", err); }
+  }
   const list = document.getElementById("hbcu-pot-list");
   list.innerHTML = "";
   let songs = [];
-  try { songs = bridge ? JSON.parse(await bridge.GetHbcuPot(state.activeTeam)) : []; }
+  try { songs = bridge ? JSON.parse(await bridge.GetHbcuPot(viewTeam)) : []; }
   catch (err) { console.error("GetHbcuPot failed", err); }
 
   if (songs.length === 0) {
-    list.innerHTML = `<div class="hbcu-pot-empty">No songs added yet -- shuffle will pull from ${state.activeTeam}'s downloaded pack instead. Click "+ Add Song" to build your own pot.</div>`;
+    list.innerHTML = _hbcuPotViewingGeneric
+      ? `<div class="hbcu-pot-empty">The Generic pack is empty -- click "+ Add Song" to add songs any HBCU-opponent team without its own pack can fall back to.</div>`
+      : `<div class="hbcu-pot-empty">No songs added yet -- shuffle will pull from ${viewTeam}'s downloaded pack instead. Click "+ Add Song" to build your own pot.</div>`;
     return;
   }
   for (const song of songs) {
@@ -757,7 +778,7 @@ async function renderHbcuPot() {
 
     row.querySelector('[data-act="trim"]').addEventListener("click", (e) => {
       e.stopPropagation();
-      openInlineTrimmerForHbcuPot(state.activeTeam, song.path, song.name);
+      openInlineTrimmerForHbcuPot(viewTeam, song.path, song.name);
     });
     row.querySelector('[data-act="preview"]').addEventListener("click", (e) => {
       e.stopPropagation();
@@ -767,7 +788,7 @@ async function renderHbcuPot() {
     row.querySelector('[data-act="stop"]').addEventListener("click", (e) => { e.stopPropagation(); bridge?.StopPreview(); });
     row.querySelector('[data-act="remove"]').addEventListener("click", async (e) => {
       e.stopPropagation();
-      await bridge?.RemoveFromHbcuPot(state.activeTeam, song.path);
+      await bridge?.RemoveFromHbcuPot(viewTeam, song.path);
       renderHbcuPot();
     });
     wireHbcuPotVolumePopover(row, song);
@@ -775,7 +796,11 @@ async function renderHbcuPot() {
     list.appendChild(row);
   }
 }
-document.getElementById("btn-hbcu-pot-add")?.addEventListener("click", () => openClipperAssignForHbcuPot(state.activeTeam));
+document.getElementById("btn-hbcu-pot-add")?.addEventListener("click", () => openClipperAssignForHbcuPot(hbcuPotViewTeam()));
+document.getElementById("btn-hbcu-pot-edit-generic")?.addEventListener("click", () => {
+  _hbcuPotViewingGeneric = !_hbcuPotViewingGeneric;
+  renderHbcuPot();
+});
 document.getElementById("hbcu-pot-use-generic")?.addEventListener("change", async (e) => {
   try {
     await bridge?.SetHbcuUseGenericPack(state.activeTeam, e.target.checked);
@@ -790,7 +815,7 @@ document.getElementById("hbcu-pot-use-generic")?.addEventListener("change", asyn
 /// pattern (SetEventPlayLeadInWhistle/CycleEventWhistleSpeed/etc) since a pot entry isn't a
 /// TriggerEntry the server already has a reference to; this just round-trips the whole object.
 function saveHbcuPotSongSettings(song) {
-  bridge?.SaveHbcuPotSongSettings(state.activeTeam, JSON.stringify({
+  bridge?.SaveHbcuPotSongSettings(hbcuPotViewTeam(), JSON.stringify({
     filePath: song.path,
     volume: song.volume ?? 100,
     playLeadInWhistle: song.playLeadInWhistle !== false,
@@ -1244,6 +1269,7 @@ function wireSituationVolumePopover(row, trigger) {
 async function selectTeam(name) {
   if (name === state.activeTeam) return;
   state.activeTeam = name;
+  _hbcuPotViewingGeneric = false; // switching teams always drops back to that team's own pot
   _clipperAssignLibrary = null; // team-scoped default/conference pack songs are merged in per-team, see openClipperAssign
   if (bridge) await bridge.SelectTeam(name);
   setActiveTeam(name);
@@ -4181,6 +4207,19 @@ const TEAM_ABBREVIATIONS = {
   "Iowa State": ["ISU"], "Kansas": ["KU", "KAN"], "Kansas State": ["KSU"],
   "Oklahoma State": ["OKST"], "Texas Tech": ["TTU"], "West Virginia": ["WV", "WVU"],
   "Oregon State": ["ORST"], "Washington State": ["WSU", "WAZZU"], "Notre Dame": ["ND"],
+  // HBCU schools (SWAC + MEAC) -- same abbreviation set as scripts/team_registry.json's
+  // alias_index (kept in sync by hand, same convention as the rest of this list); mirrored here
+  // so marketplace/team-picker search boxes recognize the same codes ("FAMU", "TXSU", etc).
+  "Alabama A&M": ["AAMU", "AAM"], "Alabama State": ["ALST", "ALSTATE", "ALABAMAST"],
+  "Alcorn State": ["ALCORN", "ALCORNST"], "Arkansas-Pine Bluff": ["UAPB", "PINEBLUFF", "ARKPB"],
+  "Bethune-Cookman": ["BCU", "BCC"], "Florida A&M": ["FAMU", "FAM"],
+  "Grambling State": ["GSU", "GRAM", "GRAMBLING"], "Jackson State": ["JSU", "JACKSONST"],
+  "Mississippi Valley State": ["MVSU", "MVSC"], "Prairie View A&M": ["PVAMU", "PV", "PVU"],
+  "Southern University": ["SUBR", "SOUTHERNU"], "Texas Southern": ["TSU", "TXSU", "TXSO"],
+  "Delaware State": ["DSU", "DEST", "DELST"], "Howard": ["HU", "HOWARDU"],
+  "Morgan State": ["MORGAN", "MORGANST"], "Norfolk State": ["NSU", "NORFOLKST"],
+  "North Carolina A&T": ["NCAT", "NCATU"], "North Carolina Central": ["NCCU", "NCCENTRAL"],
+  "South Carolina State": ["SCSU", "SCST"],
 };
 
 // Matches a search query against a team's full name OR any known scorebug abbreviation (see
@@ -5379,7 +5418,7 @@ async function importLocalSong() {
     const raw = await bridge.ImportLocalSong();
     const result = JSON.parse(raw);
     if (result.success) {
-      showToast(`Imported "${result.name}" -- it's ready to assign to any trigger.`);
+      showToast(`Imported "${result.name}" to your own library -- it's ready to assign to any trigger. Want it public? Hit Share on it in My Downloads.`);
       loadMyDownloads();
     }
     // cancelled: true just means the user backed out of one of the dialogs -- not an error,
@@ -5538,6 +5577,30 @@ function buildMyDownloadRow(item) {
     actions.appendChild(bgBtn);
   }
 
+  const renameBtn = document.createElement("button");
+  renameBtn.className = "bandroom-item-action";
+  renameBtn.title = "Rename this download";
+  renameBtn.textContent = "\u{270F}\u{FE0F}";
+  renameBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const typed = window.prompt("Rename this download:", item.name);
+    if (typed === null) return;
+    const newName = typed.trim();
+    if (!newName || newName === item.name) return;
+    renameBtn.disabled = true;
+    const ok = bridge ? await bridge.RenameMyDownload(item.id, newName) : false;
+    if (ok) {
+      item.name = newName;
+      title.textContent = newName;
+      tile.title = item.source === "local" ? newName : `${item.school} — ${newName}`;
+      showToast(`Renamed to "${newName}".`);
+    } else {
+      showToast("Couldn't rename that -- try again.");
+    }
+    renameBtn.disabled = false;
+  });
+  actions.appendChild(renameBtn);
+
   const removeBtn = document.createElement("button");
   removeBtn.className = "bandroom-item-action bandroom-item-action-danger";
   removeBtn.title = "Remove from My Downloads";
@@ -5573,6 +5636,14 @@ function buildMyDownloadRow(item) {
 async function renderPopularSongsShelf() {
   const el = document.getElementById("bandroom-popular-shelf");
   if (!el) return;
+  const labelEl = document.getElementById("bandroom-hub-section-label-text");
+  if (labelEl) {
+    labelEl.textContent = _hubSort === "newest" ? "Newest Uploads"
+      : _hubSort === "downloads" ? "Most Downloaded"
+      : _hubSort === "likes" ? "Most Liked"
+      : _hubSort === "views" ? "Most Viewed"
+      : "Popular Songs";
+  }
   el.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
   try {
     const songs = await fetchUploadList("song", null, null);
@@ -5580,6 +5651,8 @@ async function renderPopularSongsShelf() {
     let ranked = songs;
     if (_hubSort === "views" || _hubSort === "downloads" || _hubSort === "likes") {
       ranked = [...songs].sort((a, b) => (b[_hubSort] ?? 0) - (a[_hubSort] ?? 0));
+    } else if (_hubSort === "newest") {
+      ranked = [...songs].sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1));
     } else {
       // Default ranking: downloads + likes combined, per the owner's "ranked by downloads+likes"
       // spec, ties broken newest-first.
@@ -5789,7 +5862,10 @@ function buildItemTile(item) {
     const uploader = document.createElement("div");
     uploader.className = "marketplace-card-uploader";
     const ago = item.uploadedAt ? relativeTime(item.uploadedAt) : "";
-    uploader.textContent = `Uploaded by ${item.uploadedBy ?? "anonymous"}${ago ? " \u00B7 " + ago : ""}`;
+    uploader.textContent = ago
+      ? `${ago} \u00B7 ${item.uploadedBy ?? "anonymous"}`
+      : `Uploaded by ${item.uploadedBy ?? "anonymous"}`;
+    uploader.title = `Uploaded by ${item.uploadedBy ?? "anonymous"}${ago ? " \u00B7 " + ago : ""}`;
     body.append(title, schoolRow, meta, uploader);
 
     const actions = document.createElement("div");
@@ -11017,7 +11093,9 @@ function filterBandroomTeams(query) {
   const tiles = grid.querySelectorAll(".team-swatch");
   const q = query.toLowerCase().trim();
   tiles.forEach((tile) => {
-    tile.style.display = !q || (tile.title || "").toLowerCase().includes(q) ? "" : "none";
+    if (!q) { tile.style.display = ""; return; }
+    const team = state.teams?.find((t) => t.name === tile.title);
+    tile.style.display = (team ? teamMatchesQuery(team, q) : (tile.title || "").toLowerCase().includes(q)) ? "" : "none";
   });
 }
 // ================================================================

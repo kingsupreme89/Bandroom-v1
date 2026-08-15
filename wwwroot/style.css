@@ -2300,6 +2300,22 @@ input, select, textarea, [contenteditable] {
 .bandroom-album-icon:hover { transform: scale(1.08); box-shadow: 0 0 0 2px color-mix(in srgb, var(--team-secondary, var(--accent)) 55%, transparent); }
 
 .bandroom-album-grid { flex: 1 1 auto; overflow-y: auto; min-height: 0; scrollbar-gutter: stable; }
+/* Owner report (2026-08-15): mouse-wheel scrolling didn't work over the hub's Popular
+   Songs/Top Team Backgrounds lists -- had to grab the actual scrollbar. Root cause: these two
+   shelves (#bandroom-popular-shelf/#bandroom-backgrounds-shelf) carry .bandroom-album-grid for
+   its row-list styling, but unlike the team-album page (where that class's own overflow-y:auto
+   is the ONE scroll region inside a flex column), here they sit inside .bandroom-main, which is
+   already the hub's scroll container. The nested overflow-y:auto tried to scroll itself first,
+   and .bandroom-album-grid's overscroll-behavior:contain (see the rubber-band rule near the top
+   of this file) then stopped that dead end from ever chaining the wheel event up to
+   .bandroom-main. Scoped reset: let these two flow as normal content and leave all scrolling to
+   .bandroom-main. */
+.bandroom-main .bandroom-album-grid {
+  flex: none;
+  overflow: visible;
+  overscroll-behavior: auto;
+  min-height: auto;
+}
 /* Team album (songs + background images together) — Nexus Mods-style 4-column card grid.
    Trophy Room used to be its own #bandroom-images-grid; folded into #bandroom-songs-grid (kept
    the id to avoid churning every other selector/JS reference). MY DOWNLOADS moved off this grid

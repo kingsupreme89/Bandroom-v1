@@ -257,6 +257,12 @@ public sealed class MacWebBridge
     public bool RemoveMyDownload(string id) =>
         ConfigStore.RemoveMarketplaceDownload(id) || ConfigStore.RemoveLocalTrack(id);
 
+    public bool RenameMyDownload(string id, string newName)
+    {
+        if (string.IsNullOrWhiteSpace(newName)) return false;
+        return ConfigStore.RenameMarketplaceDownload(id, newName.Trim()) || ConfigStore.RenameLocalTrack(id, newName.Trim());
+    }
+
     public string ImportLocalSong() => _host.ImportLocalSongFromWeb();
 
     public async Task<string> ShareLocalTrackToMarketplace(string id, string school)
