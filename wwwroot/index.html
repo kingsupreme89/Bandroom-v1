@@ -246,6 +246,22 @@
         </div>
       </div>
 
+      <!-- Generic "pick a team" dialog (pickTeamDialog in app.js) -- reusable Promise<name|null>
+           team picker with the same searchable icon-grid UX as import-target-team-overlay above,
+           instead of every other feature (Share to Marketplace, Edit Upload's school field) making
+           the user hand-type an exact team name/abbreviation into a window.prompt or free-text
+           input, which is typo-prone and can silently detach an upload from its team. -->
+      <div id="pick-team-overlay" hidden>
+        <div id="pick-team-dialog" class="glass">
+          <div class="team-picker-header">
+            <span id="pick-team-title">Which Team?</span>
+            <button id="btn-close-pick-team" class="icon-btn">&times;</button>
+          </div>
+          <input type="text" id="pick-team-search" placeholder="Search teams..." class="team-picker-search" aria-label="Search teams" />
+          <div class="team-picker-grid" id="pick-team-grid"><!-- populated by app.js --></div>
+        </div>
+      </div>
+
       <!-- Add School (TeamBuilder custom school v1) -- name + primary/secondary color only. No
            in-game OCR/matching for these; logo is set afterward via the existing per-team pencil
            icon in the full Team picker, which already works for any team name. -->
@@ -294,9 +310,35 @@
             <label class="add-school-label" for="edit-upload-name">Name</label>
             <input type="text" id="edit-upload-name" class="team-picker-search" maxlength="80" />
             <label class="add-school-label" for="edit-upload-school">School / team</label>
-            <input type="text" id="edit-upload-school" placeholder="e.g. Georgia" class="team-picker-search" maxlength="60" />
+            <!-- Was a free-text input the user had to type an exact name/abbreviation into (typo
+                 = item silently detaches from its team, see resolveTypedTeamName's doc comment).
+                 Now read-only + a button that opens the same searchable icon-grid team picker
+                 every other team-select flow in the app uses (pickTeamDialog) -- picking always
+                 yields a valid roster name. -->
+            <div class="edit-upload-school-row">
+              <input type="text" id="edit-upload-school" class="team-picker-search" readonly />
+              <button type="button" id="btn-edit-upload-school-pick" class="btn-ghost">Change...</button>
+            </div>
             <div id="edit-upload-error" class="add-school-error" hidden></div>
             <button id="btn-edit-upload-confirm" class="btn-ghost btn-block">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Rename dialog (renameDialog in app.js) -- single-field version of edit-upload-overlay
+           above, replacing My Downloads' old window.prompt() rename with the app's own themed
+           modal for consistency with every other name/text entry point. -->
+      <div id="rename-overlay" hidden>
+        <div id="rename-dialog" class="glass">
+          <div class="team-picker-header">
+            <span id="rename-title">Rename</span>
+            <button id="btn-close-rename" class="icon-btn">&times;</button>
+          </div>
+          <div class="add-school-body">
+            <label class="add-school-label" for="rename-input">Name</label>
+            <input type="text" id="rename-input" class="team-picker-search" maxlength="80" />
+            <div id="rename-error" class="add-school-error" hidden></div>
+            <button id="btn-rename-confirm" class="btn-ghost btn-block">Save</button>
           </div>
         </div>
       </div>
@@ -790,14 +832,14 @@
                grid, which the hub's instructions text referenced but never actually linked to).
                Jumps straight to the active team's album with the upload picker already open --
                see wireBandroomHubUploadButton in app.js. -->
-          <button id="btn-bandroom-hub-upload" class="pill pill-marketplace" title="Upload a song or background image to your team's Sound Bank">+ Upload</button>
+          <button id="btn-bandroom-hub-upload" class="pill pill-marketplace" title="Upload a song or background image to your team's Sound Bank">+ Upload to My Team</button>
           <button id="btn-forward-bandroom-album" class="icon-btn" title="Forward to last team" hidden>&rarr;</button>
           <button id="btn-close-bandroom" class="icon-btn">&times;</button>
         </div>
       </div>
       <div class="bandroom-sidebar">
         <div class="bandroom-hub-section-label">Your Library</div>
-        <input type="text" id="bandroom-search" placeholder="Search teams..." class="team-picker-search" />
+        <input type="text" id="bandroom-search" placeholder="Search teams..." class="team-picker-search" aria-label="Search teams" />
         <div class="team-picker-grid" id="bandroom-team-grid"><!-- populated by app.js --></div>
       </div>
       <div class="bandroom-main">
@@ -840,7 +882,7 @@
         <div class="bandroom-hero-row" id="bandroom-hub-hero-row"><!-- populated by app.js --></div>
         <div class="bandroom-hub-section-label">
           <span id="bandroom-hub-section-label-text">Popular Songs</span>
-          <select id="bandroom-hub-sort" class="bandroom-hub-sort">
+          <select id="bandroom-hub-sort" class="bandroom-hub-sort" aria-label="Sort popular songs">
             <option value="newest">Newest</option>
             <option value="views">Most Viewed</option>
             <option value="downloads">Most Downloaded</option>
@@ -902,7 +944,7 @@
         </div>
       </div>
       <div class="bandroom-album-toolbar">
-        <input type="text" id="bandroom-album-search" placeholder="Search this album..." class="team-picker-search" />
+        <input type="text" id="bandroom-album-search" placeholder="Search this album..." class="team-picker-search" aria-label="Search this album" />
         <button id="btn-bandroom-album-import-pack" class="btn-ghost" title="Import the default song pack from a .zip or folder">Import Song Pack</button>
         <button id="btn-bandroom-album-download-all" class="btn-ghost" title="Download every item in this album">Download All</button>
         <button id="btn-open-marketplace-chat" class="pill pill-marketplace" title="Talk with everyone else in the marketplace">Chat</button>
@@ -912,9 +954,9 @@
            content types (there's no genre metadata on uploads, just song vs. background image).
            Wired in app.js (see bandroomAlbumTypeFilter). -->
       <div class="bandroom-album-filters" id="bandroom-album-filters">
-        <button class="pill bandroom-album-filter bandroom-filter-pill active" data-type="all">All</button>
-        <button class="pill bandroom-album-filter bandroom-filter-pill" data-type="song">Songs</button>
-        <button class="pill bandroom-album-filter bandroom-filter-pill" data-type="image">Backgrounds</button>
+        <button class="pill bandroom-album-filter bandroom-filter-pill active" data-type="all" aria-pressed="true">All</button>
+        <button class="pill bandroom-album-filter bandroom-filter-pill" data-type="song" aria-pressed="false">Songs</button>
+        <button class="pill bandroom-album-filter bandroom-filter-pill" data-type="image" aria-pressed="false">Backgrounds</button>
       </div>
       <!-- Column header row for the list below -- Title/Type/Uploaded/Actions, same idea as the
            reference image's Title/Genre/Mood/Duration/License header over its track table. -->

@@ -4543,14 +4543,24 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   width: 18px; text-align: center;
 }
 .suggested-row-body { flex: 1 1 auto; min-width: 0; }
+/* Was a hard single-line ellipsis -- on a narrow sidebar that cut real song names down to
+   useless fragments ("OKST-Fight Song..." -> "OKST-Fl..."), the exact "truncation hides the one
+   useful part" bug already fixed once for the uploader line (Session 86). Wrap to 2 lines
+   instead so the full name is actually readable without relying on the hover tooltip. */
 .suggested-row-name {
   font-size: 13px; font-weight: 600; color: var(--text-primary);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.25;
 }
 .suggested-row-meta { font-size: 11.5px; color: var(--text-muted); }
 .suggested-row-dl {
   flex: 0 0 auto;
   font-size: 11.5px; font-weight: 700; color: var(--accent);
+  /* was rendering with the arrow glyph jammed against the number -- \u{2B07} has no built-in
+     trailing space in most fonts even though the template literal has one, so it visually reads
+     "↓4" with zero gap. */
+  letter-spacing: 0.3px;
+  white-space: nowrap;
 }
 .suggested-empty { font-size: 12.5px; color: var(--text-muted); padding: 4px 0; }
 
@@ -4597,7 +4607,7 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
    [hidden] attribute itself still worked via the UA stylesheet, so it stayed invisible until
    opened -- the break only showed once you actually triggered the edit-pencil/admin-edit flow).
    Folded in here since its dialog already matches this exact fixed-backdrop/centered-flex shape. */
-#import-target-team-overlay, #add-school-overlay, #edit-upload-overlay {
+#import-target-team-overlay, #add-school-overlay, #edit-upload-overlay, #pick-team-overlay, #rename-overlay {
   position: fixed;
   inset: 0;
   z-index: 10;
@@ -4606,10 +4616,13 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   justify-content: center;
   background: rgba(6, 7, 8, 0.55);
 }
-#import-target-team-overlay[hidden], #add-school-overlay[hidden], #edit-upload-overlay[hidden] {
+#import-target-team-overlay[hidden], #add-school-overlay[hidden], #edit-upload-overlay[hidden], #pick-team-overlay[hidden], #rename-overlay[hidden] {
   display: none;
 }
-#import-target-team-dialog {
+/* Opens ON TOP of edit-upload-overlay (school "Change..." button) or the marketplace hub, so it
+   needs to win the stacking order rather than sharing z-index:10 with everything else above. */
+#pick-team-overlay { z-index: 20; }
+#import-target-team-dialog, #pick-team-dialog {
   width: min(700px, 90vw);
   height: min(600px, 80vh);
   border-radius: var(--radius-panel);
@@ -4618,7 +4631,7 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   flex-direction: column;
   min-height: 0;
 }
-#add-school-dialog, #edit-upload-dialog {
+#add-school-dialog, #edit-upload-dialog, #rename-dialog {
   width: min(420px, 90vw);
   border-radius: var(--radius-panel);
   padding: 22px;
@@ -4647,6 +4660,20 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 .add-school-colors {
   display: flex;
   gap: 16px;
+}
+.edit-upload-school-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.edit-upload-school-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: default;
+  opacity: 0.85;
+}
+.edit-upload-school-row button {
+  flex: 0 0 auto;
 }
 .add-school-color-field {
   display: flex;

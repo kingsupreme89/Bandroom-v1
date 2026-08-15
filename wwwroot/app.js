@@ -328,6 +328,7 @@ function renderSuggestedBatch() {
       const playBtn = document.createElement("button");
       playBtn.className = "bandroom-item-action";
       playBtn.title = "Play";
+      playBtn.setAttribute("aria-label", "Play");
       playBtn.textContent = "▶";
       playBtn.addEventListener("click", (e) => { e.stopPropagation(); previewSong(item); });
       actions.appendChild(playBtn);
@@ -335,6 +336,7 @@ function renderSuggestedBatch() {
       const stopBtn = document.createElement("button");
       stopBtn.className = "bandroom-item-action";
       stopBtn.title = "Stop";
+      stopBtn.setAttribute("aria-label", "Stop");
       stopBtn.textContent = "⏹";
       stopBtn.addEventListener("click", (e) => { e.stopPropagation(); stopPreview(); });
       actions.appendChild(stopBtn);
@@ -346,6 +348,7 @@ function renderSuggestedBatch() {
       const dlBtn = document.createElement("button");
       dlBtn.className = "bandroom-item-action";
       dlBtn.title = "Download to My Downloads";
+      dlBtn.setAttribute("aria-label", "Download to My Downloads");
       dlBtn.textContent = "⬇";
       dlBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -557,9 +560,38 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/// Clicking the "Generic" icon in the left team-grid (HBCU mode) jumps straight to viewing/
+/// editing the shared Generic pack's pot -- same underlying toggle as "Edit Generic Pack" inside
+/// the Team Pot panel (see _hbcuPotViewingGeneric above), just reachable as an icon alongside the
+/// real teams instead of a button you only see after opening Situations. Does NOT touch
+/// state.activeTeam -- this is purely which pot the panel is showing, not which team is selected.
+function selectGenericPot() {
+  _hbcuPotViewingGeneric = true;
+  const panel = document.getElementById("situations-panel");
+  if (panel.hidden) {
+    openSituations(state.currentSituationsCategory || "All");
+  } else {
+    renderHbcuPot();
+  }
+  renderTeamGrid();
+}
+
 function renderTeamGrid() {
   const grid = document.getElementById("team-grid");
   grid.innerHTML = "";
+  // Generic pack icon -- HBCU mode only, pinned first/left like the owner's other HBCU team
+  // icons, so the shared pot is a one-click destination instead of a toggle buried inside the
+  // Team Pot panel. Neutral gray gradient + "GEN" initials since it isn't a real roster team.
+  if (state.hbcuMode) {
+    const genSw = document.createElement("div");
+    genSw.className = "team-swatch team-swatch-generic" + (_hbcuPotViewingGeneric ? " active" : "");
+    genSw.title = "Generic Pack – shared pot for HBCU opponents without their own pack";
+    genSw.style.background = "linear-gradient(135deg, #4b5563, #9ca3af)";
+    genSw.style.setProperty("--tile-color", "#9ca3af");
+    genSw.textContent = "GEN";
+    genSw.addEventListener("click", selectGenericPot);
+    grid.appendChild(genSw);
+  }
   for (const t of hbcuFilteredTeams()) {
     const sw = document.createElement("div");
     const configured = state.savedProfiles.includes(t.name);
@@ -3774,6 +3806,8 @@ function wireControls() {
   });
   document.getElementById("import-target-team-search").addEventListener("input", (e) => renderImportTargetTeamGrid(e.target.value));
 
+  document.getElementById("pick-team-search").addEventListener("input", (e) => renderTeamGridInto("pick-team-grid", e.target.value, (name) => _pickTeamResolve?.(name)));
+
   document.getElementById("btn-close-add-school").addEventListener("click", closeAddSchoolDialog);
   document.getElementById("add-school-overlay").addEventListener("click", (e) => {
     if (e.target.id === "add-school-overlay") closeAddSchoolDialog();
@@ -4058,6 +4092,71 @@ function closeImportTargetTeamDialog() {
   document.getElementById("import-target-team-overlay").hidden = true;
 }
 
+// Reusable "pick a team" dialog -- resolves with the picked team name, or null if closed without
+// picking. Replaces window.prompt("which team is it for?") free-text entry points across the app
+// (Share to Marketplace, Edit Upload's school field) with the same searchable icon-grid every
+// other team-picking flow in the app already uses -- no typing, no typos, no abbreviation lookup
+// needed from the user.
+let _pickTeamResolve = null;
+function pickTeamDialog(title) {
+  return new Promise((resolve) => {
+    document.getElementById("pick-team-title").textContent = title || "Which Team?";
+    const overlay = document.getElementById("pick-team-overlay");
+    const search = document.getElementById("pick-team-search");
+    overlay.hidden = false;
+    search.value = "";
+    renderTeamGridInto("pick-team-grid", "", (name) => finishPickTeam(name));
+    search.focus();
+    _pickTeamResolve = (name) => finishPickTeam(name);
+    function finishPickTeam(name) {
+      overlay.hidden = true;
+      _pickTeamResolve = null;
+      resolve(name);
+    }
+    document.getElementById("btn-close-pick-team").onclick = () => finishPickTeam(null);
+    overlay.onclick = (e) => { if (e.target === overlay) finishPickTeam(null); };
+  });
+}
+
+// Single-field rename dialog -- replaces window.prompt("Rename this download:", ...) with the
+// app's own themed modal, same shape as editUploadDialog above. Resolves with the trimmed new
+// name, or null if cancelled/unchanged.
+function renameDialog(initialName, title) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("rename-overlay");
+    const input = document.getElementById("rename-input");
+    const err = document.getElementById("rename-error");
+    const confirmBtn = document.getElementById("btn-rename-confirm");
+    const closeBtn = document.getElementById("btn-close-rename");
+
+    document.getElementById("rename-title").textContent = title || "Rename";
+    input.value = initialName ?? "";
+    err.hidden = true;
+    err.textContent = "";
+    overlay.hidden = false;
+    input.focus();
+    input.select();
+
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      overlay.hidden = true;
+      confirmBtn.onclick = null;
+      closeBtn.onclick = null;
+      input.onkeydown = null;
+      resolve(result);
+    };
+    confirmBtn.onclick = () => {
+      const name = input.value.trim();
+      if (!name) { err.textContent = "A name is required."; err.hidden = false; return; }
+      finish(name === initialName ? null : name);
+    };
+    closeBtn.onclick = () => finish(null);
+    input.onkeydown = (e) => { if (e.key === "Enter") confirmBtn.onclick(); };
+  });
+}
+
 function renderImportTargetTeamGrid(filter) {
   renderTeamGridInto("import-target-team-grid", filter, async (name) => {
     closeImportTargetTeamDialog();
@@ -4086,6 +4185,7 @@ function editUploadDialog(initialName, initialSchool, title) {
     const overlay = document.getElementById("edit-upload-overlay");
     const nameInput = document.getElementById("edit-upload-name");
     const schoolInput = document.getElementById("edit-upload-school");
+    const schoolPickBtn = document.getElementById("btn-edit-upload-school-pick");
     const err = document.getElementById("edit-upload-error");
     const confirmBtn = document.getElementById("btn-edit-upload-confirm");
     const closeBtn = document.getElementById("btn-close-edit-upload");
@@ -4106,7 +4206,12 @@ function editUploadDialog(initialName, initialSchool, title) {
       confirmBtn.onclick = null;
       closeBtn.onclick = null;
       overlay.onclick = null;
+      schoolPickBtn.onclick = null;
       resolve(result);
+    };
+    schoolPickBtn.onclick = async () => {
+      const picked = await pickTeamDialog("Move this upload to which team?");
+      if (picked) { schoolInput.value = picked; err.hidden = true; }
     };
     confirmBtn.onclick = () => {
       const name = nameInput.value.trim();
@@ -4231,6 +4336,19 @@ function teamMatchesQuery(team, q) {
   const abbrevs = TEAM_ABBREVIATIONS[team.name];
   if (!abbrevs) return false;
   return abbrevs.some((a) => a.toLowerCase().startsWith(q));
+}
+
+// Resolves a hand-typed team name against the roster for the Share/Edit/Admin-Edit "which team
+// is this for" prompts -- those used to require an EXACT full name match, so typing a known
+// scorebug abbreviation (e.g. "FAMU" for Florida A&M) was silently rejected as "not in your
+// roster" even though it's the same abbreviation the search boxes already understand via
+// TEAM_ABBREVIATIONS. Exact full-name match first, then exact abbreviation match.
+function resolveTypedTeamName(typed) {
+  const q = (typed || "").trim().toLowerCase();
+  if (!q) return null;
+  const exact = state.teams.find((t) => t.name.toLowerCase() === q);
+  if (exact) return exact;
+  return state.teams.find((t) => (TEAM_ABBREVIATIONS[t.name] || []).some((a) => a.toLowerCase() === q)) || null;
 }
 
 function renderTeamGridInto(gridId, filter, onPick, showEditLogo = false, preferIcon = false) {
@@ -5513,14 +5631,8 @@ function buildMyDownloadRow(item) {
     shareBtn.textContent = "\u{1F4E4} Share";
     shareBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      const typed = window.prompt(`Share "${item.name}" to the marketplace -- which team is it for? (exact team name, e.g. "Georgia")`);
-      if (!typed || !typed.trim()) return;
-      const match = state.teams.find((t) => t.name.toLowerCase() === typed.trim().toLowerCase());
-      if (!match) {
-        showToast(`"${typed.trim()}" isn't a team in your roster -- use the exact team name so it shows up in that team's Sound Bank.`);
-        return;
-      }
-      const school = match.name;
+      const school = await pickTeamDialog(`Share "${item.name}" to which team's Sound Bank?`);
+      if (!school) return;
       shareBtn.disabled = true;
       shareBtn.textContent = "Sharing...";
       try {
@@ -5580,13 +5692,12 @@ function buildMyDownloadRow(item) {
   const renameBtn = document.createElement("button");
   renameBtn.className = "bandroom-item-action";
   renameBtn.title = "Rename this download";
+  renameBtn.setAttribute("aria-label", "Rename this download");
   renameBtn.textContent = "\u{270F}\u{FE0F}";
   renameBtn.addEventListener("click", async (e) => {
     e.stopPropagation();
-    const typed = window.prompt("Rename this download:", item.name);
-    if (typed === null) return;
-    const newName = typed.trim();
-    if (!newName || newName === item.name) return;
+    const newName = await renameDialog(item.name, "Rename Download");
+    if (!newName) return;
     renameBtn.disabled = true;
     const ok = bridge ? await bridge.RenameMyDownload(item.id, newName) : false;
     if (ok) {
@@ -5604,9 +5715,11 @@ function buildMyDownloadRow(item) {
   const removeBtn = document.createElement("button");
   removeBtn.className = "bandroom-item-action bandroom-item-action-danger";
   removeBtn.title = "Remove from My Downloads";
+  removeBtn.setAttribute("aria-label", "Remove from My Downloads");
   removeBtn.textContent = "\u{1F5D1}";
   removeBtn.addEventListener("click", async (e) => {
     e.stopPropagation();
+    if (!window.confirm(`Remove "${item.name}" from My Downloads?`)) return;
     removeBtn.disabled = true;
     const ok = bridge ? await bridge.RemoveMyDownload(item.id) : false;
     if (ok) {
@@ -5770,17 +5883,27 @@ function renderBandroomHubHeroRow() {
   for (const card of cards) {
     const el = document.createElement("div");
     el.className = "bandroom-hero-card" + (_hubSort === card.sort ? " active" : "");
+    // Was a plain <div> with only a click listener -- unreachable by keyboard/Tab. role="button"
+    // + tabindex + Enter/Space handling makes it a real activatable control for keyboard/AT users.
+    el.setAttribute("role", "button");
+    el.setAttribute("tabindex", "0");
+    el.setAttribute("aria-pressed", _hubSort === card.sort ? "true" : "false");
+    el.setAttribute("aria-label", `Sort by ${card.label}`);
     el.innerHTML = `
       <div class="bandroom-hero-card-icon">${card.icon}</div>
       <div>
         <div class="bandroom-hero-card-label">${card.label}</div>
         <div class="bandroom-hero-card-count">${card.caption}</div>
       </div>`;
-    el.addEventListener("click", () => {
+    const activate = () => {
       _hubSort = card.sort;
       const sortSelect = document.getElementById("bandroom-hub-sort");
       if (sortSelect) sortSelect.value = card.sort;
       renderBandroomHub();
+    };
+    el.addEventListener("click", activate);
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
     });
     row.appendChild(el);
   }
@@ -5877,12 +6000,12 @@ function buildItemTile(item) {
     actions.appendChild(previewBtn);
     const dlBtn = document.createElement("button");
     dlBtn.className = "btn-ghost";
-    dlBtn.textContent = "\u{2B07} Get";
+    dlBtn.textContent = "\u{2B07} Download";
     dlBtn.addEventListener("click", async (e) => {
       e.stopPropagation(); dlBtn.disabled = true; dlBtn.textContent = "...";
       const ok = bridge ? await downloadMarketplaceItem(item) : false;
       showToast(ok ? `Downloaded "${item.name}"!` : "Couldn't download that.");
-      dlBtn.disabled = false; dlBtn.textContent = "\u{2B07} Get";
+      dlBtn.disabled = false; dlBtn.textContent = "\u{2B07} Download";
     });
     actions.appendChild(dlBtn);
     body.appendChild(actions);
@@ -5903,6 +6026,7 @@ function buildItemTile(item) {
     const likeBtn = document.createElement("button");
     likeBtn.className = "bandroom-item-action";
     likeBtn.title = "Like this upload";
+    likeBtn.setAttribute("aria-label", "Like this upload");
     likeBtn.textContent = `♡ ${item.likes ?? 0}`;
     likeBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -5916,6 +6040,7 @@ function buildItemTile(item) {
     const dislikeBtn = document.createElement("button");
     dislikeBtn.className = "bandroom-item-action";
     dislikeBtn.title = "Dislike this upload";
+    dislikeBtn.setAttribute("aria-label", "Dislike this upload");
     dislikeBtn.textContent = `\u{1F44E} ${item.dislikes ?? 0}`;
     dislikeBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -5929,6 +6054,7 @@ function buildItemTile(item) {
     const dlBtn = document.createElement("button");
     dlBtn.className = "bandroom-item-action";
     dlBtn.title = "Download to My Downloads";
+    dlBtn.setAttribute("aria-label", "Download to My Downloads");
     dlBtn.textContent = "\u{2B07}"; // down arrow
     dlBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -5968,6 +6094,7 @@ function buildItemTile(item) {
     const reportBtn = document.createElement("button");
     reportBtn.className = "bandroom-item-action";
     reportBtn.title = "Report this upload";
+    reportBtn.setAttribute("aria-label", "Report this upload");
     reportBtn.textContent = "\u{1F6A9}";
     reportBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -5982,6 +6109,7 @@ function buildItemTile(item) {
       const editBtn = document.createElement("button");
       editBtn.className = "bandroom-item-action";
       editBtn.title = "Edit your upload's name/school";
+      editBtn.setAttribute("aria-label", "Edit your upload's name and school");
       editBtn.textContent = "\u{270F}\u{FE0F}";
       editBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -6001,9 +6129,9 @@ function buildItemTile(item) {
         // though it's still sitting in the worker's index -- the exact "modal opens, list is
         // empty despite real uploads" symptom reported for Georgia. Resolving against the
         // canonical roster here closes that off the same way the Share flow already does.
-        const matchedTeam = state.teams.find((t) => t.name.toLowerCase() === typedSchool.trim().toLowerCase());
+        const matchedTeam = resolveTypedTeamName(typedSchool);
         if (!matchedTeam) {
-          showToast(`"${typedSchool.trim()}" isn't a team in your roster -- use the exact team name (e.g. "Georgia").`);
+          showToast(`"${typedSchool.trim()}" isn't a team in your roster -- use the team name or its abbreviation (e.g. "FAMU").`);
           return;
         }
         const newSchool = matchedTeam.name;
@@ -6024,9 +6152,13 @@ function buildItemTile(item) {
       const delBtn = document.createElement("button");
       delBtn.className = "bandroom-item-action bandroom-item-action-danger";
       delBtn.title = "Delete your upload";
+      delBtn.setAttribute("aria-label", "Delete your upload");
       delBtn.textContent = "\u{1F5D1}";
       delBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
+        // Owner-uploaded item removed from the shared marketplace for everyone, not just this
+        // device -- one misclick previously deleted it permanently with zero confirmation.
+        if (!window.confirm(`Delete "${item.name}" from the marketplace for everyone? This can't be undone.`)) return;
         delBtn.disabled = true;
         const ok = await deleteUploadedItem(item);
         if (ok) {
@@ -6048,6 +6180,7 @@ function buildItemTile(item) {
       const adminEditBtn = document.createElement("button");
       adminEditBtn.className = "bandroom-item-action bandroom-item-action-admin";
       adminEditBtn.title = "Admin: Edit";
+      adminEditBtn.setAttribute("aria-label", "Admin: Edit this upload's name and school");
       // Icon-only (no "ADMIN" text label) -- with like/download/report/delete/admin-edit/
       // admin-delete all sharing one small tile's hover row, the old text pills were wide
       // enough to force multiple wrapped rows that overflowed the thumb and overlapped the
@@ -6062,9 +6195,9 @@ function buildItemTile(item) {
         const typedSchool = edited.school;
         // Same team-key validation as the per-owner edit above (root cause fix, Music Library UX
         // Brief v2 §1/§2.2) -- the admin path had the identical unvalidated free-text hole.
-        const matchedAdminTeam = state.teams.find((t) => t.name.toLowerCase() === typedSchool.trim().toLowerCase());
+        const matchedAdminTeam = resolveTypedTeamName(typedSchool);
         if (!matchedAdminTeam) {
-          showToast(`"${typedSchool.trim()}" isn't a team in your roster -- use the exact team name (e.g. "Georgia").`);
+          showToast(`"${typedSchool.trim()}" isn't a team in your roster -- use the team name or its abbreviation (e.g. "FAMU").`);
           return;
         }
         const newSchool = matchedAdminTeam.name;
@@ -6085,9 +6218,11 @@ function buildItemTile(item) {
       const adminDelBtn = document.createElement("button");
       adminDelBtn.className = "bandroom-item-action bandroom-item-action-admin bandroom-item-action-danger";
       adminDelBtn.title = "Admin: Delete";
+      adminDelBtn.setAttribute("aria-label", "Admin: Delete this upload");
       adminDelBtn.textContent = "\u{1F6E0}\u{1F5D1}"; // icon-only, see adminEditBtn comment above
       adminDelBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
+        if (!window.confirm(`Admin-delete "${item.name}" from the marketplace for everyone? This can't be undone.`)) return;
         adminDelBtn.disabled = true;
         try {
           const raw = await bridge.AdminDeleteMarketplaceItem(item.type, item.id);
@@ -7716,8 +7851,9 @@ function initAlbumFilters() {
   document.getElementById("bandroom-album-filters")?.addEventListener("click", (e) => {
     const btn = e.target.closest(".bandroom-album-filter");
     if (!btn) return;
-    document.querySelectorAll(".bandroom-album-filter").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".bandroom-album-filter").forEach((b) => { b.classList.remove("active"); b.setAttribute("aria-pressed", "false"); });
     btn.classList.add("active");
+    btn.setAttribute("aria-pressed", "true");
     _albumTypeFilter = btn.dataset.type;
     paintAlbumGrid(getAlbumSearchFilter());
   });
