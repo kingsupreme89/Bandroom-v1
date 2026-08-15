@@ -96,6 +96,12 @@ public sealed class WebMainForm : Form
     bool _useEngineForEvents;
     HbcuPlaybackService? _hbcuPlayback;
     System.Threading.Timer? _hbcuResumeTimer;
+    /// <summary>Which side scored the most recent HBCU-mode touchdown -- the scoring team kicks
+    /// off next in real football, so the post-score "Other: Kickoff" event routes here instead of
+    /// the home-priority guess "Other: Pregame Ready"/"Other: Pregame Take the Field" still use
+    /// (owner report 2026-08-15: Away scored, engine still tried Home's Kickoff slot -- wrong side
+    /// AND that slot had nothing assigned, so nothing played at all).</summary>
+    string? _lastHbcuTouchdownSide;
 
     public WebMainForm()
     {
@@ -941,6 +947,7 @@ public sealed class WebMainForm : Form
 
         _hbcuPlayback?.Dispose();
         _hbcuPlayback = null;
+        _lastHbcuTouchdownSide = null;
         if (ConfigStore.LoadPlaybackMode() == ConfigStore.PlaybackMode.Hbcu)
         {
             // Built here (so the pot/pack queues are ready), but not Start()ed until the opening
@@ -1358,6 +1365,13 @@ public sealed class WebMainForm : Form
             // unlock so a new GAMETIME press can pick a different matchup for the next game.
             _matchupLocked = false;
             HideScorebugOverlay();
+            // Owner request 2026-08-15: the HBCU Team Pot shuffle chain used to keep running (and
+            // audible) even after Stop Watching -- it's tied to the confirmed matchup, not the
+            // watch state, so nothing here was telling it the game ended. Next GAMETIME press
+            // still builds a brand-new HbcuPlaybackService (see ConfirmGametimeFromWeb) that
+            // auto-starts fresh after ITS OWN Opening Kickoff song, same as always -- this only
+            // silences whatever instance was already running for the game that just ended.
+            _hbcuPlayback?.Stop();
         }
         else
         {
@@ -3174,6 +3188,14 @@ public sealed class WebMainForm : Form
     static void PlayDraftChime()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "Assets", "nfl-draft-chime.mp3");
+        // This chime is shared between app-open and update-detected (see doc comment above), and
+        // AudioPlayer.Play's 20s same-file FireCooldown (meant to stop rapid-fire OCR re-triggers
+        // during a live game) was silently swallowing the update-detected chime whenever an
+        // update happened to already be available right at launch -- the app-open chime fires
+        // first, then InitAutoUpdater's very first check (no startup delay) tries to fire the
+        // exact same file within that 20s window and gets dropped. This is a deliberate,
+        // infrequent notification, not game-trigger spam, so it should never be cooldown-gated.
+        AudioPlayer.ClearCooldown(path);
         AudioPlayer.Play(path);
     }
 
@@ -3296,7 +3318,14 @@ public sealed class WebMainForm : Form
             // feature entirely. Back to firing synchronously, same as before that feature existed.
             string paFile = entry.PaAudioFile;
             bool paExists = !string.IsNullOrWhiteSpace(paFile) && File.Exists(paFile);
-            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, channel: channel, forcePaEffect: entry.PaSpeakerEffect, fadeStartOverride: entry.FadeStartSecondsOverride, fadeOutDurationOverride: entry.FadeOutDurationOverride, noFade: entry.NoFade);
+            // HBCU mode plays every cue straight through with no volume-ramp fade -- the only
+            // "fade" HBCU mode ever does is the Team Pot rotation's touchdown interrupt
+            // (HbcuPlaybackService.OnTouchdown's AudioPlayer.FadeOutChannel call on whatever was
+            // already playing), which is a separate hard/quick cut, not this per-clip end-of-track
+            // ramp. Owner request: no clipped fade-outs on Kickoff/Runout/Ready/Touchdown cards
+            // in HBCU mode, same as Team Pot songs already default to (ConfigStore.HbcuPotSong.NoFade).
+            bool noFade = entry.NoFade || ConfigStore.LoadPlaybackMode() == ConfigStore.PlaybackMode.Hbcu;
+            AudioPlayer.Play(audioFile, mainVolume, interruptPrevious: interruptPrevious, isHighPriorityEvent: isHighPriority, isBigHitEvent: isBigHit, isPregameEvent: isPregame, playLeadInWhistle: entry.PlayLeadInWhistle, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, channel: channel, forcePaEffect: entry.PaSpeakerEffect, fadeStartOverride: entry.FadeStartSecondsOverride, fadeOutDurationOverride: entry.FadeOutDurationOverride, noFade: noFade);
             // PA Announcer layer: plays concurrently with the main cue above, not instead of it,
             // so interruptPrevious MUST be false here -- true would call StopAll() and kill the
             // main clip that was just started a line above. Fired after, not before, the main
@@ -3583,17 +3612,29 @@ public sealed class WebMainForm : Form
                 // possession-routed loop below can't ALSO fire them a second time.
                 var hbcuSideAgnostic = events.Where(e => e.EventKey is "Other: Pregame Ready"
                     or "Other: Pregame Take the Field" or "Other: Kickoff" or "Other: Opening Kickoff").ToList();
+                string? kickoffFireResult = null;
+                string? kickoffFireSide = null;
                 foreach (var evt in hbcuSideAgnostic)
                 {
-                    // Opening Kickoff is always the HOME team's cue -- never falls back to away,
-                    // even if home has no song assigned (owner request 2026-08-14: it was
-                    // observed falling back to away with "no song assigned, nothing played").
-                    string firstSide = evt.EventKey == "Other: Opening Kickoff"
-                        ? "home"
-                        : ResolveEntryForEvent("home", evt.EventKey) != null ? "home" : "away";
+                    string firstSide;
+                    if (evt.EventKey == "Other: Opening Kickoff")
+                        // Opening Kickoff is always the HOME team's cue -- never falls back to
+                        // away, even if home has no song assigned (owner request 2026-08-14: it
+                        // was observed falling back to away with "no song assigned, nothing played").
+                        firstSide = "home";
+                    else if (evt.EventKey == "Other: Kickoff")
+                        // Post-touchdown Kickoff: real football has the SCORING team kick off to
+                        // the other side, not a home-priority guess -- owner report 2026-08-15
+                        // (Away scored, engine still tried Home's empty Kickoff slot and stayed
+                        // silent). Falls back to home-priority only if we somehow don't know who
+                        // just scored (shouldn't normally happen -- this event only fires after a TD).
+                        firstSide = _lastHbcuTouchdownSide ?? (ResolveEntryForEvent("home", evt.EventKey) != null ? "home" : "away");
+                    else
+                        firstSide = ResolveEntryForEvent("home", evt.EventKey) != null ? "home" : "away";
                     string result = FireEventForSide(firstSide, evt.EventKey, interruptPrevious: true);
                     OnLog($"[engine] {evt.EventKey} -> {firstSide} (HBCU home-priority): {result}");
                     RecordFireResult(evt.EventKey, firstSide, result);
+                    if (evt.EventKey == "Other: Kickoff") { kickoffFireResult = result; kickoffFireSide = firstSide; }
                 }
                 events = events.Except(hbcuSideAgnostic).ToList();
 
@@ -3609,17 +3650,35 @@ public sealed class WebMainForm : Form
                     var kickoffEntry = ResolveEntryForEvent("home", "Other: Opening Kickoff");
                     _hbcuPlayback.Start(ResolveEventSongDuration(kickoffEntry));
                 }
-                // Runout/Kickoff (post-opening) are side-agnostic overrides: pause the shuffle
-                // chain so it doesn't race whichever cue is assigned, then resume shortly after --
-                // if nothing was actually assigned for that event, FireEventForSide above just
-                // no-ops and Resume picks the pool back up like nothing happened ("revert back to
-                // pool"). Touchdown is handled per-event further down instead (see
-                // HbcuPlaybackService.OnTouchdown), once the scoring side is actually known.
-                if (hbcuSideAgnostic.Any(e => e.EventKey is "Other: Pregame Ready" or "Other: Pregame Take the Field" or "Other: Kickoff"))
+                // Runout/Ready are side-agnostic overrides: pause the shuffle chain so it doesn't
+                // race whichever cue is assigned, then resume shortly after -- if nothing was
+                // actually assigned for that event, FireEventForSide above just no-ops and Resume
+                // picks the pool back up like nothing happened ("revert back to pool"). Touchdown
+                // is handled per-event further down instead (see HbcuPlaybackService.OnTouchdown),
+                // once the scoring side is actually known.
+                if (hbcuSideAgnostic.Any(e => e.EventKey is "Other: Pregame Ready" or "Other: Pregame Take the Field"))
                 {
                     _hbcuPlayback.Pause();
                     _hbcuResumeTimer?.Dispose();
                     _hbcuResumeTimer = new System.Threading.Timer(_ => RunOnUi(() => _hbcuPlayback?.Resume()), null, TimeSpan.FromSeconds(8), System.Threading.Timeout.InfiniteTimeSpan);
+                }
+                if (kickoffFireSide != null)
+                {
+                    if (kickoffFireResult != null && kickoffFireResult.StartsWith("fired:"))
+                    {
+                        // Scoring side had a real Kickoff cue assigned -- same pause-then-resume
+                        // pattern as Runout/Ready above.
+                        _hbcuPlayback.Pause();
+                        _hbcuResumeTimer?.Dispose();
+                        _hbcuResumeTimer = new System.Threading.Timer(_ => RunOnUi(() => _hbcuPlayback?.Resume()), null, TimeSpan.FromSeconds(8), System.Threading.Timeout.InfiniteTimeSpan);
+                    }
+                    else
+                    {
+                        // Owner request 2026-08-15: no Kickoff song assigned for the scoring side
+                        // shouldn't mean dead air -- grab one from that side's Team Pot instead and
+                        // let the normal 20s AdvanceGap carry the rotation on from there.
+                        _hbcuPlayback.PlayKickoffFallback(kickoffFireSide);
+                    }
                 }
 
                 if (events.Count == 0) return;
@@ -3716,7 +3775,11 @@ public sealed class WebMainForm : Form
                     // duration elapses -- interruptPrevious is back to the normal !firedYet rule
                     // since the scoring side's track is no longer deliberately left alive.
                     bool hbcuTouchdown = _hbcuPlayback != null && evt.EventKey.Contains("Touchdown", StringComparison.OrdinalIgnoreCase);
-                    if (hbcuTouchdown) _hbcuPlayback!.OnTouchdown(routedSide, ResolveEventSongDuration(ResolveEntryForEvent(routedSide, evt.EventKey)));
+                    if (hbcuTouchdown)
+                    {
+                        _hbcuPlayback!.OnTouchdown(routedSide, ResolveEventSongDuration(ResolveEntryForEvent(routedSide, evt.EventKey)));
+                        _lastHbcuTouchdownSide = routedSide;
+                    }
                     string result = FireEventForSide(routedSide, evt.EventKey, volumeMultiplier: volumeMultiplier, interruptPrevious: !firedYet);
                     if (result.StartsWith("fired:")) firedYet = true;
                     OnLog($"[engine] {evt.EventKey} -> {routedSide}: {result}");

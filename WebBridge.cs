@@ -720,7 +720,11 @@ public sealed class WebBridge
                 System.Text.Encoding.UTF8, "application/json");
             using var response = await ShareHttp.SendAsync(request);
             if (!response.IsSuccessStatusCode)
-                return JsonSerializer.Serialize(new { success = false, error = $"Edit failed: {(int)response.StatusCode}" });
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                CrashLog.Write($"AdminEditMarketplaceItem non-success for {type}/{id}", new Exception($"{(int)response.StatusCode} {body}"));
+                return JsonSerializer.Serialize(new { success = false, error = $"Edit failed: {(int)response.StatusCode} {body}" });
+            }
             return JsonSerializer.Serialize(new { success = true });
         }
         catch (Exception ex)

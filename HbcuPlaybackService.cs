@@ -62,6 +62,14 @@ internal sealed class HbcuPlaybackService : IDisposable
     readonly Queue<ConfigStore.HbcuPotSong> _awayQueue = new();
     readonly Random _rng = new();
 
+    /// <summary>Owner request 2026-08-15: once a full cycle of a side's own Team Pot has played
+    /// through, the next Refill switches that side over to the shared Generic pack for a round
+    /// instead of immediately re-shuffling the same handful of team songs -- alternates own/
+    /// Generic every time that side's queue empties (see Refill), so a small pot doesn't loop
+    /// itself into the ground over a whole game.</summary>
+    bool _homeUseGenericNextRefill;
+    bool _awayUseGenericNextRefill;
+
     string _nextTurn = "home";
     string? _currentlyPlayingSide;
     string? _currentSongName;
@@ -160,6 +168,9 @@ internal sealed class HbcuPlaybackService : IDisposable
         _running = false;
         _paused = false;
         _tdSequenceActive = false;
+        _kickoffFallbackActive = false;
+        _homeUseGenericNextRefill = false;
+        _awayUseGenericNextRefill = false;
         _currentlyPlayingSide = null;
         _currentSongName = null;
         _nextTimerUtc = null;
@@ -193,12 +204,44 @@ internal sealed class HbcuPlaybackService : IDisposable
     /// their real behavior.</summary>
     public void Resume()
     {
-        if (!_running || !_paused || _tdSequenceActive) return;
+        if (!_running || !_paused || _tdSequenceActive || _kickoffFallbackActive) return;
         _paused = false;
         PlayNext();
     }
 
+    /// <summary>True from PlayKickoffFallback() until its scheduled Resume() fires -- same
+    /// "block external Resume calls mid-sequence" purpose as _tdSequenceActive.</summary>
+    bool _kickoffFallbackActive;
+
     System.Threading.Timer? _touchdownTimer;
+
+    /// <summary>Owner request 2026-08-15: a post-touchdown Kickoff with no song assigned for the
+    /// scoring side used to leave the chain paused with nothing playing (WebMainForm's blind 8s
+    /// pause-then-resume, tuned for an actual Kickoff cue, just expired into silence). Grabs one
+    /// song from the scoring side's own pot instead -- same dequeue/refill logic PlayTouchdownBonus
+    /// uses -- and resumes normal alternating rotation AdvanceGap (20s) after it ends, same as
+    /// every other track transition in the shuffle chain. No-ops (straight to Resume) if that
+    /// side's pot is empty too.</summary>
+    public void PlayKickoffFallback(string side)
+    {
+        if (!_running) return;
+        Pause();
+        _kickoffFallbackActive = true;
+        _touchdownTimer?.Dispose();
+
+        var queue = side == "home" ? _homeQueue : _awayQueue;
+        if (queue.Count == 0) Refill(side, queue);
+        if (queue.Count == 0) { _kickoffFallbackActive = false; Resume(); return; }
+
+        _currentlyPlayingSide = side;
+        var song = queue.Dequeue();
+        _currentSongName = Path.GetFileNameWithoutExtension(song.FilePath);
+        _playForSide(side, song);
+
+        var delay = ResolveSongDuration(song) + AdvanceGap;
+        _nextTimerUtc = DateTime.UtcNow + delay;
+        _touchdownTimer = new System.Threading.Timer(_ => { _kickoffFallbackActive = false; Resume(); }, null, delay, System.Threading.Timeout.InfiniteTimeSpan);
+    }
 
     /// <summary>REWORKED 2026-08-14 (owner request): a TD now fades out WHATEVER's currently
     /// playing -- including the scoring side's own track, not just the opponent's like before --
@@ -320,9 +363,33 @@ internal sealed class HbcuPlaybackService : IDisposable
         // "Use Generic Pack" toggle still goes straight to Generic (owner's forced override stays
         // absolute), but otherwise an empty side first borrows from the OTHER side's pot/pack
         // (playing your own team's songs beats silence) before finally falling back to Generic.
-        var pool = useGeneric ? PoolForTeam(GenericPackTeamName) : PoolForTeam(team);
-        if (pool.Count == 0 && !useGeneric) pool = PoolForTeam(otherTeam);
-        if (pool.Count == 0 && !useGeneric) pool = PoolForTeam(GenericPackTeamName);
+        List<ConfigStore.HbcuPotSong> pool;
+        if (useGeneric)
+        {
+            pool = PoolForTeam(GenericPackTeamName);
+        }
+        else
+        {
+            var ownPool = PoolForTeam(team);
+            if (ownPool.Count == 0)
+            {
+                pool = PoolForTeam(otherTeam);
+                if (pool.Count == 0) pool = PoolForTeam(GenericPackTeamName);
+            }
+            else
+            {
+                // Alternate own pot / Generic pack every time this side's queue empties (see
+                // _homeUseGenericNextRefill's doc comment) -- only when Generic actually has
+                // songs to alternate with, otherwise just keep looping the team's own pot.
+                var genericPool = PoolForTeam(GenericPackTeamName);
+                bool wantGeneric = side == "home" ? _homeUseGenericNextRefill : _awayUseGenericNextRefill;
+                pool = (wantGeneric && genericPool.Count > 0) ? genericPool : ownPool;
+
+                bool usedGeneric = ReferenceEquals(pool, genericPool);
+                if (side == "home") _homeUseGenericNextRefill = !usedGeneric;
+                else _awayUseGenericNextRefill = !usedGeneric;
+            }
+        }
 
         // Fisher-Yates -- avoids repeating a track until the whole pool has played once.
         for (int i = pool.Count - 1; i > 0; i--)

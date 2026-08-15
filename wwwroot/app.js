@@ -4355,7 +4355,10 @@ function renderTeamGridInto(gridId, filter, onPick, showEditLogo = false, prefer
   const grid = document.getElementById(gridId);
   grid.innerHTML = "";
   const q = filter.trim().toLowerCase();
-  for (const t of state.teams) {
+  // Same HBCU-mode lock as the main team grid (hbcuFilteredTeams): HBCU Mode restricts every
+  // team picker to HBCU schools only, and FBS teams are only reachable with the toggle off --
+  // matches the pre-toggle FBS workflow when the toggle is off (unfiltered, same as always).
+  for (const t of hbcuFilteredTeams()) {
     if (!teamMatchesQuery(t, q)) continue;
     const sw = document.createElement("div");
     sw.className = "team-swatch" + (t.name === state.activeTeam ? " active" : "");
@@ -6205,7 +6208,7 @@ function buildItemTile(item) {
         try {
           const raw = await bridge.AdminEditMarketplaceItem(item.type, item.id, newName, newSchool);
           const result = JSON.parse(raw);
-          showToast(result.success ? `Admin-edited "${newName}".` : "Admin edit failed -- try again.");
+          showToast(result.success ? `Admin-edited "${newName}".` : `Admin edit failed: ${result.error || "try again"}`);
           if (result.success) renderBandroomHub();
         } catch (err) {
           console.error("AdminEditMarketplaceItem failed", err);
