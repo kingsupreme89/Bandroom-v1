@@ -256,6 +256,19 @@ internal sealed class GameWatcher
     // possession.
     static readonly TimeSpan RamFieldStaleThreshold = TimeSpan.FromSeconds(5);
     static readonly TimeSpan OcrFieldCorroborationWindow = TimeSpan.FromSeconds(1.5);
+    // 2026-08-14: the reader's v1.4.9+ "ram.freshness" block is ground truth for "is the core
+    // memory block (quarter/clocks/scores/down/distance/timeouts) still being live-verified right
+    // now" -- straight from re-checking game memory, not our own guess from comparing against OCR.
+    // Per the reader's own DATA-API.md ("Staleness: how to actually detect it"): treat either
+    // clock (game clock or play clock) showing a recent change as proof the WHOLE block is live,
+    // even if some other field in it (e.g. score) is legitimately unchanged for minutes. Only when
+    // BOTH clocks have gone quiet past a normal dead-ball stretch is the block worth suspecting --
+    // 20s here matches RamReaderValidator's own MaxDocumentAgeMs-adjacent reasoning (long enough to
+    // clear a real replay/dead-ball gap, short enough to catch a genuinely broken locator quickly).
+    // When this is true, the existing OCR-corroboration fallback below is trusted exactly as
+    // before; when the reader predates v1.4.9 (Freshness null), that fallback runs unconditionally,
+    // same as before this check existed.
+    static readonly TimeSpan CoreBlockFreshnessWindow = TimeSpan.FromSeconds(20);
     int? _ramDownStableValue; DateTime? _ramDownStableSince;
     int? _ramYardsToGoStableValue; DateTime? _ramYardsToGoStableSince;
     bool? _ramPossessionStableValue; DateTime? _ramPossessionStableSince;
@@ -302,7 +315,10 @@ internal sealed class GameWatcher
     // under a yard (unambiguously short); "Goal" is owner's explicit call (2026-08-11) to also
     // treat as short for the hype logic, even though the real yard-to-go varies -- both now
     // normalize to "1" via NormalizeDistanceRaw below instead of leaving the field stale.
-    static readonly Regex DistancePattern = new(@"&\s*(-?\d+|inches|goal)", RegexOptions.IgnoreCase);
+    // Widened alongside the down-region ordinal lookahead (2026-08-14) -- CFB26's stylized "&"
+    // glyph also gets misread here, and this pattern extracts the actual distance value, not just
+    // detects the ordinal, so it needs the same [&a8] connector class to keep working on the fix.
+    static readonly Regex DistancePattern = new(@"[&a8]\s*(-?\d+|inches|goal)", RegexOptions.IgnoreCase);
 
     static string NormalizeDistanceRaw(string raw) =>
         int.TryParse(raw, out _) ? raw : "1";
@@ -550,6 +566,12 @@ internal sealed class GameWatcher
     // same CommitValueIfConfirmed debounce, found by audit rather than a live report.
     string? _pendingQuarter;
 
+    // Debounce for the foreground-window re-target below (added 2026-08-15): only retarget once
+    // the SAME alternate candidate has been foreground for 2 consecutive ticks, so two windows
+    // that are both valid candidates (e.g. a background CollegeFB27 process and a RemotePlay
+    // window on the unscoped default preset) fighting for OS focus can't thrash hwnd every tick.
+    IntPtr _pendingForegroundCandidate = IntPtr.Zero;
+
     readonly List<WatchedRegion> _regions = new()
     {
         // Spans the FULL WIDTH of the bottom score-bug band rather than one tight box, because
@@ -568,7 +590,14 @@ internal sealed class GameWatcher
         {
             Name = "down",
             FxX = 0, FxY = 0.83, FxW = 1.0, FxH = 0.14,
-            Pattern = new Regex(@"\b(1st|2nd|3rd|4th)\b(?=\s*&)", RegexOptions.IgnoreCase),
+            // Lookahead widened 2026-08-14 (live CFB 26/27 Remote Play bug: down/distance NEVER
+            // fired) -- confirmed via ocr_debug.log that CFB26's stylized "&" glyph gets OCR'd as
+            // "a" ("2nd a 8" instead of "2nd & 8"), so the old literal-"&" lookahead silently
+            // never matched. [&a8] covers the confirmed misread plus "8" (another common "&"
+            // confusion in condensed broadcast fonts) without loosening enough to also match
+            // "quarter"'s own text -- see "quarter" region below, whose negative lookahead was
+            // widened to the exact same character class so the two stay mutually exclusive.
+            Pattern = new Regex(@"\b(1st|2nd|3rd|4th)\b(?=\s*[&a8]\s*\d)", RegexOptions.IgnoreCase),
         },
         // Penalty/flag banner -- calibrated 2026-08-07 from a live screenshot (Auburn @ Georgia
         // Tech, CBS skin): the FLAG state renders in the exact same rightmost box as
@@ -619,7 +648,10 @@ internal sealed class GameWatcher
         {
             Name = "quarter",
             FxX = 0, FxY = 0.83, FxW = 1.0, FxH = 0.14,
-            Pattern = new Regex(@"\b(1st|2nd|3rd|4th)\b(?!\s*&)", RegexOptions.IgnoreCase),
+            // Widened 2026-08-14 alongside "down"'s matching fix above -- must stay the exact same
+            // exclusion shape as "down"'s lookahead or an ordinal could match BOTH regions (or
+            // neither) depending on which one's regex happens to be looser.
+            Pattern = new Regex(@"\b(1st|2nd|3rd|4th)\b(?!\s*[&a8]\s*\d)", RegexOptions.IgnoreCase),
         },
         // Penalty decision overlay -- RECALIBRATED 2026-08-12 (owner report: penalty never fired
         // live; sent 3 real screenshots from a Montana St @ Montana game, an actual "ENCROACHMENT
@@ -860,7 +892,9 @@ internal sealed class GameWatcher
             {
                 if (hwnd == IntPtr.Zero)
                 {
-                    hwnd = FindGameWindow();
+                    // Read fresh each time (not cached in a local) so switching the scorebug
+                    // preset mid-session re-scopes which process(es) get searched immediately.
+                    hwnd = FindGameWindow(ActivePreset.GameProcessNames ?? GameProcessNames);
                     WindowFoundChanged?.Invoke(hwnd != IntPtr.Zero);
                     if (hwnd == IntPtr.Zero)
                     {
@@ -921,9 +955,38 @@ internal sealed class GameWatcher
                 // guess at wrong content the way the old title-substring bug did.
                 if (Native.GetForegroundWindow() != hwnd)
                 {
-                    Log?.Invoke("[watcher] game window isn't focused/foreground -- skipping capture this tick (bring the game to the front to resume detection)");
-                    await Task.Delay(500, ct);
-                    continue;
+                    // Before giving up this tick: the foreground window might genuinely be the
+                    // game, just under a DIFFERENT candidate process than the one hwnd locked onto
+                    // (see FindGameWindow's 2026-08-14 fix doc comment -- e.g. RemotePlay is what's
+                    // actually on screen but a background CollegeFB27 process got matched first).
+                    // Re-target instead of skipping so this doesn't loop forever in that case.
+                    IntPtr fg = Native.GetForegroundWindow();
+                    if (fg != IntPtr.Zero && IsCandidateGameWindow(fg, ActivePreset.GameProcessNames ?? GameProcessNames))
+                    {
+                        if (_pendingForegroundCandidate != fg)
+                        {
+                            // First tick seeing this candidate -- wait for a second consecutive
+                            // tick before retargeting (see _pendingForegroundCandidate doc comment).
+                            _pendingForegroundCandidate = fg;
+                            await Task.Delay(500, ct);
+                            continue;
+                        }
+
+                        // rect/winW/winH above were measured against the OLD hwnd -- re-loop
+                        // immediately so they get recomputed against the new one instead of
+                        // capturing the wrong window's stale geometry this tick.
+                        Log?.Invoke("[watcher] foreground window is a different game-window candidate -- switching to it");
+                        hwnd = fg;
+                        _pendingForegroundCandidate = IntPtr.Zero;
+                        continue;
+                    }
+                    else
+                    {
+                        _pendingForegroundCandidate = IntPtr.Zero;
+                        Log?.Invoke("[watcher] game window isn't focused/foreground -- skipping capture this tick (bring the game to the front to resume detection)");
+                        await Task.Delay(500, ct);
+                        continue;
+                    }
                 }
 
                 using var fullBmp = new Bitmap(winW, winH, PixelFormat.Format32bppArgb);
@@ -2017,31 +2080,41 @@ internal sealed class GameWatcher
         if (ramSnapshot is { } ramForWatchdog)
             LogRamOcrCrosscheck(ocrDown, ocrYardsToGo, ocrAwayScore, ocrHomeScore, ocrPossessionAway, ramForWatchdog);
 
-        // Stale-RAM-field fallback (2026-08-14) -- see the tracking fields' own doc comment above
-        // RamFieldStaleThreshold for the full story. Deliberately scoped to down/distance/
-        // possession only (the fields actually observed stuck live); score/timeouts/yard line
-        // already have their own -1-sentinel "never resolved" protection and haven't shown this
-        // failure mode. Runs AFTER the rs-driven assignments above so it can override them back to
-        // OCR once both RAM-frozen and OCR-settled are confirmed true -- otherwise this is a no-op
-        // and RAM's value is used exactly as before this fix existed.
+        // Stale-RAM-field fallback (2026-08-14, tightened 2026-08-14 with the reader's own
+        // ram.freshness data). Deliberately scoped to down/distance/possession (the fields actually
+        // observed stuck live); score/timeouts/yard line already have their own -1-sentinel "never
+        // resolved" protection. Runs AFTER the rs-driven assignments above so it can override them
+        // back to OCR once confirmed stale -- otherwise this is a no-op and RAM's value is used
+        // exactly as before this fix existed.
+        //
+        // coreBlockMaybeStale gates the whole fallback on the reader's OWN ground truth (see
+        // CoreBlockFreshnessWindow's doc comment) when available: if either clock shows a recent
+        // change, the reader itself proves this block is still being live-verified, so the OCR-
+        // corroboration check below never even runs -- a score/down legitimately unchanged for
+        // minutes between plays can no longer look "stuck" just because OCR flickers to a different
+        // reading. Falls back to running the OCR-corroboration check unconditionally (old behavior)
+        // when the connected reader predates v1.4.9 and never publishes Freshness at all.
         if (ramSnapshot is { } ramForStaleness)
         {
-            if (ocrDown != 0 && ocrDown != ramForStaleness.Down && ocrDownSettled
+            bool coreBlockMaybeStale = ramForStaleness.Freshness == null
+                || !ramForStaleness.Freshness.CoreBlockRecentlyChanged(nowUtc, CoreBlockFreshnessWindow);
+
+            if (coreBlockMaybeStale && ocrDown != 0 && ocrDown != ramForStaleness.Down && ocrDownSettled
                 && IsFieldStableFor(ramForStaleness.Down, ref _ramDownStableValue, ref _ramDownStableSince, nowUtc, RamFieldStaleThreshold))
             {
-                Log?.Invoke($"[RAM watchdog] down stuck at {ramForStaleness.Down} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {ocrDown} -- falling back to OCR for this field");
+                Log?.Invoke($"[RAM watchdog] down stuck at {ramForStaleness.Down} for {RamFieldStaleThreshold.TotalSeconds:0}s+ (both clocks quiet {CoreBlockFreshnessWindow.TotalSeconds:0}s+) while OCR settled on {ocrDown} -- falling back to OCR for this field");
                 down = ocrDown;
             }
-            if (ocrDown != 0 && ocrYardsToGo != ramForStaleness.YardsToGo && ocrYardsToGoSettled
+            if (coreBlockMaybeStale && ocrDown != 0 && ocrYardsToGo != ramForStaleness.YardsToGo && ocrYardsToGoSettled
                 && IsFieldStableFor(ramForStaleness.YardsToGo, ref _ramYardsToGoStableValue, ref _ramYardsToGoStableSince, nowUtc, RamFieldStaleThreshold))
             {
-                Log?.Invoke($"[RAM watchdog] distance stuck at {ramForStaleness.YardsToGo} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {ocrYardsToGo} -- falling back to OCR for this field");
+                Log?.Invoke($"[RAM watchdog] distance stuck at {ramForStaleness.YardsToGo} for {RamFieldStaleThreshold.TotalSeconds:0}s+ (both clocks quiet {CoreBlockFreshnessWindow.TotalSeconds:0}s+) while OCR settled on {ocrYardsToGo} -- falling back to OCR for this field");
                 yardsToGo = ocrYardsToGo;
             }
-            if (readerPossessionAway.HasValue && ocrPossessionAway != ramForStaleness.PossessionAway && ocrPossessionSettled
+            if (coreBlockMaybeStale && readerPossessionAway.HasValue && ocrPossessionAway != ramForStaleness.PossessionAway && ocrPossessionSettled
                 && IsFieldStableFor(ramForStaleness.PossessionAway, ref _ramPossessionStableValue, ref _ramPossessionStableSince, nowUtc, RamFieldStaleThreshold))
             {
-                Log?.Invoke($"[RAM watchdog] possession stuck at {(ramForStaleness.PossessionAway ? "away" : "home")} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {(ocrPossessionAway ? "away" : "home")} -- falling back to OCR for this field");
+                Log?.Invoke($"[RAM watchdog] possession stuck at {(ramForStaleness.PossessionAway ? "away" : "home")} for {RamFieldStaleThreshold.TotalSeconds:0}s+ (both clocks quiet {CoreBlockFreshnessWindow.TotalSeconds:0}s+) while OCR settled on {(ocrPossessionAway ? "away" : "home")} -- falling back to OCR for this field");
                 readerPossessionAway = ocrPossessionAway;
             }
         }
@@ -2302,9 +2375,26 @@ internal sealed class GameWatcher
     const string XboxHostProcessName = "ApplicationFrameHost";
     const string XboxWindowTitleContains = "Xbox";
 
-    static IntPtr FindGameWindow()
+    // FIXED 2026-08-14 (live bug: "CollegeFB27" and "RemotePlay" both running at once -- e.g. a
+    // background/minimized PC install still open while the owner actually plays via PS Remote
+    // Play in front -- meant this always locked onto whichever process enumerated first
+    // ("CollegeFB27", since it's first in GameProcessNames), even when THAT window wasn't the one
+    // actually on screen. The real foreground window (RemotePlay) never matched, so the watcher's
+    // GetForegroundWindow() != hwnd check in RunAsync failed forever -- "nothing is reading" with
+    // no explanation. Widened same day: rather than searching every known process regardless of
+    // context, the caller now passes ActivePreset.GameProcessNames (falling back to the full
+    // GameProcessNames list for presets that don't declare one) -- e.g. picking "College Football
+    // 27" as your scorebug preset means this only ever looks for the real PC process, so a
+    // leftover Remote Play window open for something else can't get matched by accident either.
+    // Still checks whether the CURRENT foreground window itself belongs to one of the candidate
+    // processes first; only falls back to the old enumerate-in-order behavior if the foreground
+    // window isn't a candidate at all (e.g. focus is on Bandroom itself or some unrelated app).
+    static IntPtr FindGameWindow(string[] processNames)
     {
-        foreach (var name in GameProcessNames)
+        IntPtr fg = Native.GetForegroundWindow();
+        if (fg != IntPtr.Zero && Native.IsWindowVisible(fg) && IsCandidateGameWindow(fg, processNames)) return fg;
+
+        foreach (var name in processNames)
         {
             foreach (var proc in System.Diagnostics.Process.GetProcessesByName(name))
             {
@@ -2313,10 +2403,43 @@ internal sealed class GameWatcher
             }
         }
 
+        // Xbox streaming is matched regardless of the preset's process-name scoping -- it's found
+        // by window title on a shared OS host process, not a named game process, so there's
+        // nothing preset-specific to scope it by.
         IntPtr xboxHwnd = FindXboxAppWindow();
         if (xboxHwnd != IntPtr.Zero) return xboxHwnd;
 
         return IntPtr.Zero;
+    }
+
+    /// <summary>True if hWnd belongs to one of processNames, or is the Xbox host window (matched
+    /// by title, same as FindXboxAppWindow). Used by FindGameWindow to prefer whatever's actually
+    /// in the foreground, and by RunAsync to re-target hwnd when a DIFFERENT candidate process has
+    /// taken the foreground out from under the one it originally locked onto.</summary>
+    static bool IsCandidateGameWindow(IntPtr hWnd, string[] processNames)
+    {
+        Native.GetWindowThreadProcessId(hWnd, out uint pid);
+        if (pid != 0)
+        {
+            try
+            {
+                using var proc = System.Diagnostics.Process.GetProcessById((int)pid);
+                foreach (var name in processNames)
+                    if (string.Equals(proc.ProcessName, name, StringComparison.OrdinalIgnoreCase)) return true;
+                if (string.Equals(proc.ProcessName, XboxHostProcessName, StringComparison.OrdinalIgnoreCase))
+                {
+                    int len = Native.GetWindowTextLength(hWnd);
+                    if (len > 0)
+                    {
+                        var sb = new System.Text.StringBuilder(len + 1);
+                        Native.GetWindowText(hWnd, sb, sb.Capacity);
+                        if (sb.ToString().Contains(XboxWindowTitleContains, StringComparison.OrdinalIgnoreCase)) return true;
+                    }
+                }
+            }
+            catch (ArgumentException) { /* process exited between GetWindowThreadProcessId and GetProcessById */ }
+        }
+        return false;
     }
 
     static IntPtr FindXboxAppWindow()

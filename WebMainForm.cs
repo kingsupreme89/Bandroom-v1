@@ -94,6 +94,8 @@ public sealed class WebMainForm : Form
     /// is the one signal that means "this game is over, I might pick a different matchup next."</summary>
     bool _matchupLocked;
     bool _useEngineForEvents;
+    HbcuPlaybackService? _hbcuPlayback;
+    System.Threading.Timer? _hbcuResumeTimer;
 
     public WebMainForm()
     {
@@ -117,6 +119,7 @@ public sealed class WebMainForm : Form
         // been requested doesn't retroactively fix a scale pass that already ran wrong.
         AutoScaleMode = AutoScaleMode.Dpi;
 
+        ConfigStore.EnsureHbcuSchoolFolders();
         Text = "Bandroom";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
         TopMost = ConfigStore.LoadAppWindowSettings().AlwaysOnTop;
@@ -213,7 +216,7 @@ public sealed class WebMainForm : Form
         NormalizeExistingLibraryOnce();
 
         _overlayServer.Start();
-        FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); _scoreboardReaderHost.Stop(); FlushOcrLog(); _overlayServer.Stop(); _scorebugOverlay?.Dispose(); };
+        FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); _scoreboardReaderHost.Stop(); FlushOcrLog(); _overlayServer.Stop(); _scorebugOverlay?.Dispose(); _hbcuPlayback?.Dispose(); _hbcuResumeTimer?.Dispose(); };
 
         Load += async (_, _) =>
         {
@@ -935,7 +938,62 @@ public sealed class WebMainForm : Form
         PlayGametimeSound();
         RecordGameWatched(homeName, awayName);
         ConfigStore.SaveLastMatchup(homeName, awayName);
+
+        _hbcuPlayback?.Dispose();
+        _hbcuPlayback = null;
+        if (ConfigStore.LoadPlaybackMode() == ConfigStore.PlaybackMode.Hbcu)
+        {
+            // Built here (so the pot/pack queues are ready), but not Start()ed until the opening
+            // kickoff fires (see OnEngineEventsDetected) -- the owner wants the shuffle chain to
+            // begin at kickoff, not sit playing songs during pregame/team-select.
+            _hbcuPlayback = new HbcuPlaybackService(homeName, awayName, FireAdHocForSide,
+                ConfigStore.GetHbcuUseGenericPack(homeName), ConfigStore.GetHbcuUseGenericPack(awayName));
+        }
     }
+
+    /// <summary>Plays a Team Pot song for a side outside the TriggerEntry/EventRouter path --
+    /// used only by HbcuPlaybackService's shuffle queue. Applies the SAME per-song settings
+    /// (whistle/speed/PA effect/fade/no-fade/volume) FireEvent applies for a normal event card,
+    /// just sourced from the pot entry (ConfigStore.HbcuPotSong) instead of a TriggerEntry.</summary>
+    void FireAdHocForSide(string side, ConfigStore.HbcuPotSong song)
+    {
+        if (!File.Exists(song.FilePath)) return;
+        float baseVolume = side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume;
+        float volume = baseVolume * (Math.Clamp(song.Volume, 0, 100) / 100f);
+        AudioPlayer.Play(song.FilePath, volume, interruptPrevious: true, channel: side,
+            playLeadInWhistle: song.PlayLeadInWhistle, whistleSpeed: song.WhistleSpeed, speed2x: song.PlaybackSpeed2x,
+            forcePaEffect: song.PaSpeakerEffect, fadeStartOverride: song.FadeStartSecondsOverride,
+            fadeOutDurationOverride: song.FadeOutDurationOverride, noFade: song.NoFade);
+    }
+
+    /// <summary>Backs the "\" hotkey HBCU dashboard -- null (JSON "null") when HBCU mode isn't
+    /// active this session (no matchup confirmed with HBCU Mode on yet).</summary>
+    public string? GetHbcuPlaybackStatusFromWeb()
+    {
+        if (_hbcuPlayback == null) return null;
+        var s = _hbcuPlayback.GetStatus();
+        return JsonSerializer.Serialize(new
+        {
+            running = s.Running,
+            paused = s.Paused,
+            startPending = s.StartPending,
+            secondsUntilNext = s.SecondsUntilNext,
+            currentlyPlayingSide = s.CurrentlyPlayingSide,
+            currentSongName = s.CurrentSongName,
+            homeQueueCount = s.HomeQueueCount,
+            awayQueueCount = s.AwayQueueCount,
+            homeTeam = s.HomeTeam,
+            awayTeam = s.AwayTeam,
+        }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+    }
+
+    public void PauseHbcuPlaybackFromWeb() => _hbcuPlayback?.Pause();
+    public void ResumeHbcuPlaybackFromWeb() => _hbcuPlayback?.Resume();
+    public void StopHbcuPlaybackFromWeb() => _hbcuPlayback?.Stop();
+    /// <summary>Dashboard "Start" button -- see HbcuPlaybackService.Restart's doc comment: fresh
+    /// shuffle, no memory of what already played, starts immediately (not gated behind a kickoff
+    /// song's length like the real in-game Start(TimeSpan) path).</summary>
+    public void RestartHbcuPlaybackFromWeb() => _hbcuPlayback?.Restart();
 
     /// <summary>JSON for the matchup dialog's "Last: Away @ Home" pill (see
     /// ConfigStore.LoadLastMatchup) -- null/empty-object shape when no GAMETIME has ever been
@@ -1184,14 +1242,25 @@ public sealed class WebMainForm : Form
     /// Golden Band -- 'Neck' (Hype Sting, Heavy Brass) fired on 3rd Down" instead of
     /// "Neck_trimmed.wav". Falls back to the filename-only line when there's no sidecar, same as
     /// before this existed.</summary>
+    /// <summary>Owner request 2026-08-14: Big Game (the alternate-song/away-quiet/field-position
+    /// volume system) doesn't make sense in HBCU mode -- that mode already has its own continuous
+    /// pot-shuffle playback (HbcuPlaybackService) with its own touchdown/kickoff handling, and Big
+    /// Game's away-team-quiet-unless-earned-event logic actively fights that (e.g. it was routing
+    /// Opening Kickoff to whichever side _watcher.IsBigGame happened to favor instead of always
+    /// giving home priority). Every site in this file that used to read _watcher.IsBigGame directly
+    /// should read this instead -- forces Big Game off whenever an HBCU game is active, regardless
+    /// of the underlying ConfigStore.BigGameSettings toggle, without touching that toggle itself
+    /// (so it's still there/unchanged for the next non-HBCU game).</summary>
+    bool EffectiveBigGame => _watcher.IsBigGame && _hbcuPlayback == null;
+
     void RecordFireResult(string eventKey, string side, string result)
     {
         string name = EventActivityLog.FriendlyEventName(eventKey);
         // Owner request 2026-08-11: the log line alone couldn't tell a Big Game fire apart from an
         // ordinary one (e.g. "2nd & Short Away" -- was this the Big Game's louder/alternate cue or
-        // not?). _watcher.IsBigGame is the same flag FireEvent's own BigGameAudioFile fallback
+        // not?). EffectiveBigGame is the same flag FireEvent's own BigGameAudioFile fallback
         // already keys off (line ~2599 above), so this tag reflects exactly what actually played.
-        string sideLabel = DisplaySide(side) + (_watcher.IsBigGame ? " BG" : "");
+        string sideLabel = DisplaySide(side) + (EffectiveBigGame ? " BG" : "");
         if (result.StartsWith("fired:"))
         {
             string filename = result["fired:".Length..];
@@ -2046,6 +2115,36 @@ public sealed class WebMainForm : Form
         return Path.GetFileName(newPath);
     }
 
+    /// <summary>"Is this for an HBCU?" upload flow: moves the trigger's assigned file (and its
+    /// .meta.json sidecar, if any) into ConfigStore.HbcuSchoolFolder(school) -- same rename-and-
+    /// retarget shape as RenameAssignedTrackFromWeb above, just relocating instead of renaming.
+    /// No-ops (returns the current filename) if the file's already in that folder.</summary>
+    public string? MoveAssignedTrackToHbcuFolderFromWeb(string trigger, string school)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        var oldPath = entry?.AudioFile;
+        if (entry == null || string.IsNullOrWhiteSpace(oldPath) || !File.Exists(oldPath)) return null;
+
+        string destDir = ConfigStore.HbcuSchoolFolder(school);
+        Directory.CreateDirectory(destDir);
+        if (string.Equals(Path.GetDirectoryName(oldPath), destDir, StringComparison.OrdinalIgnoreCase))
+            return Path.GetFileName(oldPath);
+
+        var newPath = Path.Combine(destDir, Path.GetFileName(oldPath));
+        int suffix = 1;
+        var baseName = Path.GetFileNameWithoutExtension(oldPath);
+        var ext = Path.GetExtension(oldPath);
+        while (File.Exists(newPath))
+            newPath = Path.Combine(destDir, $"{baseName} ({++suffix}){ext}");
+
+        File.Move(oldPath, newPath);
+        var oldSidecar = oldPath + ".meta.json";
+        if (File.Exists(oldSidecar)) File.Move(oldSidecar, newPath + ".meta.json");
+
+        RewriteAudioFileReferences(oldPath, newPath);
+        return Path.GetFileName(newPath);
+    }
+
     /// <summary>Swaps `oldPath` for `newPath` on any TriggerEntry.AudioFile/PaAudioFile/
     /// BigGameAudioFile that referenced it, across the in-memory active/home/away configs (saved
     /// immediately) and every other team's saved profile file on disk (so a rename made while
@@ -2539,6 +2638,48 @@ public sealed class WebMainForm : Form
         catch (Exception ex)
         {
             CrashLog.Write("SaveTrimFromWeb failed", ex);
+            return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the trimmed clip." });
+        }
+    }
+
+    /// <summary>Team Pot's trim save -- mirrors SaveTrimFromWeb above (same "one working slot in
+    /// ConfigStore.TrimSourceFolder, prepped by PrepareTrimForWhistleFromWeb since a pot entry has
+    /// no trigger to key off of either") except it retargets the pot entry's FilePath
+    /// (ConfigStore.RetargetHbcuPotSong) instead of a TriggerEntry.AudioFile.</summary>
+    public string SaveTrimForHbcuPotFromWeb(string team, string oldFilePath, double startSec, double endSec, string? sourceName = null)
+    {
+        string? srcPath = Directory.Exists(ConfigStore.TrimSourceFolder)
+            ? Directory.GetFiles(ConfigStore.TrimSourceFolder).FirstOrDefault() : null;
+        if (srcPath == null) return JsonSerializer.Serialize(new { ok = false, error = "Trim source is gone -- reopen the trimmer." });
+        if (endSec <= startSec) return JsonSerializer.Serialize(new { ok = false, error = "End must be after start." });
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.SongsTrimmedFolder);
+            string baseName = !string.IsNullOrWhiteSpace(sourceName) ? Path.GetFileNameWithoutExtension(sourceName) : Path.GetFileNameWithoutExtension(oldFilePath);
+            string safeBase = System.Text.RegularExpressions.Regex.Replace(baseName, @"[^\w\s-]", "").Replace(" ", "_");
+            string outPath = Path.Combine(ConfigStore.SongsTrimmedFolder, $"{safeBase}.wav");
+            int n = 1;
+            while (File.Exists(outPath))
+                outPath = Path.Combine(ConfigStore.SongsTrimmedFolder, $"{safeBase}_{n++}.wav");
+
+            using (var reader = new NAudio.Wave.AudioFileReader(srcPath))
+            {
+                var offset = new NAudio.Wave.SampleProviders.OffsetSampleProvider(reader)
+                {
+                    SkipOver = TimeSpan.FromSeconds(startSec),
+                    Take = TimeSpan.FromSeconds(endSec - startSec),
+                };
+                var normalized = AudioNormalizer.NormalizeAndLimit(offset);
+                NAudio.Wave.WaveFileWriter.CreateWaveFile16(outPath, normalized);
+            }
+
+            ConfigStore.RetargetHbcuPotSong(team, oldFilePath, outPath);
+            return JsonSerializer.Serialize(new { ok = true, fileName = Path.GetFileName(outPath) });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SaveTrimForHbcuPotFromWeb failed", ex);
             return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the trimmed clip." });
         }
     }
@@ -3122,7 +3263,7 @@ public sealed class WebMainForm : Form
         // used INSTEAD of AudioFile, not layered like PaAudioFile below, only when both a Big
         // Game is currently flagged and a variant is actually assigned. Falls back to the
         // ordinary AudioFile otherwise, same as if no variant existed.
-        string audioFile = (_watcher.IsBigGame && !string.IsNullOrWhiteSpace(entry.BigGameAudioFile))
+        string audioFile = (EffectiveBigGame && !string.IsNullOrWhiteSpace(entry.BigGameAudioFile))
             ? entry.BigGameAudioFile
             : entry.AudioFile;
 
@@ -3135,7 +3276,8 @@ public sealed class WebMainForm : Form
                 || entry.Event.Contains("Turnover", StringComparison.OrdinalIgnoreCase)
                 || entry.Event.Contains("Safety", StringComparison.OrdinalIgnoreCase);
             bool isBigHit = entry.Event.Contains("Tackle for Loss", StringComparison.OrdinalIgnoreCase);
-            bool isPregame = entry.Event.Contains("Pregame Ready", StringComparison.OrdinalIgnoreCase);
+            // Owner request 2026-08-14: Ready screen should sound normal, no Tunnel reverb/EQ.
+            bool isPregame = false;
             RecordSongTriggered(entry.Event);
 
             // See HighPriorityOverlapGrace's doc comment: a second big moment within the grace
@@ -3265,9 +3407,13 @@ public sealed class WebMainForm : Form
     {
         bool routesLikeDefense = (eventKey.StartsWith("Defense:") && eventKey != "Defense: Touchdown Scored")
             || eventKey == "Penalty: Offense";
-        string routedSide = routesLikeDefense
-            ? (possessionSide == "home" ? "away" : "home")
-            : possessionSide;
+        // Opening Kickoff is always the HOME team's cue -- never routed by possession, which can
+        // easily read "away" at the moment this fires (owner request 2026-08-14).
+        string routedSide = eventKey == "Other: Opening Kickoff"
+            ? "home"
+            : routesLikeDefense
+                ? (possessionSide == "home" ? "away" : "home")
+                : possessionSide;
 
         bool sideAllowed = HomeOnlyEventsForNow ? routedSide == "home" : true;
         float volumeMultiplier = 1f;
@@ -3286,7 +3432,7 @@ public sealed class WebMainForm : Form
             {
                 // Un-gated -- your own team's hype cue always plays for whoever's driving.
             }
-            else if (!_watcher.IsBigGame)
+            else if (!EffectiveBigGame)
             {
                 if (!isEarnedBigEvent)
                 {
@@ -3316,7 +3462,7 @@ public sealed class WebMainForm : Form
     /// guess" philosophy as the rest of this file's possession handling.</summary>
     float FieldPositionVolumeMultiplier(string side)
     {
-        if (!_watcher.IsBigGame) return 1f;
+        if (!EffectiveBigGame) return 1f;
         if (_watcher.ActivePreset.Name != ScorebugPreset.CollegeFootball27.Name
             && _watcher.ActivePreset.Name != ScorebugPreset.CollegeFootball26Console.Name) return 1f;
         if (_watcher.ArrowUp is not bool arrowUp) return 1f;
@@ -3340,6 +3486,52 @@ public sealed class WebMainForm : Form
         return $"{routedSide}|" + FireEventForSide(routedSide, eventKey, bypassCooldown: true, volumeMultiplier: volumeMultiplier);
     }
 
+    /// <summary>How long a given event's assigned cue will actually play for, so
+    /// HbcuPlaybackService's various pot-scheduling timers (kickoff-start, post-touchdown bonus)
+    /// can be scheduled for the real end of the song, not a guess. Originally kickoff-only (see
+    /// the Start() call site below); reused 2026-08-14 for OnTouchdown's own duration-based
+    /// scheduling since the same two bugs fixed here apply to any entry, not just kickoff's:
+    /// 1. Was reading entry.AudioFile's cached .meta.json duration, ignoring
+    ///    entry.BigGameAudioFile -- FireEvent's own logic (see its "audioFile" local right
+    ///    above the AudioPlayer.Play call) actually plays BigGameAudioFile instead whenever Big
+    ///    Game mode is active, so this could easily be measuring the WRONG file's length.
+    /// 2. Fell back to TimeSpan.Zero when no cached duration existed for whichever file it did
+    ///    check -- meaning "wait only the fixed gap from the EVENT firing" instead of "song
+    ///    length + gap", cutting the pot chain in early on any song over that gap long that just
+    ///    hadn't been previewed/analyzed yet (which is how a .meta.json sidecar gets its
+    ///    DurationSeconds in the first place). Now reads the real file duration directly (cheap --
+    ///    NAudio's AudioFileReader.TotalTime, no decode of the actual samples needed) as a safety
+    ///    net instead of guessing zero.</summary>
+    TimeSpan ResolveEventSongDuration(TriggerEntry? entry)
+    {
+        if (entry == null) return TimeSpan.Zero;
+        string? audioFile = (EffectiveBigGame && !string.IsNullOrWhiteSpace(entry.BigGameAudioFile))
+            ? entry.BigGameAudioFile
+            : entry.AudioFile;
+        if (string.IsNullOrWhiteSpace(audioFile) || !File.Exists(audioFile)) return TimeSpan.Zero;
+
+        var meta = AudioTrackMetadataStore.Load(audioFile);
+        if (meta?.DurationSeconds is > 0) return TimeSpan.FromSeconds(meta.DurationSeconds.Value);
+
+        try { using var reader = new NAudio.Wave.AudioFileReader(audioFile); return reader.TotalTime; }
+        catch { return TimeSpan.Zero; } // unreadable file -- can't know its length, same as before
+    }
+
+    /// <summary>HBCU-mode test hook -- unlike FireTestEventFromWeb/FireTestEventRoutedFromWeb
+    /// (which call FireEventForSide directly), this goes through the REAL OnEngineEventsDetected
+    /// path so HbcuPlaybackService's Start/Pause/Resume/OnTouchdown wiring is actually exercised
+    /// (owner request 2026-08-14: no way to test the kickoff-delay/pot-shuffle chain without a
+    /// live game). "no-hbcu" if HBCU mode isn't active this session -- _hbcuPlayback is only built
+    /// in ConfirmGametimeFromWeb when ConfigStore.LoadPlaybackMode() == PlaybackMode.Hbcu, so
+    /// GAMETIME needs to have been pressed with HBCU Mode on before this does anything.</summary>
+    public string FireTestEventHbcuFromWeb(string eventKey, string possessionSide)
+    {
+        if (_hbcuPlayback == null) return "no-hbcu";
+        _possession = possessionSide;
+        OnEngineEventsDetected(new List<TriggerEvent> { new() { EventKey = eventKey } });
+        return "ok";
+    }
+
     /// <summary>Test-hook path for the same-tick double-fire scenario (e.g. Offense: Third Down
     /// Short + the new Defense: Third Down Short firing together, routed to opposite sides) --
     /// fires both through ResolveEventRouting exactly like a real tick's batch would, first
@@ -3360,12 +3552,78 @@ public sealed class WebMainForm : Form
         return string.Join(";", results);
     }
 
+    /// <summary>HBCU mode's only required event triggers -- everything else is suppressed in
+    /// favor of HbcuPlaybackService's continuous shuffle (see its class doc). Matches Touchdown
+    /// by substring so both "Offense:" and "Defense: Touchdown Scored" qualify.</summary>
+    static bool IsHbcuAllowedEvent(string eventKey) =>
+        eventKey is "Other: Pregame Ready" or "Other: Pregame Take the Field" or "Other: Kickoff" or "Other: Opening Kickoff"
+        || eventKey.Contains("Touchdown", StringComparison.OrdinalIgnoreCase);
+
     void OnEngineEventsDetected(IReadOnlyList<TriggerEvent> events)
     {
         RunOnUi(() =>
         {
             // If matchup not set yet, fall back to the single-team config (legacy mode).
             if (_homeConfig == null || _awayConfig == null) return;
+
+            if (_hbcuPlayback != null)
+            {
+                events = events.Where(e => IsHbcuAllowedEvent(e.EventKey)).ToList();
+                if (events.Count == 0) return;
+
+                // Side-agnostic HBCU events (pregame/kickoff) always favor HOME over away, fired
+                // directly here instead of through the possession-based routing further down.
+                // Owner request 2026-08-14: these used to fall through to ResolveEventRouting like
+                // every other event once _possession had already been read once (which can easily
+                // happen before Opening Kickoff fires) -- that routes strictly by possessionSide
+                // with no home preference at all, so a stray/early "away" possession read would
+                // silently play the AWAY song for a supposedly side-agnostic cue (reported live:
+                // Opening Kickoff played the away band's song). Resolved here with an explicit
+                // home-first, away-fallback lookup instead, then stripped out of `events` so the
+                // possession-routed loop below can't ALSO fire them a second time.
+                var hbcuSideAgnostic = events.Where(e => e.EventKey is "Other: Pregame Ready"
+                    or "Other: Pregame Take the Field" or "Other: Kickoff" or "Other: Opening Kickoff").ToList();
+                foreach (var evt in hbcuSideAgnostic)
+                {
+                    // Opening Kickoff is always the HOME team's cue -- never falls back to away,
+                    // even if home has no song assigned (owner request 2026-08-14: it was
+                    // observed falling back to away with "no song assigned, nothing played").
+                    string firstSide = evt.EventKey == "Other: Opening Kickoff"
+                        ? "home"
+                        : ResolveEntryForEvent("home", evt.EventKey) != null ? "home" : "away";
+                    string result = FireEventForSide(firstSide, evt.EventKey, interruptPrevious: true);
+                    OnLog($"[engine] {evt.EventKey} -> {firstSide} (HBCU home-priority): {result}");
+                    RecordFireResult(evt.EventKey, firstSide, result);
+                }
+                events = events.Except(hbcuSideAgnostic).ToList();
+
+                // Opening Kickoff is the shuffle chain's actual start signal -- HbcuPlaybackService
+                // is only constructed (not Start()ed) at GAMETIME, so pregame/team-select stays
+                // silent and the first band's song starts HbcuPlaybackService.PostKickoffGap after
+                // the Kickoff event's OWN assigned song finishes (owner request 2026-08-14 -- not
+                // a fixed delay from the event firing, which cut the shuffle in early whenever that
+                // song ran long). Start() itself no-ops if already running, so a stray double-fire
+                // of this event can't restart the chain.
+                if (hbcuSideAgnostic.Any(e => e.EventKey == "Other: Opening Kickoff"))
+                {
+                    var kickoffEntry = ResolveEntryForEvent("home", "Other: Opening Kickoff");
+                    _hbcuPlayback.Start(ResolveEventSongDuration(kickoffEntry));
+                }
+                // Runout/Kickoff (post-opening) are side-agnostic overrides: pause the shuffle
+                // chain so it doesn't race whichever cue is assigned, then resume shortly after --
+                // if nothing was actually assigned for that event, FireEventForSide above just
+                // no-ops and Resume picks the pool back up like nothing happened ("revert back to
+                // pool"). Touchdown is handled per-event further down instead (see
+                // HbcuPlaybackService.OnTouchdown), once the scoring side is actually known.
+                if (hbcuSideAgnostic.Any(e => e.EventKey is "Other: Pregame Ready" or "Other: Pregame Take the Field" or "Other: Kickoff"))
+                {
+                    _hbcuPlayback.Pause();
+                    _hbcuResumeTimer?.Dispose();
+                    _hbcuResumeTimer = new System.Threading.Timer(_ => RunOnUi(() => _hbcuPlayback?.Resume()), null, TimeSpan.FromSeconds(8), System.Threading.Timeout.InfiniteTimeSpan);
+                }
+
+                if (events.Count == 0) return;
+            }
             // STATE_MACHINE_ANALYSIS.md Race #3: this used to default to "home" when possession
             // hadn't been read yet (right after GAMETIME, before the first real possession-color
             // sample), which could fire a "Defense:*" cue for the wrong team -- e.g. an away-team
@@ -3401,7 +3659,12 @@ public sealed class WebMainForm : Form
                 bool otherFiredYet = false;
                 foreach (var evt in events.Where(e => e.EventKey.StartsWith("Other:")))
                 {
-                    foreach (var otherSide in new[] { "home", "away" })
+                    // Opening Kickoff is always the HOME team's cue -- never fire it for away,
+                    // even in this both-sides fallback (owner request 2026-08-14).
+                    var sidesToFire = evt.EventKey == "Other: Opening Kickoff"
+                        ? new[] { "home" }
+                        : new[] { "home", "away" };
+                    foreach (var otherSide in sidesToFire)
                     {
                         string result = FireEventForSide(otherSide, evt.EventKey, interruptPrevious: !otherFiredYet);
                         if (result.StartsWith("fired:")) otherFiredYet = true;
@@ -3445,6 +3708,15 @@ public sealed class WebMainForm : Form
 
                 if (sideAllowed)
                 {
+                    // HBCU mode Touchdown: routedSide IS the scoring side (see the long comment
+                    // above on "Defense: Touchdown Scored"). REWORKED 2026-08-14: OnTouchdown now
+                    // fades whatever's playing on EITHER side (including the scoring side's own
+                    // pot track, not just the opponent's like before) so the TD cue plays clean,
+                    // then queues a bonus pot song for the scoring side once the cue's own
+                    // duration elapses -- interruptPrevious is back to the normal !firedYet rule
+                    // since the scoring side's track is no longer deliberately left alive.
+                    bool hbcuTouchdown = _hbcuPlayback != null && evt.EventKey.Contains("Touchdown", StringComparison.OrdinalIgnoreCase);
+                    if (hbcuTouchdown) _hbcuPlayback!.OnTouchdown(routedSide, ResolveEventSongDuration(ResolveEntryForEvent(routedSide, evt.EventKey)));
                     string result = FireEventForSide(routedSide, evt.EventKey, volumeMultiplier: volumeMultiplier, interruptPrevious: !firedYet);
                     if (result.StartsWith("fired:")) firedYet = true;
                     OnLog($"[engine] {evt.EventKey} -> {routedSide}: {result}");

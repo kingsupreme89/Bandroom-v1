@@ -21,6 +21,15 @@ public sealed class WebBridge
         iconUrl = IconUrl(t.Name),
     }));
 
+    /// <summary>Owner-entered real in-game colors for a team, overriding whatever hardcoded hex
+    /// TeamColors.cs ships with (or a custom team's original picked colors) -- see ConfigStore.
+    /// SaveTeamColorOverride's doc comment for why this exists: none of the hardcoded values are
+    /// guaranteed to match the owner's actual custom CFB27 roster, which the scoreboard OCR match
+    /// (WebMainForm.ResolveTeamColor) needs to work correctly. Takes effect immediately, no
+    /// restart needed (TeamColors.InvalidateRoster).</summary>
+    public void SetTeamColors(string teamName, string primaryHex, string secondaryHex) =>
+        ConfigStore.SaveTeamColorOverride(teamName, primaryHex, secondaryHex);
+
     internal static string? LogoUrl(string teamName)
     {
         string? path = TeamLogo.FindImagePath(teamName);
@@ -347,7 +356,7 @@ public sealed class WebBridge
         return meta != null ? JsonSerializer.Serialize(meta, CamelCaseJsonOptions) : "null";
     }
 
-    public string SaveTrackMetadata(string trigger, string metadataJson)
+    public string SaveTrackMetadata(string trigger, string metadataJson, bool isHbcu = false)
     {
         var audioFile = ResolveAudioFileForTrigger(trigger);
         if (audioFile == null)
@@ -367,7 +376,14 @@ public sealed class WebBridge
                     renamedTo = _host.RenameAssignedTrackFromWeb(trigger, desiredBaseName);
             }
 
-            return JsonSerializer.Serialize(new { success = true, fileName = renamedTo });
+            // "Is this for an HBCU?" -- moves the file into ConfigStore.HbcuSchoolFolder(school)
+            // AFTER any rename above, so RewriteAudioFileReferences only ever chases one hop at a
+            // time (rename's old->new, then this move's old->new) instead of needing to know both.
+            string? movedTo = null;
+            if (isHbcu && !string.IsNullOrWhiteSpace(meta.SchoolAbbreviation))
+                movedTo = _host.MoveAssignedTrackToHbcuFolderFromWeb(trigger, meta.SchoolAbbreviation.Trim());
+
+            return JsonSerializer.Serialize(new { success = true, fileName = movedTo ?? renamedTo });
         }
         catch (Exception ex)
         {
@@ -640,6 +656,38 @@ public sealed class WebBridge
         catch (Exception ex)
         {
             CrashLog.Write($"AdminDeleteMarketplaceItem failed for {type}/{id}", ex);
+            return JsonSerializer.Serialize(new { success = false, error = "Delete failed -- check your connection and try again." });
+        }
+    }
+
+    /// <summary>Posts a message to the marketplace chat (General/Media Sharing) via the worker's
+    /// /chat/&lt;channel&gt;/post -- requires the user to be signed in (session token lives in
+    /// ConfigStore, never in JS, so this can't be a raw fetch() from app.js). Returns
+    /// { ok, error?, message? } as JSON.</summary>
+    public Task<string> PostMarketplaceChatMessage(string channel, string content, string? attachedItemId, string? attachedItemType)
+        => MarketplaceChatService.PostAsync(channel, content, attachedItemId, attachedItemType);
+
+    /// <summary>Admin-only moderation delete for a chat message, same X-Admin-Token mechanism as
+    /// AdminDeleteMarketplaceItem above. No-ops with an error if IsAdminMode() is false.</summary>
+    public async Task<string> AdminDeleteMarketplaceChatMessage(string channel, string id)
+    {
+        if (_adminToken == null)
+            return JsonSerializer.Serialize(new { success = false, error = "Admin mode is not active." });
+
+        try
+        {
+            using var request = new System.Net.Http.HttpRequestMessage(
+                System.Net.Http.HttpMethod.Delete,
+                $"https://bandroom-marketplace.bandroom.workers.dev/chat/{channel}/{Uri.EscapeDataString(id)}");
+            request.Headers.Add("X-Admin-Token", _adminToken);
+            using var response = await ShareHttp.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+                return JsonSerializer.Serialize(new { success = false, error = $"Delete failed: {(int)response.StatusCode}" });
+            return JsonSerializer.Serialize(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write($"AdminDeleteMarketplaceChatMessage failed for {channel}/{id}", ex);
             return JsonSerializer.Serialize(new { success = false, error = "Delete failed -- check your connection and try again." });
         }
     }
@@ -1390,6 +1438,8 @@ public sealed class WebBridge
     public string PrepareTrimForWhistle(string path) => _host.PrepareTrimForWhistleFromWeb(path);
     public string SaveTrim(string trigger, bool isPa, double startSec, double endSec, string? sourceName = null) => _host.SaveTrimFromWeb(trigger, isPa, startSec, endSec, sourceName);
     public string SaveTrimAsLeadInWhistle(double startSec, double endSec) => _host.SaveTrimAsLeadInWhistleFromWeb(startSec, endSec);
+    public string SaveTrimForHbcuPot(string team, string oldFilePath, double startSec, double endSec, string? sourceName = null) =>
+        _host.SaveTrimForHbcuPotFromWeb(team, oldFilePath, startSec, endSec, sourceName);
     public int GetEventVolume(string trigger) => _host.GetEventVolumeFromWeb(trigger);
     public void SetEventVolume(string trigger, int percent) => _host.SetEventVolumeFromWeb(trigger, percent);
     // Per-song override for the global lead-in whistle toggle (TriggerEntry.PlayLeadInWhistle) --
@@ -1448,6 +1498,14 @@ public sealed class WebBridge
     public void SetCrowdBusEnabled(bool enabled) => _host.SetCrowdBusEnabledFromWeb(enabled);
     public bool GetCrowdBusClipAvailable() => _host.GetCrowdBusClipAvailableFromWeb();
     public bool BrowseAndSetCrowdBusClip() => _host.BrowseAndSetCrowdBusClipFromWeb();
+    public bool GetRemotePlayMode() => _host.GetRemotePlayModeFromWeb();
+    public void SetRemotePlayMode(bool enabled) => _host.SetRemotePlayModeFromWeb(enabled);
+    public string FireTestEventHbcu(string eventKey, string possessionSide) => _host.FireTestEventHbcuFromWeb(eventKey, possessionSide);
+    public string? GetHbcuPlaybackStatus() => _host.GetHbcuPlaybackStatusFromWeb();
+    public void PauseHbcuPlayback() => _host.PauseHbcuPlaybackFromWeb();
+    public void ResumeHbcuPlayback() => _host.ResumeHbcuPlaybackFromWeb();
+    public void StopHbcuPlayback() => _host.StopHbcuPlaybackFromWeb();
+    public void RestartHbcuPlayback() => _host.RestartHbcuPlaybackFromWeb();
 
     /// <summary>Real changelog -- Bandroom's own GitHub Releases (version, title, bullet
     /// notes, published date). Powers the "Updates" panel (formerly a Live Feed of in-session
@@ -1531,6 +1589,56 @@ public sealed class WebBridge
     public string GetBigGameSettings() => JsonSerializer.Serialize(ConfigStore.LoadBigGameSettings());
     public void SaveBigGameSettings(bool isBigGame) =>
         ConfigStore.SaveBigGameSettings(new ConfigStore.BigGameSettings(isBigGame, 4, 8));
+
+    /// <summary>Global FCS/HBCU mode toggle -- see ConfigStore.PlaybackMode's doc comment. Narrows
+    /// the left team chooser/favorite-team picker to TeamColors.HbcuTeamNames when on; matchup
+    /// screens and playback are unaffected.</summary>
+    public bool GetHbcuMode() => ConfigStore.LoadPlaybackMode() == ConfigStore.PlaybackMode.Hbcu;
+    public void SaveHbcuMode(bool enabled) =>
+        ConfigStore.SavePlaybackMode(enabled ? ConfigStore.PlaybackMode.Hbcu : ConfigStore.PlaybackMode.Fcs);
+
+    /// <summary>The HBCU roster's school names, for the left team chooser/favorite picker's
+    /// client-side filter and for the upload flow's "Is this for an HBCU?" school dropdown.</summary>
+    public string GetHbcuTeamNames() => JsonSerializer.Serialize(TeamColors.HbcuTeamNames);
+
+    /// <summary>HBCU mode's "Team Pot" -- the unlimited song list HbcuPlaybackService shuffles
+    /// through for one team (see ConfigStore.GetHbcuPot's doc comment). Returns each entry's
+    /// filename plus its full settings (whistle/speed/PA effect/fade/no-fade/volume), camelCase
+    /// like every other JS-facing payload in this bridge, so the pot panel's settings popover has
+    /// everything it needs without a second lookup.</summary>
+    public string GetHbcuPot(string team) => JsonSerializer.Serialize(
+        ConfigStore.GetHbcuPot(team).Select(s => new
+        {
+            name = Path.GetFileNameWithoutExtension(s.FilePath),
+            path = s.FilePath,
+            volume = s.Volume,
+            playLeadInWhistle = s.PlayLeadInWhistle,
+            whistleSpeed = s.WhistleSpeed,
+            speed2x = s.PlaybackSpeed2x,
+            paSpeakerEffect = s.PaSpeakerEffect,
+            fadeStartSecondsOverride = s.FadeStartSecondsOverride,
+            fadeOutDurationOverride = s.FadeOutDurationOverride,
+            noFade = s.NoFade,
+        }), CamelCaseJsonOptions);
+
+    public void AddToHbcuPot(string team, string filePath) => ConfigStore.AddToHbcuPot(team, filePath);
+    public void RemoveFromHbcuPot(string team, string filePath) => ConfigStore.RemoveFromHbcuPot(team, filePath);
+
+    /// <summary>Explicit "use Generic pack" picker (owner request 2026-08-14) for a team with no
+    /// HBCU pot/pack of its own -- typically the opponent in an HBCU matchup. See ConfigStore.
+    /// GetHbcuUseGenericPack's doc comment -- this is a forced override, not just an empty-pot
+    /// fallback, and takes effect on the NEXT GAMETIME press (HbcuPlaybackService reads it once
+    /// at construction), not retroactively mid-game.</summary>
+    public bool GetHbcuUseGenericPack(string team) => ConfigStore.GetHbcuUseGenericPack(team);
+    public void SetHbcuUseGenericPack(string team, bool useGeneric) => ConfigStore.SetHbcuUseGenericPack(team, useGeneric);
+
+    /// <summary>Saves one pot song's settings from the pot panel's "Event Settings" popover --
+    /// same fields/shape TriggerEntry's settings popover edits, just targeting a pot entry.</summary>
+    public void SaveHbcuPotSongSettings(string team, string settingsJson)
+    {
+        var s = JsonSerializer.Deserialize<ConfigStore.HbcuPotSong>(settingsJson, CamelCaseJsonOptions);
+        if (s != null) ConfigStore.UpdateHbcuPotSongSettings(team, s);
+    }
 
     /// <summary>Band Director dashboard, Phase 1 (see BANDROOM_STREAMER_MASTER_PROMPT.md SYSTEM
     /// 2) -- only the quick-trigger slot->EventKey mapping is real/persisted so far.</summary>

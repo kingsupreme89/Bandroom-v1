@@ -105,8 +105,8 @@
            (openDiscordChat, handleAutoAssignClick, runRailAction's data-action dispatch, etc.)
            needed zero changes -- only their container and class moved. -->
       <div class="nav-rack glass" id="nav-rack">
-        <button id="btn-bandroom-cloud" class="nav-rack-item nav-rack-primary" title="Browse The Bandroom">
-          <span class="nav-rack-icon">🎵</span><span>The Bandroom</span>
+        <button id="btn-bandroom-cloud" class="nav-rack-item nav-rack-primary" title="Browse The Market">
+          <span class="nav-rack-icon">🎵</span><span>The Market</span>
         </button>
         <button id="btn-sound-bank" class="nav-rack-item" title="This team's Sound Bank">
           <span class="nav-rack-icon">🏆</span><span>Sound Bank</span>
@@ -135,13 +135,18 @@
       </div>
       <!-- Left panel: team grid + profiles -->
       <div class="side-panel glass" id="left-panel">
-        <div class="panel-section">
-          <div class="panel-title-row">
-            <div class="panel-title">Team</div>
-            <button class="icon-btn" id="btn-add-school" title="Add a custom TeamBuilder school (name, colors, logo, and optional mascot for scoreboard matching)">+</button>
-          </div>
-          <div class="team-grid" id="team-grid"><!-- populated by app.js --></div>
-        </div>
+        <!-- HBCU Mode pill -- global FCS/HBCU roster toggle (ConfigStore.PlaybackMode). Narrows
+             THIS panel's team grid + the Favorite Team picker to the SWAC/MEAC roster only; the
+             Set Matchup screen always shows every team regardless, since an HBCU band can play
+             any opponent -- see WebBridge.GetHbcuMode/SaveHbcuMode and app.js's
+             wireHbcuModeToggle/applyHbcuModeFilter. -->
+        <button id="pill-hbcu-mode" class="hbcu-mode-pill" title="Toggle HBCU Mode -- narrows the team chooser to SWAC/MEAC schools" aria-pressed="false">
+          <span class="hbcu-mode-pill-dot"></span>
+          <span>HBCU Mode</span>
+        </button>
+        <!-- Owner request 2026-08-14: moved above the Team grid (was below it) so the profile
+             share/load/publish pills are visible without scrolling past the whole team grid --
+             "people can see how to share profiles etc." -->
         <div class="panel-section" id="profiles-section">
           <div class="panel-title">Profiles</div>
           <div id="profile-status" class="profile-status"></div>
@@ -168,6 +173,13 @@
               <button class="pill pill-marketplace" id="btn-browse-team-profiles">Browse Team Profiles</button>
             </div>
           </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-title-row">
+            <div class="panel-title">Team</div>
+            <button class="icon-btn" id="btn-add-school" title="Add a custom TeamBuilder school (name, colors, logo, and optional mascot for scoreboard matching)">+</button>
+          </div>
+          <div class="team-grid" id="team-grid"><!-- populated by app.js --></div>
         </div>
       </div>
 
@@ -326,30 +338,6 @@
         </div>
       </div>
 
-      <!-- Load Profile from Others -- lists shared profiles for the active team, applies
-           whichever one is picked by matching filenames against the local Songs library. -->
-      <div id="load-profile-overlay" hidden>
-        <div id="load-profile-dialog" class="glass">
-          <div class="clipper-header">
-            <span class="clipper-title" id="load-profile-title">Load Profile from Others</span>
-            <button id="btn-close-load-profile" class="icon-btn">&times;</button>
-          </div>
-          <div id="load-profile-list" class="clipper-assign-list"></div>
-        </div>
-      </div>
-
-      <!-- Browse Team Profiles -- lists published team identity cards (name/colors/bio/logo)
-           across every team, distinct from Load Profile from Others (song assignments). -->
-      <div id="team-profiles-overlay" hidden>
-        <div id="team-profiles-dialog" class="glass">
-          <div class="clipper-header">
-            <span class="clipper-title">Browse Team Profiles</span>
-            <button id="btn-close-team-profiles" class="icon-btn">&times;</button>
-          </div>
-          <div id="team-profiles-list" class="clipper-assign-list"></div>
-        </div>
-      </div>
-
       <!-- Track Info drawer -- editable AudioTrackMetadata sidecar for the song assigned to one
            trigger (see WebBridge.GetTrackMetadata/SaveTrackMetadata/AnalyzeTrackMetadata,
            AudioTrackMetadata.cs). Slides in from the right rather than centered, so it reads as a
@@ -365,7 +353,17 @@
           <div id="track-info-form">
             <label>Title <input type="text" id="ti-title" maxlength="120" /></label>
             <label>Artist <input type="text" id="ti-artist" maxlength="120" /></label>
-            <label>School <input type="text" id="ti-school" maxlength="20" /></label>
+            <!-- "Is this for an HBCU?" -- checked switches School from free text to a dropdown of
+                 TeamColors.HbcuTeamNames (WebBridge.GetHbcuTeamNames), with an "Add a school..."
+                 option that reveals a text input for one not on the list yet. Saving with this
+                 checked also moves the file into ConfigStore.HbcuSchoolFolder(school) -- see
+                 wireTrackInfoHbcuFields/saveTrackInfo in app.js. -->
+            <label class="ti-hbcu-check"><input type="checkbox" id="ti-is-hbcu" /> Is this for an HBCU?</label>
+            <label id="ti-school-plain-row">School <input type="text" id="ti-school" maxlength="20" /></label>
+            <label id="ti-school-hbcu-row" hidden>School (HBCU)
+              <select id="ti-school-hbcu"><option value="">Select a school...</option><option value="__add__">+ Add a school...</option></select>
+            </label>
+            <label id="ti-school-hbcu-new-row" hidden>New School Name <input type="text" id="ti-school-hbcu-new" maxlength="40" placeholder="e.g. Fort Valley State" /></label>
             <label>Energy Level
               <select id="ti-energy">
                 <option value="">Not set</option>
@@ -498,7 +496,29 @@
             <button id="btn-enter-bandroom-viewer" class="pill bandroom-enter-pill">&#127958; Enter Band Room</button>
             <button id="btn-close-situations" class="icon-btn">&times;</button>
           </div>
-          <div class="situations-list" id="situations-list"><!-- populated by app.js --></div>
+          <div class="situations-body">
+            <div class="situations-list" id="situations-list"><!-- populated by app.js --></div>
+            <!-- Team Pot -- HBCU mode only (see app.js renderHbcuPot). The actual shuffle source
+                 for HbcuPlaybackService: unlimited songs, add/remove freely, distinct from the
+                 single-file event cards on the left. Click a row to load it into Clip Preview;
+                 "+ Add Song" reuses the same Clipper library (openClipperAssignForHbcuPot). -->
+            <div id="hbcu-pot-panel" hidden>
+              <div class="hbcu-pot-header">
+                <span id="hbcu-pot-title">Team Pot</span>
+                <!-- Owner request 2026-08-14: explicit picker for a team with no pot/pack of its
+                     own (typically the FBS/non-HBCU opponent) -- forces HbcuPlaybackService to
+                     pull from the shared "Generic" pool instead of sitting silent all game. Takes
+                     effect on the next GAMETIME press, not retroactively mid-game (see
+                     ConfigStore.GetHbcuUseGenericPack's doc comment). -->
+                <label class="toggle-row pill-toggle hbcu-pot-generic-toggle" id="hbcu-pot-generic-wrap" title="Force this team to use the shared Generic pack instead of their own pot/uploaded songs -- takes effect next GAMETIME.">
+                  <input type="checkbox" id="hbcu-pot-use-generic" />
+                  <span>Use Generic Pack</span>
+                </label>
+                <button id="btn-hbcu-pot-add" class="pill">+ Add Song</button>
+              </div>
+              <div class="hbcu-pot-list" id="hbcu-pot-list"><!-- populated by app.js --></div>
+            </div>
+          </div>
         </div>
 
         <!-- Clip Preview island -- static on every tab (Offense/Defense/Situations), same width
@@ -738,9 +758,12 @@
     </div>
   </div>
 
-  <!-- "The Bandroom" cloud marketplace -- same team icons/logos as everywhere else in the app
-       (fillTeamSwatch), same dock-magnify hover. Picking a team opens its "album" below. -->
-  <!-- The Bandroom -- main marketplace hub. Search/select a team to jump to its own album
+  <!-- "The Market" cloud marketplace -- same team icons/logos as everywhere else in the app
+       (fillTeamSwatch), same dock-magnify hover. Picking a team opens its "album" below.
+       Renamed from "The Bandroom" (owner report: too easily confused with the app's own name,
+       "Bandroom") -- element ids/classes below still say "bandroom" internally, only the
+       user-visible label changed. -->
+  <!-- The Market -- main marketplace hub. Search/select a team to jump to its own album
        (same as always), OR browse "Newest Uploads" right here, Mac Finder-icon-view style,
        across every team at once -- clicking any tile jumps straight into that team's album on
        the right tab. No fake/placeholder content anywhere: if nothing's been uploaded yet, the
@@ -753,7 +776,7 @@
   <div id="bandroom-overlay" hidden>
     <div id="bandroom-picker" class="glass">
       <div class="team-picker-header">
-        <span>The Bandroom</span>
+        <span>The Market</span>
         <div class="team-picker-header-actions">
           <!-- Added 2026-08-12 (owner report: no way to upload from the marketplace homepage --
                the only real entry point was a "+ Upload" tile buried inside a team's own album
@@ -776,6 +799,33 @@
           it. Every team's Sound Bank holds both songs and background images together -- open
           one and hit <strong>+ Upload</strong> to contribute.
         </p>
+        <!-- Owner report: Chat, Team Profiles, Upload, and My Downloads all existed already but
+             were buried in different screens (Chat only inside a team's album, Team Profiles only
+             on the Assignment screen's small profile-io row, Upload only via the small header
+             pill) -- nothing about them was visible from The Market's own front page. This row
+             puts all four right here as equally-large, equally-visible nav pills. -->
+        <div class="bandroom-hub-nav-row" id="bandroom-hub-nav-row">
+          <button id="btn-hub-nav-upload" class="bandroom-hub-nav-pill" title="Upload a song, background, team logo, or profile">
+            <span class="bandroom-hub-nav-icon">⬆️</span><span>Upload</span>
+          </button>
+          <button id="btn-hub-nav-downloads" class="bandroom-hub-nav-pill" title="Songs and images you've downloaded">
+            <span class="bandroom-hub-nav-icon">⬇️</span><span>My Downloads</span>
+          </button>
+          <button id="btn-hub-nav-chat" class="bandroom-hub-nav-pill" title="Talk with everyone else in The Market">
+            <span class="bandroom-hub-nav-icon">💬</span><span>Chat</span>
+          </button>
+          <!-- Song ASSIGNMENTS (trigger -> song map), distinct from Team Profiles below (team
+             IDENTITY: logo/colors/bio) -- these two were easy to mix up once both were equally
+             prominent pills, per owner report ("applied shared logo but we want to be sharing the
+             events/song assignments"). This one wires to the existing "Load Profile from Others"
+             flow (openLoadProfileDialog), applied to whichever team is currently active. -->
+          <button id="btn-hub-nav-song-profiles" class="bandroom-hub-nav-pill" title="Apply another user's song-to-event assignments to your active team">
+            <span class="bandroom-hub-nav-icon">🎯</span><span>Song Profiles</span>
+          </button>
+          <button id="btn-hub-nav-team-profiles" class="bandroom-hub-nav-pill" title="Browse team LOGOS/colors/bio other users have published -- not song assignments">
+            <span class="bandroom-hub-nav-icon">🛡️</span><span>Team Logos</span>
+          </button>
+        </div>
         <!-- Shortcut hero row -- shared .bandroom-hero-row/.bandroom-hero-card component (Music
              Library UX Brief v2 §4), same shortcut-strip idea as the reference layout's
              Create New/Project/Ambient row, mapped to what actually exists here. Populated by
@@ -848,6 +898,7 @@
         <input type="text" id="bandroom-album-search" placeholder="Search this album..." class="team-picker-search" />
         <button id="btn-bandroom-album-import-pack" class="btn-ghost" title="Import the default song pack from a .zip or folder">Import Song Pack</button>
         <button id="btn-bandroom-album-download-all" class="btn-ghost" title="Download every item in this album">Download All</button>
+        <button id="btn-open-marketplace-chat" class="pill pill-marketplace" title="Talk with everyone else in the marketplace">Chat</button>
       </div>
       <!-- Type filter pills -- All/Songs/Backgrounds, same "All Genre / Sound Effect / Hip Hop"
            row shape as the marketplace-layout reference image, adapted to Bandroom's actual two
@@ -1042,11 +1093,6 @@
           <label for="settings-reverb">Reverb preset</label>
           <select id="settings-reverb"></select>
         </div>
-        <div class="profile-settings-row">
-          <label for="settings-scorebug">Scorebug position</label>
-          <select id="settings-scorebug"></select>
-        </div>
-
         <div class="save-profile-header">App</div>
         <label class="profile-settings-row">
           <input type="checkbox" id="settings-always-on-top" />
@@ -1290,7 +1336,7 @@
     <div id="my-downloads" class="glass">
       <div class="team-picker-header">
         <div class="bandroom-album-title">
-          <button id="btn-back-my-downloads" class="icon-btn" title="Back to The Bandroom">&larr;</button>
+          <button id="btn-back-my-downloads" class="icon-btn" title="Back to The Market">&larr;</button>
           <span>My Downloads</span>
           <span id="my-downloads-count" class="my-downloads-count"></span>
         </div>
@@ -1563,6 +1609,70 @@
     </div>
   </div>
 
+  <!-- Marketplace chat -- forum-style, two fixed channels: General (open talk) and Media Sharing
+       (talk about + attach a song/background already in the marketplace). Docked panel like
+       Discord Chat above rather than a full modal, so it can stay open alongside browsing. Polls
+       the worker's /chat/<channel>/list every ~5s while open (see pollMarketplaceChat in app.js);
+       posting requires sign-in and routes through bridge.PostMarketplaceChatMessage since the
+       session token lives server-side in the C# app, never in JS. -->
+  <div id="marketplace-chat-overlay" hidden>
+    <div id="marketplace-chat-panel" class="glass">
+      <div class="team-picker-header">
+        <span>Market Chat</span>
+        <button id="btn-close-marketplace-chat" class="icon-btn">&times;</button>
+      </div>
+      <div class="marketplace-chat-channels">
+        <button class="pill marketplace-chat-channel-pill active" data-chat-channel="general">General</button>
+        <button class="pill marketplace-chat-channel-pill" data-chat-channel="media">Media Sharing</button>
+      </div>
+      <div id="marketplace-chat-messages"><!-- populated by app.js --></div>
+      <div id="marketplace-chat-attach-preview" hidden>
+        <!-- populated by app.js when a file is attached in Media Sharing -->
+      </div>
+      <div class="marketplace-chat-composer">
+        <button id="btn-marketplace-chat-attach" class="icon-btn" title="Attach a song or background to share" hidden>📎</button>
+        <input type="text" id="marketplace-chat-input" placeholder="Message General..." maxlength="1000" />
+        <button id="btn-marketplace-chat-send" class="btn-primary">Send</button>
+      </div>
+      <div class="marketplace-chat-signin-prompt" id="marketplace-chat-signin-prompt" hidden>
+        Sign in from your Profile to post here.
+      </div>
+    </div>
+  </div>
+
+  <!-- Browse Team Profiles -- lists published team identity cards (name/colors/bio/logo) across
+       every team, distinct from Load Profile from Others (song assignments, still inside #app).
+       BUG FIX: this dialog used to live nested inside #app, which has `position: relative;
+       z-index: 2` and therefore its own stacking context -- no z-index set on a descendant can
+       ever escape above overlays like The Market that sit outside #app as direct children of
+       <body> (same reasoning as #edit-upload-overlay's fix elsewhere in this file). Moved out
+       here, alongside Market Chat/The Market itself, now that it's reachable from the hub nav
+       row while The Market is already open on top. -->
+  <div id="team-profiles-overlay" hidden>
+    <div id="team-profiles-dialog" class="glass">
+      <div class="clipper-header">
+        <span class="clipper-title">Browse Team Profiles</span>
+        <button id="btn-close-team-profiles" class="icon-btn">&times;</button>
+      </div>
+      <div id="team-profiles-list" class="clipper-assign-list"></div>
+    </div>
+  </div>
+
+  <!-- Load Profile from Others -- lists shared SONG-to-EVENT assignment maps for the active
+       team, applies whichever one is picked by matching filenames against the local Songs
+       library. Distinct from Team Profiles above (team identity: logo/colors/bio). Same
+       trapped-inside-#app bug as Team Profiles had (see comment above) -- moved out here for the
+       same reason, now that it's also reachable from the hub nav row's "Song Profiles" pill. -->
+  <div id="load-profile-overlay" hidden>
+    <div id="load-profile-dialog" class="glass">
+      <div class="clipper-header">
+        <span class="clipper-title" id="load-profile-title">Load Profile from Others</span>
+        <button id="btn-close-load-profile" class="icon-btn">&times;</button>
+      </div>
+      <div id="load-profile-list" class="clipper-assign-list"></div>
+    </div>
+  </div>
+
   <!-- Matchup picker / GAMETIME -- pick who's home and away for this game so the app can
        auto-load BOTH teams' own saved profiles and play the right side's song when OCR detects
        who actually scored/forced a turnover, instead of always assuming "the active team". -->
@@ -1651,14 +1761,19 @@
           <input type="checkbox" id="matchup-my-team-away" />
           <span>My team is Away (load their band room first)</span>
         </label>
-        <!-- Owner request 2026-08-13: replaces the old pill+arrows scorebug-LAYOUT switcher that
-             used to sit in the matchup header (PC CBS vs console presets) -- console presets
-             aren't offered on this screen at all now, everyone reads Kam's CBS. This is just a
-             standing preference for streaming/console players so BANDroom never even attempts
-             the RAM reader for them (moot for remote play -- no local process to read memory
-             from). See ConfigStore.RemotePlayModePath's doc comment -- unchecked never implies
-             RAM mode is ON, it only ever forces it off when checked. -->
-        <label class="toggle-row pill-toggle" title="Check this if you're playing on console or streaming/remote-play -- BANDroom will skip trying its RAM reader (which only works reading a local PC process anyway) and just use the Kam's CBS scorebug reader.">
+        <!-- Owner request 2026-08-13, updated 2026-08-14: the pill+arrows scorebug-LAYOUT switcher
+             (see .scorebug-switcher above) is the ONLY scorebug preset picker now -- the duplicate
+             Settings-tab dropdown (#settings-scorebug) was removed 2026-08-14 since both pickers
+             always wrote the exact same ConfigStore value anyway. Default preset for new users is
+             ScorebugPreset.CollegeFootball27 (the stock CFB 27 scorebug, same on PC and console
+             since the 2026-08-10 game update unified the two layouts -- see that preset's doc
+             comment), NOT Kam's CBS, so most console/remote-play users don't need to touch the
+             switcher at all. This checkbox is just a standing preference for streaming/console
+             players so BANDroom never even attempts the RAM reader for them (moot for remote play
+             -- no local process to read memory from). See ConfigStore.RemotePlayModePath's doc
+             comment -- unchecked never implies RAM mode is ON, it only ever forces it off when
+             checked. -->
+        <label class="toggle-row pill-toggle" title="Check this if you're playing on console or streaming/remote-play -- BANDroom will skip trying its RAM reader (which only works reading a local PC process anyway) and read the scorebug on screen instead. Uses whichever scorebug preset is picked via the pill switcher above -- default is the stock CFB 27 HUD, so most console players don't need to change anything.">
           <input type="checkbox" id="matchup-remote-play" />
           <span>Remote Play (console/streaming -- skip RAM reader)</span>
         </label>
@@ -1797,6 +1912,39 @@
     </div>
   </div>
 
+  <!-- Marketplace upload picker -- one shared front door for every upload type instead of the
+       "+ Upload" pill jumping straight to song upload and leaving background/logo/profile
+       avatar uploads to be found separately. Each tile routes into the existing flow for that
+       type (see openMarketplaceUploadPicker/wireMarketplaceUploadPickerTiles in app.js) --
+       no new upload logic, just a shared entry point. -->
+  <div id="marketplace-upload-picker-overlay" hidden>
+    <div id="marketplace-upload-picker" class="glass">
+      <div class="save-profile-header">
+        <span>Upload to The Market</span>
+        <button id="btn-close-marketplace-upload-picker" class="icon-btn">&times;</button>
+      </div>
+      <p class="save-profile-instructions">Pick what you're uploading.</p>
+      <div class="marketplace-upload-picker-grid">
+        <button class="marketplace-upload-picker-tile" data-upload-kind="song">
+          <span class="marketplace-upload-picker-icon">🎵</span>
+          <span>Song</span>
+        </button>
+        <button class="marketplace-upload-picker-tile" data-upload-kind="image">
+          <span class="marketplace-upload-picker-icon">🖼️</span>
+          <span>Background</span>
+        </button>
+        <button class="marketplace-upload-picker-tile" data-upload-kind="teamlogo">
+          <span class="marketplace-upload-picker-icon">🛡️</span>
+          <span>Team Logo</span>
+        </button>
+        <button class="marketplace-upload-picker-tile" data-upload-kind="profile">
+          <span class="marketplace-upload-picker-icon">👤</span>
+          <span>Profile</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Marketplace upload -- school is implicit (the album's own team, never re-typed), so this
        only asks for the item's name per the upload spec. Reuses .save-profile-* dialog styling
        verbatim so it doesn't look like a bolted-on feature. -->
@@ -1855,6 +2003,22 @@
       </div>
       <div class="coverflow-name" id="favorite-team-name"></div>
       <button id="btn-favorite-team-confirm" class="btn-primary">Confirm Team</button>
+    </div>
+  </div>
+
+  <!-- Team Color Editor -- none of this app's team colors are real CFB27 scoreboard colors (every
+       team here, HBCU or otherwise, is a custom in-game roster the owner built themselves), so
+       possession-color OCR (WebMainForm.ResolveTeamColor) only works once the owner enters the
+       colors they actually set in-game. Opened via the pencil icon on a team swatch
+       (openTeamColorEditor in app.js) -- small enough to be a popover, not a full overlay. -->
+  <div id="team-color-edit-popover" class="glass" hidden>
+    <div class="team-color-edit-title">Edit Colors -- <span id="team-color-edit-name"></span></div>
+    <label class="team-color-edit-row">Primary <input type="color" id="team-color-edit-primary" /></label>
+    <label class="team-color-edit-row">Secondary <input type="color" id="team-color-edit-secondary" /></label>
+    <div class="team-color-edit-hint">Match these to what you actually set in CFB27's roster/uniform editor so possession detection works correctly.</div>
+    <div class="team-color-edit-actions">
+      <button id="btn-team-color-edit-save" class="btn-primary">Save</button>
+      <button id="btn-team-color-edit-close" class="btn-ghost">Cancel</button>
     </div>
   </div>
 
@@ -1963,12 +2127,38 @@
   <div id="bandroom-ticker">
     <span class="brand-mark ticker-logo">B</span>
     <div class="ticker-track">
-      <span id="ticker-text" class="ticker-scroll">No uploads yet — be the first to add a song or background in The Bandroom!</span>
+      <span id="ticker-text" class="ticker-scroll">No uploads yet — be the first to add a song or background in The Market!</span>
     </div>
   </div>
 
   <!-- Test hook: fire any EventKey for home/away directly through FireEventForSide, bypassing
        OCR/live game feed. Owner-only debug tool, not part of the normal user flow. -->
+  <!-- HBCU pot dashboard -- "\" hotkey, see app.js openHbcuDashboard/pollHbcuDashboard. Live
+       readout of HbcuPlaybackService's own state (WebMainForm.GetHbcuPlaybackStatusFromWeb),
+       polled while open -- not a control surface for anything the app doesn't already track. -->
+  <div id="hbcu-dashboard-panel" class="glass" hidden>
+    <div class="test-hook-header">
+      <span>HBCU Pot Dashboard</span>
+      <button id="btn-close-hbcu-dashboard" class="icon-btn">&times;</button>
+    </div>
+    <div class="test-hook-body" id="hbcu-dashboard-body">
+      <div id="hbcu-dashboard-inactive" hidden>HBCU mode isn't active this session -- press GAMETIME with HBCU Mode on first.</div>
+      <div id="hbcu-dashboard-active">
+        <div class="hbcu-dashboard-row"><span>Status</span><span id="hbcu-dash-status">--</span></div>
+        <div class="hbcu-dashboard-row"><span>Now playing</span><span id="hbcu-dash-playing">--</span></div>
+        <div class="hbcu-dashboard-row"><span>Next in</span><span id="hbcu-dash-next">--</span></div>
+        <div class="hbcu-dashboard-row"><span id="hbcu-dash-home-label">Home</span><span id="hbcu-dash-home-count">-- queued</span></div>
+        <div class="hbcu-dashboard-row"><span id="hbcu-dash-away-label">Away</span><span id="hbcu-dash-away-count">-- queued</span></div>
+        <div class="test-hook-actions">
+          <button id="btn-hbcu-dash-start" class="btn-primary" title="Fresh shuffle -- clears both queues, nothing already-played carries over">Start</button>
+          <button id="btn-hbcu-dash-pause" class="btn-ghost">Pause</button>
+          <button id="btn-hbcu-dash-resume" class="btn-primary">Resume</button>
+          <button id="btn-hbcu-dash-stop" class="btn-ghost">Stop</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="test-hook-panel" class="glass" hidden>
     <div class="test-hook-header">
       <span>Event Test Hook</span>
@@ -2024,6 +2214,26 @@
         </label>
         <div class="test-hook-actions">
           <button id="btn-test-hook-fire-pair" class="btn-primary">Fire Together</button>
+        </div>
+      </div>
+      <!-- HBCU mode -- unlike every button above (which call FireEventForSide directly), these
+           route through the real OnEngineEventsDetected path so HbcuPlaybackService's Start
+           (kickoff-song-duration + 20s delay)/Pause/Resume/OnTouchdown wiring is actually
+           exercised. Only does anything once GAMETIME's been pressed with HBCU Mode on this
+           session (see WebMainForm.FireTestEventHbcuFromWeb) -- fire "Other: Opening Kickoff"
+           below, then wait for the assigned kickoff song's own length + 20s to hear the pot's
+           first shuffled track start. -->
+      <div class="test-hook-routed">
+        <div class="test-hook-routed-title">HBCU mode (tests kickoff delay + pot shuffle)</div>
+        <label>Possession
+          <select id="test-hook-hbcu-possession">
+            <option value="home">Home</option>
+            <option value="away">Away</option>
+          </select>
+        </label>
+        <div class="test-hook-actions">
+          <button id="btn-test-hook-hbcu-kickoff" class="btn-primary">Fire Opening Kickoff</button>
+          <button id="btn-test-hook-hbcu-touchdown" class="btn-primary">Fire Touchdown</button>
         </div>
       </div>
     </div>

@@ -66,12 +66,21 @@ public static class RamReaderValidator
 
             if (fields.Count == 0) return (null, Array.Empty<string>());
 
+            // "ram.freshness" (reader v1.4.9+) -- a nested "ram" object carries it, per DATA-API.md.
+            // Absent entirely on older readers; BuildFreshness returns null in that case, which
+            // ScoreboardReaderFreshness.CoreBlockRecentlyChanged's own doc comment says callers must
+            // treat as "no data to lean on," never as "stale."
+            ScoreboardReaderFreshness? freshness = root.TryGetProperty("ram", out var ramEl)
+                && ramEl.TryGetProperty("freshness", out var freshnessEl)
+                ? BuildFreshness(freshnessEl) : null;
+
             var state = new ScoreboardReaderState
             {
                 Away = away,
                 Home = home,
                 Game = game,
                 Meta = new ScoreboardReaderMeta { Source = "ram", Visible = true, UpdatedAt = updatedAtRaw, RamUpdatedAt = updatedAtRaw },
+                Freshness = freshness,
             };
             return (state, fields);
         }
@@ -164,6 +173,49 @@ public static class RamReaderValidator
             BallOn = null,
             Status = null,
         };
+    }
+
+    /// <summary>Reads every `ram.freshness.&lt;field&gt;` entry documented in DATA-API.md. Unlike
+    /// every other field in this file, a freshness entry that fails to parse is simply left null
+    /// (not a reason to reject the whole document) -- freshness is a trust SIGNAL, not game data,
+    /// so a partially-broken freshness block should just mean "no signal for that one field,"
+    /// never "distrust the document."</summary>
+    static ScoreboardReaderFreshness BuildFreshness(JsonElement freshnessEl) => new()
+    {
+        Quarter = BuildFreshnessEntry(freshnessEl, "quarter"),
+        GameClockSeconds = BuildFreshnessEntry(freshnessEl, "gameClockSeconds"),
+        PlayClock = BuildFreshnessEntry(freshnessEl, "playClock"),
+        AwayScore = BuildFreshnessEntry(freshnessEl, "awayScore"),
+        HomeScore = BuildFreshnessEntry(freshnessEl, "homeScore"),
+        PossessionAwayIsOne = BuildFreshnessEntry(freshnessEl, "possessionAwayIsOne"),
+        Down = BuildFreshnessEntry(freshnessEl, "down"),
+        Distance = BuildFreshnessEntry(freshnessEl, "distance"),
+        AwayTimeouts = BuildFreshnessEntry(freshnessEl, "awayTimeouts"),
+        HomeTimeouts = BuildFreshnessEntry(freshnessEl, "homeTimeouts"),
+        AwayRank = BuildFreshnessEntry(freshnessEl, "awayRank"),
+        HomeRank = BuildFreshnessEntry(freshnessEl, "homeRank"),
+        AwayRecord = BuildFreshnessEntry(freshnessEl, "awayRecord"),
+        HomeRecord = BuildFreshnessEntry(freshnessEl, "homeRecord"),
+        AwayTeamName = BuildFreshnessEntry(freshnessEl, "awayTeamName"),
+        HomeTeamName = BuildFreshnessEntry(freshnessEl, "homeTeamName"),
+    };
+
+    static ScoreboardReaderFreshnessEntry? BuildFreshnessEntry(JsonElement freshnessEl, string prop)
+    {
+        if (freshnessEl.ValueKind != JsonValueKind.Object || !freshnessEl.TryGetProperty(prop, out var entryEl)
+            || entryEl.ValueKind != JsonValueKind.Object) return null;
+
+        DateTime? changedAt = TryGetString(entryEl, "changedAt", out var changedAtRaw) && changedAtRaw != null
+            && DateTime.TryParse(changedAtRaw, CultureInfo.InvariantCulture,
+                DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed)
+            ? parsed : null;
+
+        double? secondsSinceChange = entryEl.TryGetProperty("secondsSinceChange", out var secEl)
+            && secEl.ValueKind == JsonValueKind.Number && secEl.TryGetDouble(out var secVal)
+            ? secVal : null;
+
+        return changedAt == null && secondsSinceChange == null ? null
+            : new ScoreboardReaderFreshnessEntry(changedAt, secondsSinceChange);
     }
 
     static bool SourceIsRam(JsonElement obj, string sourceProp) =>

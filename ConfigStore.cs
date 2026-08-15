@@ -154,6 +154,7 @@ internal static class ConfigStore
     /// full volume for every ordinary game, which is exactly the "small pep band" case this flag
     /// is supposed to exclude.</summary>
     static readonly string BigGameSettingsPath = Path.Combine(UserDataRoot, "big_game_settings.json");
+    static readonly string PlaybackModePath = Path.Combine(UserDataRoot, "playback_mode.json");
 
     public record BigGameSettings(bool Enabled, int QuarterThreshold, int ScoreMargin);
 
@@ -182,6 +183,278 @@ internal static class ConfigStore
         Directory.CreateDirectory(UserDataRoot);
         AtomicWriteAllText(BigGameSettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
         _bigGameSettingsCache = settings;
+    }
+
+    // FCS mode (default): normal FBS/FCS roster + the per-event trigger system, same as always.
+    // HBCU mode narrows the team chooser/favorite picker to the SWAC/MEAC roster (TeamColors.
+    // HbcuTeamNames; matchup screens still show every team, since an HBCU band can play any
+    // opponent) AND switches playback to HbcuPlaybackService's continuous pool shuffle -- see
+    // HbcuPool below for the per-team song list that drives it, and Touchdown/Kickoff/Runout for
+    // the only three events still routed through the normal per-event trigger system in this mode.
+    public enum PlaybackMode { Fcs, Hbcu }
+
+    public record PlaybackModeSettings(PlaybackMode Mode);
+
+    static PlaybackModeSettings? _playbackModeCache;
+
+    public static PlaybackMode LoadPlaybackMode()
+    {
+        if (_playbackModeCache != null) return _playbackModeCache.Mode;
+        if (!File.Exists(PlaybackModePath)) return (_playbackModeCache = new PlaybackModeSettings(PlaybackMode.Fcs)).Mode;
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<PlaybackModeSettings>(File.ReadAllText(PlaybackModePath), JsonOptions);
+            return (_playbackModeCache = loaded ?? new PlaybackModeSettings(PlaybackMode.Fcs)).Mode;
+        }
+        catch
+        {
+            return (_playbackModeCache = new PlaybackModeSettings(PlaybackMode.Fcs)).Mode;
+        }
+    }
+
+    public static void SavePlaybackMode(PlaybackMode mode)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        var settings = new PlaybackModeSettings(mode);
+        AtomicWriteAllText(PlaybackModePath, JsonSerializer.Serialize(settings, JsonOptions));
+        _playbackModeCache = settings;
+    }
+
+    // Per-team color OVERRIDE -- none of TeamColors.cs's hardcoded hex values are real CFB27
+    // roster colors (owner confirmed every team here, HBCU or otherwise, is a custom in-game
+    // roster/uniform they built themselves), so WebMainForm.ResolveTeamColor's scoreboard OCR
+    // match can only ever work once the owner enters the colors they ACTUALLY set in-game. This
+    // store lets any team's Primary/Secondary be overridden without touching the hardcoded arrays
+    // -- TeamColors.BuildAll applies these on top of Base/FcsTeams/HbcuTeams/custom teams.
+    static readonly string TeamColorOverridesPath = Path.Combine(UserDataRoot, "team_color_overrides.json");
+    public record TeamColorOverride(string PrimaryHex, string SecondaryHex);
+    public record TeamColorOverrides(Dictionary<string, TeamColorOverride> ByTeam);
+    static TeamColorOverrides? _teamColorOverridesCache;
+
+    public static TeamColorOverrides LoadTeamColorOverrides()
+    {
+        if (_teamColorOverridesCache != null) return _teamColorOverridesCache;
+        if (!File.Exists(TeamColorOverridesPath)) return _teamColorOverridesCache = new TeamColorOverrides(new());
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<TeamColorOverrides>(File.ReadAllText(TeamColorOverridesPath), JsonOptions);
+            return _teamColorOverridesCache = loaded ?? new TeamColorOverrides(new());
+        }
+        catch
+        {
+            return _teamColorOverridesCache = new TeamColorOverrides(new());
+        }
+    }
+
+    /// <summary>Saves the override and invalidates TeamColors' cached roster so the next
+    /// TeamColors.All read reflects it immediately -- no restart needed.</summary>
+    public static void SaveTeamColorOverride(string teamName, string primaryHex, string secondaryHex)
+    {
+        var overrides = LoadTeamColorOverrides();
+        overrides.ByTeam[teamName] = new TeamColorOverride(primaryHex, secondaryHex);
+        Directory.CreateDirectory(UserDataRoot);
+        AtomicWriteAllText(TeamColorOverridesPath, JsonSerializer.Serialize(overrides, JsonOptions));
+        _teamColorOverridesCache = overrides;
+        TeamColors.InvalidateRoster();
+    }
+
+    // HBCU mode's "Team Pot" -- an unlimited, freely add/remove list of songs per team that
+    // HbcuPlaybackService shuffles through all game, distinct from every other TriggerEntry slot
+    // (which holds exactly one file). Falls back to GetPackFilesForSchool only if a team's pot is
+    // still empty (nothing added yet). Each entry carries the SAME per-song playback settings a
+    // TriggerEntry does (whistle/speed/PA effect/fade/no-fade/volume) -- owner request: "the pot
+    // needs the same settings as the FBS event cards" -- kept as its own small record rather than
+    // reusing TriggerEntry itself, since a pot entry has no Trigger/Event/PaAudioFile/
+    // BigGameAudioFile (those only make sense for a single fixed game-event slot).
+    public class HbcuPotSong
+    {
+        public string FilePath { get; set; } = "";
+        public int Volume { get; set; } = 100;
+        public bool PlayLeadInWhistle { get; set; } = true;
+        public double WhistleSpeed { get; set; } = 1.0;
+        public bool PlaybackSpeed2x { get; set; } = false;
+        public bool PaSpeakerEffect { get; set; } = false;
+        public double? FadeStartSecondsOverride { get; set; } = null;
+        public double? FadeOutDurationOverride { get; set; } = null;
+        public bool NoFade { get; set; } = true; // pot songs default to full-song playback, matching HBCU mode's "no clipped fade-outs" behavior
+    }
+
+    static readonly string HbcuPotsPath = Path.Combine(UserDataRoot, "hbcu_pots.json");
+    public record HbcuPots(Dictionary<string, List<HbcuPotSong>> ByTeam);
+    static HbcuPots? _hbcuPotsCache;
+
+    static HbcuPots LoadHbcuPots()
+    {
+        if (_hbcuPotsCache != null) return _hbcuPotsCache;
+        if (!File.Exists(HbcuPotsPath)) return _hbcuPotsCache = new HbcuPots(new());
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<HbcuPots>(File.ReadAllText(HbcuPotsPath), JsonOptions);
+            return _hbcuPotsCache = loaded ?? new HbcuPots(new());
+        }
+        catch
+        {
+            return _hbcuPotsCache = new HbcuPots(new());
+        }
+    }
+
+    static void SaveHbcuPots(HbcuPots pots)
+    {
+        Directory.CreateDirectory(UserDataRoot);
+        AtomicWriteAllText(HbcuPotsPath, JsonSerializer.Serialize(pots, JsonOptions));
+        _hbcuPotsCache = pots;
+    }
+
+    public static List<HbcuPotSong> GetHbcuPot(string teamName)
+    {
+        var pots = LoadHbcuPots();
+        return pots.ByTeam.TryGetValue(teamName, out var songs) ? songs.Where(s => File.Exists(s.FilePath)).ToList() : new List<HbcuPotSong>();
+    }
+
+    /// <summary>Owner request 2026-08-14: a song added to a Team Pot from the Clipper's "+ Add
+    /// Song" modal should also show up in My Downloads, same as any other song brought into the
+    /// app -- lets it get reused (assigned to a normal event card, shared to marketplace) without
+    /// having to re-import it. Skipped for a file that's already a marketplace download or already
+    /// has its own My Downloads entry (RecordLocalTrack's own path-based dedupe would just
+    /// silently overwrite that entry's Shared/Type/CreatedAt otherwise -- see its doc comment on
+    /// never mixing the two sources).</summary>
+    public static void AddToHbcuPot(string teamName, string filePath)
+    {
+        var pots = LoadHbcuPots();
+        if (!pots.ByTeam.TryGetValue(teamName, out var songs)) pots.ByTeam[teamName] = songs = new List<HbcuPotSong>();
+        if (!songs.Any(s => string.Equals(s.FilePath, filePath, StringComparison.OrdinalIgnoreCase)))
+            songs.Add(new HbcuPotSong { FilePath = filePath });
+        SaveHbcuPots(pots);
+
+        bool alreadyTracked = LoadMarketplaceDownloads().Any(d => string.Equals(d.Path, filePath, StringComparison.OrdinalIgnoreCase))
+            || LoadLocalTracks().Any(t => string.Equals(t.Path, filePath, StringComparison.OrdinalIgnoreCase));
+        if (!alreadyTracked && File.Exists(filePath))
+            RecordLocalTrack(Path.GetFileNameWithoutExtension(filePath), filePath);
+    }
+
+    public static void RemoveFromHbcuPot(string teamName, string filePath)
+    {
+        var pots = LoadHbcuPots();
+        if (pots.ByTeam.TryGetValue(teamName, out var songs) && songs.RemoveAll(s => string.Equals(s.FilePath, filePath, StringComparison.OrdinalIgnoreCase)) > 0)
+            SaveHbcuPots(pots);
+    }
+
+    /// <summary>Overwrites one pot entry's settings in place (whistle/speed/PA effect/fade/no-
+    /// fade/volume) -- same "Event Settings" popover the FCS event cards use, just targeting a
+    /// pot song by file path instead of a TriggerEntry. No-ops if the file isn't in this team's
+    /// pot (e.g. a stale client-side call after it was already removed).</summary>
+    public static void UpdateHbcuPotSongSettings(string teamName, HbcuPotSong updated)
+    {
+        var pots = LoadHbcuPots();
+        if (!pots.ByTeam.TryGetValue(teamName, out var songs)) return;
+        int idx = songs.FindIndex(s => string.Equals(s.FilePath, updated.FilePath, StringComparison.OrdinalIgnoreCase));
+        if (idx < 0) return;
+        songs[idx] = updated;
+        SaveHbcuPots(pots);
+    }
+
+    /// <summary>Trim/rename support for pot songs (mirrors WebMainForm.RenameAssignedTrackFromWeb/
+    /// MoveAssignedTrackToHbcuFolderFromWeb's "retarget the stored path" pattern): swaps a pot
+    /// entry's FilePath from oldPath to newPath in place, e.g. after TrimmerForm writes a trimmed
+    /// copy. No-ops if oldPath isn't in this team's pot.</summary>
+    public static void RetargetHbcuPotSong(string teamName, string oldPath, string newPath)
+    {
+        var pots = LoadHbcuPots();
+        if (!pots.ByTeam.TryGetValue(teamName, out var songs)) return;
+        var song = songs.FirstOrDefault(s => string.Equals(s.FilePath, oldPath, StringComparison.OrdinalIgnoreCase));
+        if (song == null) return;
+        song.FilePath = newPath;
+        SaveHbcuPots(pots);
+    }
+
+    // Added 2026-08-14 (owner request): explicit per-team toggle so a team with no HBCU pot/pack
+    // of its own (typically the FBS/non-HBCU opponent in a matchup) can be pointed at a shared
+    // "Generic" pool instead of sitting silent all game. Deliberately an EXPLICIT picker, not an
+    // automatic empty-pot fallback -- owner wants to be able to force Generic even for a team that
+    // already has some songs, not just as a last resort. "Generic" itself is just a sentinel team-
+    // name string -- GetHbcuPot("Generic")/GetPackFilesForSchool("Generic")/AddToHbcuPot("Generic",
+    // ...) all already work unmodified (no schema special-casing needed, same as any real team).
+    static readonly string HbcuGenericPackTeamsPath = Path.Combine(UserDataRoot, "hbcu_generic_pack_teams.json");
+    static HashSet<string>? _hbcuGenericPackTeamsCache;
+
+    static HashSet<string> LoadHbcuGenericPackTeams()
+    {
+        if (_hbcuGenericPackTeamsCache != null) return _hbcuGenericPackTeamsCache;
+        if (!File.Exists(HbcuGenericPackTeamsPath))
+            return _hbcuGenericPackTeamsCache = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<HashSet<string>>(File.ReadAllText(HbcuGenericPackTeamsPath), JsonOptions);
+            return _hbcuGenericPackTeamsCache = loaded != null
+                ? new HashSet<string>(loaded, StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return _hbcuGenericPackTeamsCache = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    public static bool GetHbcuUseGenericPack(string teamName) => LoadHbcuGenericPackTeams().Contains(teamName);
+
+    public static void SetHbcuUseGenericPack(string teamName, bool useGeneric)
+    {
+        var teams = LoadHbcuGenericPackTeams();
+        bool changed = useGeneric ? teams.Add(teamName) : teams.Remove(teamName);
+        if (!changed) return;
+        Directory.CreateDirectory(UserDataRoot);
+        AtomicWriteAllText(HbcuGenericPackTeamsPath, JsonSerializer.Serialize(teams, JsonOptions));
+        _hbcuGenericPackTeamsCache = teams;
+    }
+
+    /// <summary>SongsFolder/HBCU/{school}/ -- one subfolder per HBCU roster school (see
+    /// TeamColors.HbcuTeamNames), so a user uploading a track and marking it "for an HBCU" has a
+    /// real place on disk for that school's songs to land, browsable outside the app too.</summary>
+    public static string HbcuSchoolFolder(string schoolName) =>
+        Path.Combine(SongsFolder, "HBCU", SanitizeFileNamePart(schoolName));
+
+    static string SanitizeFileNamePart(string name)
+    {
+        foreach (char c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+        return name;
+    }
+
+    /// <summary>Creates SongsFolder/HBCU/{school}/ for every school in TeamColors.HbcuTeamNames
+    /// that doesn't already have one. Safe to call repeatedly (CreateDirectory is a no-op if it
+    /// already exists) -- called once at app startup so the folders are there immediately, before
+    /// any upload happens.</summary>
+    public static void EnsureHbcuSchoolFolders()
+    {
+        foreach (var school in TeamColors.HbcuTeamNames)
+            Directory.CreateDirectory(HbcuSchoolFolder(school));
+    }
+
+    /// <summary>HbcuPlaybackService's fallback pool when a team has no songs assigned to any
+    /// trigger slot yet: every audio file in that school's HbcuSchoolFolder, plus (for songs
+    /// uploaded before that folder convention existed) anything elsewhere under SongsFolder/the
+    /// downloaded default pack whose .meta.json sidecar tags it to this school via
+    /// AudioTrackMetadata.SchoolAbbreviation.</summary>
+    public static List<string> GetPackFilesForSchool(string schoolName)
+    {
+        var result = new List<string>();
+        string schoolFolder = HbcuSchoolFolder(schoolName);
+        if (Directory.Exists(schoolFolder))
+            result.AddRange(Directory.EnumerateFiles(schoolFolder, "*.*", SearchOption.AllDirectories)
+                .Where(f => !f.EndsWith(".meta.json", StringComparison.OrdinalIgnoreCase)));
+
+        foreach (var root in new[] { SongsFolder, DownloadedDefaultSongsFolder })
+        {
+            if (!Directory.Exists(root)) continue;
+            foreach (var file in Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories))
+            {
+                if (file.EndsWith(".meta.json", StringComparison.OrdinalIgnoreCase)) continue;
+                if (file.StartsWith(schoolFolder, StringComparison.OrdinalIgnoreCase)) continue; // already added above
+                var meta = AudioTrackMetadataStore.Load(file);
+                if (meta?.SchoolAbbreviation != null && meta.SchoolAbbreviation.Equals(schoolName, StringComparison.OrdinalIgnoreCase))
+                    result.Add(file);
+            }
+        }
+        return result;
     }
 
     /// <summary>The most recently confirmed GAMETIME matchup (home/away team names), so the

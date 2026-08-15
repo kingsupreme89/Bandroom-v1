@@ -1737,14 +1737,53 @@ input, select, textarea, [contenteditable] {
   display: none;
 }
 #bandroom-album {
-  width: min(1100px, 95vw);
-  max-height: 85vh;
+  width: min(1400px, 96vw);
+  max-height: 88vh;
   display: flex;
   flex-direction: column;
   padding: 20px;
   border-radius: 16px;
 }
 #bandroom-team-grid { overflow-y: auto; }
+
+/* Marketplace upload picker -- shared front door for song/background/team logo/profile
+   uploads, same overlay+glass-card shape as the other small dialogs. */
+#marketplace-upload-picker-overlay {
+  position: fixed; inset: 0; z-index: 65;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#marketplace-upload-picker-overlay[hidden] { display: none; }
+#marketplace-upload-picker {
+  width: min(480px, 92vw);
+  padding: 20px;
+  border-radius: 16px;
+}
+.marketplace-upload-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+.marketplace-upload-picker-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+.marketplace-upload-picker-tile:hover {
+  border-color: var(--team-glow, var(--glass-border));
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-2px);
+}
+.marketplace-upload-picker-icon { font-size: 28px; }
 
 /* The Bandroom hub -- Spotify-style sidebar (Your Library) + scrolling main pane, full-window
    scale to match the reference (Spotify desktop), not a small centered card like the other
@@ -1791,8 +1830,8 @@ input, select, textarea, [contenteditable] {
 }
 #my-downloads-overlay[hidden] { display: none; }
 #my-downloads {
-  width: min(1100px, 95vw);
-  max-height: 85vh;
+  width: min(1400px, 96vw);
+  max-height: 88vh;
   display: flex;
   flex-direction: column;
   padding: 20px;
@@ -1932,6 +1971,87 @@ input, select, textarea, [contenteditable] {
 }
 
 .pill-active { background: rgba(255, 255, 255, 0.14); color: var(--text-primary); }
+
+/* Marketplace Chat -- reuses .discord-message-row/.discord-avatar/etc. verbatim (same message
+   row shape), docked like Discord Chat, plus channel pills + a composer Discord Chat doesn't
+   need since that one's read-only.
+   BUG FIX: z-index was 55 (Discord Chat's value), but unlike Discord Chat this panel is opened
+   from a pill INSIDE the team album (z-index 60) and its dark rgba(0,0,0,0.55) backdrop -- at
+   55 the album's backdrop rendered on TOP of the chat panel, so it looked washed-out/dead and
+   every click landed on the backdrop (closing the album) instead of the chat itself. 69 puts it
+   above the album/hub/upload-picker, just under Team Profiles' 70. */
+#marketplace-chat-overlay {
+  position: fixed; top: 64px; right: 12px; bottom: 12px; z-index: 69;
+  display: flex; width: min(360px, 90vw);
+}
+#marketplace-chat-overlay[hidden] { display: none; }
+#marketplace-chat-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 12px;
+  border-radius: 16px;
+}
+.marketplace-chat-channels {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.marketplace-chat-channel-pill {
+  flex: 1;
+  text-align: center;
+  font-size: 12.5px;
+}
+#marketplace-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.marketplace-chat-report-btn, .marketplace-chat-admin-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0.5;
+  font-size: 12px;
+  padding: 0 2px;
+  margin-left: auto;
+}
+.marketplace-chat-report-btn:hover, .marketplace-chat-admin-delete-btn:hover { opacity: 1; }
+.marketplace-chat-attachment {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--team-glow, var(--accent));
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  display: inline-block;
+}
+#marketplace-chat-attach-preview {
+  font-size: 12.5px;
+  color: var(--text-muted-2);
+  padding: 6px 4px;
+}
+#marketplace-chat-attach-preview[hidden] { display: none; }
+.marketplace-chat-composer {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+.marketplace-chat-composer input {
+  flex: 1;
+  min-width: 0;
+}
+.marketplace-chat-signin-prompt {
+  font-size: 12.5px;
+  color: var(--text-muted-2);
+  text-align: center;
+  margin-top: 6px;
+}
+.marketplace-chat-signin-prompt[hidden] { display: none; }
 
 .bandroom-instructions {
   font-size: 14px;
@@ -2094,6 +2214,37 @@ input, select, textarea, [contenteditable] {
   font-weight: 600;
   color: var(--text-muted);
 }
+
+/* Hub nav row (Upload / My Downloads / Chat / Team Profiles) -- distinct from the sort-shortcut
+   hero row above (that one filters Popular Songs; this one navigates to a whole other feature),
+   but built from the same glass-card language so The Market reads as one consistent system. */
+.bandroom-hub-nav-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.bandroom-hub-nav-pill {
+  flex: 1 1 160px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 14.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.bandroom-hub-nav-pill:hover {
+  border-color: var(--team-glow, var(--accent));
+  box-shadow: 0 0 16px 2px color-mix(in srgb, var(--team-glow, var(--accent)) 32%, transparent);
+  transform: translateY(-2px);
+}
+.bandroom-hub-nav-icon { font-size: 18px; }
 
 /* Compact album-header hero card (single team, not a shortcut strip) -- team logo + name +
    song/background counts, Apple-Music-album-header style, above the per-team filter/list. */
@@ -2913,6 +3064,38 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
   0%, 100% { box-shadow: 0 0 6px -1px color-mix(in srgb, var(--team-primary, var(--accent)) 40%, transparent); }
   50% { box-shadow: 0 0 13px 0px color-mix(in srgb, var(--team-primary, var(--accent)) 80%, transparent); }
 }
+/* HBCU Mode pill -- top of the left panel (index.html #pill-hbcu-mode). Off state is a plain
+   glass pill; [aria-pressed="true"] switches on the same team-color LED-glow pulse every other
+   "this is active" pill in the app uses (see pill-glow-pulse above), so it reads as consistent
+   with the rest of the theme rather than a one-off control. */
+.hbcu-mode-pill {
+  display: flex; align-items: center; gap: 8px;
+  width: calc(100% - 4px); margin: 10px 2px 4px;
+  padding: 9px 14px; border-radius: 999px;
+  background: var(--glass-bg, rgba(255,255,255,0.04));
+  border: 1px solid var(--glass-border);
+  color: var(--text-muted, #9aa4b2);
+  font-family: var(--font-sports-block, inherit);
+  font-size: 12.5px; letter-spacing: 0.04em; text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.hbcu-mode-pill:hover { border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 45%, var(--glass-border)); }
+.hbcu-mode-pill-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--text-muted, #9aa4b2);
+  transition: background 0.15s ease;
+}
+.hbcu-mode-pill[aria-pressed="true"] {
+  color: var(--team-glow, var(--accent));
+  border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 60%, transparent);
+  background: color-mix(in srgb, var(--team-glow, var(--accent)) 12%, var(--glass-bg, transparent));
+  animation: pill-glow-pulse 2.2s ease-in-out infinite;
+}
+.hbcu-mode-pill[aria-pressed="true"] .hbcu-mode-pill-dot {
+  background: var(--team-glow, var(--accent));
+  box-shadow: 0 0 6px 1px var(--team-glow, var(--accent));
+}
 .situations-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -2920,6 +3103,157 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
   gap: 10px;
   overflow-y: auto;
   min-height: 0;
+}
+/* HBCU Mode only has 3 real event cards (Touchdown, Kickoff, Runout -- see
+   openSituations/hbcuRelevantEvents in app.js), so the normal auto-fill card grid leaves a lot of
+   dead space and reads oddly sparse. Single-column full-width rows instead -- same card markup,
+   just a plain list layout instead of a grid. */
+.situations-list.hbcu-event-list {
+  grid-template-columns: 1fr;
+  max-width: 520px;
+}
+/* Team Pot -- sits to the right of the (now short, single-column) event card list in HBCU mode.
+   situations-body just needs to let both children size themselves; situations-list keeps
+   min-height:0/overflow-y:auto from above so it scrolls independently of the pot panel. */
+.situations-body {
+  display: flex;
+  gap: 16px;
+  min-height: 0;
+  flex: 1;
+}
+.situations-body .situations-list.hbcu-event-list {
+  flex: 0 0 auto;
+}
+#hbcu-pot-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 260px;
+  min-height: 0;
+  border-left: 1px solid var(--glass-border);
+  padding-left: 16px;
+}
+.hbcu-pot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+#hbcu-pot-title {
+  font-family: var(--font-sports-block, inherit);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--team-glow, var(--accent));
+}
+.hbcu-pot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.hbcu-pot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg, rgba(255,255,255,0.03));
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.hbcu-pot-row:hover {
+  border-color: color-mix(in srgb, var(--team-glow, var(--accent)) 45%, var(--glass-border));
+}
+.hbcu-pot-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.hbcu-pot-row .situation-transport {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.hbcu-pot-row-remove {
+  flex: 0 0 auto;
+}
+.hbcu-pot-empty {
+  color: var(--text-muted, #9aa4b2);
+  font-size: 13px;
+  padding: 8px 4px;
+}
+
+/* Team swatch color-edit pencil -- hidden until hover so the team grid doesn't look cluttered;
+   .team-swatch needs position:relative for this to anchor correctly (already true elsewhere in
+   this stylesheet for the "configured" checkmark badge, same pattern). */
+.team-swatch-edit-colors {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 11px;
+  line-height: 20px;
+  text-align: center;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.team-swatch:hover .team-swatch-edit-colors {
+  opacity: 1;
+}
+
+#team-color-edit-popover {
+  position: fixed;
+  z-index: 2000;
+  padding: 14px 16px;
+  border-radius: 12px;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.team-color-edit-title {
+  font-family: var(--font-sports-block, inherit);
+  letter-spacing: 0.03em;
+  font-size: 13px;
+}
+.team-color-edit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.team-color-edit-row input[type="color"] {
+  width: 48px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+.team-color-edit-hint {
+  font-size: 11px;
+  color: var(--text-muted, #9aa4b2);
+  line-height: 1.4;
+}
+.team-color-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
 }
 .situation-row {
   display: flex;
@@ -4436,6 +4770,32 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 #logo-crop-overlay[hidden], #bg-crop-overlay[hidden], #auto-assign-confirm-overlay[hidden], #auto-assign-summary-overlay[hidden],
 #quick-load-confirm-overlay[hidden], #track-info-overlay[hidden] { display: none; }
 
+/* BUG FIX: #team-profiles-overlay had NO CSS rule anywhere in this file (same missing-styling
+   bug as #edit-upload-overlay above) -- toggling hidden=false rendered it as an unstyled block
+   shoved into normal document flow instead of a centered glass modal, so "Browse Team Profiles"
+   looked completely dead. Z-index 70 (above every other overlay, including the album/upload-
+   picker/chat panel) since it's now reachable via the hub nav row while The Market itself is
+   already open behind it -- needs to win that stack regardless of what's already showing. */
+#team-profiles-overlay {
+  position: fixed; inset: 0; z-index: 70;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+#team-profiles-overlay[hidden] { display: none; }
+#team-profiles-dialog {
+  width: min(480px, 92vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 20px;
+  border-radius: 16px;
+}
+#team-profiles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
 /* Track Info drawer -- same fixed-centered-glass footprint as the overlays above, plus the
    standing team-color neon-pulse LED glow every new pill/modal/drawer in this app uses. */
 #track-info-dialog {
@@ -5801,6 +6161,18 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 .test-hook-routed-title {
   font-size: 12px; font-weight: 600; color: var(--text-muted-2);
 }
+
+#hbcu-dashboard-panel {
+  position: fixed; top: 60px; right: 20px; z-index: 9999;
+  width: 280px; padding: 16px 18px; border-radius: var(--radius-panel);
+}
+#hbcu-dashboard-panel[hidden] { display: none; }
+.hbcu-dashboard-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 15px; gap: 10px;
+}
+.hbcu-dashboard-row span:first-child { color: var(--text-muted-2); }
+.hbcu-dashboard-row span:last-child { font-weight: 600; text-align: right; }
 
 #whats-new-modal {
   width: 560px; max-width: 94vw; max-height: 80vh;

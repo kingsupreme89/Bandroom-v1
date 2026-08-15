@@ -216,21 +216,49 @@ internal static class TeamColors
         new("Lamar", Hex("#a80532"), Hex("#ffffff")),
         new("McNeese", Hex("#003876"), Hex("#f2a900")),
         new("Northwestern State", Hex("#582c83"), Hex("#a7a9ac")),
-        new("Southern University", Hex("#0033a0"), Hex("#f2a900")),
-        new("Jackson State", Hex("#001c54"), Hex("#a7a9ac")),
-        new("Grambling State", Hex("#000000"), Hex("#f2a900")),
-        new("Alcorn State", Hex("#4b116f"), Hex("#eaaa00")),
-        new("North Carolina A&T", Hex("#002946"), Hex("#f2a900")),
         new("Southern Utah", Hex("#c8102e"), Hex("#231f20")),
         new("Portland State", Hex("#00693e"), Hex("#000000")),
         new("Idaho State", Hex("#f47321"), Hex("#000000")),
         new("Holy Cross", Hex("#4f2c1d"), Hex("#a89968")),
     };
 
+    /// <summary>HBCU mode's dedicated roster (SWAC + MEAC football programs) -- kept separate from
+    /// FcsTeams so HBCU mode's team picker never shows non-HBCU FCS schools. Used in place of
+    /// FcsTeams by BuildAll when ConfigStore.LoadPlaybackMode() == PlaybackMode.Hbcu.</summary>
+    static readonly TeamColor[] HbcuTeams =
+    {
+        // SWAC. Secondary is chosen to also be the LED-glow color (app.js applyTeamGlowVars picks
+        // whichever of primary/secondary is lighter) -- same Montana treatment as BaseTeams'
+        // FcsTeams entry above: several of these schools' actual secondary is a flat gray/silver,
+        // which would otherwise win the glow pick and look generic instead of team-colored, so
+        // those are swapped for a lighter TINT of the real primary instead. Schools whose real
+        // secondary is already a distinct hue (gold/orange/etc, not gray) keep it unchanged.
+        new("Alabama A&M", Hex("#8a1538"), Hex("#c25a78")), // maroon/white -- white glow read as generic, tinted maroon instead
+        new("Alabama State", Hex("#000000"), Hex("#f2a900")), // black/old gold -- was placeholder gray, corrected to real gold
+        new("Alcorn State", Hex("#4b116f"), Hex("#eaaa00")), // purple/gold
+        new("Arkansas-Pine Bluff", Hex("#041e42"), Hex("#f2a900")), // navy/gold
+        new("Bethune-Cookman", Hex("#862633"), Hex("#ffb81c")), // maroon/gold
+        new("Florida A&M", Hex("#f68712"), Hex("#00543c")), // orange/green
+        new("Grambling State", Hex("#000000"), Hex("#f2a900")), // black/gold
+        new("Jackson State", Hex("#001c54"), Hex("#3d6dc4")), // navy/white -- white glow read as generic, tinted navy instead
+        new("Mississippi Valley State", Hex("#00553f"), Hex("#2f9e6f")), // green/white -- tinted green instead of a generic white glow
+        new("Prairie View A&M", Hex("#3c1053"), Hex("#f2a900")), // purple/gold
+        new("Southern University", Hex("#0033a0"), Hex("#f2a900")), // blue/gold
+        new("Texas Southern", Hex("#7a0019"), Hex("#a83250")), // maroon/gray -- was placeholder gray, tinted maroon for a colored glow
+        // MEAC
+        new("Delaware State", Hex("#c8102e"), Hex("#a5cfe3")), // red/Columbia blue
+        new("Howard", Hex("#003087"), Hex("#e31937")), // blue/red -- was placeholder gray, corrected to real accent red
+        new("Morgan State", Hex("#041e42"), Hex("#f47321")), // navy/burnt orange (was swapped -- orange is the accent, not the base)
+        new("Norfolk State", Hex("#00563f"), Hex("#eaaa00")), // green/gold
+        new("North Carolina A&T", Hex("#002946"), Hex("#f2a900")), // blue/gold
+        new("North Carolina Central", Hex("#7a0019"), Hex("#b8455f")), // maroon/gray -- was a flat tan placeholder, tinted maroon instead
+        new("South Carolina State", Hex("#7a0019"), Hex("#002d72")), // garnet/blue (was placeholder navy+gray, corrected to real pairing)
+    };
+
     /// <summary>Base roster plus any user-created custom schools (TeamBuilder "add school" v1),
     /// loaded once from ConfigStore's custom_teams.json manifest and kept in sync in-memory by
     /// AddCustomTeam so a newly-added team shows up everywhere immediately, no restart needed.</summary>
-    static readonly List<TeamColor> _all = BuildAll();
+    static List<TeamColor> _all = BuildAll();
 
     // BUG FIX (audit finding): AddCustomTeam used to read/mutate _all with no synchronization.
     // WebView2 host-object calls aren't serialized onto one thread (same reasoning as every lock
@@ -240,20 +268,51 @@ internal static class TeamColors
     // a duplicate/corrupt roster). Guards the whole check-then-add in AddCustomTeam.
     static readonly object AllLock = new();
 
+    /// <summary>Always the FULL roster -- Base + FCS + HBCU + custom -- regardless of
+    /// ConfigStore.PlaybackMode. Matchup screens and anything that resolves a team by name (an
+    /// HBCU school can play any opponent) read from here. The FCS/HBCU mode toggle only narrows
+    /// which SUBSET of this the left team chooser/favorite picker offer -- see HbcuTeamNames.</summary>
     static List<TeamColor> BuildAll()
     {
         var list = new List<TeamColor>(BaseTeams);
         list.AddRange(FcsTeams);
+        list.AddRange(HbcuTeams);
         foreach (var custom in ConfigStore.LoadCustomTeams())
         {
             if (list.Any(t => t.Name.Equals(custom.Name, StringComparison.OrdinalIgnoreCase))) continue;
             try { list.Add(new TeamColor(custom.Name, Hex(custom.PrimaryHex), Hex(custom.SecondaryHex), custom.Mascot)); }
             catch { /* corrupt hex in manifest -- skip this one custom team, don't break the roster */ }
         }
+
+        // Owner-entered real in-game colors (ConfigStore.TeamColorOverrides) win over every
+        // hardcoded/custom entry above -- see ConfigStore.SaveTeamColorOverride's doc comment for
+        // why: none of the hardcoded hex values here are guaranteed to match this owner's actual
+        // custom CFB27 roster/uniform colors, which is what WebMainForm.ResolveTeamColor's
+        // scoreboard OCR match needs to work correctly.
+        var overrides = ConfigStore.LoadTeamColorOverrides().ByTeam;
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (!overrides.TryGetValue(list[i].Name, out var ov)) continue;
+            try { list[i] = list[i] with { Primary = Hex(ov.PrimaryHex), Secondary = Hex(ov.SecondaryHex) }; }
+            catch { /* corrupt override hex -- skip, keep the un-overridden color rather than crash */ }
+        }
         return list;
     }
 
+    /// <summary>Forces the next TeamColors.All read to rebuild from the current overrides/custom
+    /// teams. Called by ConfigStore.SaveTeamColorOverride so a color change shows up immediately,
+    /// no restart needed.</summary>
+    public static void InvalidateRoster()
+    {
+        lock (AllLock) { _all = BuildAll(); }
+    }
+
     public static TeamColor[] All { get { lock (AllLock) return _all.ToArray(); } }
+
+    /// <summary>The HBCU mode subset -- names only, matching HbcuTeams. Used to filter the left
+    /// team chooser and favorite-team picker down to just these when HBCU mode is on, and to seed
+    /// ConfigStore.EnsureHbcuSchoolFolders/the upload flow's school dropdown.</summary>
+    public static readonly IReadOnlyList<string> HbcuTeamNames = HbcuTeams.Select(t => t.Name).ToList();
 
     public static TeamColor ByName(string name)
     {

@@ -171,6 +171,33 @@ internal static class AudioPlayer
         }
     }
 
+    /// <summary>HBCU mode's touchdown handling: the scoring band's shuffle track keeps playing
+    /// uninterrupted, but the OTHER band's track (if any) should audibly fade out rather than cut
+    /// hard, since a hard StopChannel would sound like a glitch under a real TD moment. Ramps that
+    /// channel's volume to zero over durationSeconds, then stops it. Self-contained (keeps its own
+    /// Timer reference alive via closure) so callers don't need to manage timer lifetime.</summary>
+    public static void FadeOutChannel(string channel, double durationSeconds = 1.5)
+    {
+        List<WaveOutEvent> targets;
+        lock (Lock) targets = ActiveOutputs.Where(t => t.Channel == channel).Select(t => t.Output).ToList();
+        if (targets.Count == 0) return;
+
+        var startVolumes = targets.ToDictionary(o => o, o => { try { return o.Volume; } catch { return 1f; } });
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        System.Threading.Timer? timer = null;
+        timer = new System.Threading.Timer(_ =>
+        {
+            double t = sw.Elapsed.TotalSeconds / durationSeconds;
+            if (t >= 1)
+            {
+                foreach (var o in targets) { try { o.Stop(); } catch { /* already stopping/disposed */ } }
+                timer?.Dispose();
+                return;
+            }
+            foreach (var o in targets) { try { o.Volume = startVolumes[o] * (float)(1 - t); } catch { /* disposed mid-fade */ } }
+        }, null, 0, 50);
+    }
+
     /// <param name="volumeOverride">If set, used instead of MasterVolume -- lets side-aware
     /// events (home/away) play at their own independently-configured volume.</param>
     /// <param name="interruptPrevious">True for real in-game trigger cues (Touchdown, PAT,

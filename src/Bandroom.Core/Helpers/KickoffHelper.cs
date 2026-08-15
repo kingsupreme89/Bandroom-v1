@@ -40,8 +40,15 @@ public sealed class KickoffHelper : IRuleEvaluator
 
         _didFire = true;
 
-        // Opening kickoff: 1st quarter, first time kickoff is seen this game
-        if (state.Current.Quarter == 1 && !_openingKickoffFired)
+        // Opening kickoff: the FIRST time "kickoff" is seen on screen at all this game, full stop.
+        // FIXED 2026-08-14 (owner correction): this used to also require Quarter == 1, but that's
+        // redundant -- the first kickoff of a game IS quarter 1 by definition -- and it added a
+        // second, independent OCR read (the "quarter" region) that had to land correctly on the
+        // exact same tick as the kickoff read for this to fire. A blank/stale quarter read on that
+        // tick silently demoted the event to the generic "Other: Kickoff" instead, which is likely
+        // why HBCU mode's kickoff never showed up despite the kickoff text itself being clearly
+        // readable. Dropped the Quarter check entirely -- _openingKickoffFired alone is sufficient.
+        if (!_openingKickoffFired)
         {
             _openingKickoffFired = true;
             return new TriggerEvent

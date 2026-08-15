@@ -33,6 +33,20 @@ public sealed class PregameHelper : IRuleEvaluator
         if (!state.Current.IsPregameReady || state.Previous.IsPregameReady)
             return null;
 
+        // FIXED 2026-08-14 (live bug: "Pregame Ready" fired mid-game, right around a PAT, with no
+        // actual READY screen up) -- the "pregameready" WatchedRegion's OCR crop is a wide
+        // team-neutral band (see its doc comment: deliberately NOT anchored to either team's pill
+        // to stay color-independent) and matches the bare word "READY" anywhere in it. That word
+        // can legitimately appear elsewhere mid-game (a post-play/personnel prompt, a menu, etc),
+        // and since this region is deliberately left OUT of EventGatedRegions so Back-and-re-ready
+        // can refire it (see the class doc comment), nothing else guarded against a stray mid-game
+        // sighting re-arming this edge trigger. Quarter == 0 is this codebase's established
+        // "still pregame" signal (see GameStateEventHelper's "Pregame Take the Field" inferring
+        // pregame from Quarter 0->1, referenced in this class's own doc comment) -- once the game
+        // clock has actually started, a READY sighting can't be the real pregame screen anymore.
+        if (state.Current.Quarter != 0)
+            return null;
+
         return new TriggerEvent
         {
             EventKey = "Other: Pregame Ready",

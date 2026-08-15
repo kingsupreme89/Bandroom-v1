@@ -10,6 +10,58 @@ public sealed class ScoreboardReaderState
     public ScoreboardReaderTeamState? Home { get; init; }
     public ScoreboardReaderGameState? Game { get; init; }
     public ScoreboardReaderMeta? Meta { get; init; }
+    /// <summary>Reader's own per-field "when did this actually last change" data (added in the
+    /// reader's v1.4.9, `ram.freshness` in the raw JSON) -- ground truth from directly re-checking
+    /// live memory on every publish, not an outside guess. Null when the connected reader predates
+    /// v1.4.9 and never published this block; callers must treat that the same as "no freshness
+    /// data available" (fall back to trusting the field, same as before this existed) rather than
+    /// treating an absent block as "everything is stale."</summary>
+    public ScoreboardReaderFreshness? Freshness { get; init; }
+}
+
+/// <summary>One field's freshness entry from `ram.freshness.&lt;field&gt;` -- ChangedAtUtc is the ISO
+/// timestamp the reader gave for when the PUBLISHED value last actually changed (a null-to-value
+/// or value-to-null transition counts as a change too, per the reader's own DATA-API.md). Prefer
+/// this over SecondsSinceChange when possible -- the reader's own number is relative to ITS clock,
+/// which can drift from ours; recomputing from ChangedAtUtc against our own utcNow keeps both
+/// numbers on the same clock.</summary>
+public readonly record struct ScoreboardReaderFreshnessEntry(DateTime? ChangedAtUtc, double? SecondsSinceChange);
+
+/// <summary>Mirrors the reader's documented `ram.freshness` field set exactly (DATA-API.md,
+/// v1.4.9) -- one entry per field sharing the core memory block (game clock/play clock are the
+/// canary: see GameWatcher's staleness check, which trusts the whole block live whenever either
+/// clock shows recent change) plus the self-guarding fields (rank/record/possession/names) that
+/// the reader already nulls out instead of going stale.</summary>
+public sealed class ScoreboardReaderFreshness
+{
+    public ScoreboardReaderFreshnessEntry? Quarter { get; init; }
+    public ScoreboardReaderFreshnessEntry? GameClockSeconds { get; init; }
+    public ScoreboardReaderFreshnessEntry? PlayClock { get; init; }
+    public ScoreboardReaderFreshnessEntry? AwayScore { get; init; }
+    public ScoreboardReaderFreshnessEntry? HomeScore { get; init; }
+    public ScoreboardReaderFreshnessEntry? PossessionAwayIsOne { get; init; }
+    public ScoreboardReaderFreshnessEntry? Down { get; init; }
+    public ScoreboardReaderFreshnessEntry? Distance { get; init; }
+    public ScoreboardReaderFreshnessEntry? AwayTimeouts { get; init; }
+    public ScoreboardReaderFreshnessEntry? HomeTimeouts { get; init; }
+    public ScoreboardReaderFreshnessEntry? AwayRank { get; init; }
+    public ScoreboardReaderFreshnessEntry? HomeRank { get; init; }
+    public ScoreboardReaderFreshnessEntry? AwayRecord { get; init; }
+    public ScoreboardReaderFreshnessEntry? HomeRecord { get; init; }
+    public ScoreboardReaderFreshnessEntry? AwayTeamName { get; init; }
+    public ScoreboardReaderFreshnessEntry? HomeTeamName { get; init; }
+
+    /// <summary>True whenever EITHER clock (game clock or play clock) shows a change within the
+    /// last <paramref name="window"/> -- the reader's own documented canary for "the whole core
+    /// memory block (quarter/clocks/scores/down/distance/timeouts) is provably live right now."
+    /// Both entries missing (pre-v1.4.9 reader) returns false -- callers must NOT treat that as
+    /// "block is stale," only as "no freshness data to lean on," same as ScoreboardReaderState.Freshness
+    /// being null entirely.</summary>
+    public bool CoreBlockRecentlyChanged(DateTime utcNow, TimeSpan window) =>
+        IsRecent(GameClockSeconds, utcNow, window) || IsRecent(PlayClock, utcNow, window);
+
+    static bool IsRecent(ScoreboardReaderFreshnessEntry? entry, DateTime utcNow, TimeSpan window) =>
+        entry is { ChangedAtUtc: { } changedAt } && (utcNow - changedAt) <= window;
 }
 
 public sealed class ScoreboardReaderTeamState

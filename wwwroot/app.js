@@ -483,16 +483,98 @@ window.addEventListener("resize", () => {
 /// disabled until a hit-test-safe approach (e.g. rem-based sizing recalculated on resize,
 /// with no `zoom`/`transform` involved) replaces it.
 
+/// HBCU Mode narrows the left team-grid + favorite-team picker to just the SWAC/MEAC roster
+/// (state.hbcuTeamNames, from WebBridge.GetHbcuTeamNames) -- everything else that reads
+/// state.teams directly (matchup screens, marketplace matching) is untouched, since an HBCU band
+/// can play any opponent and still needs the full roster there.
+function hbcuFilteredTeams() {
+  if (!state.hbcuMode || !state.hbcuTeamNames || state.hbcuTeamNames.size === 0) return state.teams;
+  return state.teams.filter((t) => state.hbcuTeamNames.has(t.name));
+}
+
+let _teamColorEditTeam = null;
+
+/// Opens the small color-edit popover for one team, positioned under the swatch that was
+/// clicked. See index.html's #team-color-edit-popover -- this exists because none of this app's
+/// hardcoded team colors are guaranteed to match the owner's actual custom CFB27 uniform colors,
+/// which possession-color OCR (WebMainForm.ResolveTeamColor) depends on.
+function openTeamColorEditor(team, anchorEl) {
+  _teamColorEditTeam = team;
+  const popover = document.getElementById("team-color-edit-popover");
+  document.getElementById("team-color-edit-name").textContent = team.name;
+  document.getElementById("team-color-edit-primary").value = team.primary || "#000000";
+  document.getElementById("team-color-edit-secondary").value = team.secondary || "#000000";
+  const rect = anchorEl.getBoundingClientRect();
+  popover.style.left = `${rect.left}px`;
+  popover.style.top = `${rect.bottom + 6}px`;
+  popover.hidden = false;
+}
+function closeTeamColorEditor() {
+  document.getElementById("team-color-edit-popover").hidden = true;
+  _teamColorEditTeam = null;
+}
+document.getElementById("btn-team-color-edit-close")?.addEventListener("click", closeTeamColorEditor);
+// FIXED (owner report: "this window wont close"): the popover only closed AFTER the SetTeamColors/
+// GetTeams bridge round-trip succeeded, so any exception in that async chain (bridge not ready,
+// backend error) left it stuck open with no way out short of restarting the app. Close immediately
+// on click -- the color values are already captured by then -- and let the actual save happen in
+// the background with its own error handling, so a save failure surfaces as a toast instead of a
+// dialog the user can't dismiss.
+document.getElementById("btn-team-color-edit-save")?.addEventListener("click", () => {
+  if (!_teamColorEditTeam || !bridge) { closeTeamColorEditor(); return; }
+  const team = _teamColorEditTeam;
+  const primary = document.getElementById("team-color-edit-primary").value;
+  const secondary = document.getElementById("team-color-edit-secondary").value;
+  closeTeamColorEditor();
+  (async () => {
+    try {
+      await bridge.SetTeamColors(team.name, primary, secondary);
+      state.teams = sortTeamsAZ(JSON.parse(await bridge.GetTeams()));
+      renderTeamGrid();
+      // The edited team may be the currently active one -- re-apply glow vars so the change is
+      // visible immediately instead of waiting for the next selectTeam().
+      const active = state.teams.find((t) => t.name === state.activeTeam);
+      if (active) applyTeamGlowVars(active);
+      showToast("Team colors updated.");
+    } catch (err) {
+      showToast("Couldn't save team colors -- try again.");
+    }
+  })();
+});
+// Click-outside and Escape also close it -- the only ways out used to be the two buttons inside,
+// so if either one somehow didn't register a click (e.g. a mis-timed re-render), there was no
+// other way to dismiss it.
+document.addEventListener("click", (e) => {
+  const popover = document.getElementById("team-color-edit-popover");
+  if (popover && !popover.hidden && !popover.contains(e.target) && !e.target.closest(".team-swatch-edit-colors")) {
+    closeTeamColorEditor();
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    const popover = document.getElementById("team-color-edit-popover");
+    if (popover && !popover.hidden) closeTeamColorEditor();
+  }
+});
+
 function renderTeamGrid() {
   const grid = document.getElementById("team-grid");
   grid.innerHTML = "";
-  for (const t of state.teams) {
+  for (const t of hbcuFilteredTeams()) {
     const sw = document.createElement("div");
     const configured = state.savedProfiles.includes(t.name);
     sw.className = "team-swatch" + (t.name === state.activeTeam ? " active" : "") + (configured ? " configured" : "");
     sw.title = t.name + (configured ? " ✓" : "");
     fillTeamSwatch(sw, t, false, true); // preferIcon: main team-select grid wants the icon-only crop
     sw.addEventListener("click", () => selectTeam(t.name));
+
+    const editBtn = document.createElement("button");
+    editBtn.className = "team-swatch-edit-colors";
+    editBtn.title = "Edit this team's colors";
+    editBtn.textContent = "✎"; // pencil
+    editBtn.addEventListener("click", (e) => { e.stopPropagation(); openTeamColorEditor(t, sw); });
+    sw.appendChild(editBtn);
+
     grid.appendChild(sw);
   }
   squareUpTiles(grid);
@@ -515,9 +597,30 @@ async function updateProfileStatus() {
   el.innerHTML = `<span class="profile-saved">&#10003; ${state.activeTeam} saved${savedAt} &mdash; ${total} team${total !== 1 ? "s" : ""} configured</span>`;
 }
 
-function renderCategories() {
+async function renderCategories() {
   const list = document.getElementById("category-list");
   list.innerHTML = "";
+  // HBCU Mode's event cards (Touchdown x2, Kickoff, Ready, Runout) span multiple FCS categories
+  // (Offense/Defense/Situations), so those per-category tabs no longer mean anything useful --
+  // just one "All" pill with the real filtered count instead of the stale full-roster 0/46.
+  if (state.hbcuMode) {
+    let assigned = 0;
+    try {
+      const events = bridge ? JSON.parse(await bridge.GetEventsForCategory("All")) : [];
+      assigned = events.filter((e) => hbcuRelevantEvents.has(e.eventName) && e.fileName).length;
+    } catch (err) { console.error("GetEventsForCategory failed", err); }
+    const row = document.createElement("div");
+    row.className = "category-row selected";
+    row.innerHTML = `
+      <span class="category-dot" style="background:${categoryColors["All"] ?? "#8b95a1"}"></span>
+      <span class="category-text">
+        <span class="category-name">All</span>
+        <span class="category-count">${assigned}/${hbcuRelevantEvents.size}</span>
+      </span>`;
+    row.addEventListener("click", () => openSituations("All"));
+    list.appendChild(row);
+    return;
+  }
   const totalAssigned = state.categories.reduce((n, c) => n + c.assigned, 0);
   const totalAll = state.categories.reduce((n, c) => n + c.total, 0);
   const all = [{ name: "All", assigned: totalAssigned, total: totalAll }, ...state.categories];
@@ -551,11 +654,263 @@ function whistleSpeedTitle(speed) {
     : `Whistle plays at ${s}x speed for this event -- click to cycle to the next speed`;
 }
 
+// HBCU Mode's only real per-event triggers -- matches WebMainForm.IsHbcuAllowedEvent exactly
+// (Touchdown handled by both Offense/Defense keys since either side can score).
+const hbcuRelevantEvents = new Set([
+  "Offense: Touchdown Scored",
+  "Defense: Touchdown Scored",
+  "Other: Opening Kickoff",
+  "Other: Kickoff",
+  "Other: Pregame Ready",
+  "Other: Pregame Take the Field",
+]);
+
+// friendlyEventName's shared EVENT_FRIENDLY_NAMES map labels both TD keys plain "Touchdown" --
+// fine in the full 46-card FCS grid where surrounding context (Offense/Defense tab) disambiguates
+// them, but confusing side-by-side in HBCU's short 4-card list. Local override, doesn't touch the
+// shared map other screens use.
+function hbcuFriendlyEventName(eventKey) {
+  if (eventKey === "Offense: Touchdown Scored") return "Touchdown (Your Team Scores)";
+  if (eventKey === "Defense: Touchdown Scored") return "Touchdown (Opponent Scores)";
+  return friendlyEventName(eventKey);
+}
+
+/// Renders the Team Pot list (state.activeTeam's HbcuPlaybackService shuffle source) for the
+/// currently active team -- same team the event cards on the left are being edited for. Click a
+/// row to load it into the shared Clip Preview bar; the trash icon removes it from the pot
+/// (ConfigStore.RemoveFromHbcuPot) without touching the file on disk.
+async function renderHbcuPot() {
+  document.getElementById("hbcu-pot-title").textContent = `${state.activeTeam}'s Team Pot`;
+  const genericToggle = document.getElementById("hbcu-pot-use-generic");
+  try { genericToggle.checked = bridge ? await bridge.GetHbcuUseGenericPack(state.activeTeam) : false; }
+  catch (err) { console.error("GetHbcuUseGenericPack failed", err); }
+  const list = document.getElementById("hbcu-pot-list");
+  list.innerHTML = "";
+  let songs = [];
+  try { songs = bridge ? JSON.parse(await bridge.GetHbcuPot(state.activeTeam)) : []; }
+  catch (err) { console.error("GetHbcuPot failed", err); }
+
+  if (songs.length === 0) {
+    list.innerHTML = `<div class="hbcu-pot-empty">No songs added yet -- shuffle will pull from ${state.activeTeam}'s downloaded pack instead. Click "+ Add Song" to build your own pot.</div>`;
+    return;
+  }
+  for (const song of songs) {
+    const row = document.createElement("div");
+    row.className = "hbcu-pot-row";
+    row.dataset.path = song.path;
+    // Same settings/volume popover markup the FCS event cards use (situation-row's template,
+    // see openSituations) -- owner request: "the pot needs the same settings as the FBS event
+    // cards" -- trim/whistle/whistle-speed/1.09x speed/PA effect/fade override/no-fade, all per
+    // song instead of per trigger slot.
+    row.innerHTML = `
+      <span class="hbcu-pot-row-name" title="${song.name}">${song.name}</span>
+      <span class="situation-transport" style="position: relative;">
+        <button class="bandroom-item-action" data-act="trim" title="Trim this song">&#9986;</button>
+        <button class="bandroom-item-action" data-act="preview" title="Play">&#9654;</button>
+        <button class="bandroom-item-action" data-act="stop" title="Stop">&#9209;</button>
+        <button class="bandroom-item-action" data-act="volume" title="Adjust this song's own volume">&#128266;</button>
+        <button class="bandroom-item-action situation-whistle-toggle${(song.playLeadInWhistle === false) || (song.whistleSpeed && song.whistleSpeed !== 1) || song.speed2x || song.paSpeakerEffect || song.fadeStartSecondsOverride != null || song.fadeOutDurationOverride != null || song.noFade === false ? " active" : ""}" data-act="settings" title="Song settings (whistle, speed, PA effect, fade)">&#9881;</button>
+        <button class="icon-btn hbcu-pot-row-remove" data-act="remove" title="Remove from pot">&times;</button>
+        <div class="situation-settings-popover glass" hidden>
+          <div class="situation-settings-title">Song Settings</div>
+          <label class="situation-settings-row">
+            <span>Lead-in whistle</span>
+            <input type="checkbox" data-field="whistle" ${song.playLeadInWhistle === false ? "" : "checked"} />
+          </label>
+          <label class="situation-settings-row">
+            <span>Whistle speed</span>
+            <button class="situation-settings-cycle-btn" data-field="whistle-speed">${whistleSpeedLabel(song.whistleSpeed)}</button>
+          </label>
+          <label class="situation-settings-row">
+            <span>1.09x playback speed</span>
+            <input type="checkbox" data-field="speed2x" ${song.speed2x ? "checked" : ""} />
+          </label>
+          <label class="situation-settings-row">
+            <span>Stadium PA speaker effect</span>
+            <input type="checkbox" data-field="pa-effect" ${song.paSpeakerEffect ? "checked" : ""} />
+          </label>
+          <div class="situation-settings-divider"></div>
+          <label class="situation-settings-row">
+            <span>Override fade for this song</span>
+            <input type="checkbox" data-field="fade-override" ${song.fadeStartSecondsOverride != null || song.fadeOutDurationOverride != null ? "checked" : ""} />
+          </label>
+          <label class="situation-settings-row situation-settings-fade-fields" ${song.fadeStartSecondsOverride != null || song.fadeOutDurationOverride != null ? "" : "hidden"}>
+            <span>Fade starts at (sec)</span>
+            <input type="number" min="0" max="120" step="0.5" data-field="fade-start" value="${song.fadeStartSecondsOverride ?? 10}" />
+          </label>
+          <label class="situation-settings-row situation-settings-fade-fields" ${song.fadeStartSecondsOverride != null || song.fadeOutDurationOverride != null ? "" : "hidden"}>
+            <span>Fade duration (sec)</span>
+            <input type="number" min="0" max="30" step="0.5" data-field="fade-duration" value="${song.fadeOutDurationOverride ?? 4.5}" />
+          </label>
+          <label class="situation-settings-row">
+            <span>No fade (always play full song)</span>
+            <input type="checkbox" data-field="no-fade" ${song.noFade ? "checked" : ""} />
+          </label>
+          <button class="situation-settings-close" title="Close">&times;</button>
+        </div>
+        <div class="situation-volume-popover" hidden>
+          <input type="range" min="0" max="100" value="${song.volume ?? 100}" class="slider situation-volume-slider" />
+          <span class="situation-volume-value">${song.volume ?? 100}%</span>
+          <button class="situation-volume-close" title="Close">&times;</button>
+        </div>
+      </span>`;
+
+    row.querySelector('[data-act="trim"]').addEventListener("click", (e) => {
+      e.stopPropagation();
+      openInlineTrimmerForHbcuPot(state.activeTeam, song.path, song.name);
+    });
+    row.querySelector('[data-act="preview"]').addEventListener("click", (e) => {
+      e.stopPropagation();
+      _previewAudio?.pause();
+      bridge?.PreviewLocalFile(song.path);
+    });
+    row.querySelector('[data-act="stop"]').addEventListener("click", (e) => { e.stopPropagation(); bridge?.StopPreview(); });
+    row.querySelector('[data-act="remove"]').addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await bridge?.RemoveFromHbcuPot(state.activeTeam, song.path);
+      renderHbcuPot();
+    });
+    wireHbcuPotVolumePopover(row, song);
+    wireHbcuPotSettingsPopover(row, song);
+    list.appendChild(row);
+  }
+}
+document.getElementById("btn-hbcu-pot-add")?.addEventListener("click", () => openClipperAssignForHbcuPot(state.activeTeam));
+document.getElementById("hbcu-pot-use-generic")?.addEventListener("change", async (e) => {
+  try {
+    await bridge?.SetHbcuUseGenericPack(state.activeTeam, e.target.checked);
+    showToast(e.target.checked
+      ? `${state.activeTeam} will use the Generic pack next GAMETIME`
+      : `${state.activeTeam} will use their own pot/pack next GAMETIME`);
+  } catch (err) { console.error("SetHbcuUseGenericPack failed", err); }
+});
+
+/// Pushes `song`'s current in-memory settings to the backend as one full record (see
+/// ConfigStore.HbcuPotSong) -- simpler than the FCS event cards' one-bridge-call-per-field
+/// pattern (SetEventPlayLeadInWhistle/CycleEventWhistleSpeed/etc) since a pot entry isn't a
+/// TriggerEntry the server already has a reference to; this just round-trips the whole object.
+function saveHbcuPotSongSettings(song) {
+  bridge?.SaveHbcuPotSongSettings(state.activeTeam, JSON.stringify({
+    filePath: song.path,
+    volume: song.volume ?? 100,
+    playLeadInWhistle: song.playLeadInWhistle !== false,
+    whistleSpeed: song.whistleSpeed ?? 1.0,
+    playbackSpeed2x: song.speed2x ?? false,
+    paSpeakerEffect: song.paSpeakerEffect ?? false,
+    fadeStartSecondsOverride: song.fadeStartSecondsOverride ?? null,
+    fadeOutDurationOverride: song.fadeOutDurationOverride ?? null,
+    noFade: song.noFade ?? true,
+  }));
+}
+
+function wireHbcuPotVolumePopover(row, song) {
+  const btn = row.querySelector('[data-act="volume"]');
+  const popover = row.querySelector(".situation-volume-popover");
+  const slider = row.querySelector(".situation-volume-slider");
+  const valueLabel = row.querySelector(".situation-volume-value");
+  const closeBtn = row.querySelector(".situation-volume-close");
+  const closePopover = () => { popover.hidden = true; };
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!popover.hidden) { closePopover(); return; }
+    document.querySelectorAll(".situation-volume-popover").forEach((p) => { p.hidden = true; });
+    popover.hidden = false;
+  });
+  closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
+  slider.addEventListener("click", (e) => e.stopPropagation());
+  slider.addEventListener("input", (e) => {
+    valueLabel.textContent = `${e.target.value}%`;
+    song.volume = Number(e.target.value);
+    saveHbcuPotSongSettings(song);
+  });
+}
+
+function wireHbcuPotSettingsPopover(row, song) {
+  const btn = row.querySelector('[data-act="settings"]');
+  const popover = row.querySelector(".situation-settings-popover");
+  const closeBtn = popover.querySelector(".situation-settings-close");
+  const whistleInput = popover.querySelector('[data-field="whistle"]');
+  const whistleSpeedBtn = popover.querySelector('[data-field="whistle-speed"]');
+  const speed2xInput = popover.querySelector('[data-field="speed2x"]');
+  const paEffectInput = popover.querySelector('[data-field="pa-effect"]');
+  const fadeOverrideInput = popover.querySelector('[data-field="fade-override"]');
+  const fadeFieldsRows = popover.querySelectorAll(".situation-settings-fade-fields");
+  const fadeStartInput = popover.querySelector('[data-field="fade-start"]');
+  const fadeDurationInput = popover.querySelector('[data-field="fade-duration"]');
+  const noFadeInput = popover.querySelector('[data-field="no-fade"]');
+
+  const closePopover = () => closeCardPopover(popover);
+  const refreshGearActiveState = () => {
+    const isActive = !whistleInput.checked || (song.whistleSpeed && song.whistleSpeed !== 1) ||
+      speed2xInput.checked || paEffectInput.checked || fadeOverrideInput.checked || !noFadeInput.checked;
+    btn.classList.toggle("active", !!isActive);
+  };
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!popover.hidden) { closePopover(); return; }
+    document.querySelectorAll(".situation-settings-popover, .situation-volume-popover").forEach((p) => { p.hidden = true; p.classList.remove("slide-open"); });
+    openCardPopover(btn, popover);
+  });
+  closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
+  popover.addEventListener("click", (e) => e.stopPropagation());
+
+  whistleInput.addEventListener("change", () => {
+    song.playLeadInWhistle = whistleInput.checked;
+    saveHbcuPotSongSettings(song);
+    refreshGearActiveState();
+  });
+  whistleSpeedBtn.addEventListener("click", () => {
+    const next = WHISTLE_SPEED_PRESETS[(WHISTLE_SPEED_PRESETS.indexOf(song.whistleSpeed ?? 1.0) + 1) % WHISTLE_SPEED_PRESETS.length];
+    song.whistleSpeed = next;
+    whistleSpeedBtn.textContent = whistleSpeedLabel(next);
+    saveHbcuPotSongSettings(song);
+    refreshGearActiveState();
+  });
+  speed2xInput.addEventListener("change", () => {
+    song.speed2x = speed2xInput.checked;
+    saveHbcuPotSongSettings(song);
+    refreshGearActiveState();
+  });
+  paEffectInput.addEventListener("change", () => {
+    song.paSpeakerEffect = paEffectInput.checked;
+    saveHbcuPotSongSettings(song);
+    refreshGearActiveState();
+  });
+
+  const pushFadeOverride = () => {
+    if (!fadeOverrideInput.checked) {
+      song.fadeStartSecondsOverride = null;
+      song.fadeOutDurationOverride = null;
+    } else {
+      song.fadeStartSecondsOverride = Number(fadeStartInput.value) || 0;
+      song.fadeOutDurationOverride = Number(fadeDurationInput.value) || 0;
+    }
+    saveHbcuPotSongSettings(song);
+  };
+  fadeOverrideInput.addEventListener("change", () => {
+    fadeFieldsRows.forEach((r) => { r.hidden = !fadeOverrideInput.checked; });
+    pushFadeOverride();
+    refreshGearActiveState();
+  });
+  fadeStartInput.addEventListener("change", pushFadeOverride);
+  fadeDurationInput.addEventListener("change", pushFadeOverride);
+
+  noFadeInput.addEventListener("change", () => {
+    song.noFade = noFadeInput.checked;
+    saveHbcuPotSongSettings(song);
+    refreshGearActiveState();
+  });
+}
+
 async function openSituations(category) {
   const panel = document.getElementById("situations-panel");
   const list = document.getElementById("situations-list");
   document.getElementById("situations-title").textContent = category === "All" ? "All Situations" : category;
   panel.hidden = false;
+  document.getElementById("hbcu-pot-panel").hidden = !state.hbcuMode;
+  if (state.hbcuMode) renderHbcuPot();
   // Remember which category is showing so selectTeam() can re-pull the newly active team's
   // OWN assignments into this same panel -- without this, switching Away/Home while the
   // panel is open left it showing whichever team's data happened to be fetched last (looked
@@ -576,7 +931,14 @@ async function openSituations(category) {
   // subtree, so it'd otherwise orphan on body forever across every single refresh. Sweep them here.
   document.querySelectorAll("body > .situation-share-popover").forEach((p) => p.remove());
 
-  const events = bridge ? JSON.parse(await bridge.GetEventsForCategory(category)) : [];
+  let events = bridge ? JSON.parse(await bridge.GetEventsForCategory(category)) : [];
+  // HBCU Mode only fires Touchdown/Kickoff/Runout through this per-event Assign/Edit system (see
+  // HbcuPlaybackService's class doc -- everything else is continuous pool shuffle, not
+  // per-event). Assign/Edit/Clipper/PA all still work exactly like FCS mode for these three; this
+  // just hides the other ~43 cards that would otherwise silently do nothing in HBCU mode. Filter
+  // (not a separate category) so it applies no matter which tab/category is open.
+  if (state.hbcuMode) events = events.filter((ev) => hbcuRelevantEvents.has(ev.eventName));
+  list.classList.toggle("hbcu-event-list", state.hbcuMode);
   list.innerHTML = "";
   for (const ev of events) {
     const row = document.createElement("div");
@@ -588,7 +950,7 @@ async function openSituations(category) {
     row.dataset.trigger = ev.trigger; // punch-list item 6: lets scrollToSituationRow() find this card after a trim-save
     row.innerHTML = `
       <span class="situation-text">
-        <div class="situation-name"><span class="situation-led ${ledClass}"></span><span class="situation-name-text">${friendlyEventName(ev.eventName)}</span></div>
+        <div class="situation-name"><span class="situation-led ${ledClass}"></span><span class="situation-name-text">${state.hbcuMode ? hbcuFriendlyEventName(ev.eventName) : friendlyEventName(ev.eventName)}</span></div>
         <div class="situation-file">${ev.fileName ? ev.fileName : "Unassigned"}</div>
         <div class="situation-file situation-file-pa">PA: ${ev.paFileName ? ev.paFileName : "none"}</div>
       </span>
@@ -1659,7 +2021,13 @@ function fillTrackInfoForm(meta) {
   };
   document.getElementById("ti-title").value = meta?.standardTitle ?? "";
   document.getElementById("ti-artist").value = meta?.standardArtist ?? "";
-  document.getElementById("ti-school").value = meta?.schoolAbbreviation ?? "";
+  const school = meta?.schoolAbbreviation ?? "";
+  const isHbcuSchool = !!school && !!state.hbcuTeamNames?.has(school);
+  document.getElementById("ti-is-hbcu").checked = isHbcuSchool;
+  document.getElementById("ti-school").value = isHbcuSchool ? "" : school;
+  populateTrackInfoHbcuSchoolSelect();
+  document.getElementById("ti-school-hbcu").value = isHbcuSchool ? school : "";
+  applyTrackInfoHbcuVisibility();
   document.getElementById("ti-energy").value = meta?.energyLevel ?? "";
   document.getElementById("ti-instrumentation").value = meta?.prominentInstrumentation ?? "";
   document.getElementById("ti-trim").value = meta?.recommendedTrim ?? "";
@@ -1676,6 +2044,54 @@ function fillTrackInfoForm(meta) {
     : meta?.integratedLufsApprox != null ? `Loudness (approx): ${meta.integratedLufsApprox.toFixed(1)} dBFS` : "";
   document.getElementById("ti-truepeak").textContent = meta?.truePeakDbtp != null
     ? `True Peak: ${meta.truePeakDbtp.toFixed(1)} dBTP` : "";
+}
+
+/// "Is this for an HBCU?" school picker (see index.html's #ti-is-hbcu/#ti-school-hbcu*). Fills
+/// the dropdown from state.hbcuTeamNames (loaded by refreshHbcuMode at startup, independent of
+/// whether HBCU Mode itself is on -- the upload flow's "is this for an HBCU" question applies
+/// regardless of which mode the app is currently in).
+function populateTrackInfoHbcuSchoolSelect() {
+  const select = document.getElementById("ti-school-hbcu");
+  if (!select || select.dataset.filled) return;
+  const names = Array.from(state.hbcuTeamNames || []).sort((a, b) => a.localeCompare(b));
+  for (const name of names) {
+    const opt = document.createElement("option");
+    opt.value = name; opt.textContent = name;
+    select.insertBefore(opt, select.lastElementChild); // keep "+ Add a school..." last
+  }
+  select.dataset.filled = "1";
+}
+
+function applyTrackInfoHbcuVisibility() {
+  const isHbcu = document.getElementById("ti-is-hbcu").checked;
+  document.getElementById("ti-school-plain-row").hidden = isHbcu;
+  document.getElementById("ti-school-hbcu-row").hidden = !isHbcu;
+  const addingNew = isHbcu && document.getElementById("ti-school-hbcu").value === "__add__";
+  document.getElementById("ti-school-hbcu-new-row").hidden = !addingNew;
+}
+
+function wireTrackInfoHbcuFields() {
+  document.getElementById("ti-is-hbcu")?.addEventListener("change", () => {
+    populateTrackInfoHbcuSchoolSelect();
+    applyTrackInfoHbcuVisibility();
+  });
+  document.getElementById("ti-school-hbcu")?.addEventListener("change", applyTrackInfoHbcuVisibility);
+}
+wireTrackInfoHbcuFields();
+
+/// Resolves whichever School input is actually active into the plain string
+/// AudioTrackMetadata.SchoolAbbreviation expects -- free text, the picked HBCU school, or a
+/// freshly-typed new one (added to state.hbcuTeamNames locally so it shows up in the dropdown
+/// next time without waiting on a fresh GetHbcuTeamNames round-trip).
+function resolveTrackInfoSchool() {
+  if (!document.getElementById("ti-is-hbcu").checked) return document.getElementById("ti-school").value.trim() || null;
+  const select = document.getElementById("ti-school-hbcu");
+  if (select.value === "__add__") {
+    const newName = document.getElementById("ti-school-hbcu-new").value.trim();
+    if (newName) state.hbcuTeamNames?.add(newName);
+    return newName || null;
+  }
+  return select.value || null;
 }
 
 async function openTrackInfoDrawer(trigger, fileName) {
@@ -1708,7 +2124,7 @@ document.getElementById("btn-track-info-save")?.addEventListener("click", async 
   const metadata = {
     standardTitle: document.getElementById("ti-title").value.trim() || null,
     standardArtist: document.getElementById("ti-artist").value.trim() || null,
-    schoolAbbreviation: document.getElementById("ti-school").value.trim() || null,
+    schoolAbbreviation: resolveTrackInfoSchool(),
     energyLevel: document.getElementById("ti-energy").value || null,
     prominentInstrumentation: document.getElementById("ti-instrumentation").value.trim() || null,
     recommendedTrim: document.getElementById("ti-trim").value.trim() || null,
@@ -1722,7 +2138,8 @@ document.getElementById("btn-track-info-save")?.addEventListener("click", async 
     integratedLufsApprox: _trackInfoComputed.integratedLufsApprox,
   };
   try {
-    const result = JSON.parse(await bridge.SaveTrackMetadata(_trackInfoTrigger, JSON.stringify(metadata)));
+    const isHbcu = document.getElementById("ti-is-hbcu").checked;
+    const result = JSON.parse(await bridge.SaveTrackMetadata(_trackInfoTrigger, JSON.stringify(metadata), isHbcu));
     if (result.success) {
       showToast(result.fileName ? `Track info saved. Renamed to "${result.fileName}".` : "Track info saved.");
       document.getElementById("track-info-overlay").hidden = true;
@@ -1770,11 +2187,10 @@ const REVERB_PRESET_OPTIONS = [
 async function refreshProfileSettingsTab() {
   if (!bridge) return;
   try {
-    const [timingJson, volume, reverb, scorebugJson, alwaysOnTop] = await Promise.all([
+    const [timingJson, volume, reverb, alwaysOnTop] = await Promise.all([
       bridge.GetPlaybackTimingSettings(),
       bridge.GetVolume(),
       bridge.GetReverb(),
-      bridge.GetScorebugPresets(),
       bridge.GetAlwaysOnTop(),
     ]);
     const timing = JSON.parse(timingJson);
@@ -1790,11 +2206,6 @@ async function refreshProfileSettingsTab() {
     const reverbSelect = document.getElementById("settings-reverb");
     reverbSelect.innerHTML = "";
     for (const opt of REVERB_PRESET_OPTIONS) reverbSelect.appendChild(new Option(opt.label, opt.value, false, opt.value === reverb));
-
-    const scorebug = JSON.parse(scorebugJson);
-    const scorebugSelect = document.getElementById("settings-scorebug");
-    scorebugSelect.innerHTML = "";
-    for (const name of scorebug.names || []) scorebugSelect.appendChild(new Option(name, name, false, name === scorebug.active));
 
     document.getElementById("settings-always-on-top").checked = !!alwaysOnTop;
   } catch (err) { console.error("refreshProfileSettingsTab failed", err); }
@@ -1825,7 +2236,6 @@ function wireProfileSettingsTab() {
     document.getElementById("settings-volume-value").textContent = `${e.target.value}%`;
   });
   document.getElementById("settings-reverb").addEventListener("change", (e) => bridge?.SetReverb(e.target.value));
-  document.getElementById("settings-scorebug").addEventListener("change", (e) => bridge?.SetScorebugPreset(e.target.value));
   document.getElementById("settings-always-on-top").addEventListener("change", (e) => bridge?.SetAlwaysOnTop(e.target.checked));
 
   document.getElementById("btn-settings-stop-playback").addEventListener("click", () => bridge?.StopPlayback());
@@ -2130,7 +2540,7 @@ const HELP_TIPS = [
   "Set Matchup lets you pick a Home and Away team so Bandroom can auto-switch which team's songs play.",
   "The little star button in the header jumps straight to your favorite team.",
   "You can search for a team by typing in any team-picker search box instead of scrolling.",
-  "The Bandroom marketplace lets you download songs and background images other users have shared.",
+  "The Market lets you download songs and background images other users have shared.",
   "You can upload your own songs to a team's Sound Bank from that team's album view.",
   "Every upload gets a Like and a Dislike button -- your feedback helps good uploads rise to the top.",
   "The Popular Songs shelf in the marketplace hub is ranked by downloads + likes combined.",
@@ -2339,7 +2749,7 @@ const HELP_GUIDE_HTML = `
     <li>The very first time you open Bandroom, it asks you to pick your favorite team. You'll see
     team logos slide by like a carousel -- click the arrows or click a logo to move it to the
     middle, then press <strong>Confirm Team</strong>.</li>
-    <li>Right after that, Bandroom points out <strong>The Bandroom</strong> button -- that's the
+    <li>Right after that, Bandroom points out <strong>The Market</strong> button -- that's the
     community marketplace where other people's songs and pictures live.</li>
     <li>You don't need to do anything else to start playing -- Bandroom already has some default
     songs it can use, and you can download a much bigger free pack (see "Default Song Pack" below).</li>
@@ -2378,9 +2788,9 @@ const HELP_GUIDE_HTML = `
   Set Matchup and everything else just like any other team.</p>
 </div>
 <div class="help-guide-section" id="help-section-profile-sharing">
-  <h3>The Sound Bank and The Bandroom marketplace</h3>
+  <h3>The Sound Bank and The Market</h3>
   <p>Every team has its own <strong>Sound Bank</strong> -- a folder of that team's songs and
-  background pictures. <strong>The Bandroom</strong> is the shared marketplace where every
+  background pictures. <strong>The Market</strong> is the shared marketplace where every
   Bandroom user in the world can upload and download from each other's Sound Banks.</p>
   <ul>
     <li><strong>Downloading</strong>: open a team's Sound Bank, find a song or picture you like,
@@ -2770,11 +3180,48 @@ function wireBigGameSection() {
   });
 }
 
+/// Loads the current HBCU Mode flag + the HBCU school name set (for hbcuFilteredTeams), and
+/// syncs the pill's visual state. Called once at startup and again after every toggle so the
+/// team grid/favorite picker filter is never stale.
+async function refreshHbcuMode() {
+  if (!bridge) return;
+  try {
+    state.hbcuMode = (await bridge.GetHbcuMode()) === true;
+    state.hbcuTeamNames = new Set(JSON.parse(await bridge.GetHbcuTeamNames()));
+  } catch (err) { console.error("GetHbcuMode/GetHbcuTeamNames failed", err); }
+  const pill = document.getElementById("pill-hbcu-mode");
+  if (pill) pill.setAttribute("aria-pressed", state.hbcuMode ? "true" : "false");
+  if (document.getElementById("team-grid")?.children.length) renderTeamGrid(); // re-filter if teams already loaded
+}
+
+/// HBCU Mode is a global roster filter: it narrows the left team-grid + favorite-team picker to
+/// the SWAC/MEAC schools (see hbcuFilteredTeams). Matchup screens and playback are unaffected --
+/// an HBCU band can play any opponent, so Set Matchup always shows the full roster either way.
+function wireHbcuModeToggle() {
+  const pill = document.getElementById("pill-hbcu-mode");
+  if (!pill) return;
+  pill.addEventListener("click", async () => {
+    const next = !state.hbcuMode;
+    pill.setAttribute("aria-pressed", next ? "true" : "false"); // optimistic -- feels instant
+    try {
+      await bridge?.SaveHbcuMode(next);
+      await refreshHbcuMode();
+      renderTeamGrid();
+    } catch (err) {
+      console.error("SaveHbcuMode failed", err);
+      pill.setAttribute("aria-pressed", state.hbcuMode ? "true" : "false"); // revert on failure
+      showToast("Couldn't save HBCU Mode -- try again.");
+    }
+  });
+}
+
 function wireControls() {
   wireLogoCropTool();
   wireBgCropTool();
   initHelpGuide();
   wireBigGameSection();
+  wireHbcuModeToggle();
+  refreshHbcuMode();
   wireBandDirector();
   wireProfileSettingsTab();
   document.getElementById("btn-profile").addEventListener("click", openProfile);
@@ -2964,8 +3411,36 @@ function wireControls() {
       return;
     }
     openTeamAlbum(state.activeTeam);
-    uploadSongViaClipper();
+    openMarketplaceUploadPicker();
   });
+  document.getElementById("btn-close-marketplace-upload-picker").addEventListener("click", closeMarketplaceUploadPicker);
+  document.getElementById("marketplace-upload-picker-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "marketplace-upload-picker-overlay") closeMarketplaceUploadPicker();
+  });
+  document.querySelectorAll(".marketplace-upload-picker-tile").forEach((tile) => {
+    tile.addEventListener("click", () => {
+      const kind = tile.dataset.uploadKind;
+      closeMarketplaceUploadPicker();
+      routeMarketplaceUpload(kind);
+    });
+  });
+  // Hub nav row (owner report: Chat/Team Profiles/Upload/My Downloads all existed already but
+  // were buried elsewhere -- these just trigger the same flows from a visible spot on The
+  // Market's own front page instead of duplicating any logic).
+  document.getElementById("btn-hub-nav-upload").addEventListener("click", () => {
+    document.getElementById("btn-bandroom-hub-upload").click();
+  });
+  document.getElementById("btn-hub-nav-downloads").addEventListener("click", openMyDownloads);
+  document.getElementById("btn-hub-nav-chat").addEventListener("click", openMarketplaceChat);
+  document.getElementById("btn-hub-nav-song-profiles").addEventListener("click", () => {
+    if (!state.activeTeam) {
+      showToast("Pick a team first (search above), then Song Profiles applies to that team.");
+      document.getElementById("bandroom-search")?.focus();
+      return;
+    }
+    openLoadProfileDialog();
+  });
+  document.getElementById("btn-hub-nav-team-profiles").addEventListener("click", openTeamProfilesDialog);
   document.getElementById("bandroom-overlay").addEventListener("click", (e) => {
     if (e.target.id === "bandroom-overlay") closeBandroomMarketplace();
   });
@@ -2996,6 +3471,16 @@ function wireControls() {
   // fresh-download need.
   document.getElementById("btn-bandroom-album-import-pack").addEventListener("click", () => {
     document.getElementById("songpack-import-overlay").hidden = false;
+  });
+  document.getElementById("btn-open-marketplace-chat").addEventListener("click", openMarketplaceChat);
+  document.getElementById("btn-close-marketplace-chat").addEventListener("click", closeMarketplaceChat);
+  document.querySelectorAll(".marketplace-chat-channel-pill").forEach((pill) => {
+    pill.addEventListener("click", () => switchMarketplaceChatChannel(pill.dataset.chatChannel));
+  });
+  document.getElementById("btn-marketplace-chat-attach").addEventListener("click", attachFileToChatMessage);
+  document.getElementById("btn-marketplace-chat-send").addEventListener("click", sendMarketplaceChatMessage);
+  document.getElementById("marketplace-chat-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendMarketplaceChatMessage();
   });
   document.getElementById("btn-reset").addEventListener("click", () => bridge?.ResetTeamProfile());
 
@@ -3357,7 +3842,9 @@ function wireControls() {
     if (!document.getElementById("add-school-overlay").hidden) closeAddSchoolDialog();
     if (!document.getElementById("favorite-team-overlay").hidden) { document.getElementById("favorite-team-overlay").hidden = true; restoreActiveTeamGlow(); }
     // Album closes first if both happen to be open (it renders on top of the team-grid overlay).
-    if (!document.getElementById("bandroom-upload-overlay").hidden) closeUploadDialog();
+    if (!document.getElementById("marketplace-upload-picker-overlay").hidden) closeMarketplaceUploadPicker();
+    else if (!document.getElementById("marketplace-chat-overlay")?.hidden) closeMarketplaceChat();
+    else if (!document.getElementById("bandroom-upload-overlay").hidden) closeUploadDialog();
     else if (!document.getElementById("bandroom-album-overlay").hidden) closeTeamAlbum();
     else if (!document.getElementById("bandroom-overlay").hidden) closeBandroomMarketplace();
     else if (!document.getElementById("my-downloads-overlay").hidden) closeMyDownloads();
@@ -3376,7 +3863,7 @@ function wireControls() {
     if (e.key !== "Tab") return;
     const assignPanel = document.getElementById("clipper-assign");
     if (!assignPanel || assignPanel.hidden) return;
-    if (_trimTrigger || _trimForWhistle) return;
+    if (_trimTrigger || _trimForWhistle || _trimForHbcuPot) return;
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
     e.preventDefault();
@@ -3762,7 +4249,7 @@ function marketplaceGuard(fn, label) {
       document.getElementById("bandroom-album-overlay").hidden = true;
     } catch { /* DOM itself is gone -- nothing more we can do */ }
     albumTeam = null;
-    showToast("The Bandroom hit a snag -- closed it. Try again.");
+    showToast("The Market hit a snag -- closed it. Try again.");
   }
 }
 
@@ -4681,6 +5168,205 @@ function discordRelativeTime(timestampUtc) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// ---- Marketplace chat (General / Media Sharing) --------------------------------------------
+// Forum-style, two fixed channels backed by the marketplace worker's /chat/<channel>/list+post
+// (see cloudflare-marketplace/worker.js). Reading is open to everyone and polled directly from
+// here, same pattern as pollDiscordChat above. Posting requires sign-in and goes through
+// bridge.PostMarketplaceChatMessage instead of a raw fetch(), because the session token lives in
+// the C# app's ConfigStore, never in JS.
+let _chatChannel = "general";
+let _chatLastId = { general: null, media: null };
+let _chatPollTimer = null;
+let _pendingChatAttachment = null; // { id, type, name, url } set via btn-marketplace-chat-attach
+
+function openMarketplaceChat() {
+  document.getElementById("marketplace-chat-overlay").hidden = false;
+  document.getElementById("btn-open-marketplace-chat").classList.add("pill-active");
+  refreshMarketplaceChatSignInState();
+  pollMarketplaceChat();
+}
+
+function closeMarketplaceChat() {
+  document.getElementById("marketplace-chat-overlay").hidden = true;
+  document.getElementById("btn-open-marketplace-chat").classList.remove("pill-active");
+  if (_chatPollTimer) { clearTimeout(_chatPollTimer); _chatPollTimer = null; }
+}
+
+function switchMarketplaceChatChannel(channel) {
+  if (channel === _chatChannel) return;
+  _chatChannel = channel;
+  document.querySelectorAll(".marketplace-chat-channel-pill").forEach((p) => {
+    p.classList.toggle("active", p.dataset.chatChannel === channel);
+  });
+  document.getElementById("marketplace-chat-messages").innerHTML = "";
+  document.getElementById("btn-marketplace-chat-attach").hidden = channel !== "media";
+  document.getElementById("marketplace-chat-input").placeholder =
+    channel === "media" ? "Message Media Sharing..." : "Message General...";
+  clearPendingChatAttachment();
+  pollMarketplaceChat();
+}
+
+async function refreshMarketplaceChatSignInState() {
+  let signedIn = false;
+  try { signedIn = !!(bridge && JSON.parse(await bridge.GetCurrentUser()).signedIn); } catch (_) {}
+  document.getElementById("marketplace-chat-signin-prompt").hidden = signedIn;
+  document.getElementById("marketplace-chat-input").disabled = !signedIn;
+  document.getElementById("btn-marketplace-chat-send").disabled = !signedIn;
+}
+
+async function pollMarketplaceChat() {
+  const overlay = document.getElementById("marketplace-chat-overlay");
+  if (overlay.hidden) return;
+  const channel = _chatChannel;
+  const list = document.getElementById("marketplace-chat-messages");
+
+  try {
+    const lastId = _chatLastId[channel];
+    const qs = lastId ? `?after=${encodeURIComponent(lastId)}` : "?limit=50";
+    const res = await fetch(`${MARKETPLACE_URL}/chat/${channel}/list${qs}`);
+    const data = res.ok ? await res.json() : { messages: [] };
+    const messages = data.messages ?? [];
+
+    if (overlay.hidden || channel !== _chatChannel) return; // closed/switched while awaiting
+
+    if (lastId === null && messages.length === 0 && list.children.length === 0) {
+      list.innerHTML = `<div class="bandroom-empty-state">No messages yet -- say hi!</div>`;
+    } else if (messages.length > 0) {
+      if (list.querySelector(".bandroom-empty-state")) list.innerHTML = "";
+      const wasScrolledToBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 24;
+      for (const m of messages) list.appendChild(buildMarketplaceChatMessageRow(m));
+      _chatLastId[channel] = messages[messages.length - 1].id;
+      if (wasScrolledToBottom) list.scrollTop = list.scrollHeight;
+    }
+  } catch (err) {
+    console.error("pollMarketplaceChat failed", err);
+  }
+
+  if (!overlay.hidden) _chatPollTimer = setTimeout(pollMarketplaceChat, 5000);
+}
+
+function buildMarketplaceChatMessageRow(m) {
+  const row = document.createElement("div");
+  row.className = "discord-message-row";
+  row.dataset.chatMessageId = m.id;
+  const avatar = m.authorPicture
+    ? `<img src="${m.authorPicture}" alt="" class="discord-avatar">`
+    : `<div class="discord-avatar discord-avatar-fallback">${(m.authorName || "?")[0].toUpperCase()}</div>`;
+  row.innerHTML = `
+    ${avatar}
+    <div class="discord-message-body">
+      <div class="discord-message-meta">
+        <span class="discord-message-author"></span>
+        <span class="discord-message-time">${discordRelativeTime(m.createdAt)}</span>
+        <button class="marketplace-chat-report-btn" title="Report this message">🚩</button>
+        <button class="marketplace-chat-admin-delete-btn" title="Delete (admin)" hidden>🗑️</button>
+      </div>
+      <div class="discord-message-text"></div>
+      <div class="marketplace-chat-attachment" hidden></div>
+    </div>`;
+  row.querySelector(".discord-message-author").textContent = m.authorName || "Unknown";
+  row.querySelector(".discord-message-text").textContent = m.content;
+
+  if (m.attachedItemId && m.attachedItemType) {
+    const attach = row.querySelector(".marketplace-chat-attachment");
+    attach.hidden = false;
+    attach.textContent = `📎 ${m.attachedItemType === "song" ? "Song" : "Background"} attached`;
+    attach.title = "Open the marketplace to find and download this item.";
+  }
+
+  row.querySelector(".marketplace-chat-report-btn").addEventListener("click", async () => {
+    try {
+      await fetch(`${MARKETPLACE_URL}/chat/report/${_chatChannel}/${encodeURIComponent(m.id)}`, { method: "POST" });
+      showToast("Reported.");
+    } catch (err) { console.error("chat report failed", err); }
+  });
+
+  const deleteBtn = row.querySelector(".marketplace-chat-admin-delete-btn");
+  if (_isAdminMode) {
+    deleteBtn.hidden = false;
+    deleteBtn.addEventListener("click", async () => {
+      if (!confirm("Delete this message?")) return;
+      try {
+        const raw = await bridge.AdminDeleteMarketplaceChatMessage(_chatChannel, m.id);
+        const result = JSON.parse(raw);
+        if (result.success) row.remove(); else showToast(result.error ?? "Couldn't delete that.");
+      } catch (err) { console.error("AdminDeleteMarketplaceChatMessage failed", err); }
+    });
+  }
+
+  return row;
+}
+
+function clearPendingChatAttachment() {
+  _pendingChatAttachment = null;
+  const preview = document.getElementById("marketplace-chat-attach-preview");
+  preview.hidden = true;
+  preview.innerHTML = "";
+}
+
+// Media Sharing's attach flow reuses the same /upload endpoint every other upload goes through
+// (see confirmUpload) -- picks a file, uploads it immediately under the signed-in user's
+// favorite team (or "Community" if none set/signed out), then holds the resulting item so
+// sendMarketplaceChatMessage can reference it. No separate storage path.
+async function attachFileToChatMessage() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "audio/*,image/*";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const type = file.type.startsWith("image/") ? "image" : "song";
+    const preview = document.getElementById("marketplace-chat-attach-preview");
+    preview.hidden = false;
+    preview.textContent = "Uploading...";
+    try {
+      const form = new FormData();
+      form.append("type", type);
+      form.append("name", file.name.replace(/\.[^.]+$/, "").slice(0, 80) || "Shared upload");
+      form.append("school", state.activeTeam?.name || "Community");
+      form.append("file", file);
+      const res = await fetch(`${MARKETPLACE_URL}/upload`, { method: "POST", body: form });
+      if (!res.ok) throw new Error(`upload failed: ${res.status}`);
+      const result = await res.json();
+      _pendingChatAttachment = { id: result.id, type, name: form.get("name") };
+      preview.textContent = `📎 ${_pendingChatAttachment.name} -- ready to send`;
+    } catch (err) {
+      console.error("attachFileToChatMessage failed", err);
+      preview.textContent = "Couldn't upload that -- try again.";
+      _pendingChatAttachment = null;
+    }
+  };
+  input.click();
+}
+
+async function sendMarketplaceChatMessage() {
+  const input = document.getElementById("marketplace-chat-input");
+  const content = input.value.trim();
+  if (!content || !bridge) return;
+  const sendBtn = document.getElementById("btn-marketplace-chat-send");
+  sendBtn.disabled = true;
+  try {
+    const raw = await bridge.PostMarketplaceChatMessage(
+      _chatChannel, content, _pendingChatAttachment?.id ?? null, _pendingChatAttachment?.type ?? null);
+    const result = JSON.parse(raw);
+    if (result.ok) {
+      input.value = "";
+      clearPendingChatAttachment();
+      pollMarketplaceChat();
+    } else if (result.error === "signin_required") {
+      showToast("Sign in from your Profile to post here.");
+      refreshMarketplaceChatSignInState();
+    } else {
+      showToast("Couldn't send that -- try again.");
+    }
+  } catch (err) {
+    console.error("sendMarketplaceChatMessage failed", err);
+    showToast("Couldn't send that -- try again.");
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
 /// End-user "import my own song" pipeline (item 21) -- runs the whole native flow (choose file,
 /// name track, trim/normalize via TrimmerForm) synchronously on the C# side; this just kicks it
 /// off and refreshes the grid on success. All three of those steps are modal WinForms dialogs,
@@ -5529,7 +6215,8 @@ let _clipperAssignIsPa = false;
 let _clipperAssignLibrary = null; // cached [{name, path}], same list for every trigger
 let _clipperAssignSelectedPath = null;
 let _clipperAssignSelectedName = null;
-let _clipperAssignMode = "event"; // "event" (assign/trim a situation's clip) | "whistle" (pick+trim the global lead-in whistle)
+let _clipperAssignMode = "event"; // "event" (assign/trim a situation's clip) | "whistle" (pick+trim the global lead-in whistle) | "hbcu-pot" (add to a team's Team Pot)
+let _clipperAssignPotTeam = null; // set when _clipperAssignMode === "hbcu-pot"
 // Owner request: default to just this team's Sound Bank (source "default") instead of every
 // source dumped together -- "all" and the individual source names (see CLIPPER_ASSIGN_SOURCE_*
 // below) are one pill-click away, not hidden. Resets to "default" every time the panel opens
@@ -5637,7 +6324,7 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode
   // Switching events (or into whistle mode) while the inline trimmer was left open for a
   // PREVIOUS session otherwise left its waveform/trim state on screen (clipper-assign-list
   // stays hidden, clipper-trim-panel stays visible) instead of resetting to the new song list.
-  if (_trimTrigger || _trimForWhistle) closeInlineTrimmer();
+  if (_trimTrigger || _trimForWhistle || _trimForHbcuPot) closeInlineTrimmer();
 
   _clipperAssignMode = mode;
   _clipperAssignTrigger = trigger;
@@ -5646,18 +6333,20 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode
   _clipperAssignSelectedName = null;
 
   const isWhistleMode = mode === "whistle";
+  const isPotMode = mode === "hbcu-pot";
 
   stopPreview();
   document.getElementById("clipper-empty").hidden = true;
   document.getElementById("preview-bar").hidden = true;
   document.getElementById("clipper-title-text").textContent =
-    mode === "whistle" ? "Choose a Lead-In Whistle" : isPa ? "Assign PA Announcer Clip" : "Assign Track";
+    mode === "whistle" ? "Choose a Lead-In Whistle" : isPotMode ? "Add to Team Pot" : isPa ? "Assign PA Announcer Clip" : "Assign Track";
   document.getElementById("btn-clipper-close-assign").hidden = false;
-  document.getElementById("clipper-assign-event").textContent = isWhistleMode
-    ? ""
-    : `for ${friendlyEventName(eventName)}`;
-  document.getElementById("clipper-assign-current").textContent =
-    isWhistleMode ? "Pick a song below, then Trim... it down to your whistle sound." : currentFileName ? `Current: ${currentFileName}` : "Current: (none assigned)";
+  document.getElementById("clipper-assign-event").textContent =
+    isWhistleMode ? "" : isPotMode ? `for ${_clipperAssignPotTeam}'s Team Pot` : `for ${friendlyEventName(eventName)}`;
+  document.getElementById("clipper-assign-current").textContent = isWhistleMode
+    ? "Pick a song below, then Trim... it down to your whistle sound."
+    : isPotMode ? "Pick a song below to add it to the shuffle pot."
+    : currentFileName ? `Current: ${currentFileName}` : "Current: (none assigned)";
   document.getElementById("clipper-assign-search").value = "";
   initClipperAssignFilters();
   wireBrowseOtherTeamSoundBank();
@@ -5665,11 +6354,14 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode
   document.querySelectorAll(".clipper-assign-filter").forEach((b) => b.classList.toggle("active", b.dataset.filter === "default"));
   document.getElementById("btn-clipper-assign-select").disabled = true;
   document.getElementById("btn-clipper-assign-select").hidden = isWhistleMode;
-  document.getElementById("btn-clipper-assign-clear").hidden = isWhistleMode;
-  // Event mode: Trim... always trims whatever's already assigned to this trigger. Whistle modes
-  // have no existing assignment to fall back on, so they need a library row (or browsed file)
-  // picked first.
-  document.getElementById("btn-clipper-assign-trim").disabled = isWhistleMode;
+  document.getElementById("btn-clipper-assign-select").textContent = isPotMode ? "Add to Pot" : "Select";
+  document.getElementById("btn-clipper-assign-clear").hidden = isWhistleMode || isPotMode;
+  // Event mode: Trim... always trims whatever's already assigned to this trigger. Whistle/pot
+  // modes have no single existing assignment to fall back on, so they need a library row (or
+  // browsed file) picked first -- pot mode just never offers Trim at all (keep it simple: add
+  // the file as-is, trim it later from the pot list if needed).
+  document.getElementById("btn-clipper-assign-trim").disabled = isWhistleMode || isPotMode;
+  document.getElementById("btn-clipper-assign-trim").hidden = isPotMode;
   document.getElementById("clipper-assign").hidden = false;
 
   if (!_clipperAssignLibrary) {
@@ -5704,9 +6396,14 @@ async function openClipperAssignForWhistle() {
   await openClipperAssign(null, null, false, null, "whistle");
 }
 
+async function openClipperAssignForHbcuPot(team) {
+  _clipperAssignPotTeam = team;
+  await openClipperAssign(null, null, false, null, "hbcu-pot");
+}
+
 function closeClipperAssign() {
   bridge?.StopPreview();
-  if (_trimTrigger || _trimForWhistle) closeInlineTrimmer();
+  if (_trimTrigger || _trimForWhistle || _trimForHbcuPot) closeInlineTrimmer();
   document.getElementById("clipper-assign").hidden = true;
   document.getElementById("btn-clipper-close-assign").hidden = true;
   document.getElementById("clipper-title-text").textContent = "Clip Preview";
@@ -5960,6 +6657,9 @@ function renderClipperAssignList(filter) {
 // <canvas> with the same waveform-decode approach as loadPreviewWaveform above.
 let _trimTrigger = null;
 let _trimForWhistle = false; // true when the trimmer opened via Clipper Island's whistle mode (no trigger to save back to)
+let _trimForHbcuPot = false; // true when the trimmer opened for a Team Pot row (no trigger -- see _trimPotTeam/_trimPotPath)
+let _trimPotTeam = null;
+let _trimPotPath = null; // the pot entry's CURRENT path, so Save knows which entry to retarget
 let _trimSourceName = null; // filename actually loaded into the trimmer, for correctly naming the saved clip
 let _trimIsPa = false;
 let _trimUrl = null;
@@ -6051,10 +6751,61 @@ async function openInlineTrimmerForWhistle(path, fileName) {
   loadTrimWaveform(result.url);
 }
 
+/// Team Pot counterpart to openInlineTrimmer -- like whistle mode, there's no trigger to key off
+/// (PrepareTrimForWhistleFromWeb already handles "load an arbitrary path", reused here too), but
+/// UNLIKE whistle mode this DOES save back (to the pot entry, via SaveTrimForHbcuPot/
+/// RetargetHbcuPotSong) so Save Trim stays visible.
+async function openInlineTrimmerForHbcuPot(team, path, fileName) {
+  if (!bridge) return;
+  const result = JSON.parse(await bridge.PrepareTrimForWhistle(path));
+  if (!result.ok) {
+    showToast(result.error || "Couldn't open the trimmer.");
+    return;
+  }
+  _trimTrigger = null;
+  _trimForWhistle = false;
+  _trimForHbcuPot = true;
+  _trimPotTeam = team;
+  _trimPotPath = path;
+  _trimIsPa = false;
+  _trimUrl = result.url;
+  _trimDurationSec = result.durationSec;
+  _trimStartSec = 0;
+  _trimEndSec = Math.min(result.durationSec, 15);
+  _trimPeaks = null;
+  _trimDecodeFailed = false;
+
+  // Unlike openInlineTrimmer/openInlineTrimmerForWhistle, this is entered directly from a Team
+  // Pot row (not from within an already-open openClipperAssign flow), so the Clipper Island's
+  // #clipper-assign container itself is still hidden at this point -- open it here too, along
+  // with the header text openClipperAssign would normally have set.
+  document.getElementById("clipper-empty").hidden = true;
+  document.getElementById("clipper-title-text").textContent = "Trim Team Pot Song";
+  document.getElementById("btn-clipper-close-assign").hidden = false;
+  document.getElementById("clipper-assign-event").textContent = `for ${team}'s Team Pot`;
+  document.getElementById("clipper-assign-current").textContent = "";
+  document.getElementById("clipper-assign").hidden = false;
+  document.getElementById("clipper-assign-list").hidden = true;
+  document.getElementById("clipper-trim-panel").hidden = false;
+  document.getElementById("clipper-assign-actions-default").hidden = true;
+  document.getElementById("clipper-trim-actions").hidden = false;
+  document.getElementById("btn-trim-save").hidden = false;
+  document.getElementById("btn-trim-whistle").textContent = "Set as Lead-In Whistle";
+  _trimSourceName = result.fileName || fileName;
+  document.getElementById("clipper-trim-filename").textContent = result.fileName || fileName;
+  updateTrimLabels();
+  setTrimZoom(1);
+
+  loadTrimWaveform(result.url);
+}
+
 function closeInlineTrimmer() {
   stopTrimPreview();
   _trimTrigger = null;
   _trimForWhistle = false;
+  _trimForHbcuPot = false;
+  _trimPotTeam = null;
+  _trimPotPath = null;
   _trimSourceName = null;
   _trimUrl = null;
   _trimPeaks = null;
@@ -6292,7 +7043,17 @@ function wireInlineTrimmer() {
   }, { passive: false });
 
   document.getElementById("btn-trim-save").addEventListener("click", async () => {
-    if (!_trimTrigger || !bridge) return;
+    if (!bridge) return;
+    if (_trimForHbcuPot) {
+      const result = JSON.parse(await bridge.SaveTrimForHbcuPot(_trimPotTeam, _trimPotPath, _trimStartSec, _trimEndSec, _trimSourceName));
+      if (!result.ok) { showToast(result.error || "Couldn't save the trimmed clip."); return; }
+      showToast(`Saved trimmed clip: ${result.fileName}`);
+      closeInlineTrimmer();
+      closeClipperAssign();
+      await renderHbcuPot();
+      return;
+    }
+    if (!_trimTrigger) return;
     const trigger = _trimTrigger, isPa = _trimIsPa;
     const result = JSON.parse(await bridge.SaveTrim(trigger, isPa, _trimStartSec, _trimEndSec, _trimSourceName));
     if (!result.ok) { showToast(result.error || "Couldn't save the trimmed clip."); return; }
@@ -6346,9 +7107,19 @@ function initClipperAssign() {
   document.getElementById("btn-clipper-assign-stop").addEventListener("click", () => bridge?.StopPreview());
 
   document.getElementById("btn-clipper-assign-select").addEventListener("click", async () => {
-    if (!_clipperAssignTrigger || !_clipperAssignSelectedPath) return;
-    const trigger = _clipperAssignTrigger;
+    if (!_clipperAssignSelectedPath) return;
     const songName = _clipperAssignSelectedName || _clipperAssignSelectedPath;
+
+    if (_clipperAssignMode === "hbcu-pot") {
+      await bridge?.AddToHbcuPot(_clipperAssignPotTeam, _clipperAssignSelectedPath);
+      closeClipperAssign();
+      await renderHbcuPot();
+      showToast(`Added "${songName}" to the pot.`);
+      return;
+    }
+
+    if (!_clipperAssignTrigger) return;
+    const trigger = _clipperAssignTrigger;
     await bridge?.AssignTrackFile(trigger, _clipperAssignIsPa, _clipperAssignSelectedPath);
     await refreshCategories();
     if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
@@ -6366,6 +7137,14 @@ function initClipperAssign() {
       _clipperAssignSelectedName = songName;
       document.getElementById("btn-clipper-assign-trim").disabled = false;
       showToast(`Selected "${songName}" -- click Trim... to set it as your whistle.`);
+      return;
+    }
+
+    if (_clipperAssignMode === "hbcu-pot") {
+      await bridge?.AddToHbcuPot(_clipperAssignPotTeam, path);
+      closeClipperAssign();
+      await renderHbcuPot();
+      showToast(`Added "${songName}" to the pot.`);
       return;
     }
 
@@ -6406,6 +7185,13 @@ function initClipperAssign() {
       const packAndConference = [...pack, ...conference].filter((it) => !seenPaths.has(it.path));
       for (const it of packAndConference) seenPaths.add(it.path);
       _clipperAssignLibrary = [...local, ...packAndConference];
+      // Newly-imported files are tagged source "local"/"uploaded" (see ConfigStore.
+      // ImportIntoSongsLibrary), not "default" -- the picker defaults to showing only "default"
+      // (this team's Sound Bank), so a song just added here would silently not appear at all
+      // unless the filter switches to "all" too. Reported bug: "add song and upload -- won't add
+      // it to the song list" was this, the upload succeeded but stayed filtered out of view.
+      document.querySelectorAll(".clipper-assign-filter").forEach((b) => b.classList.toggle("active", b.dataset.filter === "all"));
+      _clipperAssignFilter = "all";
       renderClipperAssignList(document.getElementById("clipper-assign-search")?.value || "");
       const failed = result.failedNames?.length
         ? ` (${result.failedNames.length} failed: ${result.failedNames.join(", ")})`
@@ -7074,6 +7860,35 @@ async function uploadSongViaClipper() {
 // asking the user to retype something already known.
 let pendingUpload = null; // { type, file }
 
+// Shared front door for the 4 upload types -- routes into whichever flow already exists for
+// that type instead of duplicating upload logic. Requires an open team album (albumTeam) since
+// song/background/logo uploads are all scoped to a team; profile is the one exception.
+function openMarketplaceUploadPicker() {
+  document.getElementById("marketplace-upload-picker-overlay").hidden = false;
+}
+
+function closeMarketplaceUploadPicker() {
+  document.getElementById("marketplace-upload-picker-overlay").hidden = true;
+}
+
+function routeMarketplaceUpload(kind) {
+  switch (kind) {
+    case "song":
+      uploadSongViaClipper();
+      break;
+    case "image":
+      openUploadPicker("image");
+      break;
+    case "teamlogo":
+      if (!albumTeam) { showToast("Open a team's Sound Bank first, then upload its logo."); return; }
+      openLogoCropTool(albumTeam.name);
+      break;
+    case "profile":
+      openProfile().then(() => document.getElementById("btn-profile-avatar-upload")?.click());
+      break;
+  }
+}
+
 function openUploadPicker(type) {
   pendingUpload = { type, file: null };
   const input = document.getElementById("bandroom-upload-file-input");
@@ -7401,11 +8216,16 @@ function openFavoriteTeamCoverflow() {
   }
 }
 
+function favoriteCoverflowTeams(filter) {
+  const q = (filter || "").trim().toLowerCase();
+  return hbcuFilteredTeams().filter((t) => t.name !== "General" && teamMatchesQuery(t, q));
+}
+
 function renderFavoriteCoverflow(filter) {
   const track = document.getElementById("favorite-team-track");
   const nameEl = document.getElementById("favorite-team-name");
   if (!track || !nameEl) return;
-  const teams = matchupCoverflowTeams(filter);
+  const teams = favoriteCoverflowTeams(filter);
   track.innerHTML = "";
   if (!teams.length) {
     nameEl.textContent = "No teams found";
@@ -7439,7 +8259,7 @@ function renderFavoriteCoverflow(filter) {
 
 function shiftFavoriteCoverflow(dir) {
   const filter = document.getElementById("favorite-team-search")?.value || "";
-  const teams = matchupCoverflowTeams(filter);
+  const teams = favoriteCoverflowTeams(filter);
   if (!teams.length) return;
   let idx = teams.findIndex((t) => t.name === _favoriteCoverflowPicked);
   if (idx === -1) idx = 0;
@@ -7458,7 +8278,7 @@ function pointOutTheBandroom() {
 
   const tip = document.createElement("div");
   tip.className = "onboarding-tooltip";
-  tip.textContent = "New here? Check out The Bandroom -- a community library of songs and backgrounds other bands have shared.";
+  tip.textContent = "New here? Check out The Market -- a community library of songs and backgrounds other bands have shared.";
   document.body.appendChild(tip);
 
   const positionTip = () => {
@@ -8697,20 +9517,32 @@ async function shareCurrentProfile() {
 }
 
 async function openLoadProfileDialog() {
-  document.getElementById("load-profile-title").textContent = `Load Profile from The Bandroom -- apply to ${state.activeTeam}`;
+  document.getElementById("load-profile-title").textContent = `Load Profile from The Market -- apply to ${state.activeTeam}`;
   const list = document.getElementById("load-profile-list");
   list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">Loading...</div>`;
   document.getElementById("load-profile-overlay").hidden = false;
 
   let items = [];
+  let fetchFailed = false;
   try {
     const raw = await bridge?.GetMarketplaceProfiles();
-    items = raw ? (JSON.parse(raw).items || []) : [];
+    // BUG FIX: a failed/empty raw response used to fall straight through to items=[] and render
+    // the exact same "No one's shared a profile yet" message as a genuinely empty marketplace --
+    // indistinguishable from "the request never even reached the worker" (offline, worker down,
+    // bridge unavailable). Track the failure explicitly so the dialog can say what actually
+    // happened instead of implying nobody's ever shared anything.
+    if (!raw) { fetchFailed = true; }
+    else { items = JSON.parse(raw).items || []; }
   } catch (err) {
     console.error("GetMarketplaceProfiles failed", err);
+    fetchFailed = true;
   }
 
   list.innerHTML = "";
+  if (fetchFailed) {
+    list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">Couldn't reach the marketplace -- check your connection and reopen this to retry.</div>`;
+    return;
+  }
   if (!items.length) {
     list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No one's shared a profile yet -- be the first with Share Profile.</div>`;
     return;
@@ -8754,9 +9586,23 @@ async function applyMarketplaceProfile(url, name) {
     await refreshCategories();
     if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
     const missed = result.total - result.applied;
-    showToast(missed > 0
-      ? `Applied ${result.applied} of ${result.total} songs -- ${missed} need a manual upload (filenames didn't match anything in your Songs library).`
-      : `Applied all ${result.applied} songs from "${name}"!`);
+    const unmatched = result.unmatched ?? [];
+    // BUG FIX: this used to only show a bare count ("X need a manual upload") with no way to see
+    // WHICH events those were -- when applied is 0 (the reported "profile didn't populate
+    // events" case) that read as a generic warning easy to miss/dismiss, not an actionable list.
+    // Logged to console either way so a 0-applied run is diagnosable from crash.log-adjacent
+    // context even if the user doesn't screenshot the toast.
+    console.log(`applyMarketplaceProfile "${name}": ${result.applied}/${result.total} applied, unmatched:`, unmatched);
+    if (result.applied === 0 && result.total > 0) {
+      alert(`None of the ${result.total} songs in "${name}" matched anything in your Songs library:\n\n`
+        + unmatched.slice(0, 20).join("\n") + (unmatched.length > 20 ? `\n...and ${unmatched.length - 20} more` : "")
+        + `\n\nThis profile only carries filenames, not the actual audio -- download matching songs from `
+        + `The Market first (or ask whoever shared it), then try again.`);
+    } else {
+      showToast(missed > 0
+        ? `Applied ${result.applied} of ${result.total} songs -- ${missed} need a manual upload (filenames didn't match anything in your Songs library).`
+        : `Applied all ${result.applied} songs from "${name}"!`);
+    }
   } catch (err) {
     console.error("applyMarketplaceProfile failed", err);
     showToast("Couldn't apply that profile -- try again.");
@@ -8926,7 +9772,7 @@ const WHATS_NEW_BLOCKING_OVERLAY_IDS = [
   "my-downloads-overlay", "sound-booth-overlay", "profile-overlay", "onboarding-overlay",
   "add-school-overlay", "import-target-team-overlay", "songpack-prompt-overlay",
   "songpack-import-overlay", "songpack-progress-overlay", "band-director-overlay",
-  "band-director-settings-overlay",
+  "band-director-settings-overlay", "marketplace-upload-picker-overlay", "marketplace-chat-overlay",
 ];
 function showWhatsNewWhenClear() {
   const anyOpen = WHATS_NEW_BLOCKING_OVERLAY_IDS.some((id) => {
@@ -9024,6 +9870,71 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "t") openTestHook();
 });
 
+// --- HBCU pot dashboard ("\" hotkey) -------------------------------------------------------
+// Read-only status readout (HbcuPlaybackService.GetStatus via WebMainForm.GetHbcuPlaybackStatusFromWeb),
+// polled once a second while the panel's open so the countdown/queue counts stay live without
+// hammering the bridge when nobody's looking at it.
+let _hbcuDashboardPollTimer = null;
+
+async function pollHbcuDashboard() {
+  const panel = document.getElementById("hbcu-dashboard-panel");
+  if (!panel || panel.hidden || !bridge) return;
+  let status = null;
+  try {
+    const json = await bridge.GetHbcuPlaybackStatus();
+    status = json ? JSON.parse(json) : null;
+  } catch (err) {
+    console.error("GetHbcuPlaybackStatus failed", err);
+  }
+  document.getElementById("hbcu-dashboard-inactive").hidden = !!status;
+  document.getElementById("hbcu-dashboard-active").hidden = !status;
+  if (!status) return;
+
+  const statusText = status.startPending ? "Waiting for kickoff song to end..."
+    : status.paused ? "Paused"
+    : status.running ? "Shuffling" : "Stopped";
+  document.getElementById("hbcu-dash-status").textContent = statusText;
+  document.getElementById("hbcu-dash-playing").textContent = status.currentSongName
+    ? `${status.currentSongName} (${status.currentlyPlayingSide === "home" ? status.homeTeam : status.awayTeam})`
+    : "--";
+  document.getElementById("hbcu-dash-next").textContent = status.secondsUntilNext != null
+    ? `${Math.ceil(status.secondsUntilNext)}s` : "--";
+  document.getElementById("hbcu-dash-home-label").textContent = status.homeTeam || "Home";
+  document.getElementById("hbcu-dash-away-label").textContent = status.awayTeam || "Away";
+  document.getElementById("hbcu-dash-home-count").textContent = `${status.homeQueueCount} queued`;
+  document.getElementById("hbcu-dash-away-count").textContent = `${status.awayQueueCount} queued`;
+  document.getElementById("btn-hbcu-dash-pause").hidden = status.paused || !status.running;
+  document.getElementById("btn-hbcu-dash-resume").hidden = !status.paused;
+}
+
+function openHbcuDashboard() {
+  const panel = document.getElementById("hbcu-dashboard-panel");
+  if (!panel) return;
+  panel.hidden = false;
+  pollHbcuDashboard();
+  if (!_hbcuDashboardPollTimer) _hbcuDashboardPollTimer = setInterval(pollHbcuDashboard, 1000);
+}
+
+function closeHbcuDashboard() {
+  document.getElementById("hbcu-dashboard-panel").hidden = true;
+  if (_hbcuDashboardPollTimer) { clearInterval(_hbcuDashboardPollTimer); _hbcuDashboardPollTimer = null; }
+}
+
+document.addEventListener("keydown", (e) => {
+  // Only outside text inputs -- "\" is a real character elsewhere (search boxes, team abbrev
+  // load field, etc), same guard pattern as this file's other bare-key hotkeys.
+  if (e.key === "\\" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
+    const panel = document.getElementById("hbcu-dashboard-panel");
+    if (panel.hidden) openHbcuDashboard(); else closeHbcuDashboard();
+  }
+});
+
+document.getElementById("btn-close-hbcu-dashboard")?.addEventListener("click", closeHbcuDashboard);
+document.getElementById("btn-hbcu-dash-start")?.addEventListener("click", async () => { await bridge?.RestartHbcuPlayback(); pollHbcuDashboard(); });
+document.getElementById("btn-hbcu-dash-pause")?.addEventListener("click", async () => { await bridge?.PauseHbcuPlayback(); pollHbcuDashboard(); });
+document.getElementById("btn-hbcu-dash-resume")?.addEventListener("click", async () => { await bridge?.ResumeHbcuPlayback(); pollHbcuDashboard(); });
+document.getElementById("btn-hbcu-dash-stop")?.addEventListener("click", async () => { await bridge?.StopHbcuPlayback(); pollHbcuDashboard(); });
+
 document.getElementById("btn-close-test-hook")?.addEventListener("click", () => {
   document.getElementById("test-hook-panel").hidden = true;
 });
@@ -9072,6 +9983,20 @@ document.getElementById("btn-test-hook-fire-pair")?.addEventListener("click", as
     return `${friendlyEventName(key)} -> ${routedSide}: ${fireResult}`;
   });
   showToast(parts.join(" | "));
+});
+
+document.getElementById("btn-test-hook-hbcu-kickoff")?.addEventListener("click", async () => {
+  const possessionSide = document.getElementById("test-hook-hbcu-possession").value;
+  const result = await bridge?.FireTestEventHbcu("Other: Opening Kickoff", possessionSide);
+  if (result === "no-hbcu") showToast("HBCU mode isn't active -- press GAMETIME with HBCU Mode on first.");
+  else showToast("Fired Opening Kickoff -- pot shuffle starts kickoff-song-length + 20s from now.");
+});
+
+document.getElementById("btn-test-hook-hbcu-touchdown")?.addEventListener("click", async () => {
+  const possessionSide = document.getElementById("test-hook-hbcu-possession").value;
+  const result = await bridge?.FireTestEventHbcu("Offense: Touchdown Scored", possessionSide);
+  if (result === "no-hbcu") showToast("HBCU mode isn't active -- press GAMETIME with HBCU Mode on first.");
+  else showToast(`Fired Touchdown for ${possessionSide} -- other side's shuffle track should fade.`);
 });
 
 // Plain-English labels for EventKeys -- "Offense:"/"Defense:"/"Other:" prefixes and helper-name
@@ -9237,7 +10162,7 @@ function sanitizeMarketplaceItem(item) {
 // COMMAND PALETTE (Ctrl+K)
 // ================================================================
 const COMMANDS = [
-  { icon: "🎵", label: "The Bandroom", hint: "marketplace", action: () => toggleBandroom() },
+  { icon: "🎵", label: "The Market", hint: "marketplace", action: () => toggleBandroom() },
   { icon: "🏆", label: "Sound Bank", hint: "songs + backgrounds", action: () => openTeamSoundBank(state.activeTeam) },
   { icon: "⬇️", label: "My Downloads", hint: "library", action: () => toggleMyDownloads() },
   { icon: "💬", label: "Discord Chat", hint: "chat", action: () => toggleDiscordChat() },
@@ -9480,7 +10405,7 @@ const TIPS_DATABASE = [
   "You can set custom team logos from any image on your computer.",
   "Team backgrounds can be any 16:9 image — stadium photos work great.",
   "Each team has its own independent song profile.",
-  "Download songs from The Bandroom to build your library.",
+  "Download songs from The Market to build your library.",
   "Upload your own songs to share with other Bandroom users.",
   "Open a team's Sound Bank to download custom background art too.",
   "The sensitivity slider controls how long songs play before fading.",
@@ -9952,7 +10877,7 @@ function leaveParty() {
 // ================================================================
 const HOTKEYS = [
   { label: "Command Palette", keys: ["Ctrl", "K"], action: openCommandPalette },
-  { label: "The Bandroom", keys: ["Ctrl", "B"], action: toggleBandroom },
+  { label: "The Market", keys: ["Ctrl", "B"], action: toggleBandroom },
   { label: "Sound Bank", keys: ["Ctrl", "S"], action: () => openTeamSoundBank(state.activeTeam) },
   { label: "My Downloads", keys: ["Ctrl", "D"], action: toggleMyDownloads },
   { label: "Discord Chat", keys: ["Ctrl", "Shift", "D"], action: toggleDiscordChat },

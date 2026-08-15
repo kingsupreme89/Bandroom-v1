@@ -76,6 +76,20 @@
 // No accounts on uploads YET -- anyone can still upload anonymously via the owner-token system
 // above. /auth/verify exists so a real account system can be built on top without a second
 // migration later, but nothing currently requires being signed in.
+//
+// GET /chat/<channel>/list?after=<id>&limit=50   channel: "general" | "media"
+//   -> { messages: [...] } oldest-first. `after` returns only newer messages (for polling);
+//      omitted returns the most recent `limit`. Reading is open to everyone, no auth required.
+//
+// POST /chat/<channel>/post   header: Authorization: Bearer <sessionToken from /auth/verify>
+//                             body: { content, attachedItemId?, attachedItemType? }
+//   -> posts a message. Requires sign-in. "media" channel posts may reference an item already
+//      created via /upload (attachedItemId/Type) -- no separate upload path for chat attachments.
+//
+// POST /chat/report/<channel>/<id>  -> increments a report counter, same pattern as /report.
+//
+// DELETE /chat/<channel>/<id>   header: X-Admin-Token: <ADMIN_TOKEN>
+//   -> admin-only moderation delete.
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25MB -- generous for a song clip or a background image
 
@@ -89,7 +103,7 @@ function cors(extra) {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, PATCH, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Owner-Token, X-Admin-Token",
+    "Access-Control-Allow-Headers": "Content-Type, X-Owner-Token, X-Admin-Token, Authorization",
     ...extra,
   };
 }
@@ -256,6 +270,33 @@ async function checkRateLimit(env, request, action, maxCount) {
 // KV writes, which is a more realistic path to exhausting the free tier's 1,000-writes/day cap
 // than upload volume ever was. Generous limit since liking/reporting is meant to be casual.
 const RATE_LIMIT_MAX_LIKES_REPORTS = 60;
+
+// ---- Marketplace chat (General / Media Sharing) ----------------------------------------
+// Two fixed channels, forum-style: "general" (open talk) and "media" (talk about + attach an
+// already-uploaded marketplace item, e.g. "check out this song"). Storage reuses the exact same
+// index-of-ids pattern as items above (addToIndex/getIndexIds, keyed by a pseudo "type" of
+// "chat-general"/"chat-media" so meta:chat-general:<id> sits alongside meta:song:<id> etc. in
+// the same KV namespace) -- avoids KV list() quota the same way item listing does. Posting
+// requires a signed-in session (same Authorization: Bearer <sessionToken> as /profile) so every
+// message is tied to a real account; reading stays open to everyone, same as browsing items.
+const CHAT_CHANNELS = new Set(["general", "media"]);
+const CHAT_INDEX_MAX = 300; // trim each channel's index to the most recent N ids on write
+const RATE_LIMIT_MAX_CHAT_POSTS = 20;
+
+function chatType(channel) {
+  return `chat-${channel}`;
+}
+
+async function requireSession(env, request) {
+  const authHeader = request.headers.get("authorization") ?? "";
+  const sessionToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (!sessionToken) return null;
+  const sub = await env.MARKETPLACE_META.get(`session:${sessionToken}`);
+  if (!sub) return null;
+  const userRaw = await env.MARKETPLACE_META.get(`user:${sub}`);
+  const user = userRaw ? JSON.parse(userRaw) : null;
+  return { sub, name: user?.name ?? "Unknown", picture: user?.picture ?? null };
+}
 
 export default {
   async fetch(request, env) {
@@ -843,6 +884,137 @@ export default {
         };
       }
       return jsonResponse({ items });
+    }
+
+    // GET /chat/<channel>/list?after=<id>&limit=50
+    //   -> { messages: [{ id, channel, authorSub, authorName, authorPicture, content,
+    //        attachedItemId, attachedItemType, createdAt, reports }, ...] }, oldest-first.
+    //      `after` returns only messages posted after that id (for polling); omitted returns the
+    //      most recent `limit` messages (initial load).
+    if (url.pathname.startsWith("/chat/") && url.pathname.endsWith("/list") && request.method === "GET") {
+      const channel = url.pathname.slice("/chat/".length, -"/list".length);
+      if (!CHAT_CHANNELS.has(channel)) {
+        return new Response('channel must be "general" or "media"', { status: 400, headers: cors() });
+      }
+      const after = url.searchParams.get("after");
+      const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
+
+      let ids;
+      try {
+        ids = await getIndexIds(env, chatType(channel));
+      } catch {
+        return jsonResponse({ messages: [] });
+      }
+
+      const messages = [];
+      for (const id of ids) {
+        const raw = await env.MARKETPLACE_META.get(`meta:${chatType(channel)}:${id}`);
+        if (raw) messages.push(JSON.parse(raw));
+      }
+      messages.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+
+      if (after) {
+        const afterIdx = messages.findIndex((m) => m.id === after);
+        return jsonResponse({ messages: afterIdx === -1 ? [] : messages.slice(afterIdx + 1) });
+      }
+      return jsonResponse({ messages: messages.slice(-limit) });
+    }
+
+    // POST /chat/<channel>/post   header: Authorization: Bearer <sessionToken from /auth/verify>
+    //   body: { content, attachedItemId?, attachedItemType? }
+    //   -> requires sign-in (see requireSession above). attachedItemId/Type reference an item
+    //      already created via the existing /upload endpoint -- the client uploads first through
+    //      the normal upload flow, then posts a chat message pointing at the returned id, so
+    //      there's no second upload/storage path to maintain here.
+    if (url.pathname.startsWith("/chat/") && url.pathname.endsWith("/post") && request.method === "POST") {
+      const channel = url.pathname.slice("/chat/".length, -"/post".length);
+      if (!CHAT_CHANNELS.has(channel)) {
+        return new Response('channel must be "general" or "media"', { status: 400, headers: cors() });
+      }
+      const session = await requireSession(env, request);
+      if (!session) return new Response("sign-in required to post", { status: 401, headers: cors() });
+
+      const allowedPost = await checkRateLimit(env, request, "chatpost", RATE_LIMIT_MAX_CHAT_POSTS);
+      if (!allowedPost) {
+        return new Response("too many messages -- slow down a bit", { status: 429, headers: cors() });
+      }
+
+      let body;
+      try { body = await request.json(); } catch { return new Response("bad request", { status: 400, headers: cors() }); }
+      const content = typeof body?.content === "string" ? body.content.trim().slice(0, 1000) : "";
+      if (!content) return new Response("content is required", { status: 400, headers: cors() });
+
+      // attached item must actually exist -- prevents linking to a fabricated/deleted id.
+      let attachedItemId = null;
+      let attachedItemType = null;
+      if (channel === "media" && typeof body?.attachedItemId === "string" && isValidType(body?.attachedItemType)) {
+        const itemRaw = await env.MARKETPLACE_META.get(`meta:${body.attachedItemType}:${body.attachedItemId}`);
+        if (itemRaw) {
+          attachedItemId = body.attachedItemId;
+          attachedItemType = body.attachedItemType;
+        }
+      }
+
+      const id = crypto.randomUUID();
+      const message = {
+        id, channel, authorSub: session.sub, authorName: session.name, authorPicture: session.picture,
+        content, attachedItemId, attachedItemType, createdAt: new Date().toISOString(), reports: 0,
+      };
+      await env.MARKETPLACE_META.put(`meta:${chatType(channel)}:${id}`, JSON.stringify(message));
+      await addToIndex(env, chatType(channel), id);
+
+      // Trim the index to the most recent CHAT_INDEX_MAX ids so a busy channel's index doesn't
+      // grow unbounded -- old messages' meta records are left in KV (cheap, and harmless if
+      // orphaned) but drop out of listing once past the trim.
+      const ids = await readIndexRaw(env, chatType(channel));
+      if (ids && ids.length > CHAT_INDEX_MAX) {
+        await env.MARKETPLACE_META.put(indexKey(chatType(channel)), JSON.stringify(ids.slice(-CHAT_INDEX_MAX)));
+      }
+
+      return jsonResponse({ message });
+    }
+
+    // POST /chat/report/<channel>/<id> -- same increment-a-counter pattern as /report for items.
+    if (url.pathname.startsWith("/chat/report/") && request.method === "POST") {
+      const parts = url.pathname.slice("/chat/report/".length).split("/");
+      const [channel, id] = parts;
+      if (!CHAT_CHANNELS.has(channel) || !id) {
+        return new Response("bad request", { status: 400, headers: cors() });
+      }
+      const allowedReport = await checkRateLimit(env, request, "chatreport", RATE_LIMIT_MAX_LIKES_REPORTS);
+      if (!allowedReport) {
+        return new Response("too many reports -- try again in a few minutes", { status: 429, headers: cors() });
+      }
+      const metaKey = `meta:${chatType(channel)}:${id}`;
+      const raw = await env.MARKETPLACE_META.get(metaKey);
+      if (!raw) return new Response("not found", { status: 404, headers: cors() });
+      const message = JSON.parse(raw);
+      message.reports = (message.reports ?? 0) + 1;
+      await env.MARKETPLACE_META.put(metaKey, JSON.stringify(message));
+      return jsonResponse({ reports: message.reports });
+    }
+
+    // DELETE /chat/<channel>/<id>   header: X-Admin-Token: <ADMIN_TOKEN>
+    //   -> admin-only, same token/mechanism as /item's admin override. No owner-token path here
+    //      (chat messages aren't anonymous -- they're tied to a signed-in account, not an
+    //      owner-token credential) -- deleting your own message isn't wired up yet, just admin
+    //      moderation.
+    if (url.pathname.startsWith("/chat/") && request.method === "DELETE") {
+      const parts = url.pathname.slice("/chat/".length).split("/");
+      const [channel, id] = parts;
+      if (!CHAT_CHANNELS.has(channel) || !id) {
+        return new Response("bad request", { status: 400, headers: cors() });
+      }
+      const adminToken = request.headers.get("x-admin-token");
+      const isAdmin = !!env.ADMIN_TOKEN && !!adminToken && adminToken === env.ADMIN_TOKEN;
+      if (!isAdmin) return new Response("forbidden -- admin token required", { status: 403, headers: cors() });
+
+      const metaKey = `meta:${chatType(channel)}:${id}`;
+      const raw = await env.MARKETPLACE_META.get(metaKey);
+      if (!raw) return new Response("not found", { status: 404, headers: cors() });
+      await env.MARKETPLACE_META.delete(metaKey);
+      await removeFromIndex(env, chatType(channel), id);
+      return jsonResponse({ deleted: true });
     }
 
     if (url.pathname.startsWith("/file/") && request.method === "GET") {

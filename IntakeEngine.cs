@@ -388,6 +388,8 @@ public static class IntakeEngine
         ("acc", "ACC"),
         ("big12", "Big 12"),
         ("pac12", "Pac-12"), ("pac", "Pac-12"),
+        ("swac", "SWAC"),
+        ("meac", "MEAC"),
     };
 
     private static string? GuessConferenceHint(string filename)

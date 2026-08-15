@@ -182,6 +182,8 @@ public sealed class MacWebBridge
     public void ClearAllAssignments() => _host.ClearAllAssignmentsFromWeb();
     public bool GetAlwaysOnTop() => _host.GetAlwaysOnTopFromWeb();
     public void SetAlwaysOnTop(bool enabled) => _host.SetAlwaysOnTopFromWeb(enabled);
+    public bool GetRemotePlayMode() => ConfigStore.LoadRemotePlayModeEnabled();
+    public void SetRemotePlayMode(bool enabled) => ConfigStore.SaveRemotePlayModeEnabled(enabled);
     public string GetPlaybackTimingSettings() => _host.GetPlaybackTimingSettingsFromWeb();
     public void SavePlaybackTimingSettings(string settingsJson)
     {
@@ -458,6 +460,17 @@ public sealed class MacWebBridge
 
     public async Task<string> AdminEditMarketplaceItem(string type, string id, string newName, string newSchool) =>
         JsonSerializer.Serialize(new { success = false, error = "Admin mode is not active." });
+
+    public async Task<string> AdminDeleteMarketplaceChatMessage(string channel, string id) =>
+        JsonSerializer.Serialize(new { success = false, error = "Admin mode is not active." });
+
+    // ---- Marketplace chat ----
+
+    /// <summary>Posts a message to the marketplace chat -- works on Mac too (unlike the admin
+    /// methods above), since posting only needs a signed-in session, not the Windows-only admin
+    /// token.</summary>
+    public Task<string> PostMarketplaceChatMessage(string channel, string content, string? attachedItemId, string? attachedItemType)
+        => MarketplaceChatService.PostAsync(channel, content, attachedItemId, attachedItemType);
 
     // ---- Profile & Auth ----
 

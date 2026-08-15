@@ -35,6 +35,7 @@
     <Compile Include="..\..\ConfigProfileManager.cs" />
     <Compile Include="..\..\MarketplaceDownloadService.cs" />
     <Compile Include="..\..\ProfileSyncService.cs" />
+    <Compile Include="..\..\MarketplaceChatService.cs" />
     <Compile Include="..\..\GoogleAuthService.cs" />
     <Compile Include="..\..\UserCountService.cs" />
     <Compile Include="..\..\VersionGuard.cs" />

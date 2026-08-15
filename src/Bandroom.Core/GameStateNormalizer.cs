@@ -35,7 +35,16 @@ public readonly record struct ReaderNumericSnapshot(
     // discarding its own OCR-derived _lastPossession (color-sampled) for the rest of the game.
     // This flag lets GameWatcher tell "reader genuinely reports home" from "reader has never once
     // resolved possession" and fall back to OCR for the latter, same as every int field above.
-    bool HavePossession);
+    bool HavePossession,
+    // 2026-08-14: PlayClock was being validated by RamReaderValidator and then just discarded --
+    // PlaySnapshot.IsPlayClockCounting stayed 100% OCR-derived even with RAM connected. -1 sentinel,
+    // same convention as every other int field above.
+    int PlayClock,
+    // 2026-08-14: carries the reader's own v1.4.9+ ram.freshness block through so GameWatcher can
+    // replace its RAM-vs-OCR staleness guess with the reader's own ground truth (see
+    // ScoreboardReaderFreshness.CoreBlockRecentlyChanged). Null on older readers or before anything
+    // has resolved -- GameWatcher must treat null the same as "no freshness data," never as "stale."
+    ScoreboardReaderFreshness? Freshness);
 
 /// <summary>Maps Coffee's reader JSON (ScoreboardReaderState) into the numeric fields of a
 /// PlaySnapshot -- most notably YardLine from `game.ballOn`, previously hardcoded to 0 in
@@ -69,6 +78,7 @@ public sealed class GameStateNormalizer
     int _lastHomeTimeoutsRemaining = -1;
     bool _lastPossessionAway;
     bool _havePossession;
+    int _lastPlayClock = -1;
 
     public void Reset()
     {
@@ -83,6 +93,7 @@ public sealed class GameStateNormalizer
         _lastHomeTimeoutsRemaining = -1;
         _lastPossessionAway = false;
         _havePossession = false;
+        _lastPlayClock = -1;
     }
 
     /// <summary>Returns null only when nothing usable has ever been read yet (state is null, or
@@ -123,6 +134,9 @@ public sealed class GameStateNormalizer
         if (home?.Timeouts is int homeTo && homeTo >= 0)
             _lastHomeTimeoutsRemaining = homeTo;
 
+        if (game?.PlayClock is int playClock && playClock >= 0)
+            _lastPlayClock = playClock;
+
         // "none" (no possession read yet, e.g. pregame) intentionally does NOT update the sticky
         // value -- same "don't let a blank/unknown read fabricate a delta" rule as everything else
         // here. Team-level `possession` bools are a fallback for when `game.possession` itself is
@@ -143,7 +157,9 @@ public sealed class GameStateNormalizer
             AwayTimeoutsRemaining: _lastAwayTimeoutsRemaining,
             HomeTimeoutsRemaining: _lastHomeTimeoutsRemaining,
             PossessionAway: _havePossession && _lastPossessionAway,
-            HavePossession: _havePossession);
+            HavePossession: _havePossession,
+            PlayClock: _lastPlayClock,
+            Freshness: state.Freshness);
     }
 
     /// <summary>Reader sends distance either as a plain number ("7") or goal-line text

@@ -92,6 +92,17 @@ public sealed class ScorebugPreset
     public double PlayClockFxW { get; init; } = 0.06;
     public double PlayClockFxH { get; init; } = 0.14;
 
+    /// <summary>Added 2026-08-14 -- which local process(es) GameWatcher.FindGameWindow should
+    /// look for while THIS preset is the active one, instead of always searching every known
+    /// game/streaming process at once. Fixes a live bug: a background/leftover PC "CollegeFB27"
+    /// process and "RemotePlay" (the one actually on screen) running simultaneously meant the
+    /// watcher always locked onto whichever enumerated first, regardless of which window the
+    /// owner was actually looking at -- capture silently never ran because the wrong window could
+    /// never be the foreground window. Null (the default) means "use GameWatcher's full
+    /// GameProcessNames list," for presets not tied to a specific local process (e.g. Kam's CBS,
+    /// which reads a broadcast-style capture that could come from either).</summary>
+    public string[]? GameProcessNames { get; init; }
+
     /// <summary>Tight crop directly under each team's name for possession sampling by brightness
     /// comparison (GameWatcher.SamplePossessionByUnderline), NOT color matching -- correction
     /// 2026-08-07: the possession signal on this scorebug revision is a thin underline beneath
@@ -251,7 +262,17 @@ public sealed class ScorebugPreset
     /// prioritize re-measuring this one directly from a live screenshot.</summary>
     public static readonly ScorebugPreset CollegeFootball27 = new()
     {
+        // RE-CONFIRMED 2026-08-14 (session 82 follow-up) against a fresh batch of live screenshots
+        // (screenshots #711-727: Georgia @ Fresno State pregame walkout/huddle, Clemson @ Florida
+        // State kickoff through a full scoring drive -- live downs, PAT, TOUCHDOWN banner x3).
+        // Band/score/clock/banner crops below all still land correctly on this batch -- no drift,
+        // no changes made. Still NOT confirmed: PenaltyAgainstFx* (no live penalty-flag screenshot
+        // seen yet in any batch) -- get one before trusting that crop.
         Name = "College Football 27",
+        // Real PC install only -- see GameProcessNames' doc comment. Deliberately does NOT
+        // include "RemotePlay": a CFB27 PC owner who also happens to have Remote Play open for
+        // something else shouldn't have this preset start reading that unrelated window.
+        GameProcessNames = new[] { "CollegeFB27" },
         BandFxY = 0.870, BandFxH = 0.075,
         AwayScoreFxX = 0.395, AwayScoreFxW = 0.035,
         HomeScoreFxX = 0.595, HomeScoreFxW = 0.035,
@@ -263,11 +284,12 @@ public sealed class ScorebugPreset
         // both ends, white text fills the whole center where the score/clock normally sit) -- so
         // the crop needs to span the full bar width, not a narrow center box like CBS's. Reuses
         // the same BandFxY/BandFxH vertical band as the rest of the bug since it's the same strip.
-        // PenaltyAgainstFx* -- still NOT calibrated from a CFB 27 screenshot (none seen showing a
-        // live penalty-decision overlay in this batch either). Left equal to the CBS-calibrated
-        // numbers as an explicit placeholder (same "clone as a starting point, flag it" convention
-        // as CollegeFootball26Console below) rather than inventing new coordinates with no basis --
-        // get a live CFB 27 penalty-overlay screenshot to replace this for real.
+        // PenaltyAgainstFx* -- CONFIRMED 2026-08-14 against a live CFB 27 penalty screenshot
+        // (screenshot #733: Clemson @ Florida State, Neutral Zone Infraction on Florida State,
+        // both Accept/Decline and Penalty/Against cards visible). The CBS-cloned placeholder
+        // values below already land correctly on the right-hand "PENALTY ... Against <Team>"
+        // card (measured ~x 0.68-0.96, y 0.54-0.80, inside this box's 0.65-0.99 / 0.50-0.84) --
+        // no longer just an unverified clone, kept as-is since it already checks out.
         PenaltyAgainstFxX = 0.65, PenaltyAgainstFxY = 0.62, PenaltyAgainstFxW = 0.32, PenaltyAgainstFxH = 0.22,
         BannerFxX = 0.15, BannerFxY = 0.870, BannerFxW = 0.70, BannerFxH = 0.075,
         AwayUnderlineFxX = 0.430, AwayUnderlineFxY = 0.876, AwayUnderlineFxW = 0.045, AwayUnderlineFxH = 0.024,
@@ -284,24 +306,43 @@ public sealed class ScorebugPreset
         ChevronMarkerFxX = 0.4275, ChevronMarkerFxY = 0.849, ChevronMarkerFxW = 0.0225, ChevronMarkerFxH = 0.04,
     };
 
-    /// <summary>Added 2026-08-09 for the owner's separate CFB 26 PS/Xbox console capture, kept as
-    /// its own preset alongside the CFB 27 console one rather than overwriting it, same
-    /// "swap presets, don't hand-edit coordinates" rationale as every preset above. IMPORTANT:
-    /// cloned from ConsoleScorebugV1's coordinates as a starting point only -- I was not given
-    /// the actual CFB 26 screenshot's pixel data to calibrate against (only an unrelated app
-    /// screenshot came through in the request), so these crop boxes are UNVERIFIED for CFB 26's
-    /// actual HUD and need live tuning against a real CFB 26 console screenshot before relying on
-    /// this preset, same caveat as ConsoleScorebugV1 originally shipped with.</summary>
+    /// <summary>Added 2026-08-09 for the owner's separate CFB 26 PS/Xbox console capture. CALIBRATED
+    /// 2026-08-14 against a real batch of live CFB 26 screenshots (Ball State @ Florida and
+    /// Auburn @ Georgia Tech, kickoff/PAT/penalty/endzone situations) -- these happened to be
+    /// captured over PS5 Remote Play rather than a direct capture card, but the "Remote Play
+    /// connected." toast sits well clear of the scorebug band and the game renders at full
+    /// 2560x1440 with no letterboxing, so this same calibration covers both capture paths; no
+    /// separate remote-play preset needed. Band/score/clock/penalty crops below now match
+    /// CollegeFootball27's confirmed values -- side-by-side comparison against this batch shows
+    /// CFB26's console scorebug uses the identical bar geometry/hexagon-clock layout as CFB27,
+    /// just with that game's team logos, so the same real-measured coordinates apply directly.
+    /// Still NOT independently confirmed: AwayUnderlineFx*/HomeUnderlineFx*/timeout dashes -- no
+    /// screenshot in this batch showed the underline or a used timeout clearly enough to measure;
+    /// left at their prior guessed/mirrored values below.
+    /// Renamed 2026-08-14 to "College Football 26/27 Console" -- owner plays BOTH years' console
+    /// builds through PS Remote Play (not a capture card), and since the scorebug layout is
+    /// identical between the two (see above), one Remote-Play-scoped preset covers either game.
+    /// The separate "College Football 27" preset above stays PC-only (GameProcessNames scoped to
+    /// "CollegeFB27") for owners running that game's real PC install instead.</summary>
     public static readonly ScorebugPreset CollegeFootball26Console = new()
     {
-        Name = "College Football 26 Console",
-        BandFxY = 0.855, BandFxH = 0.10,
+        Name = "College Football 26/27 Console",
+        // Confirmed capture path is PS Remote Play (see this preset's class doc comment) -- see
+        // GameProcessNames' doc comment on ScorebugPreset for why this is scoped instead of
+        // matching every candidate process.
+        GameProcessNames = new[] { "RemotePlay" },
+        BandFxY = 0.870, BandFxH = 0.075,
+        AwayScoreFxX = 0.395, AwayScoreFxW = 0.035,
+        HomeScoreFxX = 0.595, HomeScoreFxW = 0.035,
+        ClockFxX = 0.465, ClockFxW = 0.06,
+        PenaltyAgainstFxX = 0.65, PenaltyAgainstFxY = 0.62, PenaltyAgainstFxW = 0.32, PenaltyAgainstFxH = 0.22,
+        BannerFxX = 0.15, BannerFxY = 0.870, BannerFxW = 0.70, BannerFxH = 0.075,
         AwayUnderlineFxX = 0.20, AwayUnderlineFxY = 0.965, AwayUnderlineFxW = 0.09, AwayUnderlineFxH = 0.015,
         HomeUnderlineFxX = 0.565, HomeUnderlineFxY = 0.965, HomeUnderlineFxW = 0.09, HomeUnderlineFxH = 0.015,
         AwayTimeoutFxX = 0.20, AwayTimeoutFxY = 0.905, AwayTimeoutFxW = 0.08, AwayTimeoutFxH = 0.025,
         // Placeholder mirror (see HomeTimeoutFx*'s doc comment): AwayUnderlineFxX (0.20) ->
         // HomeUnderlineFxX (0.565) is a +0.365 offset; applied to AwayTimeoutFxX. Stacks on top of
-        // this preset's existing "cloned, unverified for CFB 26" caveat above.
+        // this preset's existing "not independently confirmed" caveat above.
         HomeTimeoutFxX = 0.565, HomeTimeoutFxY = 0.905, HomeTimeoutFxW = 0.08, HomeTimeoutFxH = 0.025,
     };
 

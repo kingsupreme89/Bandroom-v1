@@ -709,7 +709,9 @@ public class EvaluatorTests
     public void PregameHelper_Fires_OnReadyScreenEdge()
     {
         var evaluator = new PregameHelper();
-        var state = State(Snap.With(isPregameReady: false), Snap.With(isPregameReady: true));
+        // quarter: 0 -- real pregame state (before kickoff); see PregameHelper's 2026-08-14 guard
+        // against firing on a stray mid-game "READY" OCR sighting once the game clock has started.
+        var state = State(Snap.With(isPregameReady: false, quarter: 0), Snap.With(isPregameReady: true, quarter: 0));
         var result = evaluator.Evaluate(state);
         Assert.NotNull(result);
         Assert.Equal("Other: Pregame Ready", result!.EventKey);
@@ -719,7 +721,17 @@ public class EvaluatorTests
     public void PregameHelper_DoesNotRefire_WhileStillReady()
     {
         var evaluator = new PregameHelper();
-        var state = State(Snap.With(isPregameReady: true), Snap.With(isPregameReady: true));
+        var state = State(Snap.With(isPregameReady: true, quarter: 0), Snap.With(isPregameReady: true, quarter: 0));
+        Assert.Null(evaluator.Evaluate(state));
+    }
+
+    [Fact]
+    public void PregameHelper_DoesNotFire_OnMidGameReadySighting()
+    {
+        // FIXED 2026-08-14 live bug: "Pregame Ready" fired during a live game (around a PAT) with
+        // no actual READY screen up -- a stray "READY" OCR match mid-game flipped the edge trigger.
+        var evaluator = new PregameHelper();
+        var state = State(Snap.With(isPregameReady: false, quarter: 2), Snap.With(isPregameReady: true, quarter: 2));
         Assert.Null(evaluator.Evaluate(state));
     }
 
