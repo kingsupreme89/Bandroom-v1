@@ -148,6 +148,8 @@ internal static class EventActivityLog
         // distance keys above.
         ["Penalty: Offense"] = "Penalty - Your Team",
         ["Penalty: Defense"] = "Penalty - Opponent",
+        ["Offense: Earned First Down"] = "1st Down",
+        ["Offense: First Down on First Down"] = "First Down",
     };
 
     /// <summary>Turns an internal EventKey like "Offense: Touchdown Scored" or

@@ -986,7 +986,7 @@ async function openSituations(category) {
   // comment -- escapes the card's glass/backdrop-filter stacking context). Rebuilding `list` below
   // discards the ROW that used to own each popover, but the popover itself now lives outside that
   // subtree, so it'd otherwise orphan on body forever across every single refresh. Sweep them here.
-  document.querySelectorAll("body > .situation-share-popover").forEach((p) => p.remove());
+  document.querySelectorAll("body > .situation-share-popover, body > .situation-share-backdrop").forEach((p) => p.remove());
 
   let events = bridge ? JSON.parse(await bridge.GetEventsForCategory(category)) : [];
   // HBCU Mode only fires Touchdown/Kickoff/Runout through this per-event Assign/Edit system (see
@@ -1022,6 +1022,7 @@ async function openSituations(category) {
           <button class="bandroom-item-action" data-act="volume" title="Adjust this event's own volume">&#128266;</button>
           <button class="bandroom-item-action situation-whistle-toggle${(ev.playLeadInWhistle === false) || (ev.whistleSpeed && ev.whistleSpeed !== 1) || ev.speed2x || ev.paSpeakerEffect || ev.fadeStartSecondsOverride != null || ev.fadeOutDurationOverride != null || ev.noFade ? " active" : ""}" data-act="settings" title="Event settings (whistle, speed, PA effect, fade)">&#9881;</button>
           <button class="bandroom-item-action" data-act="track-info" title="Track Info" ${ev.fileName ? "" : "disabled"}>&#8505;</button>
+          <div class="situation-share-backdrop" hidden></div>
           <div class="situation-share-popover glass" hidden>
             <div class="situation-copy-title">Share this song to&hellip;</div>
             <div class="situation-copy-list"></div>
@@ -1117,25 +1118,6 @@ function closeCardPopover(popover) {
   popover.classList.remove("slide-open");
   setTimeout(() => { popover.hidden = true; }, 180);
 }
-/// Lets the owner drag a popover to a spot of their choosing (owner request) by its title bar --
-/// switches it to explicit left/top tracking the cursor, same fixed-position element either way.
-function makePopoverDraggable(popover, handle) {
-  let dragging = false, offsetX = 0, offsetY = 0;
-  handle.addEventListener("mousedown", (e) => {
-    dragging = true;
-    const rect = popover.getBoundingClientRect();
-    offsetX = e.clientX - rect.left;
-    offsetY = e.clientY - rect.top;
-    e.preventDefault();
-  });
-  document.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-    popover.style.left = `${e.clientX - offsetX}px`;
-    popover.style.top = `${e.clientY - offsetY}px`;
-  });
-  document.addEventListener("mouseup", () => { dragging = false; });
-}
-
 /// "Share to..." button -- pushes THIS row's already-assigned song
 /// (source) onto another event on the same team (target) instead of pulling one in. Same
 /// candidate list (this card's category, same team, no extra bridge call) but unfiltered by
@@ -1146,16 +1128,25 @@ function makePopoverDraggable(popover, handle) {
 function wireSituationShareToPopover(row, ev, events) {
   const btn = row.querySelector('[data-act="share-to"]');
   const popover = row.querySelector(".situation-share-popover");
+  const backdrop = row.querySelector(".situation-share-backdrop");
   const listEl = popover.querySelector(".situation-copy-list");
   const closeBtn = popover.querySelector(".situation-copy-close");
 
-  const closePopover = () => closeCardPopover(popover);
-  makePopoverDraggable(popover, popover.querySelector(".situation-copy-title"));
+  // Dialog-style, not anchored/draggable like the other card popovers -- with a long list of
+  // events this needs real room, and centering it (with a click-outside-to-close backdrop) beats
+  // squeezing it into a 280px sliver next to whichever card triggered it (owner report:
+  // overlapping/cut-off text when opened near the right-side mixer panel).
+  const closePopover = () => {
+    popover.classList.remove("slide-open");
+    backdrop.classList.remove("slide-open");
+    setTimeout(() => { popover.hidden = true; backdrop.hidden = true; }, 180);
+  };
 
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     if (!popover.hidden) { closePopover(); return; }
     document.querySelectorAll(".situation-share-popover").forEach((p) => { p.hidden = true; p.classList.remove("slide-open"); });
+    document.querySelectorAll(".situation-share-backdrop").forEach((p) => { p.hidden = true; p.classList.remove("slide-open"); });
     const candidates = events.filter((other) => other.trigger !== ev.trigger);
     listEl.innerHTML = candidates.length
       ? ""
@@ -1177,9 +1168,17 @@ function wireSituationShareToPopover(row, ev, events) {
       });
       listEl.appendChild(item);
     }
-    openCardPopover(btn, popover);
+    document.body.appendChild(backdrop);
+    document.body.appendChild(popover);
+    backdrop.hidden = false;
+    popover.hidden = false;
+    requestAnimationFrame(() => {
+      backdrop.classList.add("slide-open");
+      popover.classList.add("slide-open");
+    });
   });
   closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
+  backdrop.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
 }
 
 /// Settings (gear) button on an event card -- consolidates the lead-in whistle toggle, whistle
@@ -1211,7 +1210,7 @@ function wireSituationSettingsPopover(row, ev) {
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     if (!popover.hidden) { closePopover(); return; }
-    document.querySelectorAll(".situation-settings-popover, .situation-share-popover").forEach((p) => { p.hidden = true; p.classList.remove("slide-open"); });
+    document.querySelectorAll(".situation-settings-popover, .situation-share-popover, .situation-share-backdrop").forEach((p) => { p.hidden = true; p.classList.remove("slide-open"); });
     openCardPopover(btn, popover);
   });
   closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
@@ -3250,6 +3249,15 @@ async function refreshHbcuMode() {
   const pill = document.getElementById("pill-hbcu-mode");
   if (pill) pill.setAttribute("aria-pressed", state.hbcuMode ? "true" : "false");
   if (document.getElementById("team-grid")?.children.length) renderTeamGrid(); // re-filter if teams already loaded
+  // Team Pot/Generic Pack panel's visibility was previously only set inside openSituations(),
+  // so toggling HBCU Mode off (or on) while the Situations panel was already open left it
+  // showing stale HBCU pot content -- "still see HBCU songs in FBS mode" owner report. Keep it
+  // in sync live, same as the team grid re-filter above.
+  const potPanel = document.getElementById("hbcu-pot-panel");
+  if (potPanel && !document.getElementById("situations-panel")?.hidden) {
+    potPanel.hidden = !state.hbcuMode;
+    if (state.hbcuMode) renderHbcuPot();
+  }
 }
 
 /// HBCU Mode is a global roster filter: it narrows the left team-grid + favorite-team picker to
@@ -10225,7 +10233,7 @@ document.getElementById("btn-test-hook-hbcu-touchdown")?.addEventListener("click
 // real internal ID (zero risk to saved profiles) -- this is a display-only lookup, falls back to
 // the raw key untouched if a new EventKey shows up here before this map is updated.
 const EVENT_FRIENDLY_NAMES = {
-  "Offense: Earned First Down": "1st Down (1st & 10)",
+  "Offense: Earned First Down": "1st Down",
   "Offense: Earned First Down (Big Gain)": "Got 1st Down - Big Gain",
   "Offense: Earned First Down Short": "1st & Short",
   "Offense: 3rd Down Conversion": "Converted 3rd Down",
@@ -10238,7 +10246,7 @@ const EVENT_FRIENDLY_NAMES = {
   "Offense: Fourth Down": "4th Down",
   "Offense: 1st Down After Punt": "1st Down After Punt",
   "Offense: After Opening Kick": "After Opening Kickoff (Your Ball)",
-  "Offense: First Down on First Down": "Big Gain - Fresh 1st Down",
+  "Offense: First Down on First Down": "First Down",
   "Offense: PAT Made": "Extra Point Good",
   "Offense: 2-Point Conversion Made": "2-Point Conversion Good",
   "Offense: Field Goal Made": "Field Goal Good",

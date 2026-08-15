@@ -3393,49 +3393,62 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
    escapes the card's stacking context entirely. Also restyled per owner request as a slide-out
    panel from the right edge of the card instead of a pop-up above it -- see .slide-open below.
    Static position:absolute/bottom/right removed; JS now owns left/top per open. */
+.situation-share-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 499;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+.situation-share-backdrop.slide-open {
+  opacity: 1;
+  pointer-events: auto;
+}
 .situation-share-popover {
   position: fixed;
   z-index: 500;
-  width: 280px;
-  max-height: 320px;
+  top: 50%;
+  left: 50%;
+  width: 360px;
+  max-height: min(70vh, 480px);
   display: flex;
   flex-direction: column;
-  padding: 10px;
-  border-radius: 12px;
+  padding: 16px;
+  border-radius: 14px;
   background: var(--panel-bg, #1a1d24);
   border: 1px solid color-mix(in srgb, var(--team-secondary, var(--accent)) 40%, var(--glass-border));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
   opacity: 0;
-  transform: translateX(-18px);
+  transform: translate(-50%, -50%) scale(0.96);
   pointer-events: none;
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
 .situation-share-popover.slide-open {
   opacity: 1;
-  transform: translateX(0);
+  transform: translate(-50%, -50%) scale(1);
   pointer-events: auto;
 }
 .situation-share-popover[hidden] { display: none; }
 .situation-copy-title {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--team-glow, var(--accent));
-  margin-bottom: 6px;
-  cursor: move;
-  user-select: none;
+  margin-bottom: 10px;
 }
-.situation-copy-list { overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.situation-copy-list { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .situation-copy-option {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  padding: 6px 8px;
+  padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--glass-border);
   background: rgba(255, 255, 255, 0.03);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   text-align: left;
 }

@@ -3690,46 +3690,48 @@ public sealed class WebMainForm : Form
             // this file (penalizedIsHome/possessionIsHomeNow in GameWatcher.RouteEngineTick,
             // OnTackleForLoss above) already waits for a real read instead of guessing; this now
             // matches that convention rather than being the one place that guesses wrong.
+            // Side-agnostic "Other:*" events (kickoff, quarter starts, pregame) aren't tied to a
+            // real team the way Offense:/Defense: cues are, so they never go through
+            // ResolveEventRouting's possession-based side-flip + Big Game away-gate below -- that
+            // logic exists to decide which ONE side a possession-tied cue routes to, which doesn't
+            // apply here. FIXED 2026-08-15 (owner report: "some events weren't triggering properly
+            // and some were triggering for the other team"): this both-sides fire used to only run
+            // in the `_possession == null` branch below and then `return` -- once a real possession
+            // read came in (true for almost the whole game), "Other:*" events fell through to the
+            // main per-event loop further down instead, which routed them by CURRENT possession
+            // like a Defense:* cue (single side only) and, once routed to "away", subjected them to
+            // the Big Game away-gate -- e.g. "Other: Start of 2nd Quarter" silently skipped as "not
+            // a Big Game -- away only plays big/earned events" whenever the away team happened to
+            // have the ball at that instant. Pulled out here so it always fires for BOTH sides
+            // (their own separately-assigned songs, per side's own config tab) regardless of
+            // possession state, exactly once per detection batch.
+            bool otherFiredYet = false;
+            foreach (var evt in events.Where(e => e.EventKey.StartsWith("Other:")))
+            {
+                // Opening Kickoff is always the HOME team's cue -- never fire it for away.
+                var sidesToFire = evt.EventKey == "Other: Opening Kickoff"
+                    ? new[] { "home" }
+                    : new[] { "home", "away" };
+                foreach (var otherSide in sidesToFire)
+                {
+                    string result = FireEventForSide(otherSide, evt.EventKey, interruptPrevious: !otherFiredYet);
+                    if (result.StartsWith("fired:")) otherFiredYet = true;
+                    OnLog($"[engine] {evt.EventKey} -> {otherSide}: {result}");
+                    RecordFireResult(evt.EventKey, otherSide, result);
+                }
+            }
+            events = events.Where(e => !e.EventKey.StartsWith("Other:")).ToList();
+
             if (_possession == null)
             {
                 // Side-specific events can't be routed yet -- log each one as skipped so a user
-                // wondering "why didn't my song play" has an answer instead of silence. Only the
-                // side-specific ones are logged here; "Other:*" events below this branch still
-                // fire normally and get their own fired/skipped log entries.
-                foreach (var evt in events.Where(e => !e.EventKey.StartsWith("Other:")))
+                // wondering "why didn't my song play" has an answer instead of silence. "Other:*"
+                // events already fired (or not) above and are excluded from `events` now, so this
+                // only covers the possession-dependent ones.
+                foreach (var evt in events)
                 {
                     EventActivityLog.Record(evt.EventKey, "n/a",
                         $"{EventActivityLog.FriendlyEventName(evt.EventKey)} -- skipped: we haven't figured out which team has the ball yet");
-                }
-                // Side-agnostic "Other:*" events (kickoff, quarter starts, pregame) aren't tied to
-                // a real team the way Offense:/Defense: cues are, but they CAN legitimately fire
-                // before _possession has ever been read -- possession sampling is itself suppressed
-                // while a "situation" like kickoff is on screen (GameWatcher.RouteEngineTick's
-                // situationActive gate), so opening kickoff can hit this branch on literally the
-                // game's first tick. Fall back to "home" for just these; every side-specific event
-                // still returns above and waits for a real read, preserving the STATE_MACHINE_
-                // ANALYSIS.md Race #3 fix (guessing "home" there misroutes a defensive/offensive
-                // cue to the wrong team -- that risk doesn't apply to a side-agnostic cue).
-                // Fire for BOTH sides, not just "home": events like the pregame walkout apply to
-                // both bands, and each side's song is assigned under that side's own config tab.
-                // Found 2026-08-14: hardcoding "home" here meant a song assigned under the Away
-                // tab was invisible to ResolveEntryForEvent("home", ...), which always looked in
-                // _homeConfig -- logged as "no song assigned" even though the away song existed.
-                bool otherFiredYet = false;
-                foreach (var evt in events.Where(e => e.EventKey.StartsWith("Other:")))
-                {
-                    // Opening Kickoff is always the HOME team's cue -- never fire it for away,
-                    // even in this both-sides fallback (owner request 2026-08-14).
-                    var sidesToFire = evt.EventKey == "Other: Opening Kickoff"
-                        ? new[] { "home" }
-                        : new[] { "home", "away" };
-                    foreach (var otherSide in sidesToFire)
-                    {
-                        string result = FireEventForSide(otherSide, evt.EventKey, interruptPrevious: !otherFiredYet);
-                        if (result.StartsWith("fired:")) otherFiredYet = true;
-                        OnLog($"[engine] {evt.EventKey} -> {otherSide} (no possession read yet): {result}");
-                        RecordFireResult(evt.EventKey, otherSide, result);
-                    }
                 }
                 return;
             }
@@ -3741,7 +3743,12 @@ public sealed class WebMainForm : Form
             // the first off. Two evaluators (e.g. Offense: Third Down Short + the new
             // Defense: Third Down Short) can legitimately both fire on one tick, routed to
             // opposite sides -- without this, only the last-processed one would ever be audible.
-            bool firedYet = false;
+            // Seeded from otherFiredYet (not a fresh false) -- the "Other:*" loop above can already
+            // have fired something this same tick/batch (e.g. a quarter-start cue alongside a down
+            // change), and treating this loop's first event as "the" first fire would re-interrupt
+            // (StopAll) whatever the Other: loop just started, since AudioPlayer is one shared
+            // pipeline, not per-side channels.
+            bool firedYet = otherFiredYet;
 
             foreach (var evt in events)
             {
