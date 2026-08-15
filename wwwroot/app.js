@@ -6616,7 +6616,8 @@ async function openClipperAssignForHbcuPot(team) {
 }
 
 function closeClipperAssign() {
-  bridge?.StopPreview();
+  bridge?.StopPreview(); // native (local-file) preview pathway
+  _previewAudio?.pause(); // JS <audio> preview pathway -- same gap as closeBandroomMarketplace above
   if (_trimTrigger || _trimForWhistle || _trimForHbcuPot) closeInlineTrimmer();
   document.getElementById("clipper-assign").hidden = true;
   document.getElementById("btn-clipper-close-assign").hidden = true;
@@ -7717,6 +7718,11 @@ function closeBandroomMarketplace() {
   document.getElementById("bandroom-overlay").hidden = true;
   _lastAlbumTeam = null;
   document.getElementById("btn-forward-bandroom-album").hidden = true;
+  // Owner report: users hearing music playing outside any menu -- this was the gap. Every other
+  // overlay-close function (closeMyDownloads, closeTeamAlbum, backFromTeamAlbum) already pauses
+  // the shared preview player on the way out; this one, the actual "X" on the main Market hub,
+  // didn't, so a song previewed there kept playing indefinitely after you closed the hub.
+  _previewAudio?.pause();
 }
 
 // ================================================================
