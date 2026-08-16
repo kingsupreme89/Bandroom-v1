@@ -30,11 +30,21 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 # Everything the published build produced (executable, dylibs, wwwroot/, Assets/, TeamLogos/,
-# TeamBackgrounds/, Fonts/, Songs/Default/, the OCR bridge script) goes under MacOS/ as the
-# working directory the app expects (matches AppContext.BaseDirectory-relative paths already
-# used throughout the shared ConfigStore/etc. code).
+# TeamBackgrounds/, Fonts/, the OCR bridge script) goes under MacOS/ as the working directory the
+# app expects (matches AppContext.BaseDirectory-relative paths already used throughout the shared
+# ConfigStore/etc. code).
 cp -R "$PUBLISH_DIR"/. "$APP_DIR/Contents/MacOS/"
 chmod +x "$APP_DIR/Contents/MacOS/Bandroom.Mac"
+
+# Songs/Default (~2.6GB) is NOT part of the real distributable: the actual Windows installer
+# (BandroomSetup.exe) is only ~46MB -- that content is fetched on demand at runtime via
+# DefaultSongPackService.cs / bridge.DownloadDefaultSongPack into ConfigStore.
+# DownloadedDefaultSongsFolder, not shipped in the installer. The .csproj's Content include for
+# it exists for local `dotnet run` development convenience, not for what should ship here; strip
+# it from the packaged app so this build matches the real Windows distributable's footprint
+# instead of silently ballooning to ~2.8GB (and likely exceeding GitHub's 2GB release-asset
+# limit if ever uploaded as-is).
+rm -rf "$APP_DIR/Contents/MacOS/Songs/Default"
 
 cp "$SCRIPT_DIR/Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 
