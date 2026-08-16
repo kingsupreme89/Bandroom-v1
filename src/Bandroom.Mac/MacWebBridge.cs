@@ -748,6 +748,42 @@ public sealed class MacWebBridge
     public void ExportUserProfile() => _host.ExportUserProfileFromWeb();
     public void ImportUserProfile() => _host.ImportUserProfileFromWeb();
 
+    // ---- HBCU Team Pot (ported from WebBridge.cs — previously missing on Mac entirely, so the
+    // Pot panel silently no-op'd here: try/catch on the JS side swallowed the missing-bridge-
+    // method error and the checkbox/panel just never did anything. Every method below is a pure
+    // ConfigStore pass-through (same as on Windows), so no host/UI-thread plumbing is needed —
+    // SaveTrimForHbcuPot is the one exception, left out since it needs the Windows-only Trimmer
+    // dialog's waveform-trim capability, which the Mac port doesn't have yet.) ----
+
+    public string GetHbcuTeamNames() => JsonSerializer.Serialize(TeamColors.HbcuTeamNames);
+
+    public string GetHbcuPot(string team) => JsonSerializer.Serialize(
+        ConfigStore.GetHbcuPot(team).Select(s => new
+        {
+            name = Path.GetFileNameWithoutExtension(s.FilePath),
+            path = s.FilePath,
+            volume = s.Volume,
+            playLeadInWhistle = s.PlayLeadInWhistle,
+            whistleSpeed = s.WhistleSpeed,
+            speed2x = s.PlaybackSpeed2x,
+            paSpeakerEffect = s.PaSpeakerEffect,
+            fadeStartSecondsOverride = s.FadeStartSecondsOverride,
+            fadeOutDurationOverride = s.FadeOutDurationOverride,
+            noFade = s.NoFade,
+        }), CamelCaseJsonOptions);
+
+    public void AddToHbcuPot(string team, string filePath) => ConfigStore.AddToHbcuPot(team, filePath);
+    public void RemoveFromHbcuPot(string team, string filePath) => ConfigStore.RemoveFromHbcuPot(team, filePath);
+
+    public bool GetHbcuUseGenericPack(string team) => ConfigStore.GetHbcuUseGenericPack(team);
+    public void SetHbcuUseGenericPack(string team, bool useGeneric) => ConfigStore.SetHbcuUseGenericPack(team, useGeneric);
+
+    public void SaveHbcuPotSongSettings(string team, string settingsJson)
+    {
+        var s = JsonSerializer.Deserialize<ConfigStore.HbcuPotSong>(settingsJson, CamelCaseJsonOptions);
+        if (s != null) ConfigStore.UpdateHbcuPotSongSettings(team, s);
+    }
+
     // ---- Matchup / Profiles / Changelog ----
 
     public string GetSavedProfiles() => JsonSerializer.Serialize(ConfigStore.ListProfiles());
