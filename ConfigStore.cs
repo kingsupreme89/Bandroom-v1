@@ -1278,6 +1278,13 @@ internal static class ConfigStore
         public string School { get; init; } = "";
         public string Path { get; init; } = "";
         public DateTime DownloadedAt { get; init; } = DateTime.UtcNow;
+        /// <summary>The marketplace file URL this was downloaded from (worker.js's /file/&lt;key&gt;
+        /// link) -- lets ShareCurrentProfileToMarketplace embed a re-downloadable source alongside
+        /// the filename when sharing a profile, so ApplyMarketplaceProfile can fetch a song that
+        /// isn't on the applier's machine yet instead of only ever matching what's already there.
+        /// Defaults to "" so entries saved before this field existed deserialize exactly as they
+        /// always did (no source URL known for those -- filename-match is still the fallback).</summary>
+        public string Url { get; init; } = "";
     }
 
     // Guards every read-modify-write of the manifest file. Downloads happen on background async
@@ -1324,13 +1331,13 @@ internal static class ConfigStore
     /// <summary>Records a new download in the manifest. If a prior entry already points at the
     /// same local path (a re-download after deleting the manifest entry but not the file, or a
     /// double-click), it's replaced rather than duplicated.</summary>
-    public static MarketplaceDownloadEntry RecordMarketplaceDownload(string type, string name, string school, string path)
+    public static MarketplaceDownloadEntry RecordMarketplaceDownload(string type, string name, string school, string path, string url = "")
     {
         lock (MarketplaceDownloadsLock)
         {
             var entries = LoadMarketplaceDownloadsUnlocked();
             entries.RemoveAll(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
-            var entry = new MarketplaceDownloadEntry { Type = type, Name = name, School = school, Path = path };
+            var entry = new MarketplaceDownloadEntry { Type = type, Name = name, School = school, Path = path, Url = url };
             entries.Add(entry);
             SaveMarketplaceDownloads(entries);
             return entry;

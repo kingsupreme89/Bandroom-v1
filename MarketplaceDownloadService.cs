@@ -95,7 +95,7 @@ internal static class MarketplaceDownloadService
                 }
             }
 
-            ConfigStore.RecordMarketplaceDownload(type, name, school, outPath);
+            ConfigStore.RecordMarketplaceDownload(type, name, school, outPath, url);
             return outPath;
         }
         catch (Exception ex)

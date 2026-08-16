@@ -9792,7 +9792,7 @@ async function openLoadProfileDialog() {
 /// this just surfaces it as an explicit "are you sure" instead of applying on first click.
 function confirmApplyMarketplaceProfile(url, name) {
   closeLoadProfileDialog();
-  if (!confirm(`Apply "${name}" to ${state.activeTeam}?\n\nSongs will be matched by filename against your own Songs library -- anything that doesn't match stays unassigned.`)) {
+  if (!confirm(`Apply "${name}" to ${state.activeTeam}?\n\nSongs already in your library get matched by filename; anything from the sharer's Market downloads gets pulled down automatically. Anything neither of those cover stays unassigned.`)) {
     return;
   }
   applyMarketplaceProfile(url, name);
@@ -9816,21 +9816,24 @@ async function applyMarketplaceProfile(url, name) {
     if (state.currentSituationsCategory) await openSituations(state.currentSituationsCategory);
     const missed = result.total - result.applied;
     const unmatched = result.unmatched ?? [];
+    const downloaded = result.downloaded ?? 0;
     // BUG FIX: this used to only show a bare count ("X need a manual upload") with no way to see
     // WHICH events those were -- when applied is 0 (the reported "profile didn't populate
     // events" case) that read as a generic warning easy to miss/dismiss, not an actionable list.
     // Logged to console either way so a 0-applied run is diagnosable from crash.log-adjacent
     // context even if the user doesn't screenshot the toast.
-    console.log(`applyMarketplaceProfile "${name}": ${result.applied}/${result.total} applied, unmatched:`, unmatched);
+    console.log(`applyMarketplaceProfile "${name}": ${result.applied}/${result.total} applied (${downloaded} downloaded), unmatched:`, unmatched);
     if (result.applied === 0 && result.total > 0) {
-      alert(`None of the ${result.total} songs in "${name}" matched anything in your Songs library:\n\n`
+      alert(`None of the ${result.total} songs in "${name}" matched anything in your Songs library, and none were `
+        + `available to download from the Market either:\n\n`
         + unmatched.slice(0, 20).join("\n") + (unmatched.length > 20 ? `\n...and ${unmatched.length - 20} more` : "")
-        + `\n\nThis profile only carries filenames, not the actual audio -- download matching songs from `
-        + `The Market first (or ask whoever shared it), then try again.`);
+        + `\n\nThose songs were uploaded locally by whoever shared this profile, not through the Market -- ask `
+        + `them to upload the missing ones, or assign your own for now.`);
     } else {
+      const downloadNote = downloaded > 0 ? ` (${downloaded} pulled from the Market automatically)` : "";
       showToast(missed > 0
-        ? `Applied ${result.applied} of ${result.total} songs -- ${missed} need a manual upload (filenames didn't match anything in your Songs library).`
-        : `Applied all ${result.applied} songs from "${name}"!`);
+        ? `Applied ${result.applied} of ${result.total} songs${downloadNote} -- ${missed} still need a manual upload (not on the Market and no filename match).`
+        : `Applied all ${result.applied} songs from "${name}"${downloadNote}!`);
     }
   } catch (err) {
     console.error("applyMarketplaceProfile failed", err);

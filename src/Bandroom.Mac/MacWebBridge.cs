@@ -319,9 +319,30 @@ public sealed class MacWebBridge
     public async Task<string> ShareCurrentProfileToMarketplace()
     {
         var team = Theme.ActiveTeam.Name;
+        // Mirrors the Windows-side fix in WebBridge.cs's ShareCurrentProfileToMarketplace: embed a
+        // re-downloadable marketplace source URL for any assigned file that IS a marketplace
+        // download on this machine, so applying this profile elsewhere can fetch it instead of
+        // only ever matching by filename against whatever's already local.
+        var downloadsByPath = ConfigStore.LoadMarketplaceDownloads()
+            .Where(d => !string.IsNullOrWhiteSpace(d.Url))
+            .GroupBy(d => d.Path, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         var entries = _host.GetEvents(null)
             .Where(e => !string.IsNullOrWhiteSpace(e.AudioFile))
-            .Select(e => new { trigger = e.Trigger, eventName = e.Event, fileName = Path.GetFileName(e.AudioFile) })
+            .Select(e =>
+            {
+                downloadsByPath.TryGetValue(e.AudioFile!, out var src);
+                return new
+                {
+                    trigger = e.Trigger,
+                    eventName = e.Event,
+                    fileName = Path.GetFileName(e.AudioFile),
+                    sourceUrl = src?.Url,
+                    sourceType = src?.Type,
+                    sourceName = src?.Name,
+                    sourceSchool = src?.School,
+                };
+            })
             .ToList();
         if (entries.Count == 0)
             return JsonSerializer.Serialize(new { success = false, error = "No songs are assigned yet -- assign at least one before sharing this team's profile." });
@@ -430,7 +451,7 @@ public sealed class MacWebBridge
                 .GroupBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-            int applied = 0, total = 0;
+            int applied = 0, total = 0, downloaded = 0;
             var unmatched = new List<string>();
             foreach (var a in assignments.EnumerateArray())
             {
@@ -442,14 +463,31 @@ public sealed class MacWebBridge
                 {
                     _host.AssignTrackFileFromWeb(trigger, isPa: false, localPath);
                     applied++;
+                    continue;
                 }
-                else
+
+                // Mirrors WebBridge.cs's ApplyMarketplaceProfile: fetch from the embedded
+                // marketplace source when there's no local filename match, instead of giving up.
+                string? sourceUrl = a.TryGetProperty("sourceUrl", out var u) ? u.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(sourceUrl))
                 {
-                    unmatched.Add(eventName);
+                    string sourceType = a.TryGetProperty("sourceType", out var t) ? (t.GetString() ?? "song") : "song";
+                    string sourceName = a.TryGetProperty("sourceName", out var n) ? (n.GetString() ?? eventName) : eventName;
+                    string sourceSchool = a.TryGetProperty("sourceSchool", out var s) ? (s.GetString() ?? "") : "";
+                    string? downloadedPath = await MarketplaceDownloadService.DownloadAsync(sourceType, sourceName, sourceSchool, sourceUrl);
+                    if (downloadedPath != null)
+                    {
+                        _host.AssignTrackFileFromWeb(trigger, isPa: false, downloadedPath);
+                        applied++;
+                        downloaded++;
+                        continue;
+                    }
                 }
+
+                unmatched.Add(eventName);
             }
 
-            return JsonSerializer.Serialize(new { success = true, applied, total, unmatched });
+            return JsonSerializer.Serialize(new { success = true, applied, total, downloaded, unmatched });
         }
         catch
         {

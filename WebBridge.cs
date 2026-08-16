@@ -434,9 +434,35 @@ public sealed class WebBridge
     public async Task<string> ShareCurrentProfileToMarketplace()
     {
         var team = Theme.ActiveTeam.Name;
+        // BUG FIX ("Load Profile from Others" 0/N applied report): assignments used to carry only
+        // a bare filename, so applying the profile on someone else's machine could only ever
+        // succeed if they happened to already have an identically-named file -- there was no way
+        // to actually FETCH the song. For any assigned file that's itself a marketplace download
+        // on THIS machine (tracked in MarketplaceDownloadEntry with its original /file/<key> URL),
+        // embed that URL/name/school/type alongside the filename so ApplyMarketplaceProfile can
+        // download it directly when the applier doesn't already have a matching file. Purely
+        // locally-uploaded/trimmed songs still have no such URL and remain filename-match-only --
+        // there's no marketplace copy of those to fetch.
+        var downloadsByPath = ConfigStore.LoadMarketplaceDownloads()
+            .Where(d => !string.IsNullOrWhiteSpace(d.Url))
+            .GroupBy(d => d.Path, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         var entries = _host.GetEvents(null)
             .Where(e => !string.IsNullOrWhiteSpace(e.AudioFile))
-            .Select(e => new { trigger = e.Trigger, eventName = e.Event, fileName = Path.GetFileName(e.AudioFile) })
+            .Select(e =>
+            {
+                downloadsByPath.TryGetValue(e.AudioFile!, out var src);
+                return new
+                {
+                    trigger = e.Trigger,
+                    eventName = e.Event,
+                    fileName = Path.GetFileName(e.AudioFile),
+                    sourceUrl = src?.Url,
+                    sourceType = src?.Type,
+                    sourceName = src?.Name,
+                    sourceSchool = src?.School,
+                };
+            })
             .ToList();
         if (entries.Count == 0)
             return JsonSerializer.Serialize(new { success = false, error = "No songs are assigned yet -- assign at least one before sharing this team's profile." });
@@ -582,7 +608,7 @@ public sealed class WebBridge
                 .GroupBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-            int applied = 0, total = 0;
+            int applied = 0, total = 0, downloaded = 0;
             var unmatched = new List<string>();
             foreach (var a in assignments.EnumerateArray())
             {
@@ -590,17 +616,39 @@ public sealed class WebBridge
                 var trigger = a.GetProperty("trigger").GetString() ?? "";
                 var eventName = a.GetProperty("eventName").GetString() ?? trigger;
                 var fileName = a.GetProperty("fileName").GetString() ?? "";
+
                 if (byFileName.TryGetValue(fileName, out var localPath) && _host.AssignTrackFileFromWeb(trigger, isPa: false, localPath))
                 {
                     applied++;
+                    continue;
                 }
-                else
+
+                // BUG FIX: this used to give up here and report the event as unmatched -- but if
+                // the sharer's assignment carries a marketplace sourceUrl (see
+                // ShareCurrentProfileToMarketplace), the song is actually fetchable, just not
+                // already sitting on this machine under a matching filename. Download it the same
+                // way "The Market" does, then assign the freshly-downloaded file. Only attempted
+                // when the filename match above failed, so a machine that already has the song
+                // never re-downloads a duplicate copy.
+                string? sourceUrl = a.TryGetProperty("sourceUrl", out var u) ? u.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(sourceUrl))
                 {
-                    unmatched.Add(eventName);
+                    string sourceType = a.TryGetProperty("sourceType", out var t) ? (t.GetString() ?? "song") : "song";
+                    string sourceName = a.TryGetProperty("sourceName", out var n) ? (n.GetString() ?? eventName) : eventName;
+                    string sourceSchool = a.TryGetProperty("sourceSchool", out var s) ? (s.GetString() ?? "") : "";
+                    string? downloadedPath = await MarketplaceDownloadService.DownloadAsync(sourceType, sourceName, sourceSchool, sourceUrl);
+                    if (downloadedPath != null && _host.AssignTrackFileFromWeb(trigger, isPa: false, downloadedPath))
+                    {
+                        applied++;
+                        downloaded++;
+                        continue;
+                    }
                 }
+
+                unmatched.Add(eventName);
             }
 
-            return JsonSerializer.Serialize(new { success = true, applied, total, unmatched });
+            return JsonSerializer.Serialize(new { success = true, applied, total, downloaded, unmatched });
         }
         catch (Exception ex)
         {
