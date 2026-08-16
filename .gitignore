@@ -12,6 +12,10 @@ bin/
 obj/
 **/bin/
 **/obj/
+# Stray build-output folders from old ad-hoc audit builds -- accidentally got committed once
+# (4638 files, mostly a duplicated copy of the bundled Songs\Default pack) and bloated .git.
+# Untracked 2026-08-16; ignored so a similarly-named folder can never be committed again.
+bin_audit*/
 
 # WebView2 runtime cache/profile data
 WebView2Data/
