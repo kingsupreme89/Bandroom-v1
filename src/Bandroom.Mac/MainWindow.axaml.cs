@@ -694,6 +694,82 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Real trim-and-save, mirrors WebMainForm.SaveTrimFromWeb exactly except the actual
+    /// cut goes through AudioTrimService (ffmpeg) instead of NAudio's OffsetSampleProvider/
+    /// AudioNormalizer — see that class's doc comment. Was previously hardcoded to "not supported"
+    /// in MacWebBridge.SaveTrim.</summary>
+    public string SaveTrimFromWeb(string trigger, bool isPa, double startSec, double endSec, string? sourceName = null)
+    {
+        var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
+        if (entry == null) return JsonSerializer.Serialize(new { ok = false, error = "No such trigger." });
+        string? srcPath = Directory.Exists(ConfigStore.TrimSourceFolder)
+            ? Directory.GetFiles(ConfigStore.TrimSourceFolder).FirstOrDefault() : null;
+        if (srcPath == null) return JsonSerializer.Serialize(new { ok = false, error = "Trim source is gone -- reopen the trimmer." });
+        if (endSec <= startSec) return JsonSerializer.Serialize(new { ok = false, error = "End must be after start." });
+        if (!AudioTrimService.IsAvailable) return JsonSerializer.Serialize(new { ok = false, error = AudioTrimService.UnavailableMessage });
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.SongsTrimmedFolder);
+            string currentPath = isPa ? entry.PaAudioFile : entry.AudioFile;
+            string baseName = !string.IsNullOrWhiteSpace(sourceName) ? Path.GetFileNameWithoutExtension(sourceName)
+                : !string.IsNullOrWhiteSpace(currentPath) ? Path.GetFileNameWithoutExtension(currentPath) : trigger;
+            string safeBase = System.Text.RegularExpressions.Regex.Replace(baseName, @"[^\w\s-]", "").Replace(" ", "_");
+            string outPath = Path.Combine(ConfigStore.SongsTrimmedFolder, $"{safeBase}.wav");
+            int n = 1;
+            while (File.Exists(outPath))
+                outPath = Path.Combine(ConfigStore.SongsTrimmedFolder, $"{safeBase}_{n++}.wav");
+
+            if (!AudioTrimService.TrimAndNormalize(srcPath, startSec, endSec, outPath))
+                return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the trimmed clip." });
+
+            if (isPa) entry.PaAudioFile = outPath; else entry.AudioFile = outPath;
+            ConfigStore.Save(_config);
+            SaveCurrentTeamProfile();
+
+            return JsonSerializer.Serialize(new { ok = true, fileName = Path.GetFileName(outPath) });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SaveTrimFromWeb failed", ex);
+            return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the trimmed clip." });
+        }
+    }
+
+    /// <summary>Team Pot's trim save -- mirrors SaveTrimFromWeb above and WebMainForm's
+    /// SaveTrimForHbcuPotFromWeb, retargeting the pot entry's FilePath (ConfigStore.
+    /// RetargetHbcuPotSong) instead of a TriggerEntry.AudioFile.</summary>
+    public string SaveTrimForHbcuPotFromWeb(string team, string oldFilePath, double startSec, double endSec, string? sourceName = null)
+    {
+        string? srcPath = Directory.Exists(ConfigStore.TrimSourceFolder)
+            ? Directory.GetFiles(ConfigStore.TrimSourceFolder).FirstOrDefault() : null;
+        if (srcPath == null) return JsonSerializer.Serialize(new { ok = false, error = "Trim source is gone -- reopen the trimmer." });
+        if (endSec <= startSec) return JsonSerializer.Serialize(new { ok = false, error = "End must be after start." });
+        if (!AudioTrimService.IsAvailable) return JsonSerializer.Serialize(new { ok = false, error = AudioTrimService.UnavailableMessage });
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.SongsTrimmedFolder);
+            string baseName = !string.IsNullOrWhiteSpace(sourceName) ? Path.GetFileNameWithoutExtension(sourceName) : Path.GetFileNameWithoutExtension(oldFilePath);
+            string safeBase = System.Text.RegularExpressions.Regex.Replace(baseName, @"[^\w\s-]", "").Replace(" ", "_");
+            string outPath = Path.Combine(ConfigStore.SongsTrimmedFolder, $"{safeBase}.wav");
+            int n = 1;
+            while (File.Exists(outPath))
+                outPath = Path.Combine(ConfigStore.SongsTrimmedFolder, $"{safeBase}_{n++}.wav");
+
+            if (!AudioTrimService.TrimAndNormalize(srcPath, startSec, endSec, outPath))
+                return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the trimmed clip." });
+
+            ConfigStore.RetargetHbcuPotSong(team, oldFilePath, outPath);
+            return JsonSerializer.Serialize(new { ok = true, fileName = Path.GetFileName(outPath) });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SaveTrimForHbcuPotFromWeb failed", ex);
+            return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the trimmed clip." });
+        }
+    }
+
     // ---- Default/conference song pack browsing (mirrors WebMainForm.cs) ----
 
     static string? ReadAudioTitleTag(string path)
@@ -1059,8 +1135,33 @@ public partial class MainWindow : Window
         }
     }
 
-    public string SaveTrimAsLeadInWhistleFromWeb(double startSec, double endSec) =>
-        JsonSerializer.Serialize(new { ok = false, error = "Trimming isn't supported on the Mac app yet -- use \"Choose File\" to set the whole clip as your whistle instead." });
+    /// <summary>Real trim-and-save for the lead-in whistle clip, via AudioTrimService (ffmpeg) --
+    /// mirrors WebMainForm's equivalent. Was previously hardcoded to "not supported".</summary>
+    public string SaveTrimAsLeadInWhistleFromWeb(double startSec, double endSec)
+    {
+        string? srcPath = Directory.Exists(ConfigStore.TrimSourceFolder)
+            ? Directory.GetFiles(ConfigStore.TrimSourceFolder).FirstOrDefault() : null;
+        if (srcPath == null) return JsonSerializer.Serialize(new { ok = false, error = "Trim source is gone -- reopen the trimmer." });
+        if (endSec <= startSec) return JsonSerializer.Serialize(new { ok = false, error = "End must be after start." });
+        if (!AudioTrimService.IsAvailable) return JsonSerializer.Serialize(new { ok = false, error = AudioTrimService.UnavailableMessage });
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.SongsFolder);
+
+            if (!AudioTrimService.TrimAndNormalize(srcPath, startSec, endSec, ConfigStore.LeadInWhistlePath))
+                return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the whistle clip." });
+
+            AudioPlayer.LeadInClipPath = ConfigStore.LeadInWhistlePath;
+            AudioPlayer.LeadInEnabled = true;
+            return JsonSerializer.Serialize(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SaveTrimAsLeadInWhistleFromWeb failed", ex);
+            return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the whistle clip." });
+        }
+    }
 
     public void SetEventPlayLeadInWhistleFromWeb(string trigger, bool enabled)
     {

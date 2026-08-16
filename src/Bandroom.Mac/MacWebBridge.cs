@@ -163,7 +163,7 @@ public sealed class MacWebBridge
     public string AddSongsBatch() => _host.AddSongsBatchFromWeb();
     public string PrepareTrim(string trigger, bool isPa) => _host.PrepareTrimFromWeb(trigger, isPa);
     public string SaveTrim(string trigger, bool isPa, double startSec, double endSec, string? sourceName = null) =>
-        JsonSerializer.Serialize(new { ok = false, error = "Trimming isn't supported on the Mac app yet -- choose a different clip instead." });
+        _host.SaveTrimFromWeb(trigger, isPa, startSec, endSec, sourceName);
 
     // ---- Default/conference song pack browsing (mirrors WebBridge.cs ~1128-1354) ----
 
@@ -786,9 +786,9 @@ public sealed class MacWebBridge
     // ---- HBCU Team Pot (ported from WebBridge.cs — previously missing on Mac entirely, so the
     // Pot panel silently no-op'd here: try/catch on the JS side swallowed the missing-bridge-
     // method error and the checkbox/panel just never did anything. Every method below is a pure
-    // ConfigStore pass-through (same as on Windows), so no host/UI-thread plumbing is needed —
-    // SaveTrimForHbcuPot is the one exception, left out since it needs the Windows-only Trimmer
-    // dialog's waveform-trim capability, which the Mac port doesn't have yet.) ----
+    // ConfigStore pass-through (same as on Windows), so no host/UI-thread plumbing is needed.
+    // SaveTrimForHbcuPot goes through _host since it needs the real trim-and-save logic — see
+    // MainWindow.SaveTrimForHbcuPotFromWeb / AudioTrimService.) ----
 
     public string GetHbcuTeamNames() => JsonSerializer.Serialize(TeamColors.HbcuTeamNames);
 
@@ -818,6 +818,9 @@ public sealed class MacWebBridge
         var s = JsonSerializer.Deserialize<ConfigStore.HbcuPotSong>(settingsJson, CamelCaseJsonOptions);
         if (s != null) ConfigStore.UpdateHbcuPotSongSettings(team, s);
     }
+
+    public string SaveTrimForHbcuPot(string team, string oldFilePath, double startSec, double endSec, string? sourceName = null) =>
+        _host.SaveTrimForHbcuPotFromWeb(team, oldFilePath, startSec, endSec, sourceName);
 
     // ---- Matchup / Profiles / Changelog ----
 
