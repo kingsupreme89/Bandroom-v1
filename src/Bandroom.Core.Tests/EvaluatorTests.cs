@@ -230,8 +230,12 @@ public class EvaluatorTests
     }
 
     [Fact]
-    public void DefenseThirdDownHelper_FiresOnShortThirdDown_TooNotJustLong()
+    public void DefenseThirdDownHelper_FiresShortVariant_OnShortThirdDown()
     {
+        // 2026-08-15: this used to assert "Defense: Third Down" fires on EVERY distance including
+        // short -- that was the exact double-fire bug (this key AND the separate ...Short helper's
+        // key both firing for one short 3rd down). Now merged into one evaluator/one decision: a
+        // short 3rd down emits ONLY "Defense: Third Down Short", never the long key too.
         var evaluator = new DefenseThirdDownHelper();
         var t1 = State(Snap.With(down: 2, yardsToGo: 10), Snap.With(down: 3, yardsToGo: 3));
         Assert.Null(evaluator.Evaluate(t1));
@@ -239,7 +243,7 @@ public class EvaluatorTests
         var t2 = State(Snap.With(down: 3, yardsToGo: 3), Snap.With(down: 3, yardsToGo: 2));
         var result = evaluator.Evaluate(t2);
         Assert.NotNull(result);
-        Assert.Equal("Defense: Third Down", result!.EventKey);
+        Assert.Equal("Defense: Third Down Short", result!.EventKey);
     }
 
     [Fact]
@@ -308,12 +312,15 @@ public class EvaluatorTests
         Assert.Null(evaluator.Evaluate(t2));
     }
 
-    // ---------- DefenseThirdDownShortHelper ----------
+    // ---------- DefenseThirdDownHelper (merged with the former DefenseThirdDownShortHelper
+    // 2026-08-15 -- see that class's own doc comment: two separate buffer instances tracking the
+    // same down transition could resolve on different ticks with different YardsToGo readings and
+    // double-fire for one physical play, so short/long are now one evaluator's single decision) ----------
 
     [Fact]
-    public void DefenseThirdDownShortHelper_FiresAlongsideOffenseVariant()
+    public void DefenseThirdDownHelper_FiresShort_AlongsideOffenseVariant()
     {
-        var evaluator = new DefenseThirdDownShortHelper();
+        var evaluator = new DefenseThirdDownHelper();
         var t1 = State(Snap.With(down: 2, yardsToGo: 10), Snap.With(down: 3, yardsToGo: 10));
         Assert.Null(evaluator.Evaluate(t1));
 
@@ -324,14 +331,16 @@ public class EvaluatorTests
     }
 
     [Fact]
-    public void DefenseThirdDownShortHelper_DoesNotFire_OnLongThirdDown()
+    public void DefenseThirdDownHelper_FiresLong_NotShort_OnLongThirdDown()
     {
-        var evaluator = new DefenseThirdDownShortHelper();
+        var evaluator = new DefenseThirdDownHelper();
         var t1 = State(Snap.With(down: 2, yardsToGo: 10), Snap.With(down: 3, yardsToGo: 10));
         Assert.Null(evaluator.Evaluate(t1));
 
         var t2 = State(Snap.With(down: 3, yardsToGo: 10), Snap.With(down: 3, yardsToGo: 8));
-        Assert.Null(evaluator.Evaluate(t2));
+        var result = evaluator.Evaluate(t2);
+        Assert.NotNull(result);
+        Assert.Equal("Defense: Third Down", result!.EventKey);
     }
 
     // ---------- DownDistanceBuffer sanity bound (item #2) ----------

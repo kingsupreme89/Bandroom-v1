@@ -276,6 +276,24 @@ internal sealed class GameWatcher
     int? _ocrYardsToGoStableValue; DateTime? _ocrYardsToGoStableSince;
     bool? _ocrPossessionStableValue; DateTime? _ocrPossessionStableSince;
 
+    // 2026-08-15 addition: score was deliberately left out of the original stale-RAM-field
+    // fallback ("score/timeouts/yard line already have their own -1-sentinel never-resolved
+    // protection") -- that protection only covers a reader that never resolves a field at all, not
+    // one that resolves a field to a persistently WRONG value while everything else in the block
+    // keeps updating normally (confirmed live: RAM home score stuck at a stale value for 11+
+    // minutes straight while OCR settled on a different value the whole time). That mismatch let a
+    // single reader-connect/disconnect blip on any tick flip the snapshot's score source between
+    // OCR and RAM, which TouchdownHelper read as a real multi-point swing -- a phantom "Defense:
+    // Touchdown Scored" fired off nothing but two disagreeing sources handing off mid-tick. Same
+    // double-corroboration guard as down/distance/possession: only overrides once RAM's own score
+    // has sat unchanged for RamFieldStaleThreshold AND OCR has independently settled on a
+    // persistently different value for OcrFieldCorroborationWindow.
+    int? _ramHomeScoreStableValue; DateTime? _ramHomeScoreStableSince;
+    int? _ramAwayScoreStableValue; DateTime? _ramAwayScoreStableSince;
+    int? _ocrHomeScoreStableValue; DateTime? _ocrHomeScoreStableSince;
+    int? _ocrAwayScoreStableValue; DateTime? _ocrAwayScoreStableSince;
+    string? _lastResolvedPossessionReported;
+
     /// <summary>True once <paramref name="value"/> has been unchanged for at least
     /// <paramref name="threshold"/>. Updates the tracking state as a side effect -- resets the
     /// clock the instant the value changes, whether that's a real play advancing (RAM side) or a
@@ -815,6 +833,11 @@ internal sealed class GameWatcher
         _ocrDownStableValue = null; _ocrDownStableSince = null;
         _ocrYardsToGoStableValue = null; _ocrYardsToGoStableSince = null;
         _ocrPossessionStableValue = null; _ocrPossessionStableSince = null;
+        _ramHomeScoreStableValue = null; _ramHomeScoreStableSince = null;
+        _ramAwayScoreStableValue = null; _ramAwayScoreStableSince = null;
+        _ocrHomeScoreStableValue = null; _ocrHomeScoreStableSince = null;
+        _ocrAwayScoreStableValue = null; _ocrAwayScoreStableSince = null;
+        _lastResolvedPossessionReported = null;
         // AUDIT FIX 2026-08-12: the reset list above only ever covered the fields touched by the
         // specific live bugs each was added for -- it was never treated as the COMPLETE list of
         // state that can outlive a single game. Every "sticky, deliberately never nulled on a
@@ -1919,6 +1942,14 @@ internal sealed class GameWatcher
     // actually changes, not every ~250ms tick it happens to still be true, so a genuinely wrong-
     // game-attached RAM reader doesn't spam the Event Log once per tick for an entire game.
     string? _lastRamOcrMismatchSignature;
+    string? _pendingRamOcrMismatchSignature;
+    int _pendingRamOcrMismatchStreak;
+
+    // A single flickery OCR tick (misread digit, blank frame) must not reset the dedup signature
+    // to null, or the very next tick's real mismatch gets treated as "new" and re-logged. Require
+    // the same mismatch signature to repeat this many consecutive ticks before it's considered
+    // real and logged/latched.
+    const int RamOcrMismatchConfirmTicks = 2;
 
     /// <summary>2026-08-13 reliability addition: RAM stays authoritative/primary for PlaySnapshot
     /// whenever it's CONNECTED (unchanged) -- this is a SILENT cross-check underneath it, not a
@@ -1940,10 +1971,29 @@ internal sealed class GameWatcher
         if (ocrDown != 0 && ocrYardsToGo != ram.YardsToGo) mismatches.Add($"distance RAM={ram.YardsToGo} OCR={ocrYardsToGo}");
         if (ocrPossessionAway != ram.PossessionAway) mismatches.Add($"possession RAM={(ram.PossessionAway ? "away" : "home")} OCR={(ocrPossessionAway ? "away" : "home")}");
 
-        if (mismatches.Count == 0) { _lastRamOcrMismatchSignature = null; return; }
+        if (mismatches.Count == 0)
+        {
+            _pendingRamOcrMismatchSignature = null;
+            _pendingRamOcrMismatchStreak = 0;
+            _lastRamOcrMismatchSignature = null;
+            return;
+        }
 
         string signature = string.Join("|", mismatches);
         if (signature == _lastRamOcrMismatchSignature) return;
+
+        if (signature == _pendingRamOcrMismatchSignature)
+        {
+            _pendingRamOcrMismatchStreak++;
+        }
+        else
+        {
+            _pendingRamOcrMismatchSignature = signature;
+            _pendingRamOcrMismatchStreak = 1;
+        }
+
+        if (_pendingRamOcrMismatchStreak < RamOcrMismatchConfirmTicks) return;
+
         _lastRamOcrMismatchSignature = signature;
         EventActivityLog.Record("n/a", "n/a", $"(RAM/OCR watchdog) RAM is primary but disagrees with OCR -- {string.Join("; ", mismatches)}");
     }
@@ -2029,6 +2079,8 @@ internal sealed class GameWatcher
         bool ocrDownSettled = IsFieldStableFor(ocrDown, ref _ocrDownStableValue, ref _ocrDownStableSince, nowUtc, OcrFieldCorroborationWindow);
         bool ocrYardsToGoSettled = IsFieldStableFor(ocrYardsToGo, ref _ocrYardsToGoStableValue, ref _ocrYardsToGoStableSince, nowUtc, OcrFieldCorroborationWindow);
         bool ocrPossessionSettled = IsFieldStableFor(ocrPossessionAway, ref _ocrPossessionStableValue, ref _ocrPossessionStableSince, nowUtc, OcrFieldCorroborationWindow);
+        bool ocrHomeScoreSettled = IsFieldStableFor(ocrHomeScore, ref _ocrHomeScoreStableValue, ref _ocrHomeScoreStableSince, nowUtc, OcrFieldCorroborationWindow);
+        bool ocrAwayScoreSettled = IsFieldStableFor(ocrAwayScore, ref _ocrAwayScoreStableValue, ref _ocrAwayScoreStableSince, nowUtc, OcrFieldCorroborationWindow);
 
         // Reader takes over score/possession/yard line/down/distance/timeouts when CONNECTED --
         // see the ScoreboardStatus field's own doc comment. Event flags (situation/banner/etc)
@@ -2080,42 +2132,65 @@ internal sealed class GameWatcher
         if (ramSnapshot is { } ramForWatchdog)
             LogRamOcrCrosscheck(ocrDown, ocrYardsToGo, ocrAwayScore, ocrHomeScore, ocrPossessionAway, ramForWatchdog);
 
-        // Stale-RAM-field fallback (2026-08-14, tightened 2026-08-14 with the reader's own
-        // ram.freshness data). Deliberately scoped to down/distance/possession (the fields actually
-        // observed stuck live); score/timeouts/yard line already have their own -1-sentinel "never
-        // resolved" protection. Runs AFTER the rs-driven assignments above so it can override them
-        // back to OCR once confirmed stale -- otherwise this is a no-op and RAM's value is used
-        // exactly as before this fix existed.
+        // Stale-RAM-field fallback (2026-08-14). Deliberately scoped to down/distance/possession
+        // (the fields actually observed stuck live); score/timeouts/yard line already have their
+        // own -1-sentinel "never resolved" protection. Runs AFTER the rs-driven assignments above
+        // so it can override them back to OCR once confirmed wrong -- otherwise this is a no-op
+        // and RAM's value is used exactly as before this fix existed.
         //
-        // coreBlockMaybeStale gates the whole fallback on the reader's OWN ground truth (see
-        // CoreBlockFreshnessWindow's doc comment) when available: if either clock shows a recent
-        // change, the reader itself proves this block is still being live-verified, so the OCR-
-        // corroboration check below never even runs -- a score/down legitimately unchanged for
-        // minutes between plays can no longer look "stuck" just because OCR flickers to a different
-        // reading. Falls back to running the OCR-corroboration check unconditionally (old behavior)
-        // when the connected reader predates v1.4.9 and never publishes Freshness at all.
+        // 2026-08-15 fix: this used to also require the reader's own core-block clocks to look
+        // frozen (CoreBlockFreshnessWindow) before even considering a field stuck -- the idea was
+        // "if the reader is demonstrably alive, don't second-guess it." In practice the game clock
+        // is ticking on essentially every live tick, so that gate was permanently closed and this
+        // fallback could never fire *during actual gameplay* -- exactly when a wrong-not-stale RAM
+        // field (e.g. possession genuinely reading the wrong side while everything else in the
+        // block keeps updating normally) does the most damage, misrouting cues to the wrong team.
+        // The double corroboration below (RAM's OWN value hasn't moved for RamFieldStaleThreshold,
+        // AND OCR has independently settled on a persistently different value for
+        // OcrFieldCorroborationWindow) is already the real false-positive guard; requiring the
+        // whole block to ALSO look frozen was redundant on top of it, not an extra safety margin.
         if (ramSnapshot is { } ramForStaleness)
         {
-            bool coreBlockMaybeStale = ramForStaleness.Freshness == null
-                || !ramForStaleness.Freshness.CoreBlockRecentlyChanged(nowUtc, CoreBlockFreshnessWindow);
+            // 2026-08-15 fix: each IsFieldStableFor(ram value, ...) call below MUST run every
+            // single tick regardless of anything else, or its own stability clock stalls. The
+            // previous version called it as the last operand of a short-circuited && -- so on any
+            // tick where e.g. ocrDownSettled was still false (OCR itself mid-flicker), RAM's own
+            // stability tracker was never invoked at all that tick, meaning "how long has RAM been
+            // stuck" silently paused instead of accumulating. Live symptom: RAM stuck 27+ real
+            // seconds on a wrong down while the fallback's own 5s threshold kept effectively
+            // resetting because its clock wasn't running the whole time. Splitting the "compute
+            // stability" call out from the "should I act on it" condition fixes this for all 5
+            // fields the same way.
+            bool ramDownStable = IsFieldStableFor(ramForStaleness.Down, ref _ramDownStableValue, ref _ramDownStableSince, nowUtc, RamFieldStaleThreshold);
+            bool ramYardsToGoStable = IsFieldStableFor(ramForStaleness.YardsToGo, ref _ramYardsToGoStableValue, ref _ramYardsToGoStableSince, nowUtc, RamFieldStaleThreshold);
+            bool ramPossessionStable = IsFieldStableFor(ramForStaleness.PossessionAway, ref _ramPossessionStableValue, ref _ramPossessionStableSince, nowUtc, RamFieldStaleThreshold);
+            bool ramHomeScoreStable = IsFieldStableFor(ramForStaleness.HomeScore, ref _ramHomeScoreStableValue, ref _ramHomeScoreStableSince, nowUtc, RamFieldStaleThreshold);
+            bool ramAwayScoreStable = IsFieldStableFor(ramForStaleness.AwayScore, ref _ramAwayScoreStableValue, ref _ramAwayScoreStableSince, nowUtc, RamFieldStaleThreshold);
 
-            if (coreBlockMaybeStale && ocrDown != 0 && ocrDown != ramForStaleness.Down && ocrDownSettled
-                && IsFieldStableFor(ramForStaleness.Down, ref _ramDownStableValue, ref _ramDownStableSince, nowUtc, RamFieldStaleThreshold))
+            if (ocrDown != 0 && ocrDown != ramForStaleness.Down && ocrDownSettled && ramDownStable)
             {
-                Log?.Invoke($"[RAM watchdog] down stuck at {ramForStaleness.Down} for {RamFieldStaleThreshold.TotalSeconds:0}s+ (both clocks quiet {CoreBlockFreshnessWindow.TotalSeconds:0}s+) while OCR settled on {ocrDown} -- falling back to OCR for this field");
+                Log?.Invoke($"[RAM watchdog] down stuck at {ramForStaleness.Down} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {ocrDown} -- falling back to OCR for this field");
                 down = ocrDown;
             }
-            if (coreBlockMaybeStale && ocrDown != 0 && ocrYardsToGo != ramForStaleness.YardsToGo && ocrYardsToGoSettled
-                && IsFieldStableFor(ramForStaleness.YardsToGo, ref _ramYardsToGoStableValue, ref _ramYardsToGoStableSince, nowUtc, RamFieldStaleThreshold))
+            if (ocrDown != 0 && ocrYardsToGo != ramForStaleness.YardsToGo && ocrYardsToGoSettled && ramYardsToGoStable)
             {
-                Log?.Invoke($"[RAM watchdog] distance stuck at {ramForStaleness.YardsToGo} for {RamFieldStaleThreshold.TotalSeconds:0}s+ (both clocks quiet {CoreBlockFreshnessWindow.TotalSeconds:0}s+) while OCR settled on {ocrYardsToGo} -- falling back to OCR for this field");
+                Log?.Invoke($"[RAM watchdog] distance stuck at {ramForStaleness.YardsToGo} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {ocrYardsToGo} -- falling back to OCR for this field");
                 yardsToGo = ocrYardsToGo;
             }
-            if (coreBlockMaybeStale && readerPossessionAway.HasValue && ocrPossessionAway != ramForStaleness.PossessionAway && ocrPossessionSettled
-                && IsFieldStableFor(ramForStaleness.PossessionAway, ref _ramPossessionStableValue, ref _ramPossessionStableSince, nowUtc, RamFieldStaleThreshold))
+            if (readerPossessionAway.HasValue && ocrPossessionAway != ramForStaleness.PossessionAway && ocrPossessionSettled && ramPossessionStable)
             {
-                Log?.Invoke($"[RAM watchdog] possession stuck at {(ramForStaleness.PossessionAway ? "away" : "home")} for {RamFieldStaleThreshold.TotalSeconds:0}s+ (both clocks quiet {CoreBlockFreshnessWindow.TotalSeconds:0}s+) while OCR settled on {(ocrPossessionAway ? "away" : "home")} -- falling back to OCR for this field");
+                Log?.Invoke($"[RAM watchdog] possession stuck at {(ramForStaleness.PossessionAway ? "away" : "home")} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {(ocrPossessionAway ? "away" : "home")} -- falling back to OCR for this field");
                 readerPossessionAway = ocrPossessionAway;
+            }
+            if (ocrDown != 0 && ocrHomeScore != ramForStaleness.HomeScore && ocrHomeScoreSettled && ramHomeScoreStable)
+            {
+                Log?.Invoke($"[RAM watchdog] home score stuck at {ramForStaleness.HomeScore} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {ocrHomeScore} -- falling back to OCR for this field");
+                homeScore = ocrHomeScore;
+            }
+            if (ocrDown != 0 && ocrAwayScore != ramForStaleness.AwayScore && ocrAwayScoreSettled && ramAwayScoreStable)
+            {
+                Log?.Invoke($"[RAM watchdog] away score stuck at {ramForStaleness.AwayScore} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {ocrAwayScore} -- falling back to OCR for this field");
+                awayScore = ocrAwayScore;
             }
         }
 
@@ -2271,6 +2346,26 @@ internal sealed class GameWatcher
         _snapshotPrevious = _snapshotCurrent;
         _snapshotCurrent = snapshot;
 
+        // 2026-08-15 fix (live owner report: an event correctly detected off Home's own possession
+        // -- e.g. "3rd Down Conversion" -- routed to Away instead). Root cause: WebMainForm._possession
+        // (which decides WHO an event routes to) was fed ONLY from PossessionChanged, which fires off
+        // the raw OCR underline-brightness sample -- no RAM input, no stale-fallback correction, a
+        // completely separate pipeline from snapshot.PossessionAway above (which IS RAM-primary and
+        // fallback-corrected, and is what every evaluator actually used to decide what to fire). Any
+        // tick where RAM and OCR disagree on possession, the evaluator and the router could disagree
+        // on which team "has the ball" and misroute a correctly-detected event to the wrong side.
+        // Publishing the SAME fully-resolved value the evaluators used keeps routing in lockstep with
+        // detection -- fires in addition to (not instead of) the OCR sampler's own PossessionChanged,
+        // so a legitimate OCR-only flip still updates routing immediately as before; this only adds
+        // a second correction path for when RAM's resolved value has already moved on but the OCR
+        // sampler hasn't (or won't, if OCR is what's actually wrong this tick).
+        string resolvedPossessionSide = snapshot.PossessionAway ? "away" : "home";
+        if (resolvedPossessionSide != _lastResolvedPossessionReported)
+        {
+            _lastResolvedPossessionReported = resolvedPossessionSide;
+            PossessionChanged?.Invoke(resolvedPossessionSide);
+        }
+
         // Skip only the true first tick of the game -- Previous is a placeholder `new()` with
         // no real prior read, so comparing it against Current would fire every evaluator
         // simultaneously. See _isFirstEngineTick's declaration for why this can't be inferred
@@ -2322,7 +2417,6 @@ internal sealed class GameWatcher
             new DefenseHelper(),
             new DefenseSecondDownShortHelper(),
             new DefenseThirdDownHelper(),
-            new DefenseThirdDownShortHelper(),
             new DownFieldPositionHelper(),
             new DriveStarterHelper(),
             new FieldGoalMissedHelper(),

@@ -1,18 +1,22 @@
 namespace Bandroom.Core.Helpers;
 
-/// <summary>Added 2026-08-11 (owner audit call): "Defense: Third Down" should fire for the
-/// offense facing 3rd down at ANY distance, not just 3rd & long -- corrects OffenseDownHelper's
-/// prior behavior, which only emitted this key on the long branch (short 3rd downs only got
-/// "Offense: Third Down Short"/"Defense: Third Down Short", never this one). Standalone evaluator
-/// (not a branch inside OffenseDownHelper) so it can fire on EVERY 3rd down regardless of what
-/// OffenseDownHelper itself classifies that same snap as -- mirrors DefenseThirdDownShortHelper's
-/// own "separate file, same buffered-edge shape, dedupe-safe by EventKey" pattern.
+/// <summary>Fires "Defense: Third Down" (long) or "Defense: Third Down Short" for the offense
+/// facing 3rd down at ANY distance -- paired with OffenseDownHelper's own "Offense: Third Down"/
+/// "Offense: Third Down Short" on the same tick (60%), same balance as before.
 ///
-/// No longer home-only-always (owner reversed that 2026-08-11, live game, same session) -- now
-/// plays for whichever side is actually on defense, paired with OffenseDownHelper's new
-/// "Offense: Third Down" on the same tick (60%) the same balanced way
-/// "Defense/Offense: Third Down Short" already pair up. Flat 100 volume (was BigGame ? 100 : 80)
-/// to match that pairing's flat Defense volume.</summary>
+/// MERGED 2026-08-15 (live owner report: double-fire): this used to be two separate evaluators
+/// (DefenseThirdDownHelper + DefenseThirdDownShortHelper), each running its OWN independent
+/// DownDistanceBuffer instance tracking the SAME down transition. Under flickering OCR/RAM
+/// distance reads, the two buffers could resolve on DIFFERENT ticks with DIFFERENT
+/// Current.YardsToGo snapshots -- each looking individually valid at its own resolution moment --
+/// so a single physical 3rd down could get classified as "long" by one buffer and "short" by the
+/// other, firing BOTH EventKeys for one play (different keys, so EventRouter's dedupe never
+/// caught it; only the first event in a tick's batch stops previous audio, so both songs played
+/// simultaneously). A same-instant exclusion guard (added earlier this session) only prevented
+/// the double-fire when both resolved on the SAME tick -- it didn't stop two independent buffers
+/// from disagreeing across ticks. One evaluator, one buffer, one resolution moment, one EventKey
+/// -- structurally impossible to double-fire now, matching how OffenseDownHelper already avoids
+/// this exact problem on the offense side via a single switch.</summary>
 public sealed class DefenseThirdDownHelper : IRuleEvaluator
 {
     readonly DownDistanceBuffer _buffer = new();
@@ -47,16 +51,17 @@ public sealed class DefenseThirdDownHelper : IRuleEvaluator
         if (down != 3)
             return null;
 
-        // A loss (yards-to-go went UP) is DefenseHelper's/TflHelper's territory, not this cue --
-        // same deferral OffenseDownHelper/DefenseThirdDownShortHelper already use.
+        // A loss (yards-to-go went UP) is DefenseHelper's/TflHelper's territory, not this cue.
         if (state.Current.YardsToGo > baselineYardsToGo)
             return null;
 
+        bool isShort = state.Current.YardsToGo <= 5;
+
         return new TriggerEvent
         {
-            EventKey = "Defense: Third Down",
+            EventKey = isShort ? "Defense: Third Down Short" : "Defense: Third Down",
             Volume = 100,
-            IsEarnedBigEvent = state.Current.BigGame
+            IsEarnedBigEvent = isShort ? false : state.Current.BigGame
         };
     }
 }

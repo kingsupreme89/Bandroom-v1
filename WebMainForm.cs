@@ -3457,18 +3457,15 @@ public sealed class WebMainForm : Form
                 sideAllowed = false;
                 reason = "this event is home-only, even during a Big Game";
             }
-            else if (eventKey.StartsWith("Offense:", StringComparison.OrdinalIgnoreCase))
-            {
-                // Un-gated -- your own team's hype cue always plays for whoever's driving.
-            }
             else if (!EffectiveBigGame)
             {
-                if (!isEarnedBigEvent)
-                {
-                    sideAllowed = false;
-                    reason = "not a Big Game -- away only plays big/earned events";
-                }
-                volumeMultiplier = 0.25f;
+                // OWNER CALL 2026-08-15: away doesn't play AT ALL outside a Big Game -- reverses
+                // the 2026-08-10 redesign's "Offense:* always plays for away" exception (which had
+                // let away-side Field Goal Made / Earned First Down cues fire off a misrouted
+                // possession read even when nothing about the play was away's). No more partial
+                // tiers non-Big-Game: away is fully silent unless EffectiveBigGame is on.
+                sideAllowed = false;
+                reason = "not a Big Game -- away doesn't play";
             }
         }
 

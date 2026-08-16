@@ -634,7 +634,6 @@ internal sealed class MacGameWatcher
             new DefenseHelper(),
             new DefenseSecondDownShortHelper(),
             new DefenseThirdDownHelper(),
-            new DefenseThirdDownShortHelper(),
             new DownFieldPositionHelper(),
             new DriveStarterHelper(),
             new FieldGoalMissedHelper(),

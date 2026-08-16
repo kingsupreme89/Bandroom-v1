@@ -1965,7 +1965,13 @@ internal static class ConfigStore
         "2nd Down",
         "3rd Down",
         "4th Down",
-        "Offense: Earned First Down",
+        // UN-RETIRED 2026-08-15 (live owner report): retiring this assumed every team already had
+        // a working down:1st legacy assignment to fall back to -- false for any team that never
+        // did (confirmed live: neither Home nor Away had one). FirstDownHelper still emits this key
+        // on every non-short earned first down regardless, so it was firing into a card that
+        // literally didn't exist in the UI for those teams -- permanently silent with no way to
+        // fix it short of manually editing the profile JSON. Back in AllEngineEventKeys below,
+        // same as its already-not-retired "...Short" sibling.
         "Offense: Second Down",
         // REMOVED 2026-08-12 (owner call, live game): OffenseFourthDownHelper now emits this for
         // real, dual-firing alongside "Defense: Fourth Down" so the team actually driving on 4th
@@ -2042,6 +2048,7 @@ internal static class ConfigStore
         // Added 2026-08-10 alongside FirstDownHelper's short/long split -- replaces the old
         // "Offense: Earned First Down (Big Gain)" card (now retired above).
         "Offense: Earned First Down Short",
+        "Offense: Earned First Down",
         // Added 2026-08-10: two new Defense-side evaluators (DefenseFirstDownHelper,
         // DefenseThirdDownShortHelper) -- see their own file comments for the exact trigger
         // moment and WebMainForm.ResolveEventRouting's tier-3 (First Down) / tier-2 (Third Down
