@@ -78,8 +78,43 @@ public sealed class MacWebBridge
     // ---- Settings & Watching ----
 
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
-    public void ShowUpdate() { /* TODO: Sparkle update check */ }
-    public void RestartForUpdate() { /* TODO: Sparkle restart */ }
+
+    /// <summary>Windows checks/installs updates via Squirrel against this repo's GitHub Releases
+    /// (see WebMainForm.ShowUpdateDialogFromWeb) -- but every release published there ships ONLY
+    /// Windows Squirrel artifacts (BandroomSetup.exe/.nupkg/RELEASES), no Mac build at all, so
+    /// there is nothing real to check/download here yet. Rather than fake a version check against
+    /// a channel that doesn't exist for this platform (which would just be wrong the first time a
+    /// user actually had a newer Mac build available with no way to know), this tells the user the
+    /// truth and how to update by hand until a real Mac release pipeline exists. A proper fix would
+    /// either start publishing a Mac build as a release asset (checkable via the same GitHub
+    /// Releases API ChangelogService.cs already calls) and wiring Sparkle against it, or reusing
+    /// this same manual-pull flow permanently if that's not planned.</summary>
+    public void ShowUpdate() => RunNativeAlert(
+        "Bandroom for Mac",
+        "Mac builds aren't published to GitHub Releases yet, so there's no automatic update to check "
+            + "here (Windows still updates normally). To update this Mac build: git pull the latest "
+            + "code, then run src/Bandroom.Mac/publish-mac.sh again.");
+
+    public void RestartForUpdate() { /* No staged update to apply yet -- see ShowUpdate. */ }
+
+    static void RunNativeAlert(string title, string message)
+    {
+        try
+        {
+            string script = $"display dialog {EscapeForAppleScript(message)} with title {EscapeForAppleScript(title)} buttons {{\"OK\"}} default button \"OK\"";
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "/usr/bin/osascript",
+                UseShellExecute = false,
+            };
+            psi.ArgumentList.Add("-e");
+            psi.ArgumentList.Add(script);
+            System.Diagnostics.Process.Start(psi);
+        }
+        catch { /* best-effort -- never let a status dialog crash the bridge call */ }
+    }
+
+    static string EscapeForAppleScript(string s) => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
     public void ResetTeamProfile() => _host.ResetTeamProfileFromWeb();
     public void OpenHelp() { }
     public void TriggerEffectsTest() => _host.TriggerEffectsTestFromWeb();
