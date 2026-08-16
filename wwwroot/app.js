@@ -491,8 +491,10 @@ window.addEventListener("resize", () => {
 /// state.teams directly (matchup screens, marketplace matching) is untouched, since an HBCU band
 /// can play any opponent and still needs the full roster there.
 function hbcuFilteredTeams() {
-  if (!state.hbcuMode || !state.hbcuTeamNames || state.hbcuTeamNames.size === 0) return state.teams;
-  return state.teams.filter((t) => state.hbcuTeamNames.has(t.name));
+  if (!state.hbcuTeamNames || state.hbcuTeamNames.size === 0) return state.teams;
+  return state.hbcuMode
+    ? state.teams.filter((t) => state.hbcuTeamNames.has(t.name))
+    : state.teams.filter((t) => !state.hbcuTeamNames.has(t.name));
 }
 
 let _teamColorEditTeam = null;
@@ -3253,10 +3255,19 @@ async function refreshHbcuMode() {
   // so toggling HBCU Mode off (or on) while the Situations panel was already open left it
   // showing stale HBCU pot content -- "still see HBCU songs in FBS mode" owner report. Keep it
   // in sync live, same as the team grid re-filter above.
+  // FIXED 2026-08-16 (owner report, still reproduced after the fix above): the hidden-flag write
+  // itself used to be guarded behind `!situations-panel.hidden`, meant only to skip the (more
+  // expensive) renderHbcuPot() call while the panel was closed -- but that same guard also
+  // skipped the cheap hidden-flag write, so if the panel's open/closed state was ever wrong or
+  // stale at the exact moment this ran (e.g. this fires before openSituations' own DOM write
+  // settles, or the panel was reopened by a path that doesn't call openSituations), the pot
+  // panel's hidden flag silently never got corrected and stayed visible in FBS mode. The
+  // hidden-flag write is now unconditional -- correct regardless of the panel's open state --
+  // and only the render call stays gated on the panel actually being open.
   const potPanel = document.getElementById("hbcu-pot-panel");
-  if (potPanel && !document.getElementById("situations-panel")?.hidden) {
+  if (potPanel) {
     potPanel.hidden = !state.hbcuMode;
-    if (state.hbcuMode) renderHbcuPot();
+    if (state.hbcuMode && !document.getElementById("situations-panel")?.hidden) renderHbcuPot();
   }
 }
 
@@ -4359,14 +4370,17 @@ function resolveTypedTeamName(typed) {
   return state.teams.find((t) => (TEAM_ABBREVIATIONS[t.name] || []).some((a) => a.toLowerCase() === q)) || null;
 }
 
-function renderTeamGridInto(gridId, filter, onPick, showEditLogo = false, preferIcon = false) {
+function renderTeamGridInto(gridId, filter, onPick, showEditLogo = false, preferIcon = false, skipHbcuFilter = false) {
   const grid = document.getElementById(gridId);
   grid.innerHTML = "";
   const q = filter.trim().toLowerCase();
-  // Same HBCU-mode lock as the main team grid (hbcuFilteredTeams): HBCU Mode restricts every
-  // team picker to HBCU schools only, and FBS teams are only reachable with the toggle off --
-  // matches the pre-toggle FBS workflow when the toggle is off (unfiltered, same as always).
-  for (const t of hbcuFilteredTeams()) {
+  // Same HBCU-mode lock as the main team grid (hbcuFilteredTeams): HBCU Mode restricts the left
+  // team chooser + favorite-team picker to HBCU schools only, and FBS teams are only reachable
+  // with the toggle off. skipHbcuFilter opts a picker out of this entirely -- The Market/Sound
+  // Bank and Set Matchup both need to reach EVERY team regardless of the toggle (an HBCU band can
+  // play, or browse the Sound Bank of, any opponent -- owner report: "i dont see hbcu teams in
+  // the market. they all needed to be there").
+  for (const t of skipHbcuFilter ? state.teams : hbcuFilteredTeams()) {
     if (!teamMatchesQuery(t, q)) continue;
     const sw = document.createElement("div");
     sw.className = "team-swatch" + (t.name === state.activeTeam ? " active" : "");
@@ -4425,19 +4439,20 @@ function marketplaceGuard(fn, label) {
 // Thin wrappers over the cloudflare-marketplace worker's GET /list. Every call is defensive --
 // a network hiccup returns an empty list instead of throwing, since marketplaceGuard's job is
 // to keep the UI alive, not to surface raw fetch errors to the user.
-async function fetchUploadList(type, school, sort) {
-  const result = await fetchUploadListDetailed(type, school, sort);
+async function fetchUploadList(type, school, sort, q) {
+  const result = await fetchUploadListDetailed(type, school, sort, q);
   return result.items;
 }
 
 // Same as fetchUploadList, but also reports whether the fetch itself failed -- callers that need
 // to tell "the worker said this team really has zero uploads" apart from "the fetch failed" (no
 // false empty states) should use this instead.
-async function fetchUploadListDetailed(type, school, sort) {
+async function fetchUploadListDetailed(type, school, sort, q) {
   try {
     const qs = new URLSearchParams({ type });
     if (school) qs.set("school", school);
     if (sort) qs.set("sort", sort);
+    if (q) qs.set("q", q);
     const res = await fetch(`${MARKETPLACE_URL}/list?${qs}`);
     if (!res.ok) return { items: [], error: true };
     const data = await res.json();
@@ -4451,6 +4466,9 @@ async function fetchUploadListDetailed(type, school, sort) {
 // Which hub sort is currently selected -- "newest" (default), "views", "downloads", "likes".
 // Module-level so it survives re-renders (e.g. re-opening the hub keeps the last choice).
 let _hubSort = "newest";
+let _hubSongSearch = "";
+let _hubPage = 0;
+const HUB_PAGE_SIZE = 20;
 
 async function fetchRecentUploads(limit, sort) {
   const [songs, images] = await Promise.all([
@@ -4628,6 +4646,21 @@ async function dislikeUploadedItem(item) {
 }
 
 let _hubSortListenerBound = false;
+let _hubSongSearchListenerBound = false;
+let _hubPagerListenerBound = false;
+function wireBandroomPopularPager() {
+  if (_hubPagerListenerBound) return;
+  _hubPagerListenerBound = true;
+  document.getElementById("btn-bandroom-popular-prev")?.addEventListener("click", () => {
+    if (_hubPage === 0) return;
+    _hubPage--;
+    renderPopularSongsShelf();
+  });
+  document.getElementById("btn-bandroom-popular-next")?.addEventListener("click", () => {
+    _hubPage++;
+    renderPopularSongsShelf();
+  });
+}
 
 function openBandroomMarketplace() {
   marketplaceGuard(() => {
@@ -4644,10 +4677,24 @@ function openBandroomMarketplace() {
         _hubSortListenerBound = true;
         sortSelect.addEventListener("change", () => {
           _hubSort = sortSelect.value;
+          _hubPage = 0;
           renderBandroomHub();
         });
       }
     }
+    const songSearch = document.getElementById("bandroom-popular-search");
+    if (songSearch) {
+      songSearch.value = _hubSongSearch;
+      if (!_hubSongSearchListenerBound) {
+        _hubSongSearchListenerBound = true;
+        songSearch.addEventListener("input", debounce(() => {
+          _hubSongSearch = songSearch.value;
+          _hubPage = 0;
+          renderPopularSongsShelf();
+        }, 200));
+      }
+    }
+    wireBandroomPopularPager();
     renderBandroomHubHeroRow();
     renderPopularSongsShelf();
     renderTopTeamBackgroundsShelf();
@@ -5770,7 +5817,7 @@ async function renderPopularSongsShelf() {
   }
   el.innerHTML = `<div class="bandroom-empty-state">Loading...</div>`;
   try {
-    const songs = await fetchUploadList("song", null, null);
+    const songs = await fetchUploadList("song", null, null, _hubSongSearch.trim() || undefined);
     if (document.getElementById("bandroom-overlay").hidden) return;
     let ranked = songs;
     if (_hubSort === "views" || _hubSort === "downloads" || _hubSort === "likes") {
@@ -5785,10 +5832,28 @@ async function renderPopularSongsShelf() {
         return scoreDiff !== 0 ? scoreDiff : (a.uploadedAt < b.uploadedAt ? 1 : -1);
       });
     }
-    ranked = ranked.slice(0, 20);
+    // Owner report: the old hard `slice(0, 20)` meant anything past the top 20 was simply
+    // unreachable -- no way to browse the rest of the catalog, and no way to search it either.
+    // Now paginates the full (optionally search-filtered) result set instead of truncating it.
+    const totalPages = Math.max(1, Math.ceil(ranked.length / HUB_PAGE_SIZE));
+    _hubPage = Math.min(_hubPage, totalPages - 1);
+    const pageStart = _hubPage * HUB_PAGE_SIZE;
+    const paged = ranked.slice(pageStart, pageStart + HUB_PAGE_SIZE);
+    const pager = document.getElementById("bandroom-popular-pager");
+    const pagerLabel = document.getElementById("bandroom-popular-pager-label");
+    if (pager && pagerLabel) {
+      pager.hidden = ranked.length === 0;
+      pagerLabel.textContent = `Page ${_hubPage + 1} of ${totalPages} (${ranked.length} song${ranked.length === 1 ? "" : "s"})`;
+      const prevBtn = document.getElementById("btn-bandroom-popular-prev");
+      const nextBtn = document.getElementById("btn-bandroom-popular-next");
+      if (prevBtn) prevBtn.disabled = _hubPage === 0;
+      if (nextBtn) nextBtn.disabled = _hubPage >= totalPages - 1;
+    }
     el.innerHTML = "";
     if (ranked.length === 0) {
-      el.innerHTML = `<div class="bandroom-empty-state">No songs uploaded yet -- open any team's Sound Bank and be the first!</div>`;
+      el.innerHTML = _hubSongSearch.trim()
+        ? `<div class="bandroom-empty-state">No songs found for "${escapeHtml(_hubSongSearch.trim())}".</div>`
+        : `<div class="bandroom-empty-state">No songs uploaded yet -- open any team's Sound Bank and be the first!</div>`;
       return;
     }
     // Row-list table (Music Library UX Brief v2 §4), same .marketplace-card row branch the
@@ -5796,7 +5861,7 @@ async function renderPopularSongsShelf() {
     // tile before this pass (buildItemTile(item, true)); the row branch's own click still
     // previews the song (its actions already cover Preview/Get), so the school name is wired
     // separately to keep the "jump to that team's Sound Bank" shortcut the hub had.
-    for (const item of ranked) {
+    for (const item of paged) {
       const row = buildItemTile(item);
       const schoolRow = row.querySelector(".marketplace-card-school");
       if (schoolRow) {
@@ -7746,7 +7811,7 @@ function escapeHtml(text) {
 }
 
 function renderBandroomTeamGrid(filter) {
-  renderTeamGridInto("bandroom-team-grid", filter, (name) => openTeamAlbum(name));
+  renderTeamGridInto("bandroom-team-grid", filter, (name) => openTeamAlbum(name), false, false, true);
 }
 
 let albumTeam = null;

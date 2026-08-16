@@ -441,7 +441,10 @@ export default {
         if (categoryFilter && meta.metadata?.marketplaceCategory !== categoryFilter) continue;
         if (energyFilter && meta.metadata?.energyLevel !== energyFilter) continue;
         if (qFilter) {
-          const haystack = [meta.name, meta.metadata?.standardTitle, meta.metadata?.standardArtist,
+          // Includes meta.school so searching a team name (e.g. "famu") finds that school's
+          // songs too, not just title/artist -- searching for a school with zero uploads simply
+          // returns no results, which is correct (not a bug).
+          const haystack = [meta.name, meta.school, meta.metadata?.standardTitle, meta.metadata?.standardArtist,
             meta.metadata?.prominentInstrumentation, meta.metadata?.acousticFingerprint]
             .filter(Boolean).join(" ").toLowerCase();
           if (!haystack.includes(qFilter)) continue;

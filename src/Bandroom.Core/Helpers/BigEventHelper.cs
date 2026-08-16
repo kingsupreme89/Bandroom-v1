@@ -41,6 +41,14 @@ public sealed class BigEventHelper : IRuleEvaluator
         // slot instead of double-firing the plain "Defense: Fourth Down" facing-the-down cue.
         // "Defense: Fourth Down" itself is untouched -- OffenseDownHelper's facing-4th-down cue is
         // a real, separate, still-wanted moment the owner did not ask to remove.
+        //
+        // DOCUMENTED 2026-08-16 (state-machine audit finding #2): this INTENTIONALLY overlaps with
+        // TurnoverHelper's "Defense: Iced Game by Turnover" late-game branch -- see that file's own
+        // comment ("turning it over on downs" is explicitly called out as one of the ways a game
+        // gets iced). A 4th-down stop that also lands in the Iced-Game window (Quarter>=4,
+        // TimeRemainingSeconds<=120, new possessor already winning) legitimately fires both cues on
+        // the same tick, same pattern as the documented Offense/Defense pairs elsewhere in this
+        // codebase -- see EvaluatorTests.BigEventHelper_And_TurnoverHelper_BothFire_OnLateGameFourthDownStop.
         if (state.Current.Down == 4 && state.Delta.NewPossession && !state.Current.IsFieldGoalAttempt && !state.Current.IsTurnover)
         {
             return new TriggerEvent

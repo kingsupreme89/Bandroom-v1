@@ -139,6 +139,12 @@ public class EvaluatorTests
         Assert.Equal("Defense: Tackle for Loss", result!.EventKey);
     }
 
+    // VERIFIED 2026-08-16 (state-machine audit finding #5): this loop's hardcoded `3` is
+    // intentionally tied to DownDistanceBuffer's current MaxPendingTicks=2 default (Advance()
+    // trips on the 3rd call, TicksPending=3 > 2) -- if that default were ever reverted to its
+    // pre-2026-08-11 value of 3, this loop would leave TicksPending at 3 (not > 3), the timeout
+    // branch wouldn't trip, and Assert.Contains below would correctly fail. Confirmed this already
+    // guards against that regression rather than masking it.
     [Fact]
     public void TflHelper_TimesOut_NotALoss_NearMissLogged_NoFire()
     {
@@ -316,6 +322,30 @@ public class EvaluatorTests
     // 2026-08-15 -- see that class's own doc comment: two separate buffer instances tracking the
     // same down transition could resolve on different ticks with different YardsToGo readings and
     // double-fire for one physical play, so short/long are now one evaluator's single decision) ----------
+
+    // ---------- Cross-evaluator stacking (state-machine audit finding #2, 2026-08-16): a 4th-down
+    // stop that also lands in TurnoverHelper's late-game "Iced Game" window is documented in both
+    // files as an INTENTIONAL same-tick double-fire, same pattern as the 2nd/3rd-down Offense/
+    // Defense pairs below -- this pins that intent down with an actual test, since neither
+    // evaluator's own unit tests previously exercised the other. ----------
+
+    [Fact]
+    public void BigEventHelper_And_TurnoverHelper_BothFire_OnLateGameFourthDownStop()
+    {
+        // Home faces (and doesn't convert) 4th down late in the 4th quarter while trailing --
+        // possession flips to Away, who is already ahead on the scoreboard.
+        var previous = Snap.With(down: 4, possessionAway: false, quarter: 4, timeRemainingSeconds: 90, homeScore: 10, awayScore: 17);
+        var current = Snap.With(down: 4, possessionAway: true, quarter: 4, timeRemainingSeconds: 90, homeScore: 10, awayScore: 17);
+        var state = State(previous, current);
+
+        var bigEventResult = new BigEventHelper().Evaluate(state);
+        var turnoverResult = new TurnoverHelper().Evaluate(state);
+
+        Assert.NotNull(bigEventResult);
+        Assert.Equal("Defense: Fourth Down Stop", bigEventResult!.EventKey);
+        Assert.NotNull(turnoverResult);
+        Assert.Equal("Defense: Iced Game by Turnover", turnoverResult!.EventKey);
+    }
 
     [Fact]
     public void DefenseThirdDownHelper_FiresShort_AlongsideOffenseVariant()

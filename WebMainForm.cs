@@ -102,6 +102,13 @@ public sealed class WebMainForm : Form
     /// (owner report 2026-08-15: Away scored, engine still tried Home's Kickoff slot -- wrong side
     /// AND that slot had nothing assigned, so nothing played at all).</summary>
     string? _lastHbcuTouchdownSide;
+    /// <summary>DOCUMENTED/FIXED 2026-08-16 (state-machine audit finding #3): same scoring-side
+    /// tracking as _lastHbcuTouchdownSide above, but not scoped to HBCU mode -- the non-HBCU
+    /// "Other:*" both-sides loop (see its own 2026-08-15 fix comment) had no equivalent for
+    /// "Other: Kickoff" and just fired it for both sides unconditionally, unlike the HBCU path's
+    /// real-football "scoring team kicks off next" routing. Set whenever ANY touchdown-keyed event
+    /// routes (HBCU or not), read by the non-HBCU Other: Kickoff special-case below.</summary>
+    string? _lastTouchdownSide;
 
     public WebMainForm()
     {
@@ -948,6 +955,7 @@ public sealed class WebMainForm : Form
         _hbcuPlayback?.Dispose();
         _hbcuPlayback = null;
         _lastHbcuTouchdownSide = null;
+        _lastTouchdownSide = null;
         if (ConfigStore.LoadPlaybackMode() == ConfigStore.PlaybackMode.Hbcu)
         {
             // Built here (so the pot/pack queues are ready), but not Start()ed until the opening
@@ -3706,8 +3714,16 @@ public sealed class WebMainForm : Form
             foreach (var evt in events.Where(e => e.EventKey.StartsWith("Other:")))
             {
                 // Opening Kickoff is always the HOME team's cue -- never fire it for away.
-                var sidesToFire = evt.EventKey == "Other: Opening Kickoff"
-                    ? new[] { "home" }
+                // FIXED 2026-08-16 (state-machine audit finding #3): "Other: Kickoff" (the
+                // post-touchdown kickoff, distinct from "Other: Opening Kickoff" above) used to
+                // fall into the generic both-sides case below like every other "Other:*" cue --
+                // but real football has the SCORING team kick off next, exactly the reasoning
+                // the HBCU-mode path already applies to this same EventKey (see
+                // _lastTouchdownSide's doc comment) and this non-HBCU path never had. Falls back
+                // to both sides (the old behavior) only if the scoring side genuinely isn't known
+                // yet, same "don't guess wrong" convention used elsewhere in this file.
+                var sidesToFire = evt.EventKey == "Other: Opening Kickoff" ? new[] { "home" }
+                    : evt.EventKey == "Other: Kickoff" && _lastTouchdownSide != null ? new[] { _lastTouchdownSide }
                     : new[] { "home", "away" };
                 foreach (var otherSide in sidesToFire)
                 {
@@ -3778,12 +3794,16 @@ public sealed class WebMainForm : Form
                     // then queues a bonus pot song for the scoring side once the cue's own
                     // duration elapses -- interruptPrevious is back to the normal !firedYet rule
                     // since the scoring side's track is no longer deliberately left alive.
-                    bool hbcuTouchdown = _hbcuPlayback != null && evt.EventKey.Contains("Touchdown", StringComparison.OrdinalIgnoreCase);
+                    bool isTouchdownEvent = evt.EventKey.Contains("Touchdown", StringComparison.OrdinalIgnoreCase);
+                    bool hbcuTouchdown = _hbcuPlayback != null && isTouchdownEvent;
                     if (hbcuTouchdown)
                     {
                         _hbcuPlayback!.OnTouchdown(routedSide, ResolveEventSongDuration(ResolveEntryForEvent(routedSide, evt.EventKey)));
                         _lastHbcuTouchdownSide = routedSide;
                     }
+                    // Tracked regardless of HBCU mode -- see _lastTouchdownSide's doc comment, used
+                    // by the non-HBCU "Other: Kickoff" scoring-side routing below.
+                    if (isTouchdownEvent) _lastTouchdownSide = routedSide;
                     string result = FireEventForSide(routedSide, evt.EventKey, volumeMultiplier: volumeMultiplier, interruptPrevious: !firedYet);
                     if (result.StartsWith("fired:")) firedYet = true;
                     OnLog($"[engine] {evt.EventKey} -> {routedSide}: {result}");

@@ -589,6 +589,17 @@ internal sealed class GameWatcher
     // that are both valid candidates (e.g. a background CollegeFB27 process and a RemotePlay
     // window on the unscoped default preset) fighting for OS focus can't thrash hwnd every tick.
     IntPtr _pendingForegroundCandidate = IntPtr.Zero;
+    // FIXED 2026-08-16 (state-machine audit finding #6): the "same candidate twice in a row"
+    // debounce above has no escape hatch if the foreground window keeps ALTERNATING between two
+    // (or more) different valid candidates every tick -- _pendingForegroundCandidate gets reset to
+    // a different value each time and "second consecutive tick" never trips, so capture could
+    // silently stall indefinitely with nothing but a repeated debug log line. Tracks how long
+    // capture has been stalled on ANY foreground mismatch (regardless of which candidate), reset
+    // the moment a real capture actually succeeds; ForegroundStallTimeout below forces a retarget
+    // to whatever candidate is currently foreground once exceeded, trading a little flapping for a
+    // guarantee that capture eventually resumes instead of hanging forever.
+    DateTime? _foregroundStallSince;
+    static readonly TimeSpan ForegroundStallTimeout = TimeSpan.FromSeconds(5);
 
     readonly List<WatchedRegion> _regions = new()
     {
@@ -797,9 +808,22 @@ internal sealed class GameWatcher
 
     CancellationTokenSource? _cts;
 
+    // FIXED 2026-08-16 (state-machine audit finding #1): Stop() only cancels `_cts` and returns
+    // immediately -- it never waits for the previous RunAsync loop to actually observe
+    // cancellation and exit. If Start() is called again quickly (fast preset-switch, accidental
+    // double-click, or a caller that starts a new game without calling Stop() first), the OLD
+    // loop iteration -- already past its last `ct.IsCancellationRequested` check -- can still run
+    // RouteEngineTick() using stale readers/regions AFTER this Start() call has already reset
+    // every "clean slate" field below, producing a bogus PlaySnapshot delta from a half-reset
+    // watcher. `_generation` gives every RunAsync loop instance an id captured once at the top;
+    // RouteEngineTick (and the final event fire) only run/fire when the loop's own generation is
+    // still the current one, so a stale loop's tick becomes an inert no-op instead of a race.
+    int _generation;
+
     public void Start()
     {
         _cts = new CancellationTokenSource();
+        int myGeneration = ++_generation;
         // FIXED: was `??=`, so only the FIRST Start() call in the process's lifetime built fresh
         // evaluators -- every subsequent GAMETIME (Stop Watching, then start a new game) reused
         // the SAME evaluator instances, carrying over per-game state like KickoffHelper's
@@ -896,7 +920,7 @@ internal sealed class GameWatcher
             region.LastRawText = null;
             region.CooldownUntil = default;
         }
-        _ = RunAsync(_cts.Token);
+        _ = RunAsync(_cts.Token, myGeneration);
     }
 
     public void Stop()
@@ -904,7 +928,7 @@ internal sealed class GameWatcher
         _cts?.Cancel();
     }
 
-    async Task RunAsync(CancellationToken ct)
+    async Task RunAsync(CancellationToken ct, int myGeneration)
     {
         OcrEngine? ocrEngine = null;
         IntPtr hwnd = IntPtr.Zero;
@@ -978,6 +1002,7 @@ internal sealed class GameWatcher
                 // guess at wrong content the way the old title-substring bug did.
                 if (Native.GetForegroundWindow() != hwnd)
                 {
+                    _foregroundStallSince ??= DateTime.UtcNow;
                     // Before giving up this tick: the foreground window might genuinely be the
                     // game, just under a DIFFERENT candidate process than the one hwnd locked onto
                     // (see FindGameWindow's 2026-08-14 fix doc comment -- e.g. RemotePlay is what's
@@ -986,7 +1011,15 @@ internal sealed class GameWatcher
                     IntPtr fg = Native.GetForegroundWindow();
                     if (fg != IntPtr.Zero && IsCandidateGameWindow(fg, ActivePreset.GameProcessNames ?? GameProcessNames))
                     {
-                        if (_pendingForegroundCandidate != fg)
+                        // FIXED 2026-08-16 (state-machine audit finding #6): if the foreground
+                        // window keeps ALTERNATING between two+ different valid candidates,
+                        // _pendingForegroundCandidate never matches twice in a row and this branch
+                        // never retargets -- capture stalls indefinitely with only a repeated log
+                        // line. Once stalled past ForegroundStallTimeout, force the retarget onto
+                        // whatever candidate is foreground THIS tick instead of waiting for the
+                        // normal 2-consecutive-tick debounce, so capture always eventually resumes.
+                        bool forceRetarget = DateTime.UtcNow - _foregroundStallSince.Value > ForegroundStallTimeout;
+                        if (_pendingForegroundCandidate != fg && !forceRetarget)
                         {
                             // First tick seeing this candidate -- wait for a second consecutive
                             // tick before retargeting (see _pendingForegroundCandidate doc comment).
@@ -998,9 +1031,13 @@ internal sealed class GameWatcher
                         // rect/winW/winH above were measured against the OLD hwnd -- re-loop
                         // immediately so they get recomputed against the new one instead of
                         // capturing the wrong window's stale geometry this tick.
-                        Log?.Invoke("[watcher] foreground window is a different game-window candidate -- switching to it");
+                        if (forceRetarget)
+                            Log?.Invoke($"[watcher] foreground candidate kept changing for {ForegroundStallTimeout.TotalSeconds:0}s+ -- forcing retarget without waiting for a repeat");
+                        else
+                            Log?.Invoke("[watcher] foreground window is a different game-window candidate -- switching to it");
                         hwnd = fg;
                         _pendingForegroundCandidate = IntPtr.Zero;
+                        _foregroundStallSince = null;
                         continue;
                     }
                     else
@@ -1011,6 +1048,7 @@ internal sealed class GameWatcher
                         continue;
                     }
                 }
+                _foregroundStallSince = null;
 
                 using var fullBmp = new Bitmap(winW, winH, PixelFormat.Format32bppArgb);
                 using (var fg = Graphics.FromImage(fullBmp))
@@ -1190,7 +1228,7 @@ internal sealed class GameWatcher
                 // Skipped entirely while the frame is frozen (see _frameIsFrozen's doc comment) --
                 // a paused/menu screen has no real snap/play to react to, and OCR text sampled
                 // from whatever's drawn there is untrustworthy.
-                if (!_frameIsFrozen)
+                if (!_frameIsFrozen && myGeneration == _generation)
                     RouteEngineTick();
 
                 // This is the ONE delay on the actual tackle-to-sound critical path: it gates how
@@ -2213,7 +2251,18 @@ internal sealed class GameWatcher
         // events during the pre-detection window right after a matchup is confirmed. Now null
         // stays null so penalty routing waits for a real possession read, same guessing-avoidance
         // rule already used for penalizedIsHome below.
-        bool? possessionIsHomeNow = _lastPossession == null ? null : _lastPossession != "away";
+        // FIXED 2026-08-16 (owner report -- "penalty it's showing was on me and not my opponent,
+        // it's like it's reading it backwards"): this used to read ONLY the raw OCR-sampled
+        // _lastPossession, a separate, uncorrected pipeline from snapshot.PossessionAway below
+        // (readerPossessionAway ?? (_lastPossession == "away")) -- the exact same RAM-vs-OCR
+        // disagreement class the 2026-08-15 possession-routing fix addressed for down/distance
+        // events, just never applied here. A penalty's FLAG overlay darkens/obscures the
+        // possession ribbon (see IsNearBlack), making OCR possession sampling unusually likely to
+        // be stale or wrong at exactly the moment this fires. Now reads the same RAM-primary,
+        // fallback-corrected value every other evaluator uses, so penalty classification can't
+        // disagree with what the event actually gets routed on.
+        bool? possessionIsHomeNow = readerPossessionAway.HasValue ? !readerPossessionAway.Value
+            : _lastPossession == null ? null : _lastPossession != "away";
         bool? penalizedIsHome = null;
         string? penaltyText = penaltyAgainstRegion?.Last;
         if (penaltyText != null)
@@ -2404,7 +2453,14 @@ internal sealed class GameWatcher
         if (results.Any(r => r.EventKey == "Other: Pregame Take the Field"))
             _pregameTakeFieldFired = true;
 
-        if (results.Count > 0)
+        // FIXED 2026-08-16 (owner report -- "a song triggered when I quit out and went to menu"):
+        // Stop() only cancels `ct`, checked at the top of RunAsync's while loop and inside a
+        // handful of Task.Delay calls -- everything in between, including this whole tick's OCR
+        // capture and evaluator pass above, ran to completion uninterrupted even after Stop() was
+        // called mid-tick, and would still invoke EventsDetected (-> an audible clip) after the
+        // user had already backed out. Re-checking right before the actual fire closes that gap
+        // without needing to thread ct-checks through the entire multi-thousand-line tick body.
+        if (results.Count > 0 && _cts?.IsCancellationRequested != true)
             EventsDetected?.Invoke(results);
     }
 

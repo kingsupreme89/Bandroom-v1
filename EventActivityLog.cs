@@ -146,8 +146,17 @@ internal static class EventActivityLog
         // leaves a real phrase behind (e.g. "Other: Opening Kickoff" -> "Opening Kickoff"); these
         // two are the only ones that don't, so they need an explicit override like the down/
         // distance keys above.
-        ["Penalty: Offense"] = "Penalty - Your Team",
-        ["Penalty: Defense"] = "Penalty - Opponent",
+        // FIXED 2026-08-16 (owner report -- "penalty it's showing was on me and not my opponent,
+        // it's like it's reading it backwards"): "Penalty: Offense"/"Penalty: Defense" describe
+        // which side of the ball committed the penalty (see PenaltyHelper), which has nothing to
+        // do with home/away -- the actual routed side is already appended separately by the
+        // caller ("... (Home)"/"... (Away)"), so the old "Your Team"/"Opponent" wording just
+        // contradicted it half the time (e.g. both a "Penalty: Offense" and a "Penalty: Defense"
+        // routed to the same actual side would print as one "Your Team" line and one "Opponent"
+        // line). Neutral offense/defense wording here lets the appended side tag be the only
+        // thing that says whose penalty it actually was.
+        ["Penalty: Offense"] = "Penalty - Offense",
+        ["Penalty: Defense"] = "Penalty - Defense",
         ["Offense: Earned First Down"] = "1st Down",
         ["Offense: First Down on First Down"] = "First Down",
     };

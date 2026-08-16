@@ -19,6 +19,13 @@ public sealed class TurnoverHelper : IRuleEvaluator
 {
     // Cheap early-out: either a real turnover, or a possession flip (checked more precisely
     // below for the iced-game case) can qualify now.
+    // MUST stay a superset of every condition Evaluate actually checks below -- CanFire==false
+    // skips Evaluate entirely (see IRuleEvaluator's own doc comment), so a future Evaluate branch
+    // added without a matching OR term here would silently never fire, the exact bug class this
+    // evaluator was already broken by once (2026-08-11: doc comment said NewPossession, code
+    // didn't check it). Covered by EvaluatorTests.CanFire_False_Implies_Evaluate_Null_AllHelpers,
+    // added 2026-08-16 (state-machine audit finding #4) across every IRuleEvaluator, not just this
+    // one, so this specific comment is a reminder, not the only guard.
     public bool CanFire(GameState state) => state.Current.IsTurnover || state.Delta.NewPossession;
 
     public TriggerEvent? Evaluate(GameState state)
@@ -32,6 +39,15 @@ public sealed class TurnoverHelper : IRuleEvaluator
         // simply turning it over on downs/punting it away) to whichever side is ahead on the
         // scoreboard right now. A flip while the score is still tied doesn't count -- nobody's
         // "up" yet, so nothing is sealed.
+        //
+        // DOCUMENTED 2026-08-16 (state-machine audit finding #2): "turning it over on downs" above
+        // means this INTENTIONALLY overlaps with BigEventHelper's "Defense: Fourth Down Stop"
+        // (Down==4 && NewPossession && !IsFieldGoalAttempt && !IsTurnover) whenever that stop also
+        // lands in this Iced-Game window (Quarter>=4, TimeRemainingSeconds<=120) with the new
+        // possessor already winning -- both cues fire on the same tick, same as the documented
+        // Offense/Defense pairs on 2nd/3rd down elsewhere in this codebase. Unlike those pairs this
+        // was never cross-referenced or tested until now -- see
+        // EvaluatorTests.BigEventHelper_And_TurnoverHelper_BothFire_OnLateGameFourthDownStop.
         if (state.Delta.NewPossession && state.Current.Quarter >= 4 && state.Current.TimeRemainingSeconds <= 120)
         {
             bool newPossessorIsHome = !state.Current.PossessionAway;

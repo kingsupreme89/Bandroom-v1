@@ -882,6 +882,8 @@
         <div class="bandroom-hero-row" id="bandroom-hub-hero-row"><!-- populated by app.js --></div>
         <div class="bandroom-hub-section-label">
           <span id="bandroom-hub-section-label-text">Popular Songs</span>
+          <input type="text" id="bandroom-popular-search" class="team-picker-search bandroom-hub-song-search"
+            placeholder="Search all songs in the Market..." aria-label="Search all songs in the Market" />
           <select id="bandroom-hub-sort" class="bandroom-hub-sort" aria-label="Sort popular songs">
             <option value="newest">Newest</option>
             <option value="views">Most Viewed</option>
@@ -901,6 +903,11 @@
           <span class="bandroom-album-col-actions">Actions</span>
         </div>
         <div class="bandroom-album-grid bandroom-album-grid-list" id="bandroom-popular-shelf"><!-- populated by app.js --></div>
+        <div class="bandroom-album-pager" id="bandroom-popular-pager" hidden>
+          <button id="btn-bandroom-popular-prev" class="btn-ghost" title="Previous page">&larr; Previous</button>
+          <span id="bandroom-popular-pager-label"></span>
+          <button id="btn-bandroom-popular-next" class="btn-ghost" title="Next page">Next &rarr;</button>
+        </div>
 
         <div class="bandroom-hub-section-label">Top Team Background Uploads</div>
         <!-- Seeded from the existing local TeamBackgrounds pack for now (not yet a live
