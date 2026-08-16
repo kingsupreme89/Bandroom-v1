@@ -10,9 +10,14 @@ set -euo pipefail
 RID="${1:-osx-arm64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$SCRIPT_DIR/Bandroom.Mac.csproj"
-PUBLISH_DIR="$SCRIPT_DIR/bin/publish/$RID"
+# Raw dotnet-publish output and the assembled .app are kept as SIBLINGS (not nested) -- an
+# earlier version nested APP_DIR inside PUBLISH_DIR, which made the "copy publish output into
+# the app bundle" step below copy a directory into itself.
+PUBLISH_DIR="$SCRIPT_DIR/bin/publish-raw/$RID"
 APP_NAME="Bandroom.app"
-APP_DIR="$SCRIPT_DIR/bin/publish/$APP_NAME"
+# Keyed by RID so an arm64 and an x64 build can be assembled side by side without one
+# overwriting the other -- release-mac.sh reads from this same per-arch path.
+APP_DIR="$SCRIPT_DIR/bin/publish/$RID/$APP_NAME"
 VERSION="$(grep -m1 -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$SCRIPT_DIR/../../appcast.xml" 2>/dev/null | tr -d '"' || echo "1.0.0")"
 
 echo "==> Publishing self-contained build for $RID..."
