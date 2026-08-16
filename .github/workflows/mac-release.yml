@@ -1,0 +1,46 @@
+name: Attach Mac build to release
+
+# release.ps1 (the Windows "ppup" flow) publishes a GitHub release with only Windows Squirrel
+# assets -- it runs on a Windows machine and has no way to produce a macOS build. This workflow
+# closes that gap automatically: whenever a release is published, a macOS GitHub-hosted runner
+# builds both architectures via src/Bandroom.Mac/publish-mac.sh, zips them the same way
+# release-mac.sh does locally, and uploads them as additional assets on that same release --
+# no manual `./release-mac.sh` run needed for a normal release going forward.
+on:
+  release:
+    types: [published]
+  # Lets a maintainer re-run this against an existing release manually (e.g. this workflow
+  # didn't exist yet for older tags, or a run needs retrying) without re-publishing anything.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach Mac builds to (e.g. v1.1.17)"
+        required: true
+
+permissions:
+  contents: write # needed to upload release assets
+
+jobs:
+  build-and-attach:
+    runs-on: macos-14 # Apple Silicon GitHub-hosted runner; cross-compiles the x64 build too
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Determine target tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build + upload Mac builds
+        working-directory: src/Bandroom.Mac
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./release-mac.sh "${{ steps.tag.outputs.tag }}" both
