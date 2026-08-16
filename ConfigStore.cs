@@ -622,7 +622,7 @@ internal static class ConfigStore
     // next load rather than erroring.
     public record AudioSettings(int MasterVolume, int HomeVolume, int AwayVolume, int PaVolume, int WhistleVolume)
     {
-        public static readonly AudioSettings Default = new(72, 100, 100, 100, 100);
+        public static readonly AudioSettings Default = new(50, 100, 100, 100, 100);
     }
 
     static AudioSettings? _audioSettingsCache;

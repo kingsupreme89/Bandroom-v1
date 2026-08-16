@@ -1446,6 +1446,13 @@ input, select, textarea, [contenteditable] {
   flex: 0 1 auto;
   min-width: 0;
   overflow-x: auto;
+  /* overflow-x:auto forces overflow-y to compute as auto too (can't leave it "visible"), which
+     clipped the pills' soft radial pill-glow-pulse box-shadow flat at the top/bottom -- read as a
+     hard-edged "square glow" instead of the round halo every other pill in the app gets away with.
+     Padding the clipping box vertically (and pulling it back in with an equal negative margin, so
+     layout/height are unaffected) gives the glow room to fade out before it hits the clip edge. */
+  padding: 12px 0;
+  margin: -12px 0;
   overflow-y: hidden;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -1587,6 +1594,12 @@ input, select, textarea, [contenteditable] {
 }
 .clipper-assign-row-btn:hover { background: rgba(255, 255, 255, 0.15); }
 .clipper-assign-row-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.clipper-assign-row-fav { color: var(--text-muted); }
+.clipper-assign-row-fav.active {
+  color: #ffd700;
+  border-color: rgba(255, 215, 0, 0.5);
+  background: rgba(255, 215, 0, 0.12);
+}
 .clipper-assign-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 /* Section headers grouping the song list by source (task queue item 1) -- reuses
    .bandroom-hub-section-label's look-and-feel via shared properties rather than inheriting the
@@ -3143,6 +3156,16 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
   gap: 10px;
   overflow-y: auto;
   min-height: 0;
+  /* FIXED 2026-08-16: this had no explicit flex sizing of its own inside .situations-body's flex
+     row -- it was only ever getting stretched to full width because #hbcu-pot-panel's flex:1
+     sibling was pulling the row wide. Now that the pot panel is correctly display:none outside
+     HBCU Mode (see its [hidden] fix above), that pull is gone and this collapsed to a cramped
+     single column with nothing claiming the leftover space. Explicit flex:1 (overridden below for
+     the narrow HBCU variant) makes it independently full-width regardless of whether Team Pot is
+     present at all. min-width:0 stops a flex item's default content-based minimum from fighting
+     the grid's own auto-fill sizing. */
+  flex: 1;
+  min-width: 0;
 }
 /* HBCU Mode only has 3 real event cards (Touchdown, Kickoff, Runout -- see
    openSituations/hbcuRelevantEvents in app.js), so the normal auto-fill card grid leaves a lot of
@@ -3173,6 +3196,14 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
   border-left: 1px solid var(--glass-border);
   padding-left: 16px;
 }
+/* ROOT CAUSE FIX 2026-08-16: an ID selector always beats the browser's own [hidden]{display:none}
+   UA rule (ID specificity outranks attribute-selector specificity regardless of source order), so
+   setting element.hidden = true in JS was NEVER actually hiding this panel -- every app.js fix
+   this session that toggled `.hidden` was working exactly as written, the CSS just silently
+   ignored it. Confirmed live via CDP: hiddenAttr was true while computedDisplay stayed "flex".
+   Every other custom-display panel in this file already has this same [hidden] override (see
+   .situation-volume-popover[hidden] etc.) -- this one was just missed. */
+#hbcu-pot-panel[hidden] { display: none; }
 .hbcu-pot-header {
   display: flex;
   align-items: center;
@@ -3380,10 +3411,8 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
   vertical-align: super;
 }
 .situation-volume-popover {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  right: 0;
-  z-index: 20;
+  position: fixed;
+  z-index: 500;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3391,8 +3420,13 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
   border-radius: 10px;
   background: var(--panel-bg, #1a1d24);
   border: 1px solid color-mix(in srgb, var(--team-secondary, var(--accent)) 40%, var(--glass-border));
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translateX(-18px);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
+.situation-volume-popover.slide-open { opacity: 1; transform: translateX(0); pointer-events: auto; }
 .situation-volume-popover[hidden] { display: none; }
 .situation-volume-slider { width: 110px; }
 .situation-volume-value { font-size: 12.5px; color: var(--text-muted); min-width: 32px; }
@@ -3502,10 +3536,8 @@ body.gameday-mode #team-preset-bar { display: none; } /* pre-game curation, not 
    styling) but anchored to .clipper-assign-row (position: relative, see above) since Clipper rows
    aren't wrapped in a .situation-transport-style container. */
 .clipper-share-popover {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  right: 0;
-  z-index: 30;
+  position: fixed;
+  z-index: 500;
   width: 280px;
   max-height: 320px;
   display: flex;
@@ -4647,7 +4679,7 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
 #import-target-team-overlay, #add-school-overlay, #edit-upload-overlay, #pick-team-overlay, #rename-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: 70;
   display: flex;
   align-items: center;
   justify-content: center;

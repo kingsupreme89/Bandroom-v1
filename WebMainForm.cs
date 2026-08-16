@@ -975,10 +975,12 @@ public sealed class WebMainForm : Form
         if (!File.Exists(song.FilePath)) return;
         float baseVolume = side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume;
         float volume = baseVolume * (Math.Clamp(song.Volume, 0, 100) / 100f);
+        // Team Pot is continuous shuffle, not a single scripted cue -- owner: "HBCU shouldn't be
+        // fading anyways." Always plays each pot song straight through, regardless of any
+        // per-song fade settings (those fields only matter for the FireEvent/TriggerEntry path).
         AudioPlayer.Play(song.FilePath, volume, interruptPrevious: true, channel: side,
             playLeadInWhistle: song.PlayLeadInWhistle, whistleSpeed: song.WhistleSpeed, speed2x: song.PlaybackSpeed2x,
-            forcePaEffect: song.PaSpeakerEffect, fadeStartOverride: song.FadeStartSecondsOverride,
-            fadeOutDurationOverride: song.FadeOutDurationOverride, noFade: song.NoFade);
+            forcePaEffect: song.PaSpeakerEffect, noFade: true);
     }
 
     /// <summary>Backs the "\" hotkey HBCU dashboard -- null (JSON "null") when HBCU mode isn't

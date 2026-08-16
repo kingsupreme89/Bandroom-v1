@@ -868,13 +868,13 @@ function wireHbcuPotVolumePopover(row, song) {
   const slider = row.querySelector(".situation-volume-slider");
   const valueLabel = row.querySelector(".situation-volume-value");
   const closeBtn = row.querySelector(".situation-volume-close");
-  const closePopover = () => { popover.hidden = true; };
+  const closePopover = () => closeCardPopover(popover);
 
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     if (!popover.hidden) { closePopover(); return; }
-    document.querySelectorAll(".situation-volume-popover").forEach((p) => { p.hidden = true; });
-    popover.hidden = false;
+    document.querySelectorAll(".situation-volume-popover, .situation-settings-popover, .situation-share-popover, .situation-share-backdrop").forEach((p) => { p.hidden = true; p.classList.remove("slide-open"); });
+    openCardPopover(btn, popover);
   });
   closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
   slider.addEventListener("click", (e) => e.stopPropagation());
@@ -1280,16 +1280,16 @@ function wireSituationVolumePopover(row, trigger) {
   const valueLabel = row.querySelector(".situation-volume-value");
   const closeBtn = row.querySelector(".situation-volume-close");
 
-  const closePopover = () => { popover.hidden = true; };
+  const closePopover = () => closeCardPopover(popover);
 
   btn.addEventListener("click", async (e) => {
     e.stopPropagation();
     if (!popover.hidden) { closePopover(); return; }
-    document.querySelectorAll(".situation-volume-popover").forEach((p) => { p.hidden = true; });
+    document.querySelectorAll(".situation-volume-popover, .situation-settings-popover, .situation-share-popover, .situation-share-backdrop").forEach((p) => { p.hidden = true; p.classList.remove("slide-open"); });
     const current = bridge ? await bridge.GetEventVolume(trigger) : 100;
     slider.value = current;
     valueLabel.textContent = `${current}%`;
-    popover.hidden = false;
+    openCardPopover(btn, popover);
   });
   closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closePopover(); });
   slider.addEventListener("input", (e) => {
@@ -2891,6 +2891,56 @@ const HELP_GUIDE_HTML = `
   </ul>
 </div>
 <div class="help-guide-section">
+  <h3>What triggers each situation?</h3>
+  <p>Every card in your Situations list corresponds to a real moment Bandroom watches for on
+  screen. Here's what actually fires each one, grouped the same way the Situations tabs are.</p>
+  <p><strong>A note on "1st/2nd/3rd/4th Down":</strong> you may notice both a plain
+  <strong>"1st Down"</strong> card and a modern <strong>"Offense: Earned First Down"</strong> card
+  (same for 2nd/3rd/4th). That's not a mistake -- the plain cards are old-style fallbacks kept
+  around so nobody's existing song assignment silently breaks. Assign your song to the modern
+  card (the one with "Offense:" or "Defense:" in the name); you can leave the plain one blank.</p>
+  <ul>
+    <li><strong>Offense: Earned First Down / Earned First Down Short</strong> -- your team
+    converts a first down. "Short" means it only took 5 yards or less.</li>
+    <li><strong>Offense: First Down on First Down</strong> -- a big play on 1st down that's still
+    1st &amp; 10 afterward (the down number itself never changes, so the regular First Down cue
+    can't catch it -- this one does).</li>
+    <li><strong>Offense/Defense: Second Down (Short)</strong>, <strong>Third Down (Short)</strong>,
+    <strong>Fourth Down</strong> -- which side's card fires depends on the distance. 5 yards or
+    less to go is a "Short" Offense card (the offense's moment); more than 5 is the plain Defense
+    card (tougher snap, so it's the defense's hype cue instead). 4th down always fires the Defense
+    card, any distance -- it's a pressure moment regardless of yardage.</li>
+    <li><strong>Offense: 3rd Down Conversion</strong> -- fires specifically the moment a 3rd down
+    converts, on top of the regular First Down cue.</li>
+    <li><strong>Defense: Fourth Down Stop</strong> -- your defense actually stops the opponent on
+    4th down. Different from "Defense: Fourth Down," which just means they're facing it.</li>
+    <li><strong>Offense: 1st Down After Punt</strong> / <strong>Defense: After Punt</strong> --
+    the first snap of a fresh drive that started off a punt.</li>
+    <li><strong>Offense/Defense: After Opening Kick</strong> -- either team's first snap right
+    after the opening kickoff.</li>
+    <li><strong>Touchdown Scored, PAT Made, 2-Point Conversion Made, Field Goal Made</strong> --
+    scoring plays, detected the moment the scoreboard changes.</li>
+    <li><strong>Defense: Field Goal Missed by Opponent</strong> -- the other team's field goal
+    attempt misses.</li>
+    <li><strong>Defense: Turnover Forced / Tackle for Loss / Safety</strong> -- your defense forces
+    a fumble or interception, stops a run behind the line, or scores a safety.</li>
+    <li><strong>Iced Game by First Down / by Turnover, Victory in Hand</strong> -- the game is
+    effectively sealed in your favor (kneel-downs, a late turnover, or a clear win).</li>
+    <li><strong>Defense: Timeout (4/3/2/1/0 Remaining)</strong> -- the opponent calls a timeout;
+    each remaining-timeout count gets its own card.</li>
+    <li><strong>Other: Pregame Ready</strong> -- fires once both teams are set on the pregame
+    screen. <strong>Other: Pregame Take the Field</strong> fires automatically off a short timer,
+    or instantly if you press the <code>[</code> / <code>]</code> hotkeys yourself.</li>
+    <li><strong>Other: Pregame Tunnel</strong> -- exists as a card, but nothing triggers it
+    yet. If you want this wired up to a real moment in the game, let us know.</li>
+    <li><strong>Other: Opening Kickoff, Second-Half Kickoff, Kickoff</strong> -- the opening
+    kickoff, the kickoff to start the second half, and any kickoff following a score.</li>
+    <li><strong>Other: Start of 2nd/4th Quarter</strong> -- the clock hits that quarter.</li>
+    <li><strong>Penalty: Offense / Defense</strong> -- a penalty flag against your team or the
+    opponent, respectively. <strong>Penalty Flag</strong> (no team) is the older, general version.</li>
+  </ul>
+</div>
+<div class="help-guide-section">
   <h3>Default Song Pack</h3>
   <p>Instead of finding and assigning every single song yourself, Bandroom offers a big,
   free, one-time download called the <strong>Default Song Pack</strong> -- thousands of songs
@@ -3250,6 +3300,11 @@ async function refreshHbcuMode() {
   } catch (err) { console.error("GetHbcuMode/GetHbcuTeamNames failed", err); }
   const pill = document.getElementById("pill-hbcu-mode");
   if (pill) pill.setAttribute("aria-pressed", state.hbcuMode ? "true" : "false");
+  // Owner report: couldn't tell from the dot's color alone whether this was actually on or off,
+  // which made a live desync (state vs. what the pill visually showed) impossible to diagnose
+  // from a screenshot. Spell it out in words too -- unambiguous either way.
+  const pillState = document.getElementById("hbcu-mode-pill-state");
+  if (pillState) pillState.textContent = state.hbcuMode ? "On" : "Off";
   if (document.getElementById("team-grid")?.children.length) renderTeamGrid(); // re-filter if teams already loaded
   // Team Pot/Generic Pack panel's visibility was previously only set inside openSituations(),
   // so toggling HBCU Mode off (or on) while the Situations panel was already open left it
@@ -3269,25 +3324,54 @@ async function refreshHbcuMode() {
     potPanel.hidden = !state.hbcuMode;
     if (state.hbcuMode && !document.getElementById("situations-panel")?.hidden) renderHbcuPot();
   }
+  // BUG FIX 2026-08-16 (owner report: "just the teams change, not the layout of the event
+  // cards"): the fixes above keep the team grid and the Team Pot panel's own visibility in sync
+  // live, but the situations LIST itself -- the hbcu-event-list narrow-card class and the
+  // filtered-down event array, both only ever set inside openSituations() -- was never re-run on
+  // a toggle click. So flipping HBCU Mode off updated everything except the actual card grid,
+  // which stayed stuck on whichever layout was showing when the panel was first opened. Re-run
+  // openSituations() for the currently-open category (if any) so the card layout itself catches
+  // up too, same as selectTeam() already does for the same reason.
+  if (state.currentSituationsCategory && !document.getElementById("situations-panel")?.hidden) {
+    openSituations(state.currentSituationsCategory);
+  }
 }
 
 /// HBCU Mode is a global roster filter: it narrows the left team-grid + favorite-team picker to
 /// the SWAC/MEAC schools (see hbcuFilteredTeams). Matchup screens and playback are unaffected --
 /// an HBCU band can play any opponent, so Set Matchup always shows the full roster either way.
+// FIXED 2026-08-16 (live diagnosis via CDP): two overlapping toggle clicks -- e.g. one fired by
+// the live-debugging session itself landing at the same moment as a real click -- raced against
+// each other. Both SaveHbcuMode calls and both refreshHbcuMode calls could resolve out of order,
+// so whichever happened to finish LAST won regardless of which click was actually most recent,
+// leaving the pill text/aria-pressed showing one state while the pot panel's hidden flag (written
+// by the other, now-superseded call) showed the other. A monotonic token discards any click's
+// results once a newer click has already started -- and the pill is disabled for the duration of
+// its own request so a fast double-click from the SAME source can't race itself either.
+let _hbcuModeToggleToken = 0;
 function wireHbcuModeToggle() {
   const pill = document.getElementById("pill-hbcu-mode");
   if (!pill) return;
   pill.addEventListener("click", async () => {
+    const myToken = ++_hbcuModeToggleToken;
     const next = !state.hbcuMode;
+    pill.disabled = true;
     pill.setAttribute("aria-pressed", next ? "true" : "false"); // optimistic -- feels instant
+    const pillState = document.getElementById("hbcu-mode-pill-state");
+    if (pillState) pillState.textContent = next ? "On" : "Off";
     try {
       await bridge?.SaveHbcuMode(next);
       await refreshHbcuMode();
+      if (myToken !== _hbcuModeToggleToken) return; // superseded by a newer click -- its own result already applied, don't stomp it
       renderTeamGrid();
     } catch (err) {
+      if (myToken !== _hbcuModeToggleToken) return; // stale error from a superseded click -- ignore
       console.error("SaveHbcuMode failed", err);
       pill.setAttribute("aria-pressed", state.hbcuMode ? "true" : "false"); // revert on failure
+      if (pillState) pillState.textContent = state.hbcuMode ? "On" : "Off";
       showToast("Couldn't save HBCU Mode -- try again.");
+    } finally {
+      if (myToken === _hbcuModeToggleToken) pill.disabled = false;
     }
   });
 }
@@ -5596,6 +5680,10 @@ async function importLocalSong() {
     if (result.success) {
       showToast(`Imported "${result.name}" to your own library -- it's ready to assign to any trigger. Want it public? Hit Share on it in My Downloads.`);
       loadMyDownloads();
+      // Same stale-cache issue as the song-pack import fix -- Sound Bank/Assign Track reads from
+      // this cached list, so without clearing it the freshly-imported song wouldn't show up there
+      // until something unrelated (e.g. switching teams) happened to invalidate it first.
+      _clipperAssignLibrary = null;
     }
     // cancelled: true just means the user backed out of one of the dialogs -- not an error,
     // nothing to show.
@@ -6504,6 +6592,10 @@ let _clipperAssignSelectedPath = null;
 let _clipperAssignSelectedName = null;
 let _clipperAssignMode = "event"; // "event" (assign/trim a situation's clip) | "whistle" (pick+trim the global lead-in whistle) | "hbcu-pot" (add to a team's Team Pot)
 let _clipperAssignPotTeam = null; // set when _clipperAssignMode === "hbcu-pot"
+// Ctrl/Cmd-click multi-select, Team Pot mode only -- owner request: batch-add several songs to a
+// pot in one go instead of one at a time through Assign/Select. Keyed by path -> name so the
+// "Add N to Pot" button doesn't need to re-walk the DOM to know what's selected.
+let _clipperAssignMultiSelected = new Map();
 // Owner request: default to just this team's Sound Bank (source "default") instead of every
 // source dumped together -- "all" and the individual source names (see CLIPPER_ASSIGN_SOURCE_*
 // below) are one pill-click away, not hidden. Resets to "default" every time the panel opens
@@ -6618,6 +6710,7 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode
   _clipperAssignIsPa = isPa;
   _clipperAssignSelectedPath = null;
   _clipperAssignSelectedName = null;
+  _clipperAssignMultiSelected.clear();
 
   const isWhistleMode = mode === "whistle";
   const isPotMode = mode === "hbcu-pot";
@@ -6716,8 +6809,34 @@ const CLIPPER_ASSIGN_SOURCE_LABELS = {
 };
 const CLIPPER_ASSIGN_SOURCE_ORDER = ["marketplace", "trimmed", "local", "uploaded", "default"];
 
+// Favorited songs, keyed by path -- local-only (localStorage), same as _bigGameBannerEnabled's
+// persistence pattern elsewhere in this file. Cross-cuts every source pill (see the Favorites
+// pill's comment in index.html), so it's read as a client-side Set, not a `source` filter value.
+let _favoriteSongPaths = new Set();
+try { _favoriteSongPaths = new Set(JSON.parse(localStorage.getItem("bandroom-favorite-songs") || "[]")); } catch (_) {}
+function isSongFavorited(path) { return _favoriteSongPaths.has(path); }
+function toggleSongFavorite(path) {
+  if (_favoriteSongPaths.has(path)) _favoriteSongPaths.delete(path); else _favoriteSongPaths.add(path);
+  try { localStorage.setItem("bandroom-favorite-songs", JSON.stringify([..._favoriteSongPaths])); } catch (_) {}
+}
+
 /// Builds one song row -- same Play/Stop/DL per-row transport as before, factored out so both
 /// the grouped assign list and any future reuse share one implementation instead of drifting.
+/// Keeps the primary action button in sync with whichever selection mode is active in Team Pot
+/// mode -- a single plain click (_clipperAssignSelectedPath) vs. a ctrl/cmd-click batch
+/// (_clipperAssignMultiSelected). No-op label/enable logic outside pot mode.
+function updateClipperAssignSelectButton() {
+  const btn = document.getElementById("btn-clipper-assign-select");
+  if (!btn) return;
+  if (_clipperAssignMode === "hbcu-pot" && _clipperAssignMultiSelected.size > 0) {
+    btn.disabled = false;
+    btn.textContent = `Add ${_clipperAssignMultiSelected.size} to Pot`;
+  } else {
+    btn.disabled = !_clipperAssignSelectedPath;
+    btn.textContent = _clipperAssignMode === "hbcu-pot" ? "Add to Pot" : "Select";
+  }
+}
+
 function buildClipperAssignRow(item, list) {
   const row = document.createElement("div");
   row.className = "clipper-assign-row";
@@ -6759,6 +6878,22 @@ function buildClipperAssignRow(item, list) {
   stopBtn.addEventListener("click", (e) => { e.stopPropagation(); bridge?.StopPreview(); });
   actions.appendChild(stopBtn);
 
+  const favBtn = document.createElement("button");
+  favBtn.className = "clipper-assign-row-btn clipper-assign-row-fav";
+  favBtn.classList.toggle("active", isSongFavorited(item.path));
+  favBtn.title = isSongFavorited(item.path) ? "Remove from Favorites" : "Add to Favorites";
+  favBtn.textContent = isSongFavorited(item.path) ? "★" : "☆";
+  favBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleSongFavorite(item.path);
+    const nowFav = isSongFavorited(item.path);
+    favBtn.classList.toggle("active", nowFav);
+    favBtn.title = nowFav ? "Remove from Favorites" : "Add to Favorites";
+    favBtn.textContent = nowFav ? "★" : "☆";
+    if (_clipperAssignFilter === "favorites" && !nowFav) row.remove(); // unfavorited while viewing the Favorites pill -- drop it from view immediately
+  });
+  actions.appendChild(favBtn);
+
   const dlBtn = document.createElement("button");
   dlBtn.className = "clipper-assign-row-btn";
   dlBtn.title = "Add to My Downloads";
@@ -6783,18 +6918,34 @@ function buildClipperAssignRow(item, list) {
   shareBtn.textContent = "↗";
   shareBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    openClipperSharePopover(row, item);
+    openClipperSharePopover(shareBtn, item);
   });
   actions.appendChild(shareBtn);
 
   row.appendChild(actions);
 
-  row.addEventListener("click", () => {
+  row.addEventListener("click", (e) => {
+    if (_clipperAssignMode === "hbcu-pot" && (e.ctrlKey || e.metaKey)) {
+      if (_clipperAssignMultiSelected.has(item.path)) {
+        _clipperAssignMultiSelected.delete(item.path);
+        row.classList.remove("selected");
+      } else {
+        _clipperAssignMultiSelected.set(item.path, item.name);
+        row.classList.add("selected");
+      }
+      // A ctrl-click batch takes over from whatever single row was selected before it, and vice
+      // versa on a later plain click below -- the two selection modes don't mix.
+      _clipperAssignSelectedPath = null;
+      _clipperAssignSelectedName = null;
+      updateClipperAssignSelectButton();
+      return;
+    }
     list.querySelectorAll(".clipper-assign-row.selected").forEach((r) => r.classList.remove("selected"));
+    _clipperAssignMultiSelected.clear();
     row.classList.add("selected");
     _clipperAssignSelectedPath = item.path;
     _clipperAssignSelectedName = item.name;
-    document.getElementById("btn-clipper-assign-select").disabled = false;
+    updateClipperAssignSelectButton();
     if (_clipperAssignMode === "whistle") document.getElementById("btn-clipper-assign-trim").disabled = false;
   });
   return row;
@@ -6806,7 +6957,7 @@ function buildClipperAssignRow(item, list) {
 /// WebMainForm.GetEventsForTeamFromWeb -- doesn't touch/switch the active team). Only one open
 /// at a time, same convention as the situation-card popovers.
 let _clipperShareTeamsCache = null;
-async function openClipperSharePopover(row, item) {
+async function openClipperSharePopover(anchorBtn, item) {
   document.querySelectorAll(".clipper-share-popover").forEach((p) => p.remove());
 
   const popover = document.createElement("div");
@@ -6820,7 +6971,15 @@ async function openClipperSharePopover(row, item) {
 
   popover.appendChild(select);
   popover.appendChild(listEl);
-  row.appendChild(popover);
+  document.body.appendChild(popover);
+  const rect = anchorBtn.getBoundingClientRect();
+  const popW = 280;
+  let left = rect.right + 10;
+  if (left + popW > window.innerWidth - 8) left = rect.left - popW - 10;
+  if (left < 8) left = 8;
+  popover.style.position = "fixed";
+  popover.style.left = `${left}px`;
+  popover.style.top = `${rect.top}px`;
 
   if (!_clipperShareTeamsCache) {
     _clipperShareTeamsCache = bridge ? JSON.parse(await bridge.GetTeams()) : [];
@@ -6889,7 +7048,9 @@ function renderClipperAssignList(filter) {
   list.innerHTML = "";
   const q = filter.toLowerCase().trim();
   let items = (_clipperAssignLibrary || []).filter((it) => !q || it.name.toLowerCase().includes(q));
-  if (_clipperAssignFilter !== "all") {
+  if (_clipperAssignFilter === "favorites") {
+    items = items.filter((it) => isSongFavorited(it.path));
+  } else if (_clipperAssignFilter !== "all") {
     items = items.filter((it) => (it.source || "uploaded") === _clipperAssignFilter);
   }
   if (!items.length) {
@@ -6898,8 +7059,12 @@ function renderClipperAssignList(filter) {
     // pill someone lands on by default every time they open an event.
     const hint = _clipperAssignFilter === "default" && !q
       ? ` -- this team's Sound Bank may not be loaded yet. Try "All Songs".`
+      : _clipperAssignFilter === "favorites" ? " -- star a song anywhere in this list to add it here."
       : q ? " for that search" : " in the Songs library";
     list.innerHTML = `<div class="clipper-assign-row" style="cursor:default;">No songs found${hint}.</div>`;
+  } else if (_clipperAssignFilter === "favorites") {
+    // Cross-cuts every source, so no per-source section headers -- just a flat starred list.
+    for (const item of items) list.appendChild(buildClipperAssignRow(item, list));
   } else {
     const sources = _clipperAssignFilter === "all" ? CLIPPER_ASSIGN_SOURCE_ORDER : [_clipperAssignFilter];
     for (const source of sources) {
@@ -7395,6 +7560,20 @@ function initClipperAssign() {
   document.getElementById("btn-clipper-assign-stop").addEventListener("click", () => bridge?.StopPreview());
 
   document.getElementById("btn-clipper-assign-select").addEventListener("click", async () => {
+    if (_clipperAssignMode === "hbcu-pot" && _clipperAssignMultiSelected.size > 0) {
+      const btn = document.getElementById("btn-clipper-assign-select");
+      btn.disabled = true;
+      const entries = [..._clipperAssignMultiSelected.entries()];
+      for (const [path] of entries) {
+        await bridge?.AddToHbcuPot(_clipperAssignPotTeam, path);
+      }
+      _clipperAssignMultiSelected.clear();
+      closeClipperAssign();
+      await renderHbcuPot();
+      showToast(`Added ${entries.length} songs to the pot.`);
+      return;
+    }
+
     if (!_clipperAssignSelectedPath) return;
     const songName = _clipperAssignSelectedName || _clipperAssignSelectedPath;
 

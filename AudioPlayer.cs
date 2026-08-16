@@ -303,7 +303,10 @@ internal static class AudioPlayer
                 // try can't skip it, but everything that can fail now has a matching finally.
                 lock (Lock) ActiveOutputs.Add((output, channel));
 
-                double effectiveFadeStart = noFade ? double.MaxValue : (fadeStartOverride ?? FadeStartSeconds);
+                // Previews should let the owner hear the whole song when auditioning it, not just
+                // up to the in-game fade point -- only actual GAMETIME playback (and HBCU pot
+                // shuffle, which never fades to begin with) should fade out.
+                double effectiveFadeStart = (noFade || isPreview) ? double.MaxValue : (fadeStartOverride ?? FadeStartSeconds);
                 double effectiveFadeOutDuration = fadeOutDurationOverride ?? FadeOutDuration;
 
                 try

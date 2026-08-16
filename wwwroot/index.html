@@ -142,7 +142,7 @@
              wireHbcuModeToggle/applyHbcuModeFilter. -->
         <button id="pill-hbcu-mode" class="hbcu-mode-pill" title="Toggle HBCU Mode -- narrows the team chooser to SWAC/MEAC schools" aria-pressed="false">
           <span class="hbcu-mode-pill-dot"></span>
-          <span>HBCU Mode</span>
+          <span>HBCU Mode: <span id="hbcu-mode-pill-state">Off</span></span>
         </button>
         <!-- Owner request 2026-08-14: moved above the Team grid (was below it) so the profile
              share/load/publish pills are visible without scrolling past the whole team grid --
@@ -628,6 +628,11 @@
                   <button class="pill clipper-assign-filter bandroom-filter-pill" data-filter="trimmed">Trimmed</button>
                   <button class="pill clipper-assign-filter bandroom-filter-pill" data-filter="local">Your Imports</button>
                   <button class="pill clipper-assign-filter bandroom-filter-pill" data-filter="uploaded">Imported Files</button>
+                  <!-- Owner request: an easy way back to a song you've already found once, without
+                       re-searching or remembering which source pill it lives under. Cross-cuts every
+                       source (a favorite can be a Sound Bank, marketplace, or imported file) so it's
+                       handled as its own filter value, not a "source", in renderClipperAssignList. -->
+                  <button class="pill clipper-assign-filter bandroom-filter-pill" data-filter="favorites">&#9733; Favorites</button>
                   <span class="clipper-assign-filters-spacer"></span>
                   <!-- Owner request: the Sound Bank pill above only ever shows YOUR active team's
                        pack songs, named after the situational slot they auto-filled (e.g.

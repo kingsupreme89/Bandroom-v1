@@ -197,7 +197,9 @@ internal static class AudioPlayer
                     Thread.Sleep(200);
                     elapsed += 0.2;
 
-                    if (elapsed >= (FadeStartSeconds + FadeOutDuration))
+                    // Previews should play the whole song, not cut off at the in-game fade point --
+                    // only actual GAMETIME playback should hard-stop here.
+                    if (!isPreview && elapsed >= (FadeStartSeconds + FadeOutDuration))
                     {
                         // Hard stop — afplay doesn't support real-time fade
                         try
