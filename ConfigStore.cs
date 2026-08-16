@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO.Compression;
 using System.Text.Json;
 
 namespace SupremeStadiumSoundSelector;
@@ -39,6 +40,14 @@ internal static class ConfigStore
     /// same "single global setting" model as AudioPlayer.CurrentReverb/PreRollSeconds).</summary>
     public static readonly string LeadInWhistlePath = Path.Combine(SongsFolder, "leadin_whistle.wav");
     public static readonly string ProfilesFolder = Path.Combine(UserDataRoot, "Profiles");
+    /// <summary>2026-08-16 addition (live data-loss incident: every profile except 3 vanished from
+    /// ProfilesFolder overnight with no reproducible cause found -- no cloud mirror was configured,
+    /// Recycle Bin had nothing since File.Delete bypasses it, no other copy existed anywhere on
+    /// disk). ProfilesFolder had ZERO backup/versioning layer under it -- one live copy, no history.
+    /// This folder holds dated zip snapshots of the whole ProfilesFolder (see BackupProfilesIfNeeded),
+    /// stored OUTSIDE ProfilesFolder so whatever wipes/corrupts that folder can't also take the
+    /// backups with it.</summary>
+    public static readonly string ProfileBackupsFolder = Path.Combine(UserDataRoot, "ProfileBackups");
     /// <summary>One-time marker for the library-wide loudness-normalization sweep (owner request:
     /// "all songs the same volume", applied retroactively to everything assigned before
     /// LoudnessNormalizationService existed/was wired into the assign flow -- see
@@ -1242,10 +1251,17 @@ internal static class ConfigStore
         string baseName = Path.GetFileNameWithoutExtension(sourcePath).ToUpperInvariant();
         string destPath = Path.Combine(SongsUploadedFolder, baseName + ext);
         int suffix = 2;
-        while (File.Exists(destPath) && !PathsPointToSameFile(sourcePath, destPath))
+        // BUG FIX: the collision loop used to check PathsPointToSameFile only, which never
+        // matches when the identical audio is re-imported from a different source location (a
+        // re-downloaded copy, a second drag-and-drop from another folder) -- every such re-import
+        // used to mint a fresh numbered duplicate ("SONG (2).mp3", "SONG (3).mp3"...) even though
+        // the bytes already existed in the library. Falls back to a content compare so a genuine
+        // re-import of the same song is recognized and reused instead of duplicated; a real
+        // collision with DIFFERENT audio under the same name still gets a numbered alternate.
+        while (File.Exists(destPath) && !PathsPointToSameFile(sourcePath, destPath) && !FilesAreIdentical(sourcePath, destPath))
             destPath = Path.Combine(SongsUploadedFolder, $"{baseName} ({suffix++}){ext}");
 
-        if (!PathsPointToSameFile(sourcePath, destPath))
+        if (!PathsPointToSameFile(sourcePath, destPath) && !FilesAreIdentical(sourcePath, destPath))
             File.Copy(sourcePath, destPath, overwrite: false);
         return destPath;
     }
@@ -1672,6 +1688,33 @@ internal static class ConfigStore
     static bool PathsPointToSameFile(string a, string b) =>
         string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Content comparison (size, then byte-for-byte) used alongside PathsPointToSameFile
+    /// so re-importing an identical file from a DIFFERENT source path (re-downloaded copy, second
+    /// drag-and-drop from another folder) is recognized as "already have this" instead of minting
+    /// a numbered duplicate -- PathsPointToSameFile alone only catches re-importing the exact same
+    /// path, which never fires for a fresh source location even when the bytes are identical.
+    /// Same logic as DefaultSongPackService.FilesAreIdentical; kept as a separate copy since the
+    /// two types don't share an internal-visibility boundary worth crossing for one helper.</summary>
+    static bool FilesAreIdentical(string pathA, string pathB)
+    {
+        var a = new FileInfo(pathA);
+        var b = new FileInfo(pathB);
+        if (!a.Exists || !b.Exists || a.Length != b.Length) return false;
+        using var sa = File.OpenRead(pathA);
+        using var sb = File.OpenRead(pathB);
+        const int bufSize = 1024 * 64;
+        var bufA = new byte[bufSize];
+        var bufB = new byte[bufSize];
+        while (true)
+        {
+            int readA = sa.Read(bufA, 0, bufSize);
+            int readB = sb.Read(bufB, 0, bufSize);
+            if (readA != readB) return false;
+            if (readA == 0) return true;
+            if (!bufA.AsSpan(0, readA).SequenceEqual(bufB.AsSpan(0, readB))) return false;
+        }
+    }
+
     static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
 
     /// <summary>Durability safeguard (audit finding): every config/profile/manifest write in this
@@ -1795,6 +1838,66 @@ internal static class ConfigStore
         AtomicWriteAllText(ProfilePath(name), JsonSerializer.Serialize(entries, JsonOptions));
         if (CloudDatabaseService.IsConfigured)
             QueueCloudProfilePush(name, entries);
+        BackupProfilesIfNeeded();
+    }
+
+    static readonly object ProfileBackupLock = new();
+    static bool _checkedBackupToday;
+
+    /// <summary>2026-08-16 addition -- see ProfileBackupsFolder's own doc comment for the incident
+    /// this is defending against. At most one zip snapshot per calendar day (gated on the day's
+    /// zip file already existing, so this is cheap to call from SaveProfile on every single save
+    /// without spamming disk -- SaveProfile fires on every volume-slider tick same as the existing
+    /// cloud-push debounce above has to account for). _checkedBackupToday is an in-memory fast-path
+    /// so a whole session after the first save doesn't re-stat the backups folder on every
+    /// subsequent save; still safe across process restarts since the real gate is the file's own
+    /// existence, not this flag. Failures are swallowed to CrashLog -- a backup attempt must never
+    /// block or fail the actual profile save that triggered it.</summary>
+    public static void BackupProfilesIfNeeded()
+    {
+        if (_checkedBackupToday) return;
+
+        lock (ProfileBackupLock)
+        {
+            if (_checkedBackupToday) return;
+
+            try
+            {
+                if (!Directory.Exists(ProfilesFolder) || Directory.GetFiles(ProfilesFolder).Length == 0)
+                {
+                    _checkedBackupToday = true;
+                    return;
+                }
+
+                Directory.CreateDirectory(ProfileBackupsFolder);
+                string zipPath = Path.Combine(ProfileBackupsFolder, $"Profiles_{DateTime.Now:yyyy-MM-dd}.zip");
+                if (!File.Exists(zipPath))
+                {
+                    string tempZipPath = zipPath + ".tmp";
+                    if (File.Exists(tempZipPath)) File.Delete(tempZipPath);
+                    ZipFile.CreateFromDirectory(ProfilesFolder, tempZipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
+                    File.Move(tempZipPath, zipPath);
+                }
+
+                // Keep 30 days of daily snapshots -- old enough to catch a wipe nobody noticed for
+                // a while, not so much that this folder grows unbounded forever.
+                DateTime cutoff = DateTime.Now.AddDays(-30);
+                foreach (var file in Directory.GetFiles(ProfileBackupsFolder, "Profiles_*.zip"))
+                {
+                    if (File.GetLastWriteTime(file) < cutoff)
+                        try { File.Delete(file); } catch { /* best-effort prune */ }
+                }
+
+                _checkedBackupToday = true;
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("ProfileBackup failed", ex);
+                // Deliberately NOT setting _checkedBackupToday here -- a transient failure (file
+                // locked, disk full for a moment) should retry on the next save this session
+                // instead of silently giving up on backups for the rest of the day.
+            }
+        }
     }
 
     static readonly ConcurrentDictionary<string, CancellationTokenSource> PendingCloudPushes = new();

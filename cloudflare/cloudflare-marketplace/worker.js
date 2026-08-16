@@ -108,8 +108,17 @@ function cors(extra) {
   };
 }
 
+// BUG FIX: this used to strip "&" along with everything else outside [a-zA-Z0-9 _.-], so any
+// school with an ampersand in its real name (Florida A&M, Alabama A&M, Texas A&M, North
+// Carolina A&T, ...) got silently corrupted into a different string on every upload/edit
+// ("Florida A&M" -> "Florida AM"), permanently detaching it from the canonical roster name used
+// everywhere else in the app. Also now collapses repeated internal whitespace ("Ohio  State" ->
+// "Ohio State") -- previously only .trim() handled the ends, so double-spacing produced a second,
+// silently-different stored identity for the same team (same failure shape, different character
+// class). Allowing "&" is intentionally narrow (still no other punctuation) since school names are
+// the only field this matters for and R2/KV keys built from it stay safe either way.
 function sanitizeSegment(s) {
-  return String(s ?? "").replace(/[^a-zA-Z0-9 _.-]/g, "").trim().slice(0, 80);
+  return String(s ?? "").replace(/[^a-zA-Z0-9 &_.-]/g, "").replace(/\s+/g, " ").trim().slice(0, 80);
 }
 
 // Valid marketplace/upload content types -- "song" (Sound Bank), "image" (Trophy Room
@@ -239,7 +248,23 @@ async function addToIndex(env, type, id) {
   const existing = await readIndexRaw(env, type);
   if (existing !== null) {
     if (!existing.includes(id)) existing.push(id);
-    await env.MARKETPLACE_META.put(indexKey(type), JSON.stringify(existing));
+    // BUG FIX: this put was unguarded -- the doc comment above claims a failed index write
+    // "self-heals later", but that's only true for the "index absent" branch below (rebuildIndex
+    // scans every meta record from scratch). When an index already exists and THIS put fails
+    // (transient KV error), the item's meta record is already stored by the caller but never
+    // makes it into the index, and since a rebuild only ever runs when the index is entirely
+    // absent, it stays invisible to /list and /leaderboard forever, not just "until next
+    // rebuild". Retry once, then log so it's at least visible in `wrangler tail` instead of
+    // silently vanishing.
+    try {
+      await env.MARKETPLACE_META.put(indexKey(type), JSON.stringify(existing));
+    } catch (err) {
+      try {
+        await env.MARKETPLACE_META.put(indexKey(type), JSON.stringify(existing));
+      } catch (err2) {
+        console.error(`addToIndex: failed to index ${type}:${id} after retry -- item is stored but will not appear in /list until the index is manually repaired`, err2);
+      }
+    }
     return;
   }
   let rebuilt;
@@ -460,17 +485,25 @@ export default {
         return jsonResponse({ schools: [] });
       }
 
-      const counts = new Map();
+      // BUG FIX: used to group by the raw, un-normalized meta.school string, while /list's own
+      // schoolFilter compares case-insensitively -- the same school uploaded once as "Ohio State"
+      // and once as "ohio state" (both valid post-sanitizeSegment) used to fragment into two
+      // separate leaderboard rows whose counts never matched what /list?school=... actually
+      // returns for either casing. Group by a normalized key (trimmed+lowercased) so counts merge
+      // the same way /list already treats them as one school, while still displaying one real
+      // (first-seen) casing rather than the lowercased key.
+      const counts = new Map(); // normalized key -> { school: displayName, count }
       for (const id of ids) {
         const raw = await env.MARKETPLACE_META.get(`meta:${type}:${id}`);
         if (!raw) continue;
         const meta = JSON.parse(raw);
-        counts.set(meta.school, (counts.get(meta.school) ?? 0) + 1);
+        const key = String(meta.school ?? "").trim().toLowerCase();
+        const entry = counts.get(key);
+        if (entry) entry.count++;
+        else counts.set(key, { school: meta.school, count: 1 });
       }
 
-      const schools = [...counts.entries()]
-        .map(([school, count]) => ({ school, count }))
-        .sort((a, b) => b.count - a.count);
+      const schools = [...counts.values()].sort((a, b) => b.count - a.count);
       return jsonResponse({ schools });
     }
 

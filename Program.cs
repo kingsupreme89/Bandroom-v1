@@ -51,6 +51,14 @@ internal static class Program
 
         if (!ShouldContinueWithSecondInstance()) return;
 
+        // 2026-08-16: also attempt a profile backup on every launch, not just on save -- so a day
+        // with no edits at all (just watching games with existing assignments) still gets a
+        // snapshot. See ConfigStore.BackupProfilesIfNeeded's own doc comment for the incident this
+        // defends against. Runs synchronously here (before the UI even exists) since it's a cheap
+        // no-op once today's zip already exists, and must never race a save that happens seconds
+        // into the session.
+        ConfigStore.BackupProfilesIfNeeded();
+
         // Global crash guard -- three sources of unhandled exceptions in a WinForms+WebView2 app:
         //   1. AppDomain.UnhandledException: any non-UI thread (background Task continuations
         //      that escape without being awaited, timers, etc.). By the time .NET raises this,

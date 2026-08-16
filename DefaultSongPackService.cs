@@ -109,35 +109,132 @@ internal static class DefaultSongPackService
             progress(0.05, "");
             Directory.CreateDirectory(ConfigStore.UserDataRoot);
             string tempExtractRoot = Path.Combine(ConfigStore.UserDataRoot, "_songpack_import_tmp");
-            if (Directory.Exists(tempExtractRoot)) Directory.Delete(tempExtractRoot, recursive: true);
-            Directory.CreateDirectory(tempExtractRoot);
-
-            ZipFile.ExtractToDirectory(zipPath, tempExtractRoot, overwriteFiles: true);
-            ct.ThrowIfCancellationRequested();
-            progress(0.85, "");
-
-            // The pack zips "Default\..." at its root -- accept that either directly or nested
-            // one level under a "Songs\Default" folder (matches the R2 pack.zip's own layout).
-            string extractedTo = Path.Combine(tempExtractRoot, "Default");
-            if (!Directory.Exists(extractedTo))
-                extractedTo = Path.Combine(tempExtractRoot, "Songs", "Default");
-            if (!Directory.Exists(extractedTo))
+            try
             {
-                Directory.Delete(tempExtractRoot, recursive: true);
-                return false;
+                if (Directory.Exists(tempExtractRoot)) Directory.Delete(tempExtractRoot, recursive: true);
+                Directory.CreateDirectory(tempExtractRoot);
+
+                ZipFile.ExtractToDirectory(zipPath, tempExtractRoot, overwriteFiles: true);
+                ct.ThrowIfCancellationRequested();
+                progress(0.85, "");
+
+                // The pack zips "Default\..." at its root -- accept that either directly or nested
+                // one level under a "Songs\Default" folder (matches the R2 pack.zip's own layout).
+                string extractedTo = Path.Combine(tempExtractRoot, "Default");
+                if (!Directory.Exists(extractedTo))
+                    extractedTo = Path.Combine(tempExtractRoot, "Songs", "Default");
+                if (!Directory.Exists(extractedTo))
+                    return false;
+
+                if (Directory.Exists(ConfigStore.DownloadedDefaultSongsFolder))
+                    Directory.Delete(ConfigStore.DownloadedDefaultSongsFolder, recursive: true);
+                Directory.Move(extractedTo, ConfigStore.DownloadedDefaultSongsFolder);
+
+                // The zip path used to move files onto disk without ever touching index.json, so
+                // the Assign panel's per-team auto-fill (which reads index.json via
+                // ConfigStore.GetDefaultPackTeams) could stay empty even though the pack was
+                // physically present -- files "landed" without being "indexed". Discover the teams
+                // that ended up on disk the same way the folder-import path does and merge them in.
+                WriteIndexForRoot(ConfigStore.DownloadedDefaultSongsFolder);
+
+                progress(1.0, "");
+                return true;
             }
-
-            if (Directory.Exists(ConfigStore.DownloadedDefaultSongsFolder))
-                Directory.Delete(ConfigStore.DownloadedDefaultSongsFolder, recursive: true);
-            Directory.Move(extractedTo, ConfigStore.DownloadedDefaultSongsFolder);
-            Directory.Delete(tempExtractRoot, recursive: true);
-
-            progress(1.0, "");
-            return true;
+            finally
+            {
+                // Always clean up the temp extraction scratch dir, even on a thrown/cancelled
+                // extraction (bad zip, disk full, locked file) -- previously this only ran on the
+                // success/no-match paths, so a failed import left a full partial copy of every
+                // extracted file sitting in UserDataRoot until the next import happened to clear it
+                // first. That stray folder was a likely source of "extra files on disk" reports.
+                if (Directory.Exists(tempExtractRoot))
+                {
+                    try { Directory.Delete(tempExtractRoot, recursive: true); } catch { /* best-effort */ }
+                }
+            }
         }, ct);
     }
 
+    /// <summary>Scans `root` (Conference\Team\*.mp3, or Team\*.mp3, or loose files identified by
+    /// filename) for team folders the same way ImportExistingFolderAsync does, and merges the
+    /// discovered team names into root\index.json -- without copying any files. Used after a zip
+    /// extraction, which places files directly rather than routing them through CopyFile.</summary>
+    static void WriteIndexForRoot(string root)
+    {
+        var teams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        bool HasAudioFilesDirectly(string dir) =>
+            Directory.Exists(dir) && Directory.EnumerateFiles(dir).Any(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()));
+
+        void Scan(string dir, int depth)
+        {
+            if (depth > 5) return;
+            if (HasAudioFilesDirectly(dir))
+            {
+                var (resolvedTeam, _, matchType) = IntakeEngine.ResolveTeam(new DirectoryInfo(dir).Name);
+                if (resolvedTeam != "Unknown" && matchType is "exact" or "abbreviation" or "variant")
+                {
+                    teams.Add(resolvedTeam);
+                }
+                else
+                {
+                    foreach (var file in Directory.GetFiles(dir))
+                    {
+                        if (!AudioExtensions.Contains(Path.GetExtension(file).ToLowerInvariant())) continue;
+                        var result = IntakeEngine.Process(Path.GetFileName(file));
+                        if (result.Team != "Unknown") teams.Add(result.Team);
+                    }
+                }
+                return; // a directory with audio directly inside it is a leaf for indexing purposes
+            }
+            foreach (var sub in Directory.GetDirectories(dir))
+                Scan(sub, depth + 1);
+        }
+        if (Directory.Exists(root)) Scan(root, 0);
+        if (teams.Count == 0) return;
+
+        string indexPath = Path.Combine(root, "index.json");
+        var allTeams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (File.Exists(indexPath))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(indexPath));
+                if (doc.RootElement.TryGetProperty("Teams", out var arr))
+                    foreach (var t in arr.EnumerateArray())
+                        if (t.GetString() is string s) allTeams.Add(s);
+            }
+            catch { /* corrupt/missing index -- rebuild from what this scan found */ }
+        }
+        foreach (var t in teams) allTeams.Add(t);
+        File.WriteAllText(indexPath, System.Text.Json.JsonSerializer.Serialize(new { Teams = allTeams.OrderBy(t => t).ToList() }));
+    }
+
     static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aiff", ".flac", ".webm", ".ogg" };
+
+    /// <summary>Cheap same-size-first, then byte-for-byte, comparison used to tell "this is the
+    /// same file being re-imported" apart from "this is a genuinely different alternate clip that
+    /// happens to want the same situation slot". Audio files are large enough that size alone
+    /// almost always disqualifies a mismatch before the byte compare runs.</summary>
+    static bool FilesAreIdentical(string pathA, string pathB)
+    {
+        var a = new FileInfo(pathA);
+        var b = new FileInfo(pathB);
+        if (!a.Exists || !b.Exists || a.Length != b.Length) return false;
+        using var sa = File.OpenRead(pathA);
+        using var sb = File.OpenRead(pathB);
+        const int bufSize = 1024 * 64;
+        var bufA = new byte[bufSize];
+        var bufB = new byte[bufSize];
+        while (true)
+        {
+            int readA = sa.Read(bufA, 0, bufSize);
+            int readB = sb.Read(bufB, 0, bufSize);
+            if (readA != readB) return false;
+            if (readA == 0) return true;
+            if (!bufA.AsSpan(0, readA).SequenceEqual(bufB.AsSpan(0, readB))) return false;
+        }
+    }
 
     public sealed record FolderImportResult(bool Success, string Message, List<string> TeamNames, int SongCount);
 
@@ -199,10 +296,36 @@ internal static class DefaultSongPackService
                 // e.g. "Defense_Earned First Down_3.mp3"). "Load All" callers pass overwrite=true to
                 // replace the existing file at destStem instead, since the whole point of that button
                 // is "replace everything from this folder" rather than accumulate alternates.
+                //
+                // Re-running the SAME import (owner report: imported the same zip/folder ~3 times)
+                // used to number every file again each time -- Song.mp3, Song_2.mp3, Song_3.mp3 --
+                // because a plain name collision was treated as "a different alternate clip" with no
+                // check for "this is literally the same file we already copied". Compare content
+                // before falling back to a numbered alternate so re-imports of the same source are a
+                // no-op instead of piling up copies.
                 if (!overwrite && File.Exists(destPath))
                 {
+                    if (FilesAreIdentical(sourceFile, destPath))
+                    {
+                        AudioCache.Invalidate(destPath);
+                        teamsImported.Add(team);
+                        processedFiles++;
+                        progress(0.05 + 0.85 * Math.Min(1.0, (double)processedFiles / Math.Max(1, totalFiles)), Path.GetFileName(sourceFile));
+                        return;
+                    }
                     int n = 2;
-                    while (File.Exists(destPath = Path.Combine(destDir, $"{destStem}_{n}{ext}"))) n++;
+                    while (File.Exists(destPath = Path.Combine(destDir, $"{destStem}_{n}{ext}")))
+                    {
+                        if (FilesAreIdentical(sourceFile, destPath))
+                        {
+                            AudioCache.Invalidate(destPath);
+                            teamsImported.Add(team);
+                            processedFiles++;
+                            progress(0.05 + 0.85 * Math.Min(1.0, (double)processedFiles / Math.Max(1, totalFiles)), Path.GetFileName(sourceFile));
+                            return;
+                        }
+                        n++;
+                    }
                 }
                 File.Copy(sourceFile, destPath, overwrite: true);
                 // AudioCache (AudioEngine.cs) keys its RAM cache by path and never re-reads a path

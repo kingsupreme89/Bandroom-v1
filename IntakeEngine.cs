@@ -191,15 +191,28 @@ public static class IntakeEngine
 
         if (_aliasIndex!.TryGetValue(nameClean.ToUpperInvariant(), out var candidates) && candidates.Count > 0)
         {
-            string chosen = candidates[0];
+            // BUG FIX: a shared abbreviation across two teams IN THE SAME CONFERENCE (e.g. "UT" =
+            // Tennessee or Texas, both SEC; "UW" = Washington or Wisconsin, both Big Ten; "NU" =
+            // Nebraska or Northwestern, both Big Ten) used to always silently pick candidates[0]
+            // (whichever team happens to be declared first in team_registry.json) -- the
+            // conferenceHint narrowing below can't break a tie between two candidates that share
+            // the SAME hinted conference, so it looked like a confident "abbreviation" match while
+            // actually being a coin flip that mis-filed real songs under the wrong team (the exact
+            // "these teams are wrong" bug report this fix responds to). Narrow the candidate pool
+            // by conference hint when one's available, then only trust the result if it collapsed
+            // to exactly one team -- otherwise report "ambiguous" so the caller treats this as
+            // unresolved (skips auto-fill, flags low confidence) instead of guessing.
+            var pool = candidates;
             if (conferenceHint != null)
             {
-                var confMatch = candidates.FirstOrDefault(c =>
-                    _teams.TryGetValue(c, out var d) && string.Equals(d.Conference, conferenceHint, StringComparison.OrdinalIgnoreCase));
-                if (confMatch != null) chosen = confMatch;
+                var narrowed = candidates.Where(c =>
+                    _teams.TryGetValue(c, out var d) && string.Equals(d.Conference, conferenceHint, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (narrowed.Count > 0) pool = narrowed;
             }
-            if (_teams.TryGetValue(chosen, out var aliasTeam))
-                return (chosen, aliasTeam.Conference, "abbreviation");
+            if (pool.Count == 1 && _teams.TryGetValue(pool[0], out var aliasTeam))
+                return (pool[0], aliasTeam.Conference, "abbreviation");
+            if (pool.Count > 1)
+                return ("Unknown", "General", "ambiguous");
         }
 
         foreach (var (teamName, data) in _teams)
@@ -314,7 +327,7 @@ public static class IntakeEngine
         var flags = new List<string>();
         if (cleaned == "Unknown") flags.Add("title_unknown");
         if (team == "Unknown") flags.Add("team_unknown");
-        if (matchType is "fuzzy" or "unknown") flags.Add("team_match_low_confidence");
+        if (matchType is "fuzzy" or "unknown" or "ambiguous") flags.Add("team_match_low_confidence");
         if (source == "fallback") flags.Add("trigger_fallback_assigned");
 
         return new IntakeResult(cleaned, team, matchType, trigger, source, EventKeysFor(trigger), confidence, flags.ToArray());
