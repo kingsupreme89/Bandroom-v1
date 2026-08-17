@@ -130,9 +130,9 @@ export default {
     }
 
     if (url.pathname === "/downloads" && request.method === "GET") {
-      // Cache in KV for 5 minutes -- GitHub's unauthenticated API is rate-limited to 60
-      // req/hr per source IP, and every Worker isolate shares this one, so polling it
-      // straight from every client's ticker refresh would blow through that fast.
+      // Cache in KV for 5 minutes -- GraphQL is authenticated (5000 req/hr) so this is generous
+      // headroom, not a rate-limit necessity like the old REST approach, but no reason to hit
+      // GitHub on every single ticker refresh either.
       const cacheRaw = await env.USERCOUNT.get("downloads_cache_v2");
       if (cacheRaw) {
         try {
@@ -145,59 +145,83 @@ export default {
         } catch { /* fall through to recompute */ }
       }
 
-      let count = 0;
-      try {
-        // Paginate. The GitHub Releases API defaults to 30 releases per page, so a single
-        // unpaginated fetch silently drops every release older than the 30 newest -- which
-        // under-counts the all-time total (the counter showed 339 instead of the real 520,
-        // with exactly the 181 downloads from releases v1.0.9..v1.0.48 landing on page 2).
-        // Walk pages of 100 until a short page signals the end of history. At Bandroom's
-        // current ~76 releases this is a single request, still far under GitHub's 60/hr limit.
-        const releases = [];
-        for (let page = 1; page <= 20; page++) {
-          const res = await fetch(
-            `https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100&page=${page}`,
-            { headers: { "User-Agent": "bandroom-usercount-worker", Accept: "application/vnd.github+json" } },
-          );
-          if (!res.ok) {
-            // Page 1 failed (rate-limit / GitHub hiccup) -> serve the cached total rather than 0.
-            if (page === 1 && cacheRaw) {
-              return new Response(JSON.stringify({ count: JSON.parse(cacheRaw).count }), {
-                headers: { ...cors, "Content-Type": "application/json" },
-              });
-            }
-            break; // a later page failing just means we keep what we already summed
-          }
-          const batch = await res.json();
-          releases.push(...batch);
-          if (batch.length < 100) break;
-        }
+      const cachedCount = (() => {
+        try { return JSON.parse(cacheRaw ?? "null")?.count ?? null; } catch { return null; }
+      })();
 
-        for (const rel of releases) {
-          for (const asset of rel.assets ?? []) {
-            // Only count the actual installer asset. Squirrel.Windows (the auto-update
-            // mechanism) also publishes "RELEASES" and "*.nupkg" assets per release, and the
-            // app itself fetches those automatically on every update check -- counting them
-            // would report auto-update traffic as if it were human downloads (in practice,
-            // >80% of the raw asset total is this noise, not real installs).
-            if (/setup.*\.exe$/i.test(asset.name ?? "")) {
-              count += asset.download_count ?? 0;
+      let count = 0;
+      let gotRealData = false;
+      // FIXED 2026-08-16: GitHub's REST list-releases endpoint (`GET /repos/.../releases`) was
+      // reliably returning HTTP 200 with a genuinely empty `[]` body for this repo, confirmed live
+      // both unauthenticated AND with a valid token -- not a rate-limit/transient hiccup, GitHub's
+      // REST list endpoint itself was broken for this repo. `res.ok` being true meant no error path
+      // ever caught it, so this got computed as 0 and CACHED as the real download count for up to
+      // an hour, silently breaking the ticker for everyone. GitHub's GraphQL API returns the exact
+      // same data correctly (confirmed live: 88 releases, real per-asset counts) -- switched the
+      // whole computation to GraphQL, which requires an auth token even for public repos (REST
+      // didn't). Needs `wrangler secret put GITHUB_TOKEN` -- a token with just public read access
+      // is enough (no write scopes needed).
+      if (env.GITHUB_TOKEN) {
+        try {
+          let cursor = null;
+          const releases = [];
+          for (let page = 0; page < 20; page++) {
+            const [repoOwner, repoName] = GITHUB_REPO.split("/");
+            const query = `query($cursor: String) { repository(owner: "${repoOwner}", name: "${repoName}") {
+              releases(first: 100, after: $cursor) {
+                pageInfo { hasNextPage endCursor }
+                nodes { releaseAssets(first: 20) { nodes { name downloadCount } } }
+              }
+            } }`;
+            const res = await fetch("https://api.github.com/graphql", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+                "Content-Type": "application/json",
+                "User-Agent": "bandroom-usercount-worker",
+              },
+              body: JSON.stringify({ query, variables: { cursor } }),
+            });
+            if (!res.ok) { console.error("GraphQL HTTP error", res.status, await res.text()); break; }
+            const json = await res.json();
+            if (json.errors) console.error("GraphQL errors", JSON.stringify(json.errors));
+            const rel = json?.data?.repository?.releases;
+            if (!rel) break;
+            releases.push(...rel.nodes);
+            if (!rel.pageInfo.hasNextPage) break;
+            cursor = rel.pageInfo.endCursor;
+          }
+
+          if (releases.length > 0) {
+            gotRealData = true;
+            for (const rel of releases) {
+              for (const asset of rel.releaseAssets?.nodes ?? []) {
+                // Only count the actual installer asset. Squirrel.Windows (the auto-update
+                // mechanism) also publishes "RELEASES" and "*.nupkg" assets per release, and the
+                // app itself fetches those automatically on every update check -- counting them
+                // would report auto-update traffic as if it were human downloads (in practice,
+                // >80% of the raw asset total is this noise, not real installs).
+                if (/setup.*\.exe$/i.test(asset.name ?? "")) {
+                  count += asset.downloadCount ?? 0;
+                }
+              }
             }
           }
-        }
-      } catch {
-        if (cacheRaw) {
-          try { return new Response(JSON.stringify({ count: JSON.parse(cacheRaw).count }), {
-            headers: { ...cors, "Content-Type": "application/json" },
-          }); } catch { /* fall through */ }
-        }
+        } catch (err) { console.error("GraphQL fetch threw", err && err.message); /* gotRealData stays false -- falls through to the cache-preservation guard below */ }
+      } else {
+        console.error("GITHUB_TOKEN not set on env");
       }
 
-      await env.USERCOUNT.put("downloads_cache_v2", JSON.stringify({ count, computedAt: Date.now() }), {
+      // Never trust a 0/empty result over an existing known-good higher cache -- total download
+      // counts only go up in practice, and this endpoint has already been burned once by trusting
+      // a spuriously-empty upstream result (see the long comment above).
+      const finalCount = gotRealData ? count : (cachedCount ?? 0);
+
+      await env.USERCOUNT.put("downloads_cache_v2", JSON.stringify({ count: finalCount, computedAt: Date.now() }), {
         expirationTtl: 3600,
       });
 
-      return new Response(JSON.stringify({ count }), {
+      return new Response(JSON.stringify({ count: finalCount }), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
