@@ -220,10 +220,13 @@ public sealed class WebBridge
         return ConfigStore.RenameMarketplaceDownload(id, newName.Trim()) || ConfigStore.RenameLocalTrack(id, newName.Trim());
     }
 
-    /// <summary>End-user "import my own song" pipeline (item 21) -- runs the whole native flow
-    /// (choose file, name the track, trim/normalize via the existing TrimmerForm) on the UI
-    /// thread since it's all modal dialogs. Returns {success, path?, name?} on completion, or
-    /// {success:false, cancelled:true} if the user backed out at any step.</summary>
+    /// <summary>End-user "import my own song" pipeline (item 21) -- native step 1 only: pops the
+    /// OS file picker (the one native step that has to stay) and returns the chosen path plus an
+    /// IntakeEngine filename suggestion. Naming and trimming are driven entirely by app.js from
+    /// here on, via the same inline naming step + embedded clipper-trim-panel every other trim
+    /// entry point uses (see openInlineTrimmerForImport/_trimForImport in app.js and
+    /// SaveTrimForImport below). Returns {success, path, suggestedName, suggestedTeam,
+    /// suggestedTrigger, triggerSource}, or {success:false, cancelled:true} if backed out.</summary>
     public string ImportLocalSong() => _host.ImportLocalSongFromWeb();
 
     static readonly System.Net.Http.HttpClient ShareHttp = BuildShareHttpClient();
@@ -316,17 +319,19 @@ public sealed class WebBridge
     /// <summary>Marketplace song uploads (app.js's "+ Upload Song" tile in a team's Sound Bank)
     /// went straight from file picker to the worker with no trim step -- every other song path
     /// in the app (local import, AssignTrackForm) goes through TrimmerForm first. Reuses that
-    /// exact same native pick/name/trim/normalize pipeline (ImportLocalSongFromWeb) instead of
-    /// building a second one, then shares the resulting trimmed local track straight to
-    /// <paramref name="school"/> via the existing ShareLocalTrackToMarketplace path -- so a
-    /// marketplace upload now ends up trimmed/normalized exactly like a locally-kept track, and
-    /// also lands in My Downloads since ImportLocalSongFromWeb registers it there regardless.</summary>
+    /// exact same native pick/name/trim/normalize pipeline (ImportLocalSongFromWebNative -- the
+    /// old fully-native flow, kept only for this caller since it drives the whole thing
+    /// synchronously from C#) instead of building a second one, then shares the resulting trimmed
+    /// local track straight to <paramref name="school"/> via the existing
+    /// ShareLocalTrackToMarketplace path -- so a marketplace upload now ends up trimmed/normalized
+    /// exactly like a locally-kept track, and also lands in My Downloads since
+    /// ImportLocalSongFromWebNative registers it there regardless.</summary>
     public async Task<string> ImportAndUploadSongToMarketplace(string school)
     {
         if (string.IsNullOrWhiteSpace(school))
             return JsonSerializer.Serialize(new { success = false, error = "No team selected." });
 
-        var raw = _host.ImportLocalSongFromWeb();
+        var raw = _host.ImportLocalSongFromWebNative();
         using var import = JsonDocument.Parse(raw);
         var root = import.RootElement;
         if (!root.TryGetProperty("success", out var successEl) || !successEl.GetBoolean())
@@ -1501,6 +1506,8 @@ public sealed class WebBridge
     public string SaveTrimAsLeadInWhistle(double startSec, double endSec) => _host.SaveTrimAsLeadInWhistleFromWeb(startSec, endSec);
     public string SaveTrimForHbcuPot(string team, string oldFilePath, double startSec, double endSec, string? sourceName = null) =>
         _host.SaveTrimForHbcuPotFromWeb(team, oldFilePath, startSec, endSec, sourceName);
+    public string SaveTrimForImport(string name, string type, double startSec, double endSec, string? sourceName = null) =>
+        _host.SaveTrimForImportFromWeb(name, type, startSec, endSec, sourceName);
     public int GetEventVolume(string trigger) => _host.GetEventVolumeFromWeb(trigger);
     public void SetEventVolume(string trigger, int percent) => _host.SetEventVolumeFromWeb(trigger, percent);
     // Per-song override for the global lead-in whistle toggle (TriggerEntry.PlayLeadInWhistle) --

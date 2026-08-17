@@ -3592,7 +3592,7 @@ public sealed class WebMainForm : Form
     /// favor of HbcuPlaybackService's continuous shuffle (see its class doc). Matches Touchdown
     /// by substring so both "Offense:" and "Defense: Touchdown Scored" qualify.</summary>
     static bool IsHbcuAllowedEvent(string eventKey) =>
-        eventKey is "Other: Pregame Ready" or "Other: Pregame Take the Field" or "Other: Kickoff" or "Other: Opening Kickoff"
+        eventKey is "Other: Pregame Ready" or "Other: Pregame Take the Field" or "Other: Pregame Tunnel" or "Other: Kickoff" or "Other: Opening Kickoff"
         || eventKey.Contains("Touchdown", StringComparison.OrdinalIgnoreCase);
 
     void OnEngineEventsDetected(IReadOnlyList<TriggerEvent> events)
@@ -4126,12 +4126,13 @@ public sealed class WebMainForm : Form
     T RunOnUiSync<T>(Func<T> func) =>
         IsHandleCreated && InvokeRequired ? (T)Invoke(func) : func();
 
-    /// <summary>End-user "import my own song" pipeline (item 21): choose a local file -> name
-    /// the track -> the SAME TrimmerForm/NormalizeAndLimit path marketplace tracks go through
-    /// auto-opens with that name already set -> saved into ConfigStore.LocalTracksFolder and
-    /// registered in the local-tracks manifest so it shows up in My Downloads immediately, with
-    /// "Share to Marketplace" available. All three dialogs are modal, so this runs synchronously
-    /// on the UI thread via RunOnUiSync and returns a real result to the JS caller either way.</summary>
+    /// <summary>End-user "import my own song" pipeline (item 21), step 1 of 1 on the native side:
+    /// choose a local file via the OS file picker (the one native step that has to stay, since
+    /// it's picking off the user's own disk) and hand back the path plus an IntakeEngine filename
+    /// suggestion so app.js can drive the naming step and the embedded clipper-trim-panel itself,
+    /// matching every other trim entry point in the app instead of popping PromptDialog/
+    /// TrimmerForm. See SaveTrimForImportFromWeb below for where the trimmed result actually gets
+    /// written and registered -- this method no longer does any of that itself.</summary>
     public string ImportLocalSongFromWeb() => RunOnUiSync(() =>
     {
         using var ofd = new OpenFileDialog
@@ -4143,18 +4144,41 @@ public sealed class WebMainForm : Form
             return System.Text.Json.JsonSerializer.Serialize(new { success = false, cancelled = true });
 
         // Filename-based auto-indexing (IntakeEngine): suggest a clean title/team/trigger from
-        // the raw filename so the naming dialog starts prefilled instead of the user typing a
-        // clean name in from scratch. Purely a suggestion -- never auto-assigns anything; the
+        // the raw filename so the inline naming step starts prefilled instead of the user typing
+        // a clean name in from scratch. Purely a suggestion -- never auto-assigns anything; the
         // user still has to accept/edit it and, later, actually assign the track to a trigger.
+        var suggestion = IntakeEngine.Process(Path.GetFileName(ofd.FileName));
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            success = true,
+            path = ofd.FileName,
+            suggestedName = suggestion.CleanedTitle,
+            suggestedTeam = suggestion.Team,
+            suggestedTrigger = suggestion.PrimaryTrigger,
+            triggerSource = suggestion.TriggerSource,
+        });
+    });
+
+    /// <summary>Old fully-native pick/name/trim/normalize pipeline, kept only for
+    /// ImportAndUploadSongToMarketplace (the "+ Upload Song" -> marketplace share flow in
+    /// WebBridge.cs), which drives the whole thing synchronously from C# and isn't part of the
+    /// "+ Import Your Own Song" ask -- that button now uses ImportLocalSongFromWeb + the embedded
+    /// clipper-trim-panel above instead. Left untouched from before this migration.</summary>
+    public string ImportLocalSongFromWebNative() => RunOnUiSync(() =>
+    {
+        using var ofd = new OpenFileDialog
+        {
+            Filter = "Audio files (*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac)|*.mp3;*.wav;*.wma;*.m4a;*.aiff;*.flac|All files (*.*)|*.*",
+            Title = "Choose a song to import",
+        };
+        if (ofd.ShowDialog(this) != DialogResult.OK)
+            return System.Text.Json.JsonSerializer.Serialize(new { success = false, cancelled = true });
+
         var suggestion = IntakeEngine.Process(Path.GetFileName(ofd.FileName));
         var label = suggestion.Team != "Unknown" || suggestion.TriggerSource != "fallback"
             ? $"Enter a name for this track: (suggested: {suggestion.Team} / {suggestion.PrimaryTrigger})"
             : "Enter a name for this track:";
 
-        // ShowTrackNaming (Task: add PA as a content type + crowd-noise checkbox) also collects
-        // the Song/PA type choice and, if checked, bakes " w/ Crowd" into the name here -- name
-        // already carries the suffix by the time anything downstream (TrimmerForm's disk write,
-        // the local-tracks manifest, a later marketplace share) ever sees it.
         var naming = PromptDialog.ShowTrackNaming(this, "Name Your Track", label, suggestion.CleanedTitle);
         if (naming == null)
             return System.Text.Json.JsonSerializer.Serialize(new { success = false, cancelled = true });
@@ -4175,4 +4199,50 @@ public sealed class WebMainForm : Form
             return System.Text.Json.JsonSerializer.Serialize(new { success = true, path = trimmer.SavedFilePath, name = naming.Name });
         }
     });
+
+    /// <summary>Import pipeline's trim-save step -- the embedded-clipper-trim-panel counterpart to
+    /// TrimmerForm.SaveTrimmed()'s _presetSongName branch. Mirrors SaveTrimForHbcuPotFromWeb's
+    /// trim/normalize/write core exactly, but writes into ConfigStore.LocalTracksFolder (using the
+    /// same safe-filename + dedupe scheme TrimmerForm used) and registers the result in the
+    /// local-tracks manifest via ConfigStore.RecordLocalTrack, so it shows up in My Downloads
+    /// immediately with Share to Marketplace available -- exactly what the old native pipeline did.</summary>
+    public string SaveTrimForImportFromWeb(string name, string type, double startSec, double endSec, string? sourceName = null)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return JsonSerializer.Serialize(new { ok = false, error = "A track name is required." });
+        string? srcPath = Directory.Exists(ConfigStore.TrimSourceFolder)
+            ? Directory.GetFiles(ConfigStore.TrimSourceFolder).FirstOrDefault() : null;
+        if (srcPath == null) return JsonSerializer.Serialize(new { ok = false, error = "Trim source is gone -- reopen the trimmer." });
+        if (endSec <= startSec) return JsonSerializer.Serialize(new { ok = false, error = "End must be after start." });
+
+        try
+        {
+            Directory.CreateDirectory(ConfigStore.LocalTracksFolder);
+            string safeLocalName = System.Text.RegularExpressions.Regex.Replace(name, @"[^\w\s-]", "").Replace(" ", "_");
+            string outPath = Path.Combine(ConfigStore.LocalTracksFolder, $"{safeLocalName}.wav");
+            int n = 1;
+            while (File.Exists(outPath))
+                outPath = Path.Combine(ConfigStore.LocalTracksFolder, $"{safeLocalName}_{n++}.wav");
+
+            using (var reader = new NAudio.Wave.AudioFileReader(srcPath))
+            {
+                var offset = new NAudio.Wave.SampleProviders.OffsetSampleProvider(reader)
+                {
+                    SkipOver = TimeSpan.FromSeconds(startSec),
+                    Take = TimeSpan.FromSeconds(endSec - startSec),
+                };
+                var normalized = AudioNormalizer.NormalizeAndLimit(offset);
+                NAudio.Wave.WaveFileWriter.CreateWaveFile16(outPath, normalized);
+            }
+
+            ConfigStore.RecordLocalTrack(name, outPath, string.IsNullOrWhiteSpace(type) ? "song" : type);
+
+            return JsonSerializer.Serialize(new { ok = true, success = true, fileName = Path.GetFileName(outPath), path = outPath, name });
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("SaveTrimForImportFromWeb failed", ex);
+            return JsonSerializer.Serialize(new { ok = false, error = "Couldn't save the imported track." });
+        }
+    }
 }

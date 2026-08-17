@@ -4769,6 +4769,24 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   line-height: 1.4;
   margin-top: -6px;
 }
+/* Import Your Own Song naming step -- reuses .add-school-body/.add-school-label layout, just
+   adds the Song/PA radio row + crowd-noise checkbox row PromptDialog.ShowTrackNaming used to
+   collect natively. */
+.import-song-naming-type-row {
+  display: flex;
+  gap: 18px;
+}
+.import-song-naming-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.import-song-naming-crowd {
+  margin-top: -4px;
+}
 #team-picker {
   width: min(980px, 92vw);
   height: min(700px, 88vh);

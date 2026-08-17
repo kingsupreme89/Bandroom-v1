@@ -262,6 +262,36 @@
         </div>
       </div>
 
+      <!-- Import Your Own Song -- naming step. Replaces the old native PromptDialog.ShowTrackNaming
+           modal so "+ Import Your Own Song" matches every other in-app flow instead of stacking
+           native Windows dialogs. Collects the same fields the native dialog did (name, Song/PA
+           type, crowd-noise checkbox) -- see importLocalSong()/openInlineTrimmerForImport in
+           app.js. On confirm, opens the SAME embedded clipper-trim-panel every other trim entry
+           point uses (modeled on openInlineTrimmerForHbcuPot). -->
+      <div id="import-song-naming-overlay" hidden>
+        <div id="import-song-naming-dialog" class="glass">
+          <div class="team-picker-header">
+            <span id="import-song-naming-title">Name Your Track</span>
+            <button id="btn-close-import-song-naming" class="icon-btn">&times;</button>
+          </div>
+          <div class="add-school-body">
+            <div id="import-song-naming-hint" class="add-school-hint"></div>
+            <label class="add-school-label" for="import-song-naming-name">Track name</label>
+            <input type="text" id="import-song-naming-name" placeholder="e.g. Rise Up" class="team-picker-search" maxlength="80" />
+            <label class="add-school-label">Type</label>
+            <div class="import-song-naming-type-row">
+              <label class="import-song-naming-radio"><input type="radio" name="import-song-naming-type" value="song" checked /> Song</label>
+              <label class="import-song-naming-radio"><input type="radio" name="import-song-naming-type" value="pa" /> PA Announcer Clip</label>
+            </div>
+            <label class="import-song-naming-radio import-song-naming-crowd">
+              <input type="checkbox" id="import-song-naming-crowd" /> Recorded with crowd noise
+            </label>
+            <div id="import-song-naming-error" class="add-school-error" hidden></div>
+            <button id="btn-import-song-naming-confirm" class="btn-ghost btn-block">Continue to Trim</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Add School (TeamBuilder custom school v1) -- name + primary/secondary color only. No
            in-game OCR/matching for these; logo is set afterward via the existing per-team pencil
            icon in the full Team picker, which already works for any team name. -->

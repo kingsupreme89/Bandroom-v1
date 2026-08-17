@@ -694,6 +694,7 @@ const hbcuRelevantEvents = new Set([
   "Other: Kickoff",
   "Other: Pregame Ready",
   "Other: Pregame Take the Field",
+  "Other: Pregame Tunnel",
 ]);
 
 // friendlyEventName's shared EVENT_FRIENDLY_NAMES map labels both TD keys plain "Touchdown" --
@@ -964,6 +965,15 @@ function wireHbcuPotSettingsPopover(row, song) {
 }
 
 async function openSituations(category) {
+  // HBCU mode's category tabs collapse to a single "All" pill (see renderCategories) since its
+  // event cards span multiple FCS categories (Offense/Defense/Other) -- but callers all over this
+  // file re-invoke openSituations with whatever state.currentSituationsCategory was left over from
+  // BEFORE HBCU mode was toggled on (e.g. "Offense", "Defense"), which silently narrows
+  // GetEventsForCategory to that one category server-side. That's how "Defense: Touchdown Scored"
+  // (or any HBCU card outside the stale category) could vanish from the list even though it's in
+  // hbcuRelevantEvents -- force "All" here so HBCU mode always sees every category regardless of
+  // what was selected before it was turned on.
+  if (state.hbcuMode) category = "All";
   const panel = document.getElementById("situations-panel");
   const list = document.getElementById("situations-list");
   document.getElementById("situations-title").textContent = category === "All" ? "All Situations" : category;
@@ -3920,6 +3930,15 @@ function wireControls() {
     if (e.key === "Enter") submitAddSchool();
   });
 
+  document.getElementById("btn-close-import-song-naming").addEventListener("click", closeImportSongNamingDialog);
+  document.getElementById("import-song-naming-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "import-song-naming-overlay") closeImportSongNamingDialog();
+  });
+  document.getElementById("btn-import-song-naming-confirm").addEventListener("click", submitImportSongNaming);
+  document.getElementById("import-song-naming-name").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitImportSongNaming();
+  });
+
   document.getElementById("btn-matchup").addEventListener("click", openMatchupDialog);
   document.getElementById("btn-close-matchup").addEventListener("click", closeMatchupDialog);
   document.getElementById("btn-matchup-cancel").addEventListener("click", closeMatchupDialog);
@@ -4003,6 +4022,7 @@ function wireControls() {
     if (!document.getElementById("matchup-overlay").hidden) closeMatchupDialog();
     if (!document.getElementById("import-target-team-overlay").hidden) closeImportTargetTeamDialog();
     if (!document.getElementById("add-school-overlay").hidden) closeAddSchoolDialog();
+    if (!document.getElementById("import-song-naming-overlay").hidden) closeImportSongNamingDialog();
     if (!document.getElementById("favorite-team-overlay").hidden) { document.getElementById("favorite-team-overlay").hidden = true; restoreActiveTeamGlow(); }
     // Album closes first if both happen to be open (it renders on top of the team-grid overlay).
     if (!document.getElementById("marketplace-upload-picker-overlay").hidden) closeMarketplaceUploadPicker();
@@ -4026,7 +4046,7 @@ function wireControls() {
     if (e.key !== "Tab") return;
     const assignPanel = document.getElementById("clipper-assign");
     if (!assignPanel || assignPanel.hidden) return;
-    if (_trimTrigger || _trimForWhistle || _trimForHbcuPot) return;
+    if (_trimTrigger || _trimForWhistle || _trimForHbcuPot || _trimForImport) return;
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
     e.preventDefault();
@@ -5666,10 +5686,13 @@ async function sendMarketplaceChatMessage() {
   }
 }
 
-/// End-user "import my own song" pipeline (item 21) -- runs the whole native flow (choose file,
-/// name track, trim/normalize via TrimmerForm) synchronously on the C# side; this just kicks it
-/// off and refreshes the grid on success. All three of those steps are modal WinForms dialogs,
-/// so ImportLocalSong doesn't return until the user finishes or cancels.
+/// End-user "import my own song" pipeline (item 21) -- step 1: bridge.ImportLocalSong() pops just
+/// the native OS file picker (the one native step that has to stay) and returns the chosen path
+/// plus an IntakeEngine filename suggestion. Steps 2 (naming) and 3 (trim) are driven entirely by
+/// this file now, using the same in-web naming overlay + embedded clipper-trim-panel every other
+/// trim entry point already uses, instead of stacking native PromptDialog/TrimmerForm windows on
+/// top of the file picker.
+let _importLocalSongPath = null; // path returned by the file picker, held until the naming step submits
 async function importLocalSong() {
   const btn = document.getElementById("btn-import-local-song");
   if (!bridge || !btn) return;
@@ -5678,21 +5701,59 @@ async function importLocalSong() {
     const raw = await bridge.ImportLocalSong();
     const result = JSON.parse(raw);
     if (result.success) {
-      showToast(`Imported "${result.name}" to your own library -- it's ready to assign to any trigger. Want it public? Hit Share on it in My Downloads.`);
-      loadMyDownloads();
-      // Same stale-cache issue as the song-pack import fix -- Sound Bank/Assign Track reads from
-      // this cached list, so without clearing it the freshly-imported song wouldn't show up there
-      // until something unrelated (e.g. switching teams) happened to invalidate it first.
-      _clipperAssignLibrary = null;
+      _importLocalSongPath = result.path;
+      openImportSongNamingDialog(result);
     }
-    // cancelled: true just means the user backed out of one of the dialogs -- not an error,
-    // nothing to show.
+    // cancelled: true just means the user backed out of the file picker -- not an error, nothing
+    // to show.
   } catch (err) {
     console.error("ImportLocalSong failed", err);
     showToast("Couldn't import that song -- try again.");
   } finally {
     btn.disabled = false;
   }
+}
+
+/// Step 2: in-web naming step, replacing PromptDialog.ShowTrackNaming. Prefills from the
+/// IntakeEngine suggestion the same way the old native dialog's label/default text did.
+function openImportSongNamingDialog(suggestion) {
+  const hint = document.getElementById("import-song-naming-hint");
+  hint.textContent = (suggestion.suggestedTeam && suggestion.suggestedTeam !== "Unknown") || (suggestion.triggerSource && suggestion.triggerSource !== "fallback")
+    ? `Suggested: ${suggestion.suggestedTeam} / ${suggestion.suggestedTrigger}`
+    : "";
+  document.getElementById("import-song-naming-name").value = suggestion.suggestedName || "";
+  document.querySelector('input[name="import-song-naming-type"][value="song"]').checked = true;
+  document.getElementById("import-song-naming-crowd").checked = false;
+  const err = document.getElementById("import-song-naming-error");
+  err.hidden = true;
+  err.textContent = "";
+  document.getElementById("import-song-naming-overlay").hidden = false;
+  document.getElementById("import-song-naming-name").focus();
+}
+
+function closeImportSongNamingDialog() {
+  document.getElementById("import-song-naming-overlay").hidden = true;
+  _importLocalSongPath = null;
+}
+
+/// Confirms the naming step and hands off to the embedded trimmer (step 3), mirroring
+/// PromptDialog.ShowTrackNaming's "bake ' w/ Crowd' into the name here, once" behavior so
+/// everything downstream (the trimmed file's disk name, the local-tracks manifest, a later
+/// marketplace share) just uses the name as-is.
+function submitImportSongNaming() {
+  const err = document.getElementById("import-song-naming-error");
+  const rawName = document.getElementById("import-song-naming-name").value.trim();
+  if (!rawName) {
+    err.textContent = "Enter a name for this track.";
+    err.hidden = false;
+    return;
+  }
+  const crowd = document.getElementById("import-song-naming-crowd").checked;
+  const name = crowd ? `${rawName} w/ Crowd` : rawName;
+  const type = document.querySelector('input[name="import-song-naming-type"]:checked').value;
+  const path = _importLocalSongPath;
+  closeImportSongNamingDialog();
+  openInlineTrimmerForImport(path, name, type);
 }
 
 // Nexus-Mods-style card, same DOM shape as buildItemTile's marketplace-card branch (see its
@@ -6703,7 +6764,7 @@ async function openClipperAssign(trigger, eventName, isPa, currentFileName, mode
   // Switching events (or into whistle mode) while the inline trimmer was left open for a
   // PREVIOUS session otherwise left its waveform/trim state on screen (clipper-assign-list
   // stays hidden, clipper-trim-panel stays visible) instead of resetting to the new song list.
-  if (_trimTrigger || _trimForWhistle || _trimForHbcuPot) closeInlineTrimmer();
+  if (_trimTrigger || _trimForWhistle || _trimForHbcuPot || _trimForImport) closeInlineTrimmer();
 
   _clipperAssignMode = mode;
   _clipperAssignTrigger = trigger;
@@ -6784,7 +6845,7 @@ async function openClipperAssignForHbcuPot(team) {
 function closeClipperAssign() {
   bridge?.StopPreview(); // native (local-file) preview pathway
   _previewAudio?.pause(); // JS <audio> preview pathway -- same gap as closeBandroomMarketplace above
-  if (_trimTrigger || _trimForWhistle || _trimForHbcuPot) closeInlineTrimmer();
+  if (_trimTrigger || _trimForWhistle || _trimForHbcuPot || _trimForImport) closeInlineTrimmer();
   document.getElementById("clipper-assign").hidden = true;
   document.getElementById("btn-clipper-close-assign").hidden = true;
   document.getElementById("clipper-title-text").textContent = "Clip Preview";
@@ -7113,6 +7174,9 @@ let _trimForWhistle = false; // true when the trimmer opened via Clipper Island'
 let _trimForHbcuPot = false; // true when the trimmer opened for a Team Pot row (no trigger -- see _trimPotTeam/_trimPotPath)
 let _trimPotTeam = null;
 let _trimPotPath = null; // the pot entry's CURRENT path, so Save knows which entry to retarget
+let _trimForImport = false; // true when the trimmer opened as step 3 of "Import Your Own Song" (no trigger/pot to save back to -- Save finalizes into ConfigStore.LocalTracksFolder instead, see SaveTrimForImportFromWeb)
+let _trimImportName = null; // name collected by the naming step (submitImportSongNaming), carried through to Save
+let _trimImportType = null; // "song" | "pa", same
 let _trimSourceName = null; // filename actually loaded into the trimmer, for correctly naming the saved clip
 let _trimIsPa = false;
 let _trimUrl = null;
@@ -7252,6 +7316,52 @@ async function openInlineTrimmerForHbcuPot(team, path, fileName) {
   loadTrimWaveform(result.url);
 }
 
+/// Import pipeline's step 3 -- entered the same way openInlineTrimmerForHbcuPot is (directly from
+/// outside an already-open Clipper Island flow, right after the naming step submits), so it opens
+/// #clipper-assign/sets the header text itself too. Unlike the pot flow, Save finalizes the import
+/// (SaveTrimForImportFromWeb) rather than retargeting an existing entry -- name/type collected by
+/// the naming step ride along in _trimImportName/_trimImportType for that call.
+async function openInlineTrimmerForImport(path, name, type) {
+  if (!bridge) return;
+  const result = JSON.parse(await bridge.PrepareTrimForWhistle(path));
+  if (!result.ok) {
+    showToast(result.error || "Couldn't open the trimmer.");
+    return;
+  }
+  _trimTrigger = null;
+  _trimForWhistle = false;
+  _trimForHbcuPot = false;
+  _trimForImport = true;
+  _trimImportName = name;
+  _trimImportType = type;
+  _trimIsPa = type === "pa";
+  _trimUrl = result.url;
+  _trimDurationSec = result.durationSec;
+  _trimStartSec = 0;
+  _trimEndSec = Math.min(result.durationSec, 15);
+  _trimPeaks = null;
+  _trimDecodeFailed = false;
+
+  document.getElementById("clipper-empty").hidden = true;
+  document.getElementById("clipper-title-text").textContent = "Trim Your Song";
+  document.getElementById("btn-clipper-close-assign").hidden = false;
+  document.getElementById("clipper-assign-event").textContent = `"${name}"`;
+  document.getElementById("clipper-assign-current").textContent = "";
+  document.getElementById("clipper-assign").hidden = false;
+  document.getElementById("clipper-assign-list").hidden = true;
+  document.getElementById("clipper-trim-panel").hidden = false;
+  document.getElementById("clipper-assign-actions-default").hidden = true;
+  document.getElementById("clipper-trim-actions").hidden = false;
+  document.getElementById("btn-trim-save").hidden = false;
+  document.getElementById("btn-trim-whistle").textContent = "Set as Lead-In Whistle";
+  _trimSourceName = result.fileName || name;
+  document.getElementById("clipper-trim-filename").textContent = result.fileName || name;
+  updateTrimLabels();
+  setTrimZoom(1);
+
+  loadTrimWaveform(result.url);
+}
+
 function closeInlineTrimmer() {
   stopTrimPreview();
   _trimTrigger = null;
@@ -7259,6 +7369,9 @@ function closeInlineTrimmer() {
   _trimForHbcuPot = false;
   _trimPotTeam = null;
   _trimPotPath = null;
+  _trimForImport = false;
+  _trimImportName = null;
+  _trimImportType = null;
   _trimSourceName = null;
   _trimUrl = null;
   _trimPeaks = null;
@@ -7497,6 +7610,24 @@ function wireInlineTrimmer() {
 
   document.getElementById("btn-trim-save").addEventListener("click", async () => {
     if (!bridge) return;
+    if (_trimForImport) {
+      // Finalizes the import (SaveTrimForImportFromWeb: normalize/limit, write into
+      // ConfigStore.LocalTracksFolder, register in the local-tracks manifest) -- the embedded-
+      // panel equivalent of TrimmerForm.SaveTrimmed()'s _presetSongName branch. Same success
+      // toast text and cache-invalidation the old native importLocalSong() flow used, so nothing
+      // about what happens after a successful import changes for the user.
+      const result = JSON.parse(await bridge.SaveTrimForImport(_trimImportName, _trimImportType, _trimStartSec, _trimEndSec, _trimSourceName));
+      if (!result.ok) { showToast(result.error || "Couldn't save the imported track."); return; }
+      showToast(`Imported "${result.name}" to your own library -- it's ready to assign to any trigger. Want it public? Hit Share on it in My Downloads.`);
+      loadMyDownloads();
+      // Same stale-cache issue as the song-pack import fix -- Sound Bank/Assign Track reads from
+      // this cached list, so without clearing it the freshly-imported song wouldn't show up there
+      // until something unrelated (e.g. switching teams) happened to invalidate it first.
+      _clipperAssignLibrary = null;
+      closeInlineTrimmer();
+      closeClipperAssign();
+      return;
+    }
     if (_trimForHbcuPot) {
       const result = JSON.parse(await bridge.SaveTrimForHbcuPot(_trimPotTeam, _trimPotPath, _trimStartSec, _trimEndSec, _trimSourceName));
       if (!result.ok) { showToast(result.error || "Couldn't save the trimmed clip."); return; }
