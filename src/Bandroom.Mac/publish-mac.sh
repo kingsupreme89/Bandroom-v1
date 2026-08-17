@@ -3,7 +3,13 @@
 # (no .NET runtime install required on the user's Mac). Run from anywhere; paths are relative
 # to this script's location.
 #
-# Usage: ./publish-mac.sh [osx-arm64|osx-x64]   (defaults to osx-arm64, the arch this was built on)
+# Usage: ./publish-mac.sh [osx-arm64|osx-x64] [version]
+#   RID defaults to osx-arm64, the arch this was built on.
+#   version defaults to the latest git tag (e.g. "1.1.18"), falling back to 1.0.0 if none exist.
+#   Passed through as the real AssemblyVersion/FileVersion AND the Info.plist version -- without
+#   this, GetAppVersion() (Assembly.GetName().Version) always reports the SDK's default "1.0.0.0"
+#   no matter which real release this build corresponds to, which would make any version-based
+#   update check meaningless.
 
 set -euo pipefail
 
@@ -18,9 +24,14 @@ APP_NAME="Bandroom.app"
 # Keyed by RID so an arm64 and an x64 build can be assembled side by side without one
 # overwriting the other -- release-mac.sh reads from this same per-arch path.
 APP_DIR="$SCRIPT_DIR/bin/publish/$RID/$APP_NAME"
-VERSION="$(grep -m1 -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$SCRIPT_DIR/../../appcast.xml" 2>/dev/null | tr -d '"' || echo "1.0.0")"
+VERSION="${2:-}"
+if [ -z "$VERSION" ]; then
+  LATEST_TAG="$(git -C "$SCRIPT_DIR" tag --sort=-v:refname 2>/dev/null | head -1)"
+  VERSION="${LATEST_TAG#v}"
+  VERSION="${VERSION:-1.0.0}"
+fi
 
-echo "==> Publishing self-contained build for $RID..."
+echo "==> Publishing self-contained build for $RID (version $VERSION)..."
 rm -rf "$PUBLISH_DIR"
 dotnet publish "$PROJECT" \
   -c Release \
@@ -28,6 +39,9 @@ dotnet publish "$PROJECT" \
   --self-contained true \
   -p:PublishSingleFile=false \
   -p:IncludeNativeLibrariesForSelfExtract=true \
+  -p:AssemblyVersion="$VERSION" \
+  -p:FileVersion="$VERSION" \
+  -p:InformationalVersion="$VERSION" \
   -o "$PUBLISH_DIR"
 
 echo "==> Assembling $APP_NAME..."
