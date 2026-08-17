@@ -141,9 +141,40 @@ two places:
   a new "What triggers each situation?" section, right after "Assigning songs," so the same
   reference lives in-app for end users, not just this session's chat.
 
+## Fixed: Download Counter Stuck at 0 (post-`ppup` `lehgo` deploy)
+
+Owner report after the app release: "i cant see how many dl i have anymore on the ticker."
+`bandroom-usercount`'s `/downloads` endpoint was returning `{"count":0}` live.
+
+- GitHub's REST `GET /repos/.../releases` list endpoint was reliably returning HTTP 200 with a
+  genuinely empty `[]` body for this repo — confirmed both unauthenticated and with a valid token,
+  so not a rate-limit/transient issue, the REST list endpoint itself was broken for this repo. Since
+  `res.ok` was true, none of the worker's existing error-fallback paths ever caught it, so this got
+  computed as `0` and cached as the real download count for up to an hour.
+- GitHub's GraphQL API returns the exact same data correctly (confirmed live: 88 releases, real
+  per-asset counts) — rewrote `/downloads` to use GraphQL instead of REST pagination. GraphQL
+  requires an auth token even for public repos (REST didn't), so added a `GITHUB_TOKEN` secret.
+- Also added a standing guard: a `0`/empty result is never trusted over an existing known-good
+  cached count, in case this class of upstream flakiness recurs.
+- Real gotcha along the way: setting the new secret via `$token | npx wrangler secret put
+  GITHUB_TOKEN` in PowerShell silently prepended a UTF-8 BOM to the value (`Bearer <BOM>gho_...`),
+  which GitHub rejected as "Bad credentials" (401) with zero indication a BOM was the cause. Traced
+  it live via `wrangler tail` + temporary debug logging (removed before the final deploy). Setting
+  it from a clean bash-side file instead fixed it. Documented in `SECRETS_CHECKLIST.md` (which is
+  gitignored via a broad `*secret*` pattern — stays local-only by design, not committed).
+- Environment note: this shell had no working `wrangler`/`npm`/`npx` at session start (`node.exe`
+  existed standalone at `D:\node.exe` with no accompanying npm). Reinstalled Node.js LTS properly
+  via `winget` so `lehgo` deploys can run directly from here going forward without this detour.
+
+Verified live post-fix: `curl https://bandroom-usercount.bandroom.workers.dev/downloads` →
+`{"count":724}`.
+
 ## Shipped
 
 **v1.1.19** — one `ppup` release covering everything above.
+**Both Cloudflare workers redeployed** via `lehgo` — `bandroom-usercount` (with the GraphQL/download-
+counter fix) and `bandroom-marketplace` (no code changes this session, redeployed per the standard
+"deploy both" convention).
 
 ## Verification
 
@@ -173,3 +204,10 @@ two places:
   UA `[hidden]` rule) exist on any OTHER custom-`display` element in `style.css` that doesn't
   already have the override — this session found one by accident via live CDP inspection, not by
   systematically checking, so there could be others.
+- The `GITHUB_TOKEN` secret now backing the download counter is `gh auth token`'s personal OAuth
+  token (broad scopes, tied to the owner's own GitHub login) — works fine, but a dedicated
+  fine-grained PAT scoped to just this one repo's read access would be cleaner long-term and
+  wouldn't break if the personal token is ever rotated/revoked.
+- Node.js/wrangler is now properly installed in this dev environment (was previously a bare,
+  broken `node.exe` with no npm) — future `lehgo` deploys should work directly without needing to
+  reinstall anything.
