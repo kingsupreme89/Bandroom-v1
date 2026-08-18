@@ -113,6 +113,12 @@ internal static class Program
         // AudioPlayer.Warmup for why this matters for tackle-to-sound latency).
         AudioPlayer.Warmup();
 
+        // Owner request 2026-08-17: keep this process's own Windows Volume Mixer session pinned
+        // to 100%/unmuted for the app's whole lifetime -- see AudioPlayer.StartWindowsMixerGuard's
+        // own doc comment for why this can only ever limit the damage (a few seconds of quiet
+        // between checks) rather than make the app fully immune to it.
+        AudioPlayer.StartWindowsMixerGuard();
+
         Application.Run(new WebMainForm());
     }
 }

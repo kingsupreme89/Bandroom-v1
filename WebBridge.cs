@@ -1483,6 +1483,7 @@ public sealed class WebBridge
     // Assignment screen's "Browse another team's Sound Bank" picker.
     public string GetDefaultPackTeams() => _host.GetDefaultPackTeamsFromWeb();
     public void PreviewLocalFile(string path, string? contextParamKey = null) => _host.PreviewLocalFileFromWeb(path, contextParamKey);
+    public void SetPotPreviewVolume(int percent) => _host.SetPotPreviewVolumeFromWeb(percent);
     public void PlaySoundboardSlot(string key, string path) => _host.PlaySoundboardSlotFromWeb(key, path);
     public Task<string?> ScanDynastySave() => _host.ScanDynastySaveFromWeb();
     public void AssignTrackFile(string trigger, bool isPa, string path) => _host.AssignTrackFileFromWeb(trigger, isPa, path);
@@ -1574,6 +1575,7 @@ public sealed class WebBridge
     public void ResumeHbcuPlayback() => _host.ResumeHbcuPlaybackFromWeb();
     public void StopHbcuPlayback() => _host.StopHbcuPlaybackFromWeb();
     public void RestartHbcuPlayback() => _host.RestartHbcuPlaybackFromWeb();
+    public void SkipHbcuPlayback() => _host.SkipHbcuPlaybackFromWeb();
 
     /// <summary>Real changelog -- Bandroom's own GitHub Releases (version, title, bullet
     /// notes, published date). Powers the "Updates" panel (formerly a Live Feed of in-session

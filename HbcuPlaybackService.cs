@@ -77,14 +77,6 @@ internal sealed class HbcuPlaybackService : IDisposable
     bool _paused;
     bool _running;
 
-    /// <summary>True from OnTouchdown() until PlayTouchdownBonus's sequence fully resolves (bonus
-    /// song played and rotation resumed, or skipped because the queue was empty). Distinct from
-    /// _paused because an external Resume() (e.g. WebMainForm's 8s post-Runout/Kickoff resume
-    /// timer) can legitimately fire while a TD sequence is still pending its own timer -- without
-    /// this flag that race pre-empts the TD sequence and starts a normal rotation track underneath
-    /// it, so the eventual bonus song plays overlapping instead of cleanly after the resumed track.</summary>
-    bool _tdSequenceActive;
-
     /// <summary>UTC time the currently-armed timer (start delay or advance-to-next-track) fires
     /// -- null when nothing's pending (e.g. paused, or queues empty with nothing to schedule).
     /// Purely for the dashboard's countdown display, doesn't drive any playback decision itself.</summary>
@@ -167,7 +159,6 @@ internal sealed class HbcuPlaybackService : IDisposable
     {
         _running = false;
         _paused = false;
-        _tdSequenceActive = false;
         _kickoffFallbackActive = false;
         _homeUseGenericNextRefill = false;
         _awayUseGenericNextRefill = false;
@@ -185,11 +176,42 @@ internal sealed class HbcuPlaybackService : IDisposable
     }
 
     /// <summary>Called around a Runout/Ready/Kickoff fire so this service doesn't race that cue by
-    /// auto-advancing underneath it.</summary>
+    /// auto-advancing underneath it. Deliberately does NOT touch whatever's currently sounding --
+    /// those internal callers want the in-progress pot song to keep playing underneath the
+    /// interrupting cue, only the scheduler needs to stand down. See ManualPause for the dashboard
+    /// button's own, different "actually go silent" behavior.</summary>
     public void Pause()
     {
         _paused = true;
         _nextTimerUtc = null; // ScheduleAdvance's timer is still armed underneath, but PlayNext no-ops on it while paused -- don't show a misleading countdown
+    }
+
+    /// <summary>Dashboard "Pause" button (owner report 2026-08-17: pressing it left whatever song
+    /// was already playing still audibly running -- plain Pause() above is deliberately silent-only
+    /// scheduling freeze, built for brief internal races that WANT the current cue to keep playing.
+    /// A person pressing a Pause button expects actual silence, not just "nothing new will start."
+    /// Also fixes the reported "Resume immediately started a second song on top of the first" --
+    /// that happened because the first song was still genuinely playing (this method wasn't
+    /// silencing it) when Resume's PlayNext() started the next side's turn on its own channel.</summary>
+    public void ManualPause()
+    {
+        Pause();
+        if (_currentlyPlayingSide != null) AudioPlayer.FadeOutChannel(_currentlyPlayingSide, 0.4);
+    }
+
+    /// <summary>Dashboard "Next" button (owner request 2026-08-17). Cuts whatever's currently
+    /// playing and immediately advances to the next side's turn -- same strict home/away
+    /// alternation and Refill logic PlayNext always uses, just skipping the wait for AdvanceGap.
+    /// Clears _paused so pressing Next while manually paused also resumes the chain, rather than
+    /// silently no-op'ing (PlayNext returns immediately if still paused).</summary>
+    public void SkipCurrent()
+    {
+        if (!_running) return;
+        _advanceTimer?.Dispose();
+        _advanceTimer = null;
+        if (_currentlyPlayingSide != null) AudioPlayer.FadeOutChannel(_currentlyPlayingSide, 0.15);
+        _paused = false;
+        PlayNext();
     }
 
     /// <summary>Resumes shuffle a beat after the interrupting cue finishes (or immediately picks
@@ -199,12 +221,11 @@ internal sealed class HbcuPlaybackService : IDisposable
     /// every call, the second call would immediately start the OTHER side's song on top of the
     /// first one that had just started, with nothing to stop it (different channel). Guarding on
     /// `_paused` makes a redundant Resume (already running, not actually paused) a clean no-op --
-    /// every legitimate internal caller (Pause()'s counterpart, PlayTouchdownBonus's end-of-
-    /// sequence timer) only ever calls this while genuinely paused, so this doesn't change any of
-    /// their real behavior.</summary>
+    /// every legitimate internal caller only ever calls this while genuinely paused, so this
+    /// doesn't change any of their real behavior.</summary>
     public void Resume()
     {
-        if (!_running || !_paused || _tdSequenceActive || _kickoffFallbackActive) return;
+        if (!_running || !_paused || _kickoffFallbackActive) return;
         _paused = false;
         PlayNext();
     }
@@ -243,58 +264,29 @@ internal sealed class HbcuPlaybackService : IDisposable
         _touchdownTimer = new System.Threading.Timer(_ => { _kickoffFallbackActive = false; Resume(); }, null, delay, System.Threading.Timeout.InfiniteTimeSpan);
     }
 
-    /// <summary>REWORKED 2026-08-14 (owner request): a TD now fades out WHATEVER's currently
-    /// playing -- including the scoring side's own track, not just the opponent's like before --
-    /// so the TD cue WebMainForm fires plays clean with nothing underneath it. Once that cue
-    /// finishes (touchdownSongDuration, resolved by the caller the same way
-    /// ResolveEventSongDuration handles the kickoff song), the scoring side gets ONE bonus song
-    /// from their own pot, then normal alternating rotation resumes from wherever _nextTurn
-    /// already was -- the bonus song is a treat on top of the existing turn order, not a
-    /// replacement for that side's next real turn (owner call: "bonus, doesn't affect turn
-    /// order"). Pauses the chain for the whole sequence so PlayNext's own advance timer can't
-    /// fire underneath any of this.</summary>
-    public void OnTouchdown(string scoringSide, TimeSpan touchdownSongDuration = default)
+    /// <summary>SIMPLIFIED 2026-08-17 (owner spec: "if team scores then the pot stops and only
+    /// continues 20 sec after kickoff song has finished") -- previously this fed the scoring side
+    /// one bonus pot song between the TD cue and the Kickoff cue, then auto-resumed on its own
+    /// timer; that raced/overlapped with WebMainForm's OWN pause-then-resume around the ensuing
+    /// Kickoff cue (which already waits kickoffSongDuration + PostKickoffGap, see its
+    /// kickoffFireSide handling), and didn't match what the owner actually wants: score cue (if
+    /// any), then Kickoff cue, nothing else in between, pot picks back up 20s after the Kickoff
+    /// song ends. So this now does exactly one thing: fades out whatever's currently playing
+    /// (including the scoring side's own track) so a following score cue plays clean, then pauses
+    /// and STAYS paused -- WebMainForm's Kickoff-cue handling (or, if nothing's assigned there,
+    /// PlayKickoffFallback below) is what actually calls Resume() once the kickoff moment has
+    /// fully played out. Renamed from OnTouchdown (owner clarification 2026-08-17: a field goal
+    /// needs this exact same pot-stops-then-kickoff-resumes treatment even though it has no
+    /// Touchdown cue of its own to play first -- HBCU mode has no per-event card for Field Goal
+    /// Made at all, so WebMainForm just silences the pot and lets the following Kickoff carry it,
+    /// same as a touchdown minus the TD cue).</summary>
+    public void PauseForScore()
     {
         if (_currentlyPlayingSide != null)
             AudioPlayer.FadeOutChannel(_currentlyPlayingSide);
 
         if (!_running) return;
-
-        // A second TD arriving before the first's bonus timer fires overwrites that timer --
-        // the first TD's bonus song is dropped, the second TD's own sequence takes over cleanly.
-        // _tdSequenceActive stays true across this re-entry so no external Resume() can sneak in
-        // between the two.
         Pause();
-        _tdSequenceActive = true;
-        _touchdownTimer?.Dispose();
-        var delay = touchdownSongDuration + AdvanceGap;
-        _nextTimerUtc = DateTime.UtcNow + delay;
-        _touchdownTimer = new System.Threading.Timer(_ => PlayTouchdownBonus(scoringSide), null, delay, System.Threading.Timeout.InfiniteTimeSpan);
-    }
-
-    /// <summary>The scoring side's bonus post-TD song (see OnTouchdown's doc comment) -- dequeues
-    /// from that side's own queue exactly like PlayNext does, but deliberately does NOT touch
-    /// _nextTurn, so whichever side was already due up next still gets their turn immediately
-    /// after this, unaffected. Falls straight through to Resume() with no bonus song if the
-    /// scoring side's pot is empty (nothing to play), same "no-op, pick the pool back up" spirit
-    /// as every other interrupting cue in this class.</summary>
-    void PlayTouchdownBonus(string scoringSide)
-    {
-        if (!_running) return;
-
-        var queue = scoringSide == "home" ? _homeQueue : _awayQueue;
-        if (queue.Count == 0) Refill(scoringSide, queue);
-        if (queue.Count == 0) { _tdSequenceActive = false; Resume(); return; }
-
-        _currentlyPlayingSide = scoringSide;
-        var song = queue.Dequeue();
-        _currentSongName = Path.GetFileNameWithoutExtension(song.FilePath);
-        _playForSide(scoringSide, song);
-
-        var delay = ResolveSongDuration(song) + AdvanceGap;
-        _nextTimerUtc = DateTime.UtcNow + delay;
-        _touchdownTimer?.Dispose();
-        _touchdownTimer = new System.Threading.Timer(_ => { _tdSequenceActive = false; Resume(); }, null, delay, System.Threading.Timeout.InfiniteTimeSpan);
     }
 
     void PlayNext()

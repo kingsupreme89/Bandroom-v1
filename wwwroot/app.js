@@ -818,7 +818,8 @@ async function renderHbcuPot() {
     row.querySelector('[data-act="preview"]').addEventListener("click", (e) => {
       e.stopPropagation();
       _previewAudio?.pause();
-      bridge?.PreviewLocalFile(song.path);
+      bridge?.SetPotPreviewVolume(song.volume ?? 100);
+      bridge?.PreviewLocalFile(song.path, "pot-preview");
     });
     row.querySelector('[data-act="stop"]').addEventListener("click", (e) => { e.stopPropagation(); bridge?.StopPreview(); });
     row.querySelector('[data-act="remove"]').addEventListener("click", async (e) => {
@@ -883,6 +884,12 @@ function wireHbcuPotVolumePopover(row, song) {
     valueLabel.textContent = `${e.target.value}%`;
     song.volume = Number(e.target.value);
     saveHbcuPotSongSettings(song);
+    // Owner report 2026-08-17: dragging this slider had no effect on the song's own Preview
+    // playback -- Preview always ran at flat MasterVolume, ignoring song.volume entirely. Pushing
+    // the new value here too (not just on the next Preview click) means an already-playing
+    // preview (started via the "pot-preview" context above) audibly updates live while dragging,
+    // same as Home/Away/PA already do for their own Sound Booth knobs.
+    bridge?.SetPotPreviewVolume(song.volume);
   });
 }
 
@@ -10512,6 +10519,7 @@ async function pollHbcuDashboard() {
   document.getElementById("hbcu-dash-away-count").textContent = `${status.awayQueueCount} queued`;
   document.getElementById("btn-hbcu-dash-pause").hidden = status.paused || !status.running;
   document.getElementById("btn-hbcu-dash-resume").hidden = !status.paused;
+  document.getElementById("btn-hbcu-dash-skip").hidden = !status.running;
 }
 
 function openHbcuDashboard() {
@@ -10540,6 +10548,7 @@ document.getElementById("btn-close-hbcu-dashboard")?.addEventListener("click", c
 document.getElementById("btn-hbcu-dash-start")?.addEventListener("click", async () => { await bridge?.RestartHbcuPlayback(); pollHbcuDashboard(); });
 document.getElementById("btn-hbcu-dash-pause")?.addEventListener("click", async () => { await bridge?.PauseHbcuPlayback(); pollHbcuDashboard(); });
 document.getElementById("btn-hbcu-dash-resume")?.addEventListener("click", async () => { await bridge?.ResumeHbcuPlayback(); pollHbcuDashboard(); });
+document.getElementById("btn-hbcu-dash-skip")?.addEventListener("click", async () => { await bridge?.SkipHbcuPlayback(); pollHbcuDashboard(); });
 document.getElementById("btn-hbcu-dash-stop")?.addEventListener("click", async () => { await bridge?.StopHbcuPlayback(); pollHbcuDashboard(); });
 
 document.getElementById("btn-close-test-hook")?.addEventListener("click", () => {

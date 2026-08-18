@@ -296,18 +296,24 @@ internal sealed class PeakMeterProvider : ISampleProvider
     }
 }
 
-/// <summary>Dual envelope-follower transient shaper: a fast follower detects the attack
-/// (first few ms of a hit) and boosts it, a slow follower tracks sustain and can trim it.
-/// Musically useful mainly on percussion-heavy marching band tracks.</summary>
+/// <summary>Dual envelope-follower transient shaper ("Punchier Drums" toggle): a fast follower
+/// detects the attack (first few ms of a hit) and boosts it, a slow follower tracks sustain and
+/// can trim it. Musically useful mainly on percussion-heavy marching band tracks. TUNED 2026-08-17
+/// (owner request: "limit the top side but make the drums punch more") -- boosting a broadband
+/// transient hits cymbals/hi-hats/snare-crack just as hard as kick/snare body, which read as
+/// harsh rather than punchy. Bumped the attack boost up (drums hit harder) and added a fixed
+/// high-shelf cut afterward so the extra energy this stage adds doesn't come out as extra
+/// harshness up top -- the low/low-mid punch stays boosted, the top end gets reined back in.</summary>
 internal sealed class TransientShaperProvider : ISampleProvider
 {
     readonly ISampleProvider _source;
     readonly float _attackGainDb, _sustainGainDb;
     float _fastEnvL, _slowEnvL, _fastEnvR, _slowEnvR;
     readonly float _fastCoeff, _slowCoeff;
+    readonly BiQuadFilter _topLimiterL, _topLimiterR;
     public WaveFormat WaveFormat => _source.WaveFormat;
 
-    public TransientShaperProvider(ISampleProvider source, float attackGainDb = 4f, float sustainGainDb = -1f)
+    public TransientShaperProvider(ISampleProvider source, float attackGainDb = 6f, float sustainGainDb = -1f)
     {
         // Same interleaved-L/R-pairs invariant as ParametricEqProvider -- see its comment.
         if (source.WaveFormat.Channels != 2) throw new ArgumentException("TransientShaperProvider requires a stereo source.");
@@ -317,6 +323,8 @@ internal sealed class TransientShaperProvider : ISampleProvider
         int sr = source.WaveFormat.SampleRate;
         _fastCoeff = (float)Math.Exp(-1.0 / (sr * 0.003)); // ~3ms follower
         _slowCoeff = (float)Math.Exp(-1.0 / (sr * 0.080)); // ~80ms follower
+        _topLimiterL = BiQuadFilter.HighShelf(sr, 6000f, 0.71f, -5f);
+        _topLimiterR = BiQuadFilter.HighShelf(sr, 6000f, 0.71f, -5f);
     }
 
     public int Read(float[] buffer, int offset, int count)
@@ -327,8 +335,8 @@ internal sealed class TransientShaperProvider : ISampleProvider
 
         for (int i = 0; i < read; i += 2)
         {
-            buffer[offset + i] = Process(buffer[offset + i], ref _fastEnvL, ref _slowEnvL, attackLin, sustainLin);
-            if (i + 1 < read) buffer[offset + i + 1] = Process(buffer[offset + i + 1], ref _fastEnvR, ref _slowEnvR, attackLin, sustainLin);
+            buffer[offset + i] = _topLimiterL.Process(Process(buffer[offset + i], ref _fastEnvL, ref _slowEnvL, attackLin, sustainLin));
+            if (i + 1 < read) buffer[offset + i + 1] = _topLimiterR.Process(Process(buffer[offset + i + 1], ref _fastEnvR, ref _slowEnvR, attackLin, sustainLin));
         }
         return read;
     }

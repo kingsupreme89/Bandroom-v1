@@ -27,6 +27,15 @@ internal static class AudioPlayer
     /// without it tracking Master/Home/Away.</summary>
     public static float WhistleVolume = 1.0f;
 
+    /// <summary>Live-readable volume for whichever Team Pot song's volume popover is currently
+    /// open -- owner report 2026-08-17: dragging a pot song's own volume slider had no effect on
+    /// its Preview playback (Preview always played at flat MasterVolume, ignoring the per-song
+    /// value entirely, live or not). Set via WebBridge.SetPotPreviewVolume on both the initial
+    /// Preview click and every slider "input" tick while a preview is already playing -- read back
+    /// live by PreviewLocalFileFromWeb's liveVolumeSource the same way HomeVolume/AwayVolume/
+    /// PaVolume already track live for their own preview contexts (see VolumeForSoundBoothContext).</summary>
+    public static float PotPreviewVolume = 1.0f;
+
     /// <summary>Which "room" preset (if any) triggered clips are played through. Off = dry,
     /// no processing overhead.</summary>
     public static ReverbPreset CurrentReverb = ReverbPreset.Off;
@@ -73,6 +82,59 @@ internal static class AudioPlayer
     static readonly object Lock = new();
     static readonly List<(WaveOutEvent Output, string? Channel)> ActiveOutputs = new();
 
+    // ---- Windows Volume Mixer guard ----------------------------------------------------------
+    // Owner request 2026-08-17 ("make sure the windows mixer never touches the bandroom volume")
+    // -- Windows gives every process its own per-app session volume/mute in the system Volume
+    // Mixer, applied by the OS audio engine AFTER this app hands off samples, so nothing on the
+    // sample-processing side above (Master/Home/Away/etc, all just our own gain stages) can ever
+    // see or override it -- there's no way to make a process fully immune to it. The next best
+    // thing, and what actually matters for "an accidental/forgotten mixer mute makes the app go
+    // silently silent": periodically force THIS process's own session(s) back to 100%/unmuted, so
+    // Windows' mixer can only ever cost you a second of quiet rather than a permanently muted app
+    // nobody remembers to go check. FIXED 2026-08-17 (owner report, live: pressing buttons in the
+    // Team Pot dashboard was visibly dragging the Windows mixer's Bandroom slider down -- each UI
+    // click/preview opens its own short-lived WASAPI session, and Windows doesn't always inherit
+    // the previous session's volume for a brand-new one) -- tightened from every 3s to every 1s so
+    // a freshly-created quiet session gets caught fast instead of sitting muted for several
+    // button-presses in a row. Started once from Program.cs; runs for the app's whole lifetime.
+    static bool _sessionGuardStarted;
+    public static void StartWindowsMixerGuard()
+    {
+        lock (Lock)
+        {
+            if (_sessionGuardStarted) return;
+            _sessionGuardStarted = true;
+        }
+        Task.Run(async () =>
+        {
+            int pid = Environment.ProcessId;
+            while (true)
+            {
+                try
+                {
+                    using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+                    using var device = enumerator.GetDefaultAudioEndpoint(NAudio.CoreAudioApi.DataFlow.Render, NAudio.CoreAudioApi.Role.Multimedia);
+                    var sessions = device.AudioSessionManager.Sessions;
+                    for (int i = 0; i < sessions.Count; i++)
+                    {
+                        using var session = sessions[i];
+                        if (session.GetProcessID != (uint)pid) continue;
+                        if (session.SimpleAudioVolume.Mute) session.SimpleAudioVolume.Mute = false;
+                        if (session.SimpleAudioVolume.Volume < 1.0f) session.SimpleAudioVolume.Volume = 1.0f;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Best-effort guard, not a critical feature -- a transient enumerator/device
+                    // failure (e.g. default device changing mid-check) should never crash the
+                    // process or stop future retries.
+                    CrashLog.Write("Windows mixer guard tick failed", ex);
+                }
+                await Task.Delay(TimeSpan.FromSeconds(1));
+            }
+        });
+    }
+
     /// <summary>Cooldown between repeat fires of the SAME clip -- covers the real bug this was
     /// added for: GameWatcher's OCR re-detects the same on-screen state (e.g. "First Down")
     /// after a replay overlay clears and the live feed reappears, firing the same cue twice in
@@ -88,6 +150,13 @@ internal static class AudioPlayer
     public static void ClearCooldown(string path)
     {
         lock (Lock) _lastFireByPath.Remove(path);
+    }
+
+    // TEMP DIAGNOSTIC 2026-08-17 -- read-only cooldown check for PlayGametimeSound's diagnostic
+    // logging (see WebMainForm.cs). Remove alongside that once the silent-sound cause is found.
+    public static bool IsOnCooldown(string path)
+    {
+        lock (Lock) return _lastFireByPath.TryGetValue(path, out var last) && DateTime.UtcNow - last < FireCooldown;
     }
 
     static bool _warmedUp;
@@ -156,7 +225,7 @@ internal static class AudioPlayer
     /// handles) each called the old global StopAll() on interrupt, so whichever side fired
     /// second always silenced the other regardless of side. Null channel falls back to global
     /// StopAll (previews/UI chimes that never set a channel keep their old behavior).</summary>
-    static void StopChannel(string? channel)
+    public static void StopChannel(string? channel)
     {
         if (channel == null) { StopAll(); return; }
         lock (Lock)

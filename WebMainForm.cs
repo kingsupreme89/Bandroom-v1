@@ -975,6 +975,17 @@ public sealed class WebMainForm : Form
         if (!File.Exists(song.FilePath)) return;
         float baseVolume = side == "home" ? AudioPlayer.HomeVolume : AudioPlayer.AwayVolume;
         float volume = baseVolume * (Math.Clamp(song.Volume, 0, 100) / 100f);
+        // Owner request 2026-08-17 ("make sure 2 pot songs never play at the same time"): the
+        // pot's whole design is strict alternation, only one band ever sounding at once (see
+        // HbcuPlaybackService's class doc) -- but interruptPrevious above only ever stopped THIS
+        // side's own channel (by design, for ordinary game cues -- see AudioPlayer.StopChannel's
+        // doc comment on why a same-side re-fire shouldn't kill the other side's unrelated cue).
+        // Pot playback is different: a scheduling race between two timer callbacks (e.g. the
+        // natural PlayNext advance landing at nearly the same moment as a manual Skip/Resume from
+        // the dashboard) could still start both sides' channels audibly overlapping. Hard-stop the
+        // OTHER side's channel here too, every time a new pot song starts, so an overlap can never
+        // actually reach the speakers even if the scheduling race itself isn't fully eliminated.
+        AudioPlayer.StopChannel(side == "home" ? "away" : "home");
         // Team Pot is continuous shuffle, not a single scripted cue -- owner: "HBCU shouldn't be
         // fading anyways." Always plays each pot song straight through, regardless of any
         // per-song fade settings (those fields only matter for the FireEvent/TriggerEntry path).
@@ -1004,9 +1015,10 @@ public sealed class WebMainForm : Form
         }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
     }
 
-    public void PauseHbcuPlaybackFromWeb() => _hbcuPlayback?.Pause();
+    public void PauseHbcuPlaybackFromWeb() => _hbcuPlayback?.ManualPause();
     public void ResumeHbcuPlaybackFromWeb() => _hbcuPlayback?.Resume();
     public void StopHbcuPlaybackFromWeb() => _hbcuPlayback?.Stop();
+    public void SkipHbcuPlaybackFromWeb() => _hbcuPlayback?.SkipCurrent();
     /// <summary>Dashboard "Start" button -- see HbcuPlaybackService.Restart's doc comment: fresh
     /// shuffle, no memory of what already played, starts immediately (not gated behind a kickoff
     /// song's length like the real in-game Start(TimeSpan) path).</summary>
@@ -1629,11 +1641,19 @@ public sealed class WebMainForm : Form
     {
         var entry = _config.FirstOrDefault(e => e.Trigger == trigger);
         if (entry == null) return;
-        float eventVolumeScale = Math.Clamp(entry.Volume, 0, 100) / 100f;
+        // Owner report 2026-08-17 ("make sure all volume inside app can change in real time with
+        // slider"): eventVolumeScale used to be captured ONCE here and baked into the closure --
+        // dragging the event card's own volume slider (SetEventVolumeFromWeb, below) mutates this
+        // SAME `entry` instance's Volume live, but the already-armed liveVolumeSource kept
+        // multiplying by the stale snapshot instead of ever seeing that change. Re-reading
+        // entry.Volume live on every tick (entry is a reference into _config, so SetEventVolume's
+        // mutation is visible here immediately, no extra plumbing needed) fixes both the main clip
+        // and the PA layer, same live-tracking Home/Away/PA/Whistle already get.
+        float LiveEventVolumeScale() => Math.Clamp(entry.Volume, 0, 100) / 100f;
         if (!string.IsNullOrWhiteSpace(entry.AudioFile) && File.Exists(entry.AudioFile))
-            AudioPlayer.Play(entry.AudioFile, VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => VolumeForSoundBoothContext(contextParamKey) * eventVolumeScale, speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, forcePaEffect: entry.PaSpeakerEffect, fadeStartOverride: entry.FadeStartSecondsOverride, fadeOutDurationOverride: entry.FadeOutDurationOverride, noFade: entry.NoFade);
+            AudioPlayer.Play(entry.AudioFile, VolumeForSoundBoothContext(contextParamKey) * LiveEventVolumeScale(), interruptPrevious: true, isPreview: true, playLeadInWhistle: entry.PlayLeadInWhistle, liveVolumeSource: () => VolumeForSoundBoothContext(contextParamKey) * LiveEventVolumeScale(), speed2x: entry.PlaybackSpeed2x, whistleSpeed: entry.WhistleSpeed, forcePaEffect: entry.PaSpeakerEffect, fadeStartOverride: entry.FadeStartSecondsOverride, fadeOutDurationOverride: entry.FadeOutDurationOverride, noFade: entry.NoFade);
         if (!string.IsNullOrWhiteSpace(entry.PaAudioFile) && File.Exists(entry.PaAudioFile))
-            AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * eventVolumeScale, interruptPrevious: false, isPreview: true, liveVolumeSource: () => AudioPlayer.PaVolume * eventVolumeScale);
+            AudioPlayer.Play(entry.PaAudioFile, AudioPlayer.PaVolume * LiveEventVolumeScale(), interruptPrevious: false, isPreview: true, liveVolumeSource: () => AudioPlayer.PaVolume * LiveEventVolumeScale());
     }
 
     public int GetEventVolumeFromWeb(string trigger) => _config.FirstOrDefault(e => e.Trigger == trigger)?.Volume ?? 100;
@@ -2030,8 +2050,17 @@ public sealed class WebMainForm : Form
         "away-volume" => AudioPlayer.AwayVolume,
         "pa-volume" => AudioPlayer.PaVolume,
         "whistle-volume" => AudioPlayer.WhistleVolume,
+        "pot-preview" => AudioPlayer.PotPreviewVolume,
         _ => AudioPlayer.MasterVolume,
     };
+
+    /// <summary>Owner report 2026-08-17: a Team Pot song's own volume slider had no effect on its
+    /// Preview button, live or otherwise -- PreviewLocalFileFromWeb always played at flat
+    /// MasterVolume regardless of the per-song value. app.js calls this on the initial Preview
+    /// click (passing song.volume) AND on every slider "input" tick while that preview is already
+    /// playing, same live-tracking pattern VolumeForSoundBoothContext already gives Home/Away/PA/
+    /// Whistle -- see PreviewLocalFileFromWeb's liveVolumeSource for the read side.</summary>
+    public void SetPotPreviewVolumeFromWeb(int percent) => AudioPlayer.PotPreviewVolume = Math.Clamp(percent, 0, 100) / 100f;
 
     /// <summary>Preview an arbitrary local library file from the clipping island's song list --
     /// distinct from PreviewEventFromWeb (which previews whatever's already assigned to a
@@ -3198,6 +3227,12 @@ public sealed class WebMainForm : Form
     static void PlayDraftChime()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "Assets", "nfl-draft-chime.mp3");
+        // TEMP DIAGNOSTIC 2026-08-17 (owner report: never hears this chime, in any situation, but
+        // no "Playback error" has ever shown up in crash.log across several relaunches today) --
+        // same "confirm what this call actually sees" approach as PreviewEventFromWeb's diagnostic
+        // above. Remove once the cause is found.
+        CrashLog.Write("PlayDraftChime diagnostic", new Exception(
+            $"path={path} exists={File.Exists(path)} masterVolume={AudioPlayer.MasterVolume}"));
         // This chime is shared between app-open and update-detected (see doc comment above), and
         // AudioPlayer.Play's 20s same-file FireCooldown (meant to stop rapid-fire OCR re-triggers
         // during a live game) was silently swallowing the update-detected chime whenever an
@@ -3215,6 +3250,15 @@ public sealed class WebMainForm : Form
     static void PlayGametimeSound()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "Assets", "gametime-tackle.mp3");
+        // TEMP DIAGNOSTIC 2026-08-17 (owner report: never hears this on GAMETIME press either --
+        // same silent-no-crash symptom as PlayDraftChime, see its own diagnostic above). Unlike
+        // PlayDraftChime this never called ClearCooldown first, so also logging whether the 20s
+        // same-file FireCooldown is the one swallowing it (e.g. a double GAMETIME press, or
+        // something else already having fired this exact asset this session). Remove once the
+        // cause is found.
+        CrashLog.Write("PlayGametimeSound diagnostic", new Exception(
+            $"path={path} exists={File.Exists(path)} masterVolume={AudioPlayer.MasterVolume} " +
+            $"onCooldown={AudioPlayer.IsOnCooldown(path)}"));
         AudioPlayer.Play(path);
     }
 
@@ -3460,7 +3504,18 @@ public sealed class WebMainForm : Form
             ? "away-team events are turned off right now"
             : "";
 
-        if (sideAllowed && routedSide == "away")
+        // HBCU mode owner spec 2026-08-17: "both teams will play but only touchdowns and
+        // kickoffs" -- whichever side actually scores gets their own Touchdown cue, followed by
+        // their own Kickoff cue, every time, Big Game or not (Big Game is an FCS-mode-only
+        // concept HBCU never exposes a toggle for). Kickoff already bypasses this gate entirely
+        // (see the hbcuSideAgnostic block above, which resolves it straight from
+        // _lastHbcuTouchdownSide) -- Touchdown routes through here like any other event, so it
+        // needs its own explicit bypass, or an away score would silently satisfy "not a Big Game
+        // -- away doesn't play" below and never fire (matches exactly what was reported live:
+        // away's touchdown/kickoff never sounding).
+        bool hbcuTouchdownBypass = _hbcuPlayback != null && eventKey.Contains("Touchdown", StringComparison.OrdinalIgnoreCase);
+
+        if (sideAllowed && routedSide == "away" && !hbcuTouchdownBypass)
         {
             if (HomeOnlyAlwaysEventKeys.Contains(eventKey))
             {
@@ -3604,6 +3659,28 @@ public sealed class WebMainForm : Form
 
             if (_hbcuPlayback != null)
             {
+                // Owner report 2026-08-17 (live: "home team kickoff just played after away field
+                // goal") -- _lastHbcuTouchdownSide only ever got set from a Touchdown event, but
+                // real football also kicks off after a FIELD GOAL, and Field Goal Made isn't in
+                // IsHbcuAllowedEvent (HBCU mode has no per-event card for it) so it never reached
+                // the tracking code below -- the ensuing Kickoff cue fell back to home-priority
+                // and played the wrong side. Field Goal Made fires while the KICKING team is still
+                // on offense, so whoever currently has possession IS the side that just scored --
+                // read straight off the raw, PRE-filter `events` here so this still works even
+                // though the field goal cue itself is filtered out a few lines down.
+                if (_possession != null && events.Any(e => e.EventKey == "Offense: Field Goal Made"))
+                {
+                    _lastHbcuTouchdownSide = _possession;
+                    _lastTouchdownSide = _possession;
+                    // Owner clarification 2026-08-17: a field goal gets the same pot-stops-then-
+                    // kickoff-resumes treatment as a touchdown, just with no cue of its own to
+                    // play first (HBCU mode has no per-event card for Field Goal Made) -- silence
+                    // the pot here and let the following Kickoff cue's own resume logic (or
+                    // PlayKickoffFallback if nothing's assigned) pick it back up 20s after that
+                    // song ends, same as PauseForScore already does for a real touchdown.
+                    _hbcuPlayback.PauseForScore();
+                }
+
                 events = events.Where(e => IsHbcuAllowedEvent(e.EventKey)).ToList();
                 if (events.Count == 0) return;
 
@@ -3673,11 +3750,17 @@ public sealed class WebMainForm : Form
                 {
                     if (kickoffFireResult != null && kickoffFireResult.StartsWith("fired:"))
                     {
-                        // Scoring side had a real Kickoff cue assigned -- same pause-then-resume
-                        // pattern as Runout/Ready above.
+                        // Owner request 2026-08-17: this used to resume the shuffle a flat 8s after
+                        // ANY real Kickoff cue fired, regardless of how long that cue's own song
+                        // actually ran -- same "cuts the shuffle in early" bug Opening Kickoff's
+                        // PostKickoffGap handling was already fixed for (see HbcuPlaybackService.
+                        // Start's doc comment). Resolve this Kickoff cue's own assigned-song duration
+                        // and wait PostKickoffGap (20s) after THAT ends, same gap/logic as Start().
+                        var kickoffEntry = ResolveEntryForEvent(kickoffFireSide, "Other: Kickoff");
+                        var resumeDelay = ResolveEventSongDuration(kickoffEntry) + HbcuPlaybackService.PostKickoffGap;
                         _hbcuPlayback.Pause();
                         _hbcuResumeTimer?.Dispose();
-                        _hbcuResumeTimer = new System.Threading.Timer(_ => RunOnUi(() => _hbcuPlayback?.Resume()), null, TimeSpan.FromSeconds(8), System.Threading.Timeout.InfiniteTimeSpan);
+                        _hbcuResumeTimer = new System.Threading.Timer(_ => RunOnUi(() => _hbcuPlayback?.Resume()), null, resumeDelay, System.Threading.Timeout.InfiniteTimeSpan);
                     }
                     else
                     {
@@ -3790,17 +3873,15 @@ public sealed class WebMainForm : Form
                 if (sideAllowed)
                 {
                     // HBCU mode Touchdown: routedSide IS the scoring side (see the long comment
-                    // above on "Defense: Touchdown Scored"). REWORKED 2026-08-14: OnTouchdown now
-                    // fades whatever's playing on EITHER side (including the scoring side's own
-                    // pot track, not just the opponent's like before) so the TD cue plays clean,
-                    // then queues a bonus pot song for the scoring side once the cue's own
-                    // duration elapses -- interruptPrevious is back to the normal !firedYet rule
-                    // since the scoring side's track is no longer deliberately left alive.
+                    // above on "Defense: Touchdown Scored"). PauseForScore fades whatever's
+                    // playing on EITHER side (including the scoring side's own pot track) so the
+                    // TD cue plays clean, then stays paused until the following Kickoff cue's own
+                    // resume logic picks the pot back up (see PauseForScore's doc comment).
                     bool isTouchdownEvent = evt.EventKey.Contains("Touchdown", StringComparison.OrdinalIgnoreCase);
                     bool hbcuTouchdown = _hbcuPlayback != null && isTouchdownEvent;
                     if (hbcuTouchdown)
                     {
-                        _hbcuPlayback!.OnTouchdown(routedSide, ResolveEventSongDuration(ResolveEntryForEvent(routedSide, evt.EventKey)));
+                        _hbcuPlayback!.PauseForScore();
                         _lastHbcuTouchdownSide = routedSide;
                     }
                     // Tracked regardless of HBCU mode -- see _lastTouchdownSide's doc comment, used
