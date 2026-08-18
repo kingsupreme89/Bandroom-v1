@@ -80,22 +80,69 @@ public sealed class MacWebBridge
     public string ToggleWatching() => _host.ToggleWatchingFromWeb();
 
     /// <summary>Windows checks/installs updates via Squirrel against this repo's GitHub Releases
-    /// (see WebMainForm.ShowUpdateDialogFromWeb) -- but every release published there ships ONLY
-    /// Windows Squirrel artifacts (BandroomSetup.exe/.nupkg/RELEASES), no Mac build at all, so
-    /// there is nothing real to check/download here yet. Rather than fake a version check against
-    /// a channel that doesn't exist for this platform (which would just be wrong the first time a
-    /// user actually had a newer Mac build available with no way to know), this tells the user the
-    /// truth and how to update by hand until a real Mac release pipeline exists. A proper fix would
-    /// either start publishing a Mac build as a release asset (checkable via the same GitHub
-    /// Releases API ChangelogService.cs already calls) and wiring Sparkle against it, or reusing
-    /// this same manual-pull flow permanently if that's not planned.</summary>
-    public void ShowUpdate() => RunNativeAlert(
-        "Bandroom for Mac",
-        "Mac builds aren't published to GitHub Releases yet, so there's no automatic update to check "
-            + "here (Windows still updates normally). To update this Mac build: git pull the latest "
-            + "code, then run src/Bandroom.Mac/publish-mac.sh again.");
+    /// (see WebMainForm.ShowUpdateDialogFromWeb), fully automated (download + in-place apply).
+    /// Mac has no Squirrel/Sparkle equivalent wired up, but as of the mac-release.yml Actions
+    /// workflow every release DOES now carry real Mac assets (Bandroom-mac-apple-silicon-*.zip /
+    /// Bandroom-mac-intel-*.zip) -- so a real "is there a newer version" check is now honest to
+    /// do (it wasn't before that workflow existed; see git history for the version of this method
+    /// that said so). Still no in-place auto-apply here -- opens the release page in the browser
+    /// for the user to grab the right zip themselves, same "opt-in download" shape as
+    /// DownloadDefaultSongPackFromWeb elsewhere in this codebase.</summary>
+    public async void ShowUpdate()
+    {
+        try
+        {
+            var releases = await ChangelogService.GetReleasesAsync();
+            var latest = releases.Where(r => !r.Prerelease).OrderByDescending(r => r.PublishedAt).FirstOrDefault();
+            string currentVersionStr = GetAppVersion();
 
-    public void RestartForUpdate() { /* No staged update to apply yet -- see ShowUpdate. */ }
+            bool isNewer = latest != null
+                && Version.TryParse(NormalizeForVersion(latest.Version), out var latestVersion)
+                && Version.TryParse(NormalizeForVersion(currentVersionStr), out var currentVersion)
+                && latestVersion > currentVersion;
+
+            if (isNewer)
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "/usr/bin/open",
+                    Arguments = $"https://github.com/kingsupreme89/Bandroom-v1/releases/tag/v{latest!.Version}",
+                    UseShellExecute = false,
+                };
+                System.Diagnostics.Process.Start(psi);
+                RunNativeAlert("Bandroom for Mac",
+                    $"A newer version (v{latest.Version}) is available -- opening the release page. "
+                        + "Download the zip matching your Mac (Apple Silicon or Intel), then replace "
+                        + "this app with the new one.");
+            }
+            else
+            {
+                RunNativeAlert("Bandroom for Mac", "You're already on the latest version.");
+            }
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("Mac ShowUpdate failed", ex);
+            RunNativeAlert("Bandroom for Mac",
+                "Update check failed -- check your internet connection and try again.");
+        }
+    }
+
+    /// <summary>System.Version requires at least a Major.Minor pair and rejects a bare "1" --
+    /// GitHub tags/AssemblyVersion here are always "major.minor.patch" in practice, but pad
+    /// defensively rather than let a malformed tag throw and fall into the catch-all error path.</summary>
+    static string NormalizeForVersion(string v)
+    {
+        var parts = v.Split('.');
+        return parts.Length switch
+        {
+            0 => "0.0",
+            1 => $"{parts[0]}.0",
+            _ => v,
+        };
+    }
+
+    public void RestartForUpdate() { /* No in-place auto-apply on Mac yet -- see ShowUpdate. */ }
 
     static void RunNativeAlert(string title, string message)
     {

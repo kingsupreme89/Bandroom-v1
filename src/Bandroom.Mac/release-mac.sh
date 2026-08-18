@@ -23,7 +23,7 @@ echo "==> Target release: $TAG"
 publish_and_upload() {
   local rid="$1" label="$2"
   echo "==> Building Bandroom.app ($rid)..."
-  "$SCRIPT_DIR/publish-mac.sh" "$rid"
+  "$SCRIPT_DIR/publish-mac.sh" "$rid" "${TAG#v}"
 
   local app_dir="$SCRIPT_DIR/bin/publish/$rid/Bandroom.app"
   local zip_name="Bandroom-mac-$label-$TAG.zip"
