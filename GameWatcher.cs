@@ -297,6 +297,61 @@ internal sealed class GameWatcher
     bool? _lastConfirmedRamPossessionAway;
     bool? _pendingRamPossessionAway;
     int _pendingRamPossessionTicks;
+
+    // 2026-08-19 (live game, Session 96+ follow-up): RAM's raw down/distance were observed
+    // genuinely NOISY this session, not simply frozen -- e.g. distance ticking 9 -> 7 -> 9 rather
+    // than holding one wrong value. IsFieldStableFor's "unchanged for RamFieldStaleThreshold"
+    // window never closes on a noisy-but-moving value, so the OCR-fallback override below kept
+    // engaging and disengaging tick to tick, and the FINAL down/yardsToGo fed into PlaySnapshot
+    // flapped between RAM's raw value and OCR's fallback value every ~250ms tick. Down-edge
+    // evaluators (DefenseThirdDownHelper etc.) fire on any Current.Down != Previous.Down, so each
+    // flap re-triggered the same card repeatedly for one physical snap (owner report: "Defense:
+    // 3rd & Long" firing 3x in 5s). Same 2-consecutive-agreeing-tick confirm-streak already used
+    // above for RAM possession, applied here to the FINAL committed down/yardsToGo (after the
+    // stale-fallback block below has already picked RAM vs. OCR for the tick) so a value can't
+    // reach evaluators until it's held for 2 ticks running, regardless of which source produced it.
+    const int FinalDownDistanceConfirmTicks = 1; // this many ADDITIONAL agreeing ticks after the first
+    int? _lastConfirmedFinalDown;
+    int? _pendingFinalDown;
+    int _pendingFinalDownTicks;
+    int? _lastConfirmedFinalYardsToGo;
+    int? _pendingFinalYardsToGo;
+    int _pendingFinalYardsToGoTicks;
+
+    /// <summary>Debounces a per-tick candidate value: commits immediately the first time (nothing
+    /// to debounce against yet), then requires the SAME new value to repeat for
+    /// FinalDownDistanceConfirmTicks additional ticks before replacing the last confirmed value.
+    /// A candidate that flaps between two values every tick never accumulates enough agreeing
+    /// ticks to commit, so the confirmed value holds steady through the flapping.</summary>
+    static void ConfirmFinalValue(int candidate, ref int? lastConfirmed, ref int? pending, ref int pendingTicks)
+    {
+        if (lastConfirmed is not { } confirmed)
+        {
+            lastConfirmed = candidate;
+            return;
+        }
+        if (candidate == confirmed)
+        {
+            pending = null;
+            pendingTicks = 0;
+            return;
+        }
+        if (pending == candidate)
+        {
+            pendingTicks++;
+            if (pendingTicks >= FinalDownDistanceConfirmTicks)
+            {
+                lastConfirmed = candidate;
+                pending = null;
+                pendingTicks = 0;
+            }
+        }
+        else
+        {
+            pending = candidate;
+            pendingTicks = 0;
+        }
+    }
     /// <summary>Exposed for WebBridge.GetScoreboardSourceStatus, same reasoning as ScoreboardStatus
     /// above.</summary>
     public ScoreboardReaderStatus RamReaderStatus { get; private set; } = ScoreboardReaderStatus.NotFound;
@@ -894,6 +949,11 @@ internal sealed class GameWatcher
     // still the current one, so a stale loop's tick becomes an inert no-op instead of a race.
     int _generation;
 
+    // 2026-08-19 (handoff root cause #2 partial fix) -- see GameStateEventHelper.
+    // SuppressOneShotsAlreadyPassed's doc comment for the full reasoning.
+    GameStateEventHelper? _gameStateEventHelper;
+    bool _checkedRestartOneShots;
+
     public void Start()
     {
         _cts = new CancellationTokenSource();
@@ -907,7 +967,9 @@ internal sealed class GameWatcher
         // without this, a 2nd+ game's Previous.Quarter starts at whatever the last game ended on
         // instead of 0, so pregame ("Previous.Quarter == 0 && Current.Quarter == 1") could only
         // ever fire once per app launch, not once per game.
-        _eventRouter = CreateEventRouter();
+        _gameStateEventHelper = new GameStateEventHelper();
+        _checkedRestartOneShots = false;
+        _eventRouter = CreateEventRouter(_gameStateEventHelper);
         _snapshotPrevious = new();
         _snapshotCurrent = new();
         _isFirstEngineTick = true;
@@ -964,6 +1026,12 @@ internal sealed class GameWatcher
         _lastConfirmedRamPossessionAway = null;
         _pendingRamPossessionAway = null;
         _pendingRamPossessionTicks = 0;
+        _lastConfirmedFinalDown = null;
+        _pendingFinalDown = null;
+        _pendingFinalDownTicks = 0;
+        _lastConfirmedFinalYardsToGo = null;
+        _pendingFinalYardsToGo = null;
+        _pendingFinalYardsToGoTicks = 0;
         _lastAwayTimeoutsRemaining = -1;
         _lastHomeTimeoutsRemaining = -1;
         _lastKnownDown = null;
@@ -2088,7 +2156,7 @@ internal sealed class GameWatcher
         if (ocrHomeScore != ram.HomeScore) mismatches.Add($"home score RAM={ram.HomeScore} OCR={ocrHomeScore}");
         if (ocrDown != 0 && ocrDown != ram.Down) mismatches.Add($"down RAM={ram.Down} OCR={ocrDown}");
         if (ocrDown != 0 && ocrYardsToGo != ram.YardsToGo) mismatches.Add($"distance RAM={ram.YardsToGo} OCR={ocrYardsToGo}");
-        if (ocrPossessionAway != ram.PossessionAway) mismatches.Add($"possession RAM={(ram.PossessionAway ? "away" : "home")} OCR={(ocrPossessionAway ? "away" : "home")}");
+        if (ocrPossessionAway != ram.PossessionAway) mismatches.Add($"possession RAM={(ram.PossessionAway ? "away" : "home")} OCR={(ocrPossessionAway ? "away" : "home")} HavePossession={ram.HavePossession}");
 
         if (mismatches.Count == 0)
         {
@@ -2418,6 +2486,24 @@ internal sealed class GameWatcher
             }
         }
 
+        // Flap guard (2026-08-19): applied AFTER the RAM-vs-OCR fallback above has already picked
+        // this tick's down/yardsToGo -- see ConfirmFinalValue's doc comment for why this exists.
+        ConfirmFinalValue(down, ref _lastConfirmedFinalDown, ref _pendingFinalDown, ref _pendingFinalDownTicks);
+        ConfirmFinalValue(yardsToGo, ref _lastConfirmedFinalYardsToGo, ref _pendingFinalYardsToGo, ref _pendingFinalYardsToGoTicks);
+        down = _lastConfirmedFinalDown!.Value;
+        yardsToGo = _lastConfirmedFinalYardsToGo!.Value;
+
+        // 2026-08-19 (handoff root cause #2 partial fix) -- runs exactly once per Start(), the
+        // first tick Quarter/Down both resolve to real values. See SuppressOneShotsAlreadyPassed's
+        // doc comment: only acts when the values prove the game was already in progress before
+        // this Start() call, never on a genuine fresh pregame (whose first live tick is always
+        // Quarter==1/Down==1, which this leaves untouched).
+        if (!_checkedRestartOneShots && quarter >= 1 && down is >= 1 and <= 4)
+        {
+            _checkedRestartOneShots = true;
+            _gameStateEventHelper?.SuppressOneShotsAlreadyPassed(quarter, down);
+        }
+
         // REDEFINED 2026-08-10: BigGame used to be an auto-detect "close score, late quarter"
         // heuristic. Replaced with a pure manual read of ConfigStore.BigGameSettings.Enabled --
         // see that field's doc comment for why (it's now "both bands physically present," a fact
@@ -2669,7 +2755,7 @@ internal sealed class GameWatcher
             EventsDetected?.Invoke(results);
     }
 
-    static EventRouter CreateEventRouter()
+    static EventRouter CreateEventRouter(GameStateEventHelper gameStateEventHelper)
     {
         var rules = new IRuleEvaluator[]
         {
@@ -2685,7 +2771,7 @@ internal sealed class GameWatcher
             new FieldGoalPATHelper(),
             new FirstDownHelper(),
             new FirstDownOnFirstDownHelper(),
-            new GameStateEventHelper(),
+            gameStateEventHelper,
             new KickoffHelper(),
             new OffenseAfterOpeningKickHelper(),
             new OffenseAfterPuntHelper(),

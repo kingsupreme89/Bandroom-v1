@@ -36,6 +36,25 @@ public sealed class GameStateEventHelper : IRuleEvaluator
     bool _didFireStart2ndQuarter;
     bool _didFireStart4thQuarter;
 
+    // 2026-08-19 (handoff root cause #2): every Start() rebuilds this class fresh via
+    // CreateEventRouter, so a bare process/session restart mid-game re-arms all the one-shot flags
+    // above -- the next kickoff-shaped moment (e.g. the very next possession change, confirmed live:
+    // an opponent's TD kickoff) then looks exactly like a fresh pregame/quarter-start transition,
+    // since Previous.* is also reset to its zero default and can't tell "genuinely never happened
+    // yet" from "already happened before this restart." A real new game's first live tick is always
+    // Quarter==1, Down==1 (you can't start a drive already on 2nd down); anything else observed on
+    // the FIRST tick a restarted session resolves real down/quarter data is unambiguous proof the
+    // game was already in progress, so the one-shot moments already happened. Called by GameWatcher
+    // exactly once per Start(), the first time Quarter/Down both resolve to real values.
+    public void SuppressOneShotsAlreadyPassed(int quarter, int down)
+    {
+        if (quarter > 1 || down > 1) _didFirePregame = true;
+        // Quarter itself already being 2 or 4 on this first tick means the transition INTO that
+        // quarter already happened before the restart -- same reasoning as pregame above.
+        if (quarter >= 2) _didFireStart2ndQuarter = true;
+        if (quarter >= 4) _didFireStart4thQuarter = true;
+    }
+
     public TriggerEvent? Evaluate(GameState state)
     {
         // --- Quarter transitions ---
