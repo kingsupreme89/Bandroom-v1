@@ -352,6 +352,53 @@ internal sealed class GameWatcher
             pendingTicks = 0;
         }
     }
+
+    // 2026-08-19 (live game, follow-up to the down/distance flap guard above): same bug, one
+    // level up. RAM's readerPossessionAway and OCR's _lastPossession are EACH independently
+    // debounced (2-tick confirm-streaks of their own), but the FINAL possession value fed into
+    // PlaySnapshot -- `readerPossessionAway ?? (_lastPossession == "away")` -- switches which of
+    // those two already-smoothed sources it reads from every single tick, based on whether
+    // HavePossession happened to resolve THIS tick. When HavePossession itself flickers true/false
+    // (RAM's possession locator intermittently failing, confirmed live: same session, same "field
+    // resolved once then went noisy" failure class as down/distance), the final value bounces
+    // between RAM's confirmed answer and OCR's confirmed answer with no debounce on THAT switch --
+    // owner report: "After Punt (Home)"/"1st Down (Away)" firing repeatedly every ~20s with no real
+    // punt in between, each bounce read as a fresh turnover by the structural-turnover/first-down
+    // helpers. Same ConfirmFinalValue treatment, applied to the combined final bool.
+    bool? _lastConfirmedFinalPossessionAway;
+    bool? _pendingFinalPossessionAway;
+    int _pendingFinalPossessionTicks;
+
+    static void ConfirmFinalPossession(bool candidate, ref bool? lastConfirmed, ref bool? pending, ref int pendingTicks)
+    {
+        if (lastConfirmed is not { } confirmed)
+        {
+            lastConfirmed = candidate;
+            return;
+        }
+        if (candidate == confirmed)
+        {
+            pending = null;
+            pendingTicks = 0;
+            return;
+        }
+        if (pending == candidate)
+        {
+            pendingTicks++;
+            if (pendingTicks >= FinalDownDistanceConfirmTicks)
+            {
+                lastConfirmed = candidate;
+                pending = null;
+                pendingTicks = 0;
+            }
+        }
+        else
+        {
+            pending = candidate;
+            pendingTicks = 0;
+        }
+    }
+
     /// <summary>Exposed for WebBridge.GetScoreboardSourceStatus, same reasoning as ScoreboardStatus
     /// above.</summary>
     public ScoreboardReaderStatus RamReaderStatus { get; private set; } = ScoreboardReaderStatus.NotFound;
@@ -1032,6 +1079,9 @@ internal sealed class GameWatcher
         _lastConfirmedFinalYardsToGo = null;
         _pendingFinalYardsToGo = null;
         _pendingFinalYardsToGoTicks = 0;
+        _lastConfirmedFinalPossessionAway = null;
+        _pendingFinalPossessionAway = null;
+        _pendingFinalPossessionTicks = 0;
         _lastAwayTimeoutsRemaining = -1;
         _lastHomeTimeoutsRemaining = -1;
         _lastKnownDown = null;
@@ -2633,12 +2683,14 @@ internal sealed class GameWatcher
         else if (_awaitingPostKickoffSnap && down is >= 1 and <= 4 && _pendingPossession == null)
             _awaitingPostKickoffSnap = false;
 
+        ConfirmFinalPossession(readerPossessionAway ?? (_lastPossession == "away"), ref _lastConfirmedFinalPossessionAway, ref _pendingFinalPossessionAway, ref _pendingFinalPossessionTicks);
+
         var snapshot = new PlaySnapshot
         {
             Down = down,
             YardsToGo = yardsToGo,
             Quarter = quarter,
-            PossessionAway = readerPossessionAway ?? (_lastPossession == "away"),
+            PossessionAway = _lastConfirmedFinalPossessionAway!.Value,
             IsKickoff = situation == "kickoff",
             IsPAT = situation == "pat_good",
             IsTouchdown = situation == "touchdown",
