@@ -16,6 +16,17 @@ public sealed class KickoffHelper : IRuleEvaluator
 {
     bool _didFire;
 
+    // FIXED 2026-08-19 (live bug: kickoff fired twice ~7s apart -- "Second-Half Kickoff" then a
+    // plain "Kickoff" right after). "situation" is one of GameWatcher's EventGatedRegions, but
+    // that only means it doesn't reset to null on a truly blank read -- a single bad-but-different
+    // OCR frame mid-kickoff-sequence (broadcast cutaway, replay, camera cut) can still misread
+    // something other than "kickoff" for one tick, which used to reset _didFire immediately and
+    // let the very next good "kickoff" tick fire all over again. Same "require 2 consecutive
+    // agreeing ticks before trusting a flip" debounce GameWatcher.ConfirmPossessionFlip already
+    // uses for exactly this kind of single-frame flicker.
+    int _notKickoffStreak;
+    const int NotKickoffTicksToReset = 2;
+
     // FIXED 2026-08-09: Quarter == 1/3 alone doesn't mean "the FIRST kickoff of that quarter" --
     // e.g. a Q1 pick-six followed by the ensuing kickoff is still Quarter == 1, so every kickoff
     // for the rest of the opening quarter kept re-firing "Other: Opening Kickoff", and likewise
@@ -31,9 +42,12 @@ public sealed class KickoffHelper : IRuleEvaluator
     {
         if (!state.Current.IsKickoff)
         {
-            _didFire = false;
+            if (++_notKickoffStreak >= NotKickoffTicksToReset)
+                _didFire = false;
             return null;
         }
+
+        _notKickoffStreak = 0;
 
         if (_didFire)
             return null;

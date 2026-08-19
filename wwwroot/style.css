@@ -4676,7 +4676,7 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
    [hidden] attribute itself still worked via the UA stylesheet, so it stayed invisible until
    opened -- the break only showed once you actually triggered the edit-pencil/admin-edit flow).
    Folded in here since its dialog already matches this exact fixed-backdrop/centered-flex shape. */
-#import-target-team-overlay, #add-school-overlay, #edit-upload-overlay, #pick-team-overlay, #rename-overlay {
+#import-target-team-overlay, #add-school-overlay, #edit-upload-overlay, #pick-team-overlay, #rename-overlay, #import-song-naming-overlay {
   position: fixed;
   inset: 0;
   z-index: 70;
@@ -4685,7 +4685,7 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   justify-content: center;
   background: rgba(6, 7, 8, 0.55);
 }
-#import-target-team-overlay[hidden], #add-school-overlay[hidden], #edit-upload-overlay[hidden], #pick-team-overlay[hidden], #rename-overlay[hidden] {
+#import-target-team-overlay[hidden], #add-school-overlay[hidden], #edit-upload-overlay[hidden], #pick-team-overlay[hidden], #rename-overlay[hidden], #import-song-naming-overlay[hidden] {
   display: none;
 }
 /* Opens ON TOP of edit-upload-overlay (school "Change..." button) or the marketplace hub, so it

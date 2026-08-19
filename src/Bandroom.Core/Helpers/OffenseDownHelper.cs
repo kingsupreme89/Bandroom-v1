@@ -35,12 +35,34 @@ public sealed class OffenseDownHelper : IRuleEvaluator
     // OCR gap still fires something rather than going silent.
     readonly DownDistanceBuffer _buffer = new();
 
+    // FIXED 2026-08-19 (live bug: "3rd & Short" fired for a team that had just received a
+    // kickoff, before their real first snap of the drive). GameWatcher's down/distance read is
+    // sticky -- it holds the last REAL down seen (e.g. "3rd & Short" from the drive that just
+    // ended) all the way through a kickoff, since there's no down/distance HUD to read during
+    // the kickoff itself. A single flickered OCR tick during/right after the kickoff can look
+    // like Down "changing" even though the receiving team hasn't snapped yet, re-firing this
+    // helper off that stale value. Same "_awaitingPostKickoffSnap" guard DriveStarterHelper
+    // already uses to suppress itself until the real first snap after a kickoff.
+    bool _awaitingPostKickoffSnap;
+
     public bool CanFire(GameState state) => true;
 
     public TriggerEvent? Evaluate(GameState state)
     {
+        bool wasAwaitingPostKickoffSnap = _awaitingPostKickoffSnap;
+        if (state.Current.IsKickoff)
+            _awaitingPostKickoffSnap = true;
+        else if (_awaitingPostKickoffSnap && state.Current.Down is >= 1 and <= 4)
+            _awaitingPostKickoffSnap = false;
+
         if (state.Current.Down != state.Previous.Down)
         {
+            if (state.Current.IsKickoff || wasAwaitingPostKickoffSnap)
+            {
+                _buffer.Clear();
+                return null;
+            }
+
             // A turnover also resets Down for the new offense -- that's TurnoverHelper's moment,
             // not a down-and-distance cue. Same NewPossession guard FirstDownHelper/DefenseHelper
             // use.

@@ -223,10 +223,28 @@ internal sealed class GameWatcher
     // that class's own doc comment for the exact port of Coffee's status/PID/freshness/per-field
     // provenance checks). Takes priority over the screen-JSON reader above when CONNECTED (more
     // authoritative -- memory, not OCR/JSON-file guessing); both still fall back to plain OCR when
-    // neither reader is usable. OFF by default -- see ConfigStore.LoadScoreboardReaderRamModeEnabled.
+    // neither reader is usable. ON by default (2026-08-19) -- see
+    // ConfigStore.LoadScoreboardReaderRamModeEnabled.
     readonly GameStateNormalizer _ramNormalizer = new();
     string? _ramLiveDataPath;
     bool _ramModeEnabled;
+
+    // FIXED 2026-08-19 (live bug: RAM mode consistently credited the wrong side all game --
+    // "away" for plays that were actually home's, every single time, not a random flicker).
+    // Root cause: the bundled reader auto-discovers its own memory offsets fresh each session
+    // ("automatic-read-only-signatures-v9-special-downs" profile) rather than using fixed,
+    // verified offsets, and it never resolved real team names this session (awayTeamName/
+    // homeTeamName both stayed "missing") -- so its raw possession bit is just whichever memory
+    // slot it happened to lock onto, with zero guarantee that slot lines up with BANDroom's own
+    // home/away selection. It can come out backwards, and previously nothing ever checked.
+    // Self-corrects once: the first time BOTH the reader's possession AND OCR's own independently
+    // color-sampled possession (_lastPossession) are confirmed on the same tick, if they disagree,
+    // assume the reader is inverted for the rest of this session and flip every reader possession
+    // read from then on. OCR is trusted as the tie-breaker here specifically because it's sampled
+    // directly against BANDroom's own configured home/away team colors, so it can't have this same
+    // class of "which physical team is which" ambiguity the reader has.
+    bool _ramPossessionOrientationChecked;
+    bool _ramPossessionInverted;
     /// <summary>Exposed for WebBridge.GetScoreboardSourceStatus, same reasoning as ScoreboardStatus
     /// above.</summary>
     public ScoreboardReaderStatus RamReaderStatus { get; private set; } = ScoreboardReaderStatus.NotFound;
@@ -883,6 +901,8 @@ internal sealed class GameWatcher
         _pendingDownDistanceDeadline = default;
         _lastPossession = null;
         _possessionCooldownUntil = default;
+        _ramPossessionOrientationChecked = false;
+        _ramPossessionInverted = false;
         _lastAwayTimeoutsRemaining = -1;
         _lastHomeTimeoutsRemaining = -1;
         _lastKnownDown = null;
@@ -2161,7 +2181,24 @@ internal sealed class GameWatcher
             // connected). Now only trusts the reader's possession bit once HavePossession
             // confirms it has genuinely resolved at least once; otherwise stays null so OCR's own
             // possession tracking is used, unchanged.
-            if (rs.HavePossession) readerPossessionAway = rs.PossessionAway;
+            if (rs.HavePossession)
+            {
+                bool rawReaderPossessionAway = rs.PossessionAway;
+                // Gated on ocrPossessionSettled (same corroboration window as the stale-RAM
+                // fallback above), not just "OCR has any value yet" -- OCR's own possession read
+                // is itself 2-tick debounced (ConfirmPossessionFlip), so comparing against
+                // _lastPossession on the very first tick after a real possession change risks
+                // catching OCR mid-flip and concluding "inverted" from a timing race rather than
+                // a real orientation mismatch, permanently flipping every subsequent correct read.
+                if (!_ramPossessionOrientationChecked && _lastPossession != null && ocrPossessionSettled)
+                {
+                    _ramPossessionInverted = rawReaderPossessionAway != (_lastPossession == "away");
+                    _ramPossessionOrientationChecked = true;
+                    if (_ramPossessionInverted)
+                        Log?.Invoke("[watcher] RAM reader's possession disagreed with OCR on first (settled) comparison -- assuming RAM is home/away-inverted this session and correcting it from now on");
+                }
+                readerPossessionAway = _ramPossessionInverted ? !rawReaderPossessionAway : rawReaderPossessionAway;
+            }
         }
 
         // RAM-primary watchdog (2026-08-13): silent, log-only OCR cross-check -- only meaningful
@@ -2199,9 +2236,15 @@ internal sealed class GameWatcher
             // resetting because its clock wasn't running the whole time. Splitting the "compute
             // stability" call out from the "should I act on it" condition fixes this for all 5
             // fields the same way.
+            // Orientation-corrected, same as readerPossessionAway above -- comparing OCR against
+            // the raw (uncorrected) bit here would spuriously "agree" by coincidence of the
+            // inversion once _ramPossessionInverted is true, silently disabling this watchdog for
+            // possession for the rest of the game.
+            bool correctedRamPossessionAway = _ramPossessionInverted ? !ramForStaleness.PossessionAway : ramForStaleness.PossessionAway;
+
             bool ramDownStable = IsFieldStableFor(ramForStaleness.Down, ref _ramDownStableValue, ref _ramDownStableSince, nowUtc, RamFieldStaleThreshold);
             bool ramYardsToGoStable = IsFieldStableFor(ramForStaleness.YardsToGo, ref _ramYardsToGoStableValue, ref _ramYardsToGoStableSince, nowUtc, RamFieldStaleThreshold);
-            bool ramPossessionStable = IsFieldStableFor(ramForStaleness.PossessionAway, ref _ramPossessionStableValue, ref _ramPossessionStableSince, nowUtc, RamFieldStaleThreshold);
+            bool ramPossessionStable = IsFieldStableFor(correctedRamPossessionAway, ref _ramPossessionStableValue, ref _ramPossessionStableSince, nowUtc, RamFieldStaleThreshold);
             bool ramHomeScoreStable = IsFieldStableFor(ramForStaleness.HomeScore, ref _ramHomeScoreStableValue, ref _ramHomeScoreStableSince, nowUtc, RamFieldStaleThreshold);
             bool ramAwayScoreStable = IsFieldStableFor(ramForStaleness.AwayScore, ref _ramAwayScoreStableValue, ref _ramAwayScoreStableSince, nowUtc, RamFieldStaleThreshold);
 
@@ -2215,9 +2258,9 @@ internal sealed class GameWatcher
                 Log?.Invoke($"[RAM watchdog] distance stuck at {ramForStaleness.YardsToGo} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {ocrYardsToGo} -- falling back to OCR for this field");
                 yardsToGo = ocrYardsToGo;
             }
-            if (readerPossessionAway.HasValue && ocrPossessionAway != ramForStaleness.PossessionAway && ocrPossessionSettled && ramPossessionStable)
+            if (readerPossessionAway.HasValue && ocrPossessionAway != correctedRamPossessionAway && ocrPossessionSettled && ramPossessionStable)
             {
-                Log?.Invoke($"[RAM watchdog] possession stuck at {(ramForStaleness.PossessionAway ? "away" : "home")} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {(ocrPossessionAway ? "away" : "home")} -- falling back to OCR for this field");
+                Log?.Invoke($"[RAM watchdog] possession stuck at {(correctedRamPossessionAway ? "away" : "home")} for {RamFieldStaleThreshold.TotalSeconds:0}s+ while OCR settled on {(ocrPossessionAway ? "away" : "home")} -- falling back to OCR for this field");
                 readerPossessionAway = ocrPossessionAway;
             }
             if (ocrDown != 0 && ocrHomeScore != ramForStaleness.HomeScore && ocrHomeScoreSettled && ramHomeScoreStable)

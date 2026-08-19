@@ -1441,9 +1441,11 @@ public sealed class WebMainForm : Form
 
         // Auto-launch the bundled RAM reader, opportunistically -- best-effort only, never blocks
         // GAMETIME (see ScoreboardReaderHost's own doc comment). Screen-mode/OCR needs nothing
-        // launched at all (that's BANDroom's own existing GameWatcher path). RAM mode stays OFF by
-        // default behind ConfigStore.LoadScoreboardReaderRamModeEnabled() -- an anti-cheat safety
-        // decision, not something this bundling change reverses. The scorebug SKIN choice (see
+        // launched at all (that's BANDroom's own existing GameWatcher path). RAM mode is ON by
+        // default as of 2026-08-19 behind ConfigStore.LoadScoreboardReaderRamModeEnabled() -- the
+        // owner's call that the anti-cheat risk this toggle exists for only applies to online
+        // play, and the userbase is offline/vs-CPU (see that method's own doc comment). The
+        // scorebug SKIN choice (see
         // confirmMatchup in app.js) is a passive Coffee's Corner preference only now -- the
         // bundled exe's real invocation contract (`--service seedPath statusPath pid`) has no
         // resolution/theme args, so nothing about that choice is passed to the process.

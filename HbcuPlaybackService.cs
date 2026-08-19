@@ -119,11 +119,20 @@ internal sealed class HbcuPlaybackService : IDisposable
     /// starts PostKickoffGap after that song ends, not PostKickoffGap after this call.</param>
     public void Start(TimeSpan kickoffSongDuration = default)
     {
+        // TEMP DIAGNOSTIC 2026-08-18 (owner report: "hub isn't auto starting after opening
+        // kickoff event") -- this method had zero logging, so there was no way to tell whether
+        // it was never being CALLED at all (e.g. Opening Kickoff not detected/routed, or
+        // _hbcuPlayback null at that moment), called but no-op'd by the _running/_startTimer
+        // guard below, or called and genuinely armed a timer that then silently never fired.
+        // Logs which of those happened every time. Remove once the cause is found.
+        CrashLog.Write("HbcuPlaybackService.Start called", new Exception(
+            $"kickoffSongDuration={kickoffSongDuration.TotalSeconds:F1}s alreadyRunning={_running} startTimerAlreadyArmed={_startTimer != null}"));
         if (_running || _startTimer != null) return;
         var delay = kickoffSongDuration + PostKickoffGap;
         _nextTimerUtc = DateTime.UtcNow + delay;
         _startTimer = new System.Threading.Timer(_ =>
         {
+            CrashLog.Write("HbcuPlaybackService.Start timer fired", new Exception("starting first pot turn now"));
             _startTimer?.Dispose();
             _startTimer = null;
             _running = true;
@@ -139,6 +148,13 @@ internal sealed class HbcuPlaybackService : IDisposable
     /// since there's no kickoff song to wait out here, just an owner pressing a button.</summary>
     public void Restart()
     {
+        // TEMP DIAGNOSTIC 2026-08-17 (owner report: pot "keeps skipping over a track then
+        // restarting") -- this is the ONE call in the whole class that wipes both queues and
+        // starts completely over, so if it's firing when nobody pressed the dashboard's Start
+        // button, that's the "restarting" half of the report. Logs a stack trace so a stray/
+        // unexpected caller is identifiable, not just "Restart happened." Remove once the cause
+        // is found.
+        CrashLog.Write("HbcuPlaybackService.Restart called", new Exception(Environment.StackTrace));
         Stop();
         _homeQueue.Clear();
         _awayQueue.Clear();
@@ -311,7 +327,21 @@ internal sealed class HbcuPlaybackService : IDisposable
         _currentSongName = Path.GetFileNameWithoutExtension(song.FilePath);
         _playForSide(side, song);
 
-        ScheduleAdvance(ResolveSongDuration(song) + AdvanceGap);
+        var resolvedDuration = ResolveSongDuration(song);
+        // TEMP DIAGNOSTIC 2026-08-17 (owner report: pot "keeps skipping over a track then
+        // restarting" -- no exceptions ever showed up in crash.log for this, so whatever's
+        // happening is a scheduling issue, not a crash. Logging every advance decision (which
+        // side, which song, how long ResolveSongDuration thinks it is, and the resulting
+        // ScheduleAdvance delay) so the next occurrence leaves a real trace: a resolved duration
+        // that's way too short would explain a track getting cut off early (StopChannel on the
+        // OTHER side's next-turn song would then audibly cut this one short, reading as "skipped"),
+        // and any call landing here while queue.Count was already 0 before Refill ran would help
+        // spot a queue-exhaustion loop that reads as "restarting." Remove once the cause is found.
+        CrashLog.Write("HbcuPlaybackService.PlayNext diagnostic", new Exception(
+            $"side={side} song={_currentSongName} resolvedDurationSec={resolvedDuration.TotalSeconds:F1} " +
+            $"queueCountAfterDequeue={queue.Count} nextTurn={_nextTurn} homeQueue={_homeQueue.Count} awayQueue={_awayQueue.Count}"));
+
+        ScheduleAdvance(resolvedDuration + AdvanceGap);
     }
 
     void ScheduleAdvance(TimeSpan delay)

@@ -78,10 +78,11 @@ internal static class ConfigStore
     /// <summary>The single scorebug-size choice asked once at GAMETIME instead of exposing any of
     /// the reader's own settings UI -- see LoadSavedScorebugSize's doc comment.</summary>
     static readonly string ScorebugSizeChoicePath = Path.Combine(UserDataRoot, "scorebug_size_choice.txt");
-    /// <summary>One-time opt-in for the reader's RAM-read mode (default off -- see
-    /// ScoreboardReaderHost's doc comment: RAM mode reads CFB27's own process memory, which the
-    /// reader's own instructions restrict to "offline/modded play only"). Presence of "true" means
-    /// the user has already seen and accepted the one-time warning dialog.</summary>
+    /// <summary>Opt-OUT for the reader's RAM-read mode (default ON as of 2026-08-19 -- see
+    /// LoadScoreboardReaderRamModeEnabled's doc comment: owner's explicit call that the anti-cheat
+    /// risk this file guards against only applies to online play, and the userbase is
+    /// offline/vs-CPU. Absence of the file means enabled; presence of "false" means the user has
+    /// explicitly opted out.</summary>
     static readonly string ScoreboardReaderRamModeEnabledPath = Path.Combine(UserDataRoot, "scoreboard_reader_ram_enabled.txt");
     /// <summary>Owner request 2026-08-13: console/remote-play streamers have no local CFB27
     /// process to read memory from, so RAM mode is moot for them -- this is a standing "never even
@@ -804,11 +805,18 @@ internal static class ConfigStore
         AtomicWriteAllText(ScorebugSizeChoicePath, skinName);
     }
 
-    /// <summary>One-time opt-in acceptance for the reader's RAM-read mode -- see
-    /// ScoreboardReaderRamModeEnabledPath's own doc comment. False (and no warning shown yet) by
-    /// default; screen-mode is always the default regardless of this flag.</summary>
+    /// <summary>Opt-in acceptance for the reader's RAM-read mode -- see
+    /// ScoreboardReaderRamModeEnabledPath's own doc comment. DEFAULT FLIPPED TO ON 2026-08-19
+    /// (owner call: "everyone is okaying offline" -- the userbase plays offline/vs CPU, where the
+    /// reader's own online/anti-cheat restriction doesn't apply, and OCR's color/possession
+    /// misreads were causing real live-game misattribution the RAM reader doesn't have). Absence
+    /// of the file now means "never explicitly turned off," not "never opted in" -- an existing
+    /// user (or fresh install) gets RAM mode unless they (or RemotePlayMode) explicitly disable
+    /// it. Screen-mode/OCR is still the automatic fallback whenever the reader itself isn't
+    /// running or its game-process memory read fails -- this only changes which mode is tried
+    /// first, not the fail-soft behavior.</summary>
     public static bool LoadScoreboardReaderRamModeEnabled() =>
-        File.Exists(ScoreboardReaderRamModeEnabledPath) && File.ReadAllText(ScoreboardReaderRamModeEnabledPath).Trim() == "true";
+        !File.Exists(ScoreboardReaderRamModeEnabledPath) || File.ReadAllText(ScoreboardReaderRamModeEnabledPath).Trim() != "false";
 
     public static void SaveScoreboardReaderRamModeEnabled(bool enabled)
     {

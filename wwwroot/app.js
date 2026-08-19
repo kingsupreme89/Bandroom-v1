@@ -5760,6 +5760,12 @@ function submitImportSongNaming() {
   const type = document.querySelector('input[name="import-song-naming-type"]:checked').value;
   const path = _importLocalSongPath;
   closeImportSongNamingDialog();
+  // Owner report 2026-08-17 ("the import menus pop up behind the dialog still"): the trim step
+  // reveals the Clipper Island's own #clipper-assign panel, which is part of the normal page
+  // layout (no z-index of its own) -- it never had a chance to visibly appear while My Downloads'
+  // full-screen overlay (z-index 60) was still open on top of it. Close My Downloads here so the
+  // trim panel actually becomes visible instead of rendering invisibly underneath it.
+  if (!document.getElementById("my-downloads-overlay").hidden) closeMyDownloads();
   openInlineTrimmerForImport(path, name, type);
 }
 
