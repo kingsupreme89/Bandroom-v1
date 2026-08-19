@@ -103,7 +103,7 @@ public sealed class WebBridge
     /// GAMETIME flow, or via Reader Hub) -- see ConfigStore.LoadSavedScorebugSkin's own doc
     /// comment. No resolution/size question exists anywhere -- that's auto-detected from the
     /// current display, never asked.</summary>
-    public string GetSavedScorebugSkin() => ConfigStore.LoadSavedScorebugSkin();
+    public string GetSavedScorebugSkin() => _host.GetSavedScorebugSkinFromWeb();
     public void SaveScorebugSkin(string skinName) => ConfigStore.SaveScorebugSkinChoice(skinName);
 
     public string? GetTeamBackgroundUrl(string teamName)

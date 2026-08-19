@@ -570,6 +570,18 @@ public sealed class WebMainForm : Form
     /// only shows once. Empty array (not an error) only if even the bundled read fails somehow.</summary>
     public string GetScorebugThemeGalleryFromWeb()
     {
+        var result = MergedThemeLibraryEntries().Values.Select(e => new
+        {
+            name = e.name,
+            canvasWidth = e.canvasWidth,
+            canvasHeight = e.canvasHeight,
+            thumbnailUrl = e.thumbnail != null ? $"https://scorebugthumbs/{e.thumbnail}" : null,
+        });
+        return JsonSerializer.Serialize(result);
+    }
+
+    Dictionary<string, (string? name, int canvasWidth, int canvasHeight, string? thumbnail)> MergedThemeLibraryEntries()
+    {
         var bundled = ReadThemeLibraryEntries(ScoreboardReaderPaths.ResolveBundledThemeLibraryJsonPath());
         var external = ReadThemeLibraryEntries(ScoreboardReaderPaths.ResolveThemeLibraryJsonPath());
 
@@ -579,14 +591,23 @@ public sealed class WebMainForm : Form
             string name = entry.name ?? "Untitled";
             if (!byName.ContainsKey(name)) byName[name] = entry;
         }
-        var result = byName.Values.Select(e => new
-        {
-            name = e.name,
-            canvasWidth = e.canvasWidth,
-            canvasHeight = e.canvasHeight,
-            thumbnailUrl = e.thumbnail != null ? $"https://scorebugthumbs/{e.thumbnail}" : null,
-        });
-        return JsonSerializer.Serialize(result);
+        return byName;
+    }
+
+    /// <summary>2026-08-19 (owner request: pruned ESPN/NBC skins out of the bundled library) --
+    /// a machine that already saved one of those removed names (they were the gallery's default
+    /// pick, so most installs had one saved) would otherwise keep returning that dead name here
+    /// forever: the JS switcher pill would display it, but ResolveActiveScorebugThemeFile can
+    /// never resolve it to a real file (see that method's own null-handling), so the overlay would
+    /// silently show nothing while the UI claimed a skin was selected. Validates the saved name
+    /// against the CURRENT gallery and returns "" (same as "nothing saved yet") if it's gone, so
+    /// app.js's own `GetSavedScorebugSkin() || _scorebugSkinNames[0]` fallback picks a real skin
+    /// instead.</summary>
+    public string GetSavedScorebugSkinFromWeb()
+    {
+        string saved = ConfigStore.LoadSavedScorebugSkin();
+        if (string.IsNullOrWhiteSpace(saved)) return saved;
+        return MergedThemeLibraryEntries().ContainsKey(saved) ? saved : "";
     }
 
     List<(string? name, int canvasWidth, int canvasHeight, string? thumbnail)> ReadThemeLibraryEntries(string? path)

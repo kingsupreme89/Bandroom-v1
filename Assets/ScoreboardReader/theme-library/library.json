@@ -2,30 +2,6 @@
   "schema": "cfb27-theme-library/1",
   "themes": [
     {
-      "name": "ESPN 25 V3 (Bandroom)",
-      "canvasWidth": 1555,
-      "canvasHeight": 176,
-      "relativePath": "ESPN25V3/index.html"
-    },
-    {
-      "name": "ESPN 2020",
-      "canvasWidth": 1920,
-      "canvasHeight": 79,
-      "relativePath": "ESPN2020Real/index.html"
-    },
-    {
-      "name": "NBC 2024",
-      "canvasWidth": 1056,
-      "canvasHeight": 146,
-      "relativePath": "NBC2024/index.html"
-    },
-    {
-      "name": "NBC 2024 Monochrome",
-      "canvasWidth": 1056,
-      "canvasHeight": 146,
-      "relativePath": "NBC2024Mono/index.html"
-    },
-    {
       "name": "FOX 2021",
       "canvasWidth": 2038,
       "canvasHeight": 395,
@@ -38,18 +14,6 @@
       "relativePath": "FOX2025/index.html"
     },
     {
-      "name": "CFB27 ESPN 2007 V2",
-      "canvasWidth": 1920,
-      "canvasHeight": 146,
-      "relativePath": "ESPN2007V2/index.html"
-    },
-    {
-      "name": "ESPN 2020 V6",
-      "canvasWidth": 1920,
-      "canvasHeight": 79,
-      "relativePath": "ESPN2020V6/index.html"
-    },
-    {
       "name": "FOX V7 (static preview only, no live data)",
       "canvasWidth": 1920,
       "canvasHeight": 400,
@@ -60,12 +24,6 @@
       "canvasWidth": 800,
       "canvasHeight": 150,
       "relativePath": "CWScorebug/index.html"
-    },
-    {
-      "name": "ESPN 2013 (static preview only, no live data)",
-      "canvasWidth": 130,
-      "canvasHeight": 148,
-      "relativePath": "ESPN2013/index.html"
     }
   ]
 }
