@@ -94,6 +94,43 @@ real screenshots of a confirmed Kennesaw State possession frame to attempt a pro
   log lines that reported them, but not yet re-observed live post-fix (no kickoff has happened yet
   on the patched build as of this handoff).
 
+## Post-Session: Deep Review + Release (v1.1.22)
+
+Before shipping, ran a full code-review pass over this session's diff and found two real bugs in
+the possession-orientation logic that hadn't been live-verified yet — both fixed and built/tested
+green before release:
+
+- **RAM/OCR watchdog compared OCR against the raw, uncorrected reader bit.** Once
+  `_ramPossessionInverted` flips true, `readerPossessionAway` is corrected (negated) everywhere it's
+  used *except* the stale-RAM-field watchdog at `GameWatcher.cs`'s `ramForStaleness.PossessionAway`
+  checks, which still read the raw bit. If the corrected value later got stuck wrong while OCR
+  settled on the truth, the watchdog would spuriously "agree" with the raw (un-negated) value by
+  coincidence of the inversion and never fire. **Fixed**: introduced `correctedRamPossessionAway`
+  and used it for the stability tracker, the comparison, and the log line.
+- **Orientation self-check was one-shot with no debounce.** The very first tick where the reader's
+  possession resolved was compared against OCR's `_lastPossession` — but OCR's own possession read
+  is itself 2-tick debounced (`ConfirmPossessionFlip`), so a reader connecting right around a real
+  possession change could catch OCR mid-flip and wrongly conclude "inverted" from a timing race,
+  then flip every correct read for the rest of the game. **Fixed**: gated the check on
+  `ocrPossessionSettled` (same corroboration window the stale-RAM fallback already uses) so it only
+  compares once OCR has genuinely settled, not mid-flicker.
+- Two stale doc comments (`ConfigStore.cs`'s `ScoreboardReaderRamModeEnabledPath`, `WebMainForm.cs`'s
+  auto-launch comment) still described RAM mode as opt-in/off-by-default after tonight's flip to
+  default-on — updated both so a future reader isn't misled.
+- `OffenseDownHelper.cs`'s post-kickoff guard (clears on the first in-range `Down` read, which can
+  still be the stale pre-kickoff value) was flagged by review but left as-is — it's the same pattern
+  already shipped in `DriveStarterHelper.cs`, not a defect unique to tonight's diff. A real fix needs
+  a "real snap occurred" signal that doesn't exist yet; worth a future session if it's ever observed
+  live.
+
+Killed the live-swapped `bin/Debug` dev build (owner confirmed it was safe to close), rebuilt clean —
+all three projects green, 132/132 `Bandroom.Core.Tests` pass — then ran the full `ppup` release
+pipeline: committed, pushed, tagged, packed, published.
+
+**`v1.1.22` is live**: https://github.com/kingsupreme89/Bandroom-v1/releases/tag/v1.1.22 — existing
+installs get it as a delta update on next launch; the "not yet released" open item below is now
+resolved.
+
 ## Open Items For Next Session
 
 - **Confirm the RAM possession-inversion self-correction actually works live** — this is the
@@ -103,10 +140,9 @@ real screenshots of a confirmed Kennesaw State possession frame to attempt a pro
   the self-correction actually triggered (or didn't need to, if the reader happened to lock on
   correctly this time — profile is regenerated fresh every session, so orientation isn't guaranteed
   consistent run to run).
-- **This has not been released** — the owner is currently running a `bin/Debug` dev build swapped
-  in ad hoc, not a real installed version. Needs a proper `ppup` release once tonight's fixes are
-  confirmed stable, so `app-1.1.21`'s install (and the auto-updater) actually reflects tonight's
-  work.
+- ~~**This has not been released**~~ — **Resolved**: released as `v1.1.22` (see "Post-Session: Deep
+  Review + Release" above). The RAM-possession-inversion fix below is still not live-verified in a
+  real game even though it's now shipped — that verification is still the top priority next session.
 - A user-reported "turnover, nothing triggered" was flagged mid-session but never isolated — came
   in right as the RAM/possession chase was peaking and the app was mid-restart shortly after. Worth
   specifically watching for on the next turnover once the possession fix is confirmed; may have
