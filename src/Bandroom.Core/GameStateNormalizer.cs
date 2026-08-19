@@ -44,7 +44,12 @@ public readonly record struct ReaderNumericSnapshot(
     // replace its RAM-vs-OCR staleness guess with the reader's own ground truth (see
     // ScoreboardReaderFreshness.CoreBlockRecentlyChanged). Null on older readers or before anything
     // has resolved -- GameWatcher must treat null the same as "no freshness data," never as "stale."
-    ScoreboardReaderFreshness? Freshness);
+    ScoreboardReaderFreshness? Freshness,
+    // Passed straight through, NOT stickied like everything else in this record -- the reader
+    // itself already time-windows this (null before/after the ~10s-to-45s announcement window),
+    // so holding a stale "offense"/"defense" sticky would keep a penalty flag lit long after the
+    // announcement ends. See ScoreboardReaderState.PenaltySide's doc comment.
+    string? PenaltySide);
 
 /// <summary>Maps Coffee's reader JSON (ScoreboardReaderState) into the numeric fields of a
 /// PlaySnapshot -- most notably YardLine from `game.ballOn`, previously hardcoded to 0 in
@@ -112,8 +117,19 @@ public sealed class GameStateNormalizer
         if (game?.Down is int down && down is >= 1 and <= 4)
             _lastDown = down;
 
+        // 2026-08-19: game.Distance (the raw numeric-or-"Goal"-text field) is documented as
+        // "may be null during specials" -- goal-to-go is exactly such a special, so the raw
+        // distance field itself can't be trusted to carry "Goal" text the way TryParseDistance
+        // expects. game.DownDistance (the reader's own COMPOSED display string, e.g. "1st & Goal")
+        // is the reliable source for this case -- checked as a fallback only when Distance itself
+        // didn't resolve, so it never overrides a real numeric distance reading. Without this,
+        // YardsToGo just went stale (held whatever it was before the goal-to-go snap) instead of
+        // resolving to 0, which is why 1st/2nd/3rd-down-on-goal-to-go plays weren't classified
+        // correctly by the down helpers that key off YardsToGo.
         if (TryParseDistance(game?.Distance, out int distance))
             _lastYardsToGo = distance;
+        else if (!string.IsNullOrEmpty(game?.DownDistance) && game.DownDistance.Contains("goal", StringComparison.OrdinalIgnoreCase))
+            _lastYardsToGo = 0;
 
         if (game?.BallOn is int ballOn && ballOn is >= 0 and <= 100)
             _lastYardLine = ballOn;
@@ -159,7 +175,8 @@ public sealed class GameStateNormalizer
             PossessionAway: _havePossession && _lastPossessionAway,
             HavePossession: _havePossession,
             PlayClock: _lastPlayClock,
-            Freshness: state.Freshness);
+            Freshness: state.Freshness,
+            PenaltySide: state.PenaltySide);
     }
 
     /// <summary>Reader sends distance either as a plain number ("7") or goal-line text

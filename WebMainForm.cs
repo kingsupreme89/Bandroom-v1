@@ -228,6 +228,12 @@ public sealed class WebMainForm : Form
 
         NormalizeExistingLibraryOnce();
 
+        // Owner request 2026-08-19 ("ram reader permanently on and programmed to reset if it
+        // loses [connection]") -- GameWatcher's own watchdog decides WHEN a restart is warranted
+        // (sustained non-Connected status mid-session, not just a normal cold-start window); this
+        // only gives it the means to actually do it via the host that owns the child process.
+        _watcher.RestartRamReader = () => _scoreboardReaderHost.RestartRamReader();
+
         _overlayServer.Start();
         FormClosing += (_, _) => { _hook.Stop(); _watcher.Stop(); _scoreboardReaderHost.Stop(); FlushOcrLog(); _overlayServer.Stop(); _scorebugOverlay?.Dispose(); _hbcuPlayback?.Dispose(); _hbcuResumeTimer?.Dispose(); };
 
@@ -685,7 +691,8 @@ public sealed class WebMainForm : Form
             clock = $"{minutes}:{seconds:D2}",
             down = snapshot.Down,
             distance = snapshot.YardsToGo,
-        });
+            playClock = snapshot.PlayClock >= 0 ? snapshot.PlayClock : (int?)null,
+        }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
     }
 
     public string GetTeamPresetStatusFromWeb()
@@ -1466,6 +1473,12 @@ public sealed class WebMainForm : Form
     /// reasoning as every other long-lived overlay in this app.</summary>
     void ShowScorebugOverlay()
     {
+#if DEBUG
+        // TEMP 2026-08-19: owner asked to stop the scorebug overlay popping up automatically
+        // while testing other things in the dev build -- Debug-only guard so this never ships in
+        // a Release build. Remove this #if block (or flip to false->true) once wanted back.
+        return;
+#endif
         try
         {
             if (_scorebugOverlay == null || _scorebugOverlay.IsDisposed)

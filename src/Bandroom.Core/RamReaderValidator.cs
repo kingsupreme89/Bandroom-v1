@@ -74,6 +74,17 @@ public static class RamReaderValidator
                 && ramEl.TryGetProperty("freshness", out var freshnessEl)
                 ? BuildFreshness(freshnessEl) : null;
 
+            // ram.penalty.side ("offense"|"defense"|null) -- see ScoreboardReaderState.PenaltySide's
+            // doc comment. No *Source provenance marker documented for this one (unlike every other
+            // field in this file) -- ramEl's own presence plus a strict allowlist on the side string
+            // is the validation here.
+            string? penaltySide = null;
+            if (ramEl.ValueKind == JsonValueKind.Object && ramEl.TryGetProperty("penalty", out var penaltyEl)
+                && penaltyEl.ValueKind == JsonValueKind.Object
+                && TryGetString(penaltyEl, "side", out var sideVal)
+                && (sideVal == "offense" || sideVal == "defense"))
+            { penaltySide = sideVal; fields.Add("ram.penalty.side"); }
+
             var state = new ScoreboardReaderState
             {
                 Away = away,
@@ -81,6 +92,7 @@ public static class RamReaderValidator
                 Game = game,
                 Meta = new ScoreboardReaderMeta { Source = "ram", Visible = true, UpdatedAt = updatedAtRaw, RamUpdatedAt = updatedAtRaw },
                 Freshness = freshness,
+                PenaltySide = penaltySide,
             };
             return (state, fields);
         }

@@ -78,4 +78,12 @@ public sealed class PlaySnapshot
     /// can't distinguish a first-down-on-first-down (Down never changes) from ordinary mid-drive
     /// stillness.</summary>
     public bool IsPlayClockCounting { get; init; }
+
+    /// <summary>Numeric seconds-remaining play clock, RAM-reader-only (OCR has no calibrated
+    /// digit read for this, only the counting-vs-"--" edge IsPlayClockCounting above) -- -1 means
+    /// "not available this tick" (reader disconnected, or connected but this field never resolved).
+    /// Added 2026-08-19 for the scorebug overlay's numeric play-clock display, which had nothing
+    /// to bind to before this (GameStateNormalizer already normalized ReaderNumericSnapshot.PlayClock,
+    /// it just never made it past RouteEngineTick's local into the actual snapshot).</summary>
+    public int PlayClock { get; init; } = -1;
 }

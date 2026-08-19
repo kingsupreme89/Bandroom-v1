@@ -24,13 +24,26 @@ public sealed class GameStateEventHelper : IRuleEvaluator
     // ever one real "take the field" moment per GAMETIME session.
     bool _didFirePregame;
 
+    // FIXED 2026-08-19 (owner report, live game: "Start of 2nd Quarter" fired dozens of times over
+    // ~5-7s intervals for the whole quarter instead of once): the Previous/Current edge check below
+    // had no fire-once guard, unlike _didFirePregame/_didFireVictoryInHand right in this same class
+    // -- Quarter is recomputed fresh every tick from OCR/RAM with no stability requirement (unlike
+    // Down/Distance/Possession/Score, which got RAM-vs-OCR settle+stable protection 2026-08-14/15),
+    // so a HUD graphic or OCR misread that periodically causes a single stray "1st" read between
+    // real "2nd" reads makes Previous.Quarter=1/Current.Quarter=2 look like a fresh transition every
+    // single time it happens, not just at the real quarter boundary. One real "start of 2nd/4th
+    // quarter" per game, same reasoning _didFirePregame already documents for pregame.
+    bool _didFireStart2ndQuarter;
+    bool _didFireStart4thQuarter;
+
     public TriggerEvent? Evaluate(GameState state)
     {
         // --- Quarter transitions ---
         if (state.Previous.Quarter != state.Current.Quarter && state.Previous.Quarter > 0)
         {
-            if (state.Current.Quarter == 2)
+            if (state.Current.Quarter == 2 && !_didFireStart2ndQuarter)
             {
+                _didFireStart2ndQuarter = true;
                 return new TriggerEvent
                 {
                     EventKey = "Other: Start of 2nd Quarter",
@@ -45,8 +58,9 @@ public sealed class GameStateEventHelper : IRuleEvaluator
             // transition) and registered in ConfigStore.AllEngineEventKeys. Adding a second
             // event here would just double-fire on the same real-world moment.
 
-            if (state.Current.Quarter == 4)
+            if (state.Current.Quarter == 4 && !_didFireStart4thQuarter)
             {
+                _didFireStart4thQuarter = true;
                 return new TriggerEvent
                 {
                     EventKey = "Other: Start of 4th Quarter",

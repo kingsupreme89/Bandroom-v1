@@ -1,20 +1,24 @@
 namespace Bandroom.Core.Helpers;
 
-/// <summary>Fires a generic "Defense: Tackle for Loss" cue whenever a down advances (2nd, 3rd, or
-/// 4th) with YardsToGo having increased -- alongside, not instead of, the more specific
-/// "Defense: Second/Third Down (Loss)"/"Defense: Fourth Down (Loss)" cues DefenseHelper/
-/// BigEventHelper already fire for the same snap. Owner's explicit call (2026-08-11 audit): this
-/// generic cue should still play in addition to those, not be replaced by them.
+/// <summary>Fires a generic "Defense: Tackle for Loss" cue when a down advances to 3rd with
+/// YardsToGo having increased -- 3rd down has no down-specific Loss cue of its own (see the
+/// REMOVED 2026-08-11 comment below), so this generic cue is the only one that plays for it.
 ///
 /// FIXED 2026-08-11 (audit finding): a prior "fix" excluded downs 2/3/4 entirely to stop this
 /// evaluator from double-firing alongside DefenseHelper/BigEventHelper -- but since a down can
 /// only ever advance INTO 2, 3, or 4 in normal play, that exclusion covered this evaluator's
 /// entire reachable domain and made it permanently dead code (its EventKey stayed listed as an
-/// assignable song card that could never actually play). Restored to fire on all three, now
-/// intentionally overlapping with the down-specific cues (EventRouter's same-tick dedupe only
-/// blocks identical EventKeys, not different ones -- WebMainForm's per-tick layering already
-/// supports exactly this, see DefenseThirdDownShortHelper/OffenseDownHelper's identical
-/// same-tick-pairing pattern).
+/// assignable song card that could never actually play). Restored to fire on 3rd only (2nd/4th
+/// stay excluded, see those branches below) -- EventRouter's same-tick dedupe only blocks
+/// identical EventKeys, not different ones, so an overlap here would otherwise double-play,
+/// not get deduped for free.
+///
+/// UN-RESTORED for Down==2 on 2026-08-19 (owner report, live game log: "Second Down (Loss)" and
+/// "Tackle for Loss" both played back-to-back for the same snap): unlike Down==3 above, Down==2
+/// never had its specific "Defense: Second Down (Loss)" cue retired -- DefenseHelper's own
+/// down==2 branch fires on this exact same down-advance/YardsToGo-increase detection, so the two
+/// were guaranteed to co-fire on every single 2nd-down loss, not an occasional overlap worth
+/// living with. See the Down==2 guard below.
 ///
 /// Buffered edge-detection -- same OCR split-tick fix as DefenseHelper/BigEventHelper/
 /// OffenseDownHelper/DefenseThirdDownShortHelper (STATE_MACHINE_ANALYSIS Discrepancy #12):
@@ -84,6 +88,17 @@ public sealed class TflHelper : IRuleEvaluator
         // Down" only fires once the 4th-down play itself ends the drive) -- the loss cue would
         // otherwise play first and get stepped on moments later by the more important one anyway.
         if (state.Current.Down == 4)
+            return null;
+
+        // Added 2026-08-19 (owner report, live game log: "Second Down (Loss)" and "Tackle for
+        // Loss" both played back-to-back for the same snap): DefenseHelper fires its own
+        // "Defense: Second Down (Loss)" off this exact same down==2/YardsToGo-increased
+        // detection (see that file's down==2 branch) -- unlike down==3, which had its own
+        // specific Loss cue retired in favor of this generic one (see this class's own doc
+        // comment), down==2 never lost its specific cue, so the two have always been guaranteed
+        // to co-fire on every 2nd-down loss. Same deferral shape as the Down==4 guard above:
+        // the more specific cue wins, this generic one steps aside rather than stacking with it.
+        if (state.Current.Down == 2)
             return null;
 
         return new TriggerEvent

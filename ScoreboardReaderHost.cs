@@ -105,6 +105,19 @@ internal sealed class ScoreboardReaderHost
         }
     }
 
+    /// <summary>Owner request 2026-08-19: kill and relaunch the reader -- called by GameWatcher's
+    /// own watchdog (RestartRamReader) after it's seen RamReaderStatus stuck at anything other
+    /// than Connected for too long mid-session. Stop() first even though TryStartRamReader
+    /// already self-heals orphaned strays by name -- a process that's still technically alive but
+    /// wedged (hung, stopped writing its status file, whatever got it into this state) won't
+    /// necessarily show up as "exited" for IsRunning to catch, so this forces the kill unconditionally
+    /// rather than relying on TryStartRamReader's own no-op-if-already-running check.</summary>
+    public bool RestartRamReader()
+    {
+        Stop();
+        return TryStartRamReader();
+    }
+
     /// <summary>Called from FormClosing alongside _watcher.Stop() -- the reader is BANDroom's own
     /// spawned child, not something the user should have to close by hand.</summary>
     public void Stop()

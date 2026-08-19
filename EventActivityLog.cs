@@ -128,16 +128,17 @@ internal static class EventActivityLog
     /// kickoffs, etc) still falls back to the old prefix-strip behavior, unchanged.</summary>
     static readonly Dictionary<string, string> FriendlyNameOverrides = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["Offense: Second Down"] = "2nd & Long",
-        ["Offense: Second Down Short"] = "2nd & Short",
-        ["Offense: Third Down"] = "3rd & Long",
-        ["Offense: Third Down Short"] = "3rd & Short",
-        ["Defense: Second Down"] = "2nd & Long",
-        ["Defense: Second Down Short"] = "2nd & Short",
-        ["Defense: Third Down"] = "3rd & Long",
-        ["Defense: Third Down Short"] = "3rd & Short",
-        ["Defense: Fourth Down"] = "4th Down",
+        ["Offense: Second Down"] = "Offense: 2nd & Long",
+        ["Offense: Second Down Short"] = "Offense: 2nd & Short",
+        ["Offense: Third Down"] = "Offense: 3rd & Long",
+        ["Offense: Third Down Short"] = "Offense: 3rd & Short",
+        ["Defense: Second Down"] = "Defense: 2nd & Long",
+        ["Defense: Second Down Short"] = "Defense: 2nd & Short",
+        ["Defense: Third Down"] = "Defense: 3rd & Long",
+        ["Defense: Third Down Short"] = "Defense: 3rd & Short",
+        ["Defense: Fourth Down"] = "3rd Down Stop",
         ["Offense: Fourth Down"] = "4th Down",
+        ["Defense: Fourth Down Stop"] = "4th Down Stop",
         ["Defense: Fourth Down (Loss)"] = "4th Down After a Loss",
         // FIXED 2026-08-12 (owner report: log/UI labels showing the bare words "Offense"/
         // "Defense"/"Other" read as confusing on their own) -- the generic colon-strip fallback
@@ -158,7 +159,11 @@ internal static class EventActivityLog
         ["Penalty: Offense"] = "Penalty - Offense",
         ["Penalty: Defense"] = "Penalty - Defense",
         ["Offense: Earned First Down"] = "1st Down",
-        ["Offense: First Down on First Down"] = "First Down",
+        ["Defense: Earned First Down"] = "Defense: 1st Down Allowed",
+        ["Defense: Earned First Down Short"] = "Defense: 1st Down Allowed (Short)",
+        ["Offense: First Down on First Down"] = "First Down on First Down",
+        ["Offense: Touchdown Scored"] = "Offense: Touchdown",
+        ["Defense: Touchdown Scored"] = "Defense: Touchdown",
     };
 
     /// <summary>Turns an internal EventKey like "Offense: Touchdown Scored" or

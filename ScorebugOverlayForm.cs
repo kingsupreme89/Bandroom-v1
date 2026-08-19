@@ -15,6 +15,28 @@ internal static class NativeLayeredWindow
     static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize,
         IntPtr hdcSrc, ref POINT pprSrc, int crKey, ref BLENDFUNCTION pblend, uint dwFlags);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+
+    const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
+
+    /// <summary>Confirmed live bug 2026-08-19: GameWatcher's OCR fallback reads the game state via
+    /// a genuine composited-desktop screen grab (Graphics.CopyFromScreen, GameWatcher.cs ~line
+    /// 1076), not a window-specific capture -- and this overlay deliberately sits at the bottom of
+    /// the screen, the same real estate the game's own on-screen HUD occupies (that's the whole
+    /// point of a scorebug overlay). Whenever RAM reader hasn't independently resolved a field
+    /// (down/timeouts especially -- see ScorebugPreset.CollegeFootball27's own doc comments flagging
+    /// the timeout crop as an unconfirmed guess), OCR falls back to sampling screen pixels in that
+    /// same band, and can end up reading THIS overlay's own rendered text instead of the real game
+    /// HUD underneath it -- a feedback loop where a value freezes on whatever this overlay happened
+    /// to be displaying at the moment OCR first misread it. WDA_EXCLUDEFROMCAPTURE (Win32, Windows
+    /// 10 2004+) makes this window invisible to BitBlt/CopyFromScreen/PrintWindow-style capture
+    /// while leaving it fully visible on the real physical display via normal DWM composition --
+    /// the same mechanism video-call apps use to hide a picture-in-picture overlay from being
+    /// captured. Applied only to the visible top-level overlay window, never to _renderHost (which
+    /// must stay capturable -- CoreWebView2.CapturePreviewAsync depends on it).</summary>
+    public static void ExcludeFromScreenCapture(IntPtr hwnd) => SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+
     [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
     [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
     [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr hdc);
@@ -190,6 +212,13 @@ internal sealed class ScorebugOverlayForm : Form
         _renderTimer.Tick += async (_, _) => await RenderTickAsync();
         Load += async (_, _) =>
         {
+            // See NativeLayeredWindow.ExcludeFromScreenCapture's doc comment -- keeps this
+            // overlay's own rendering out of GameWatcher's OCR screen-capture fallback, which
+            // otherwise risks reading this window's own pixels back as if they were the real
+            // game HUD. Handle is guaranteed to exist here (Load fires post-handle-creation);
+            // _renderHost is deliberately excluded from this call, see the doc comment.
+            NativeLayeredWindow.ExcludeFromScreenCapture(Handle);
+
             // The off-screen host must actually be shown (Show(), not just constructed) for
             // WebView2 to paint at all -- an unshown/unrealized window's control never renders.
             // "Show" here only means "has a live HWND"; it's positioned at (-32000,-32000), far
@@ -435,6 +464,20 @@ internal sealed class ScorebugOverlayForm : Form
     /// above). Operates on straight (non-premultiplied) alpha, BEFORE the existing
     /// premultiply/scale step in RenderTickAsync -- that step still handles the separate garbage-
     /// RGB-behind-transparent-pixels problem for whatever alpha this pass produces.</summary>
+    /// <summary>Alpha-only keying (the version this replaced) leaves a magenta-tinted rim around
+    /// every real edge -- confirmed live 2026-08-19 (ESPN 25 V3 theme, pink outline traced the
+    /// whole bug's silhouette, not just individual shadow spillover). Root cause: an antialiased
+    /// edge pixel isn't "real color with wrong alpha," it's a GENUINE blend the browser rendered
+    /// (observed = alpha*real + (1-alpha)*magenta, alpha here being the page's own antialiasing
+    /// coverage, which the color-distance estimate below approximates well since it scales with
+    /// how much real color is mixed into magenta). The old code only ever adjusted alpha and left
+    /// `observed` untouched, so premultiplying afterward just scaled the magenta-contaminated
+    /// color down instead of removing the magenta out of it -- classic missing "spill suppression"
+    /// step. Since the backdrop is a KNOWN constant (magenta), the blend is exactly invertible:
+    /// real = (observed - (1-alpha)*magenta) / alpha, clamped to a valid byte per channel. Only
+    /// applied to partially-transparent pixels (0 &lt; alpha &lt; 1) -- fully transparent pixels'
+    /// RGB is irrelevant (alpha 0 either way), fully opaque pixels are real content already
+    /// untouched by magenta and unmixing would be a no-op divide by 1.0 anyway.</summary>
     static unsafe void ApplyChromaKey(Bitmap bmp)
     {
         var rect = new Rectangle(0, 0, bmp.Width, bmp.Height);
@@ -452,6 +495,17 @@ internal sealed class ScorebugOverlayForm : Form
                     int b = px[0], g = px[1], r = px[2];
                     double distance = (Math.Abs(r - keyR) + Math.Abs(g - keyG) + Math.Abs(b - keyB)) / (3.0 * 255.0);
                     double alpha = Math.Clamp((distance - ChromaKeyTolerance) * gain, 0.0, 1.0);
+
+                    if (alpha > 0.0 && alpha < 1.0)
+                    {
+                        double unmixR = (r - (1.0 - alpha) * keyR) / alpha;
+                        double unmixG = (g - (1.0 - alpha) * keyG) / alpha;
+                        double unmixB = (b - (1.0 - alpha) * keyB) / alpha;
+                        px[2] = (byte)Math.Clamp(unmixR, 0.0, 255.0);
+                        px[1] = (byte)Math.Clamp(unmixG, 0.0, 255.0);
+                        px[0] = (byte)Math.Clamp(unmixB, 0.0, 255.0);
+                    }
+
                     px[3] = (byte)Math.Round(alpha * 255.0);
                 }
             }
@@ -538,11 +592,13 @@ internal sealed class ScorebugOverlayForm : Form
                 $"(function(){{var had=!!window.updateScorebug;" +
                 $"var r=had&&window.updateScorebug({payload});" +
                 $"return JSON.stringify({{bridgePresent:had,applyResult:r}});}})();");
-            if (_pushLogCount < 5)
-            {
-                _pushLogCount++;
+            // TEMP DIAGNOSTIC 2026-08-19: was "first 5 pushes only" -- widened to sample every
+            // ~2.6s (20 ticks @ 130ms) for the whole session, to catch mid-game timeout/down
+            // values instead of only the pregame all-zero state. Revert to the 5-and-done cap
+            // once the timeouts/down staleness investigation is done.
+            _pushLogCount++;
+            if (_pushLogCount <= 5 || _pushLogCount % 20 == 0)
                 CrashLog.Write($"ScorebugOverlayForm push #{_pushLogCount}: payload={payload}, result={result}", new Exception("diagnostic"));
-            }
         }
         catch (Exception ex)
         {

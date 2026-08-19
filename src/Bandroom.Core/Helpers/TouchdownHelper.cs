@@ -10,6 +10,17 @@ public sealed class TouchdownHelper : IRuleEvaluator
     int? _lastDefenseTdHomeScore;
     int? _lastDefenseTdAwayScore;
 
+    // FIXED 2026-08-19 (audit finding, same bug class as GameStateEventHelper's quarter-start
+    // fire loop): IsTouchdown is a raw, non-sticky OCR "situation" flag with zero flicker
+    // protection -- the banner-edge check below (`!Previous.IsTouchdown && Current.IsTouchdown`)
+    // re-fires every time OCR drops a false read mid-banner (a misread frame, momentary occlusion)
+    // and then catches the banner true again on a later tick, since a false read in between makes
+    // the next true read look like a brand-new edge. Mirrors _lastDefenseTdHomeScore/AwayScore's
+    // existing pattern: remember the exact score this offense TD was already attributed to, so a
+    // repeat banner edge for the SAME still-unchanged score is a no-op instead of a second fire.
+    int? _lastOffenseTdHomeScore;
+    int? _lastOffenseTdAwayScore;
+
     // FIXED 2026-08-12 (audit finding): IsTouchdown (from the non-sticky "situation" OCR region)
     // and HomeScore/AwayScore (from a separately-sticky OCR region, see GameWatcher.RouteEngineTick)
     // are two independently-timed reads, same class of split-tick race as the down/yards-to-go gap
@@ -77,7 +88,7 @@ public sealed class TouchdownHelper : IRuleEvaluator
                 return null; // keep waiting for the scoreboard to confirm which side actually scored
 
             _awaitingOffenseScoreConfirm = false;
-            return MakeOffenseEvent(state);
+            return FireOffenseEvent(state);
         }
 
         // Offense touchdown -- banner-edge triggered.
@@ -100,13 +111,22 @@ public sealed class TouchdownHelper : IRuleEvaluator
             return null;
         }
 
-        return MakeOffenseEvent(state);
+        return FireOffenseEvent(state);
     }
 
-    static TriggerEvent MakeOffenseEvent(GameState state) => new()
+    /// <summary>See _lastOffenseTdHomeScore/AwayScore's doc comment -- a repeat banner edge for a
+    /// score already credited is a silent no-op, not a second "Offense: Touchdown Scored" fire.</summary>
+    TriggerEvent? FireOffenseEvent(GameState state)
     {
-        EventKey = "Offense: Touchdown Scored",
-        Volume = state.Current.BigGame ? 100 : 85,
-        IsEarnedBigEvent = true
-    };
+        if (state.Current.HomeScore == _lastOffenseTdHomeScore && state.Current.AwayScore == _lastOffenseTdAwayScore)
+            return null;
+        _lastOffenseTdHomeScore = state.Current.HomeScore;
+        _lastOffenseTdAwayScore = state.Current.AwayScore;
+        return new TriggerEvent
+        {
+            EventKey = "Offense: Touchdown Scored",
+            Volume = state.Current.BigGame ? 100 : 85,
+            IsEarnedBigEvent = true
+        };
+    }
 }

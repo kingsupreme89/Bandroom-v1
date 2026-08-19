@@ -17,6 +17,15 @@ public sealed class ScoreboardReaderState
     /// data available" (fall back to trusting the field, same as before this existed) rather than
     /// treating an absent block as "everything is stale."</summary>
     public ScoreboardReaderFreshness? Freshness { get; init; }
+    /// <summary>`ram.penalty.side` from the raw JSON -- "offense" | "defense" | null. The reader
+    /// resolves this directly from the game's own commentary/referee strings (~10s after the FLAG
+    /// banner, held 45s), relative to whichever team currently has the ball -- exactly what
+    /// PlaySnapshot.IsPenaltyOnOffense/IsPenaltyOnDefense already mean, so no possession-relative
+    /// math is needed downstream the way the OCR "Against &lt;Team Name&gt;" text path requires.
+    /// Added 2026-08-19: BANDroom previously had no RAM path for penalty detection at all, only
+    /// the OCR crop -- a single missed frame in that crop's narrow on-screen window meant the whole
+    /// event silently never fired, with nothing to fall back to.</summary>
+    public string? PenaltySide { get; init; }
 }
 
 /// <summary>One field's freshness entry from `ram.freshness.&lt;field&gt;` -- ChangedAtUtc is the ISO

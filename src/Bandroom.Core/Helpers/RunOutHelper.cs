@@ -16,11 +16,19 @@ public sealed class RunOutHelper : IRuleEvaluator
     // Cheap early-out: the flag itself is the primary Evaluate() condition.
     public bool CanFire(GameState state) => state.Current.IsTeamRunOut;
 
+    // FIXED 2026-08-19 (audit finding, same bug class as GameStateEventHelper's quarter-start fire
+    // loop / PregameHelper/KickoffHelper's own _didFire guards): IsTeamRunOut is a raw, non-sticky
+    // OCR flag with zero flicker protection -- a single-tick false misread while the flag card is
+    // genuinely still up would make the next true read look like a brand-new not-shown->shown
+    // edge, re-firing "Other: Pregame Tunnel" again. This card only ever appears once per game.
+    bool _didFire;
+
     public TriggerEvent? Evaluate(GameState state)
     {
-        if (!state.Current.IsTeamRunOut || state.Previous.IsTeamRunOut)
+        if (_didFire || !state.Current.IsTeamRunOut || state.Previous.IsTeamRunOut)
             return null;
 
+        _didFire = true;
         return new TriggerEvent
         {
             EventKey = "Other: Pregame Tunnel",

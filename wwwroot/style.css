@@ -5338,6 +5338,10 @@ body.gameday-mode .matchup-side-arrow { font-size: 15px; }
   display: flex; align-items: center; gap: 6px;
   font-size: 13px; font-weight: 600;
 }
+.scorebug-skin-switcher-inline {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600;
+}
 .scorebug-switcher-arrow {
   width: 26px; height: 26px;
   font-size: 16px;

@@ -2129,6 +2129,9 @@ internal static class ConfigStore
         "Defense: Fourth Down (Loss)",
         // Retired 2026-08-11 (owner audit call): no replacement cue requested, just removed.
         "Defense: No Punt Return",
+        // Retired 2026-08-19 (owner audit call, event-naming cleanup session): redundant with
+        // the plain "Offense: Earned First Down" card, just removed to simplify the list.
+        "Offense: Earned First Down Short",
     };
 
     public static readonly string[] AllEngineEventKeys =
@@ -2139,6 +2142,13 @@ internal static class ConfigStore
         // key again (3rd & long fires this alongside "Defense: Third Down", see that helper's own
         // comment) -- the retirement just never got undone after that change.
         "Offense: Third Down",
+        // Added 2026-08-19 (owner report: no card existed at all for 2nd & long, unlike 3rd down's
+        // existing "Offense: Third Down"/"Defense: Third Down" dual-fire pair right above) --
+        // OffenseSecondDownHelper's new counterpart to "Defense: Second Down" below, same-tick
+        // dual-fire pairing (ducked to 60 while "Defense: Second Down" plays full -- same balance
+        // as the 3rd-down-long pairing, long yardage hands the moment to the defense). See
+        // OffenseSecondDownHelper.cs.
+        "Offense: Second Down",
         // Added 2026-08-12 (owner call, live game) -- OffenseFourthDownHelper's new counterpart to
         // "Defense: Fourth Down", so the team actually driving on 4th down gets its own card too
         // (see that helper's own comment for the full history: this key used to be correctly
@@ -2163,10 +2173,12 @@ internal static class ConfigStore
         // to "Offense: Second Down Short" above, same-tick dual-fire pairing (ducked to 60 while
         // the offense side plays at full 100 -- inverse balance of the 3rd-down-short pairing).
         "Defense: Second Down Short",
-        // Added 2026-08-10 alongside FirstDownHelper's short/long split -- replaces the old
-        // "Offense: Earned First Down (Big Gain)" card (now retired above).
-        "Offense: Earned First Down Short",
         "Offense: Earned First Down",
+        // Added 2026-08-19 (owner request): Defense-side counterpart to "Offense: Earned First
+        // Down"/"...Short" -- the defending team's own cue for the opponent converting a first
+        // down against them. See DefenseFirstDownAllowedHelper.cs.
+        "Defense: Earned First Down",
+        "Defense: Earned First Down Short",
         // Added 2026-08-10: two new Defense-side evaluators (DefenseFirstDownHelper,
         // DefenseThirdDownShortHelper) -- see their own file comments for the exact trigger
         // moment and WebMainForm.ResolveEventRouting's tier-3 (First Down) / tier-2 (Third Down

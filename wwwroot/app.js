@@ -9022,6 +9022,7 @@ function openMatchupDialog() {
   updateMatchupSubtext();
   loadRemotePlayToggle();
   loadScorebugSwitcher();
+  loadScorebugSkinSwitcher();
   // No re-fetch needed here -- applyBigGameEnabled (see wireBigGameSection) already keeps
   // #toggle-matchup-big-game in sync with the real setting the moment it's loaded at startup
   // (refreshBigGameSection) or changed by any of the three Big Game controls.
@@ -9217,6 +9218,52 @@ async function cycleScorebugPreset(dir) {
   renderScorebugSwitcher();
   try { await bridge.SetScorebugPreset(_scorebugPresetActive); }
   catch (err) { console.error("SetScorebugPreset failed", err); }
+}
+
+// Scorebug SKIN switcher -- which HTML overlay bug is drawn on screen (see this pill's own
+// HTML comment for how this differs from the OCR-layout switcher above). GetScorebugThemeGallery
+// returns every installed theme-library entry (bundled Assets\ScoreboardReader\theme-library\ +
+// any external one); GetSavedScorebugSkin/SaveScorebugSkin persist the choice the same way
+// GetScorebugPresets/SetScorebugPreset already do for the OCR layout.
+let _scorebugSkinNames = [];
+let _scorebugSkinActive = "";
+let _scorebugSkinSwitcherBound = false;
+
+async function loadScorebugSkinSwitcher() {
+  if (!bridge) return;
+  try {
+    const gallery = JSON.parse(await bridge.GetScorebugThemeGallery());
+    _scorebugSkinNames = (gallery || []).map(t => t.name).filter(Boolean);
+    _scorebugSkinActive = (await bridge.GetSavedScorebugSkin()) || _scorebugSkinNames[0] || "";
+  } catch (err) {
+    console.error("loadScorebugSkinSwitcher failed", err);
+    return;
+  }
+  renderScorebugSkinSwitcher();
+  initScorebugSkinSwitcher();
+}
+
+function renderScorebugSkinSwitcher() {
+  const el = document.getElementById("scorebug-skin-switcher-name");
+  if (el) el.textContent = _scorebugSkinActive || "Scorebug Skin";
+}
+
+function initScorebugSkinSwitcher() {
+  if (_scorebugSkinSwitcherBound) return;
+  _scorebugSkinSwitcherBound = true;
+  document.getElementById("btn-scorebug-skin-prev")?.addEventListener("click", () => cycleScorebugSkin(-1));
+  document.getElementById("btn-scorebug-skin-next")?.addEventListener("click", () => cycleScorebugSkin(1));
+}
+
+async function cycleScorebugSkin(dir) {
+  if (!_scorebugSkinNames.length || !bridge) return;
+  let idx = _scorebugSkinNames.indexOf(_scorebugSkinActive);
+  if (idx === -1) idx = 0;
+  idx = ((idx + dir) % _scorebugSkinNames.length + _scorebugSkinNames.length) % _scorebugSkinNames.length;
+  _scorebugSkinActive = _scorebugSkinNames[idx];
+  renderScorebugSkinSwitcher();
+  try { await bridge.SaveScorebugSkin(_scorebugSkinActive); }
+  catch (err) { console.error("SaveScorebugSkin failed", err); }
 }
 
 // ---- Custom team logo crop tool ---------------------------------------------------------
@@ -10627,32 +10674,34 @@ document.getElementById("btn-test-hook-hbcu-touchdown")?.addEventListener("click
 // the raw key untouched if a new EventKey shows up here before this map is updated.
 const EVENT_FRIENDLY_NAMES = {
   "Offense: Earned First Down": "1st Down",
+  "Defense: Earned First Down": "Defense: 1st Down Allowed",
+  "Defense: Earned First Down Short": "Defense: 1st Down Allowed (Short)",
   "Offense: Earned First Down (Big Gain)": "Got 1st Down - Big Gain",
   "Offense: Earned First Down Short": "1st & Short",
   "Offense: 3rd Down Conversion": "Converted 3rd Down",
   "Offense: Earned First Down (Midfield)": "Got 1st Down - Past Midfield",
-  "Offense: Second Down": "2nd & Long",
+  "Offense: Second Down": "Offense: 2nd & Long",
   "Offense: Second Down (Midfield)": "2nd Down - Past Midfield",
-  "Offense: Second Down Short": "2nd & Short",
-  "Offense: Third Down": "3rd & Long",
-  "Offense: Third Down Short": "3rd & Short",
+  "Offense: Second Down Short": "Offense: 2nd & Short",
+  "Offense: Third Down": "Offense: 3rd & Long",
+  "Offense: Third Down Short": "Offense: 3rd & Short",
   "Offense: Fourth Down": "4th Down",
   "Offense: 1st Down After Punt": "1st Down After Punt",
   "Offense: After Opening Kick": "After Opening Kickoff (Your Ball)",
-  "Offense: First Down on First Down": "First Down",
+  "Offense: First Down on First Down": "First Down on First Down",
   "Offense: PAT Made": "Extra Point Good",
   "Offense: 2-Point Conversion Made": "2-Point Conversion Good",
   "Offense: Field Goal Made": "Field Goal Good",
   "Offense: Iced Game by First Down": "Game Sealed - Got 1st Down",
   "Offense: Victory in Hand": "Game Won",
-  "Offense: Touchdown Scored": "Touchdown",
+  "Offense: Touchdown Scored": "Offense: Touchdown",
   "Defense: After Opening Kick": "After Opening Kickoff (Their Ball)",
-  "Defense: Third Down": "3rd & Long",
-  "Defense: Third Down Short": "3rd & Short",
-  "Defense: Fourth Down": "4th Down",
+  "Defense: Third Down": "Defense: 3rd & Long",
+  "Defense: Third Down Short": "Defense: 3rd & Short",
+  "Defense: Fourth Down": "3rd Down Stop",
   "Defense: Fourth Down Stop": "4th Down Stop",
-  "Defense: Second Down": "2nd & Long",
-  "Defense: Second Down Short": "2nd & Short",
+  "Defense: Second Down": "Defense: 2nd & Long",
+  "Defense: Second Down Short": "Defense: 2nd & Short",
   "Defense: Second Down (Midfield)": "2nd Down - Past Midfield",
   "Defense: Second Down (Loss)": "2nd Down After a Loss",
   "Defense: Fourth Down (Loss)": "4th Down After a Loss",
@@ -10662,7 +10711,7 @@ const EVENT_FRIENDLY_NAMES = {
   "Defense: Iced Game by Turnover": "Game Sealed by Turnover",
   "Defense: Safety": "Safety",
   "Defense: Tackle for Loss": "Tackle for Loss / Fumble",
-  "Defense: Touchdown Scored": "Touchdown",
+  "Defense: Touchdown Scored": "Defense: Touchdown",
   "Defense: Timeout (4 Remaining)": "Opponent's 2nd Timeout Used",
   "Defense: Timeout (3 Remaining)": "Opponent's 3rd Timeout Used",
   "Defense: Timeout (2 Remaining)": "Opponent's 4th Timeout Used",
@@ -10678,8 +10727,8 @@ const EVENT_FRIENDLY_NAMES = {
   "Other: Kickoff": "Kickoff",
   "Other: Kickoff on Kick (Receiving)": "Kickoff - Receiving",
   "Other: Kickoff on Kick (Kicking)": "Kickoff - Kicking",
-  "Penalty: Offense": "Penalty - Your Team",
-  "Penalty: Defense": "Penalty - Opponent",
+  "Penalty: Offense": "Penalty - Offense",
+  "Penalty: Defense": "Penalty - Defense",
   "Defense: No Punt Return": "Punt Return Stopped",
 };
 function friendlyEventName(eventKey) {

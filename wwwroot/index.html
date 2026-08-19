@@ -1782,6 +1782,18 @@
           <button class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-prev" data-dir="-1" title="Previous scorebug layout">&#8249;</button>
           <span class="pill scorebug-switcher-pill" id="scorebug-switcher-name">...</span>
           <button class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-next" data-dir="1" title="Next scorebug layout">&#8250;</button>
+          <!-- Scorebug SKIN switcher -- re-added 2026-08-19: separate from the OCR-layout pill
+               above (that one picks which real on-screen HUD Bandroom reads FROM; this one picks
+               which HTML overlay bug Bandroom draws ON TOP of the screen). Cycles through
+               GetScorebugThemeGallery's installed theme-library entries, see
+               loadScorebugSkinSwitcher/cycleScorebugSkin in app.js. Takes effect on the next Start
+               Watching (ScorebugOverlayForm.RefreshForCurrentSkin runs right before Show()), not
+               live mid-game. -->
+          <div class="scorebug-skin-switcher-inline" id="scorebug-skin-switcher" title="Which scorebug overlay Bandroom displays">
+            <button class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-skin-prev" data-dir="-1" title="Previous scorebug skin">&#8249;</button>
+            <span class="pill scorebug-switcher-pill" id="scorebug-skin-switcher-name">...</span>
+            <button class="coverflow-arrow scorebug-switcher-arrow" id="btn-scorebug-skin-next" data-dir="1" title="Next scorebug skin">&#8250;</button>
+          </div>
           <!-- Owner request 2026-08-11: the Big-Game/last-matchup/scorebug-side/away-band toggles
                used to sit always-visible as their own island -- now tucked behind this large pill,
                placed right next to the scorebug switcher per owner request, toggling
