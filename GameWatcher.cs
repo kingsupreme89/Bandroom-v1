@@ -266,23 +266,25 @@ internal sealed class GameWatcher
     // read from then on. OCR is trusted as the tie-breaker here specifically because it's sampled
     // directly against BANDroom's own configured home/away team colors, so it can't have this same
     // class of "which physical team is which" ambiguity the reader has.
-    bool _ramPossessionOrientationChecked;
-    bool _ramPossessionInverted;
-    // RELIABILITY FIX 2026-08-19 (owner report: a whole session's worth of events -- 1st downs,
-    // tackles for loss, penalties -- all attributed to the wrong side all game long, matching a
-    // "RAM disagrees with OCR on possession" watchdog line repeating on nearly every tick). Root
-    // cause: the orientation check right below used to lock in _ramPossessionInverted off a
-    // SINGLE settled comparison -- if that one comparison landed on a fluky tick (OCR's own
-    // possession debounce, ConfirmPossessionFlip, still settles on a 2-tick window, not
-    // instantaneous), the wrong orientation got permanently baked in for the rest of the game,
-    // and everything downstream stayed wrong even though the per-tick stale-RAM-field fallback
-    // (below) kept "confirming" it disagreed with OCR without ever being allowed to reconsider
-    // the ORIENTATION decision itself, only individual field values. Now requires the same
-    // comparison result to repeat for RamPossessionOrientationConfirmTicks consecutive qualifying
-    // ticks before locking in -- a single bad tick no longer decides the whole game.
-    const int RamPossessionOrientationConfirmTicks = 3;
-    bool? _ramPossessionOrientationStreakValue;
-    int _ramPossessionOrientationStreak;
+    // RE-BUILT 2026-08-19 (owner report, live game: "Defense: 1st Down Allowed (Home)" fired for
+    // a snap that was actually Home's OFFENSE on the field right after a kickoff -- the watchdog
+    // line for that same tick showed away score RAM=7/OCR=0, home score RAM=0/OCR=6, i.e. RAM's
+    // away/home score labels swapped almost exactly against OCR's). The original version of this
+    // check (see git history) used OCR's own color-sampled possession as the tie-breaker -- ripped
+    // out earlier tonight after a DIFFERENT game proved OCR's possession color-sampling itself
+    // unreliable for a whole session. Score is a different, more trustworthy signal for this
+    // specific question (digit OCR, not a color threshold), so it's safe to use here without
+    // reopening that possession-specific bug. Self-corrects ONCE per game: the first time OCR's
+    // score has settled and at least one side has scored, compares RAM's away/home scores against
+    // OCR's both directly and swapped -- if the swapped pairing matches and the direct pairing
+    // doesn't, RAM's home/away is backwards for this game. Locked in for the rest of the session
+    // once confirmed (never re-evaluated, never flips back) so a single fluky tick can't decide it
+    // and it can't oscillate mid-game the way the old possession-based version did.
+    bool _ramOrientationChecked;
+    bool _ramOrientationSwapped;
+    const int RamOrientationConfirmTicks = 3;
+    bool? _ramOrientationStreakValue;
+    int _ramOrientationStreak;
     // FIXED 2026-08-19 (owner report, live game: a real earned 1st down within an ongoing drive
     // triggered a false "Defense: After Punt" ~2s later): PlaySnapshot.PossessionAway used to take
     // RAM's raw per-tick bit completely unsmoothed the instant it resolved (the very fix earlier
@@ -1066,10 +1068,10 @@ internal sealed class GameWatcher
         _pendingDownDistanceDeadline = default;
         _lastPossession = null;
         _possessionCooldownUntil = default;
-        _ramPossessionOrientationChecked = false;
-        _ramPossessionInverted = false;
-        _ramPossessionOrientationStreakValue = null;
-        _ramPossessionOrientationStreak = 0;
+        _ramOrientationChecked = false;
+        _ramOrientationSwapped = false;
+        _ramOrientationStreakValue = null;
+        _ramOrientationStreak = 0;
         _lastConfirmedRamPossessionAway = null;
         _pendingRamPossessionAway = null;
         _pendingRamPossessionTicks = 0;
@@ -2351,6 +2353,46 @@ internal sealed class GameWatcher
         bool ocrHomeScoreSettled = IsFieldStableFor(ocrHomeScore, ref _ocrHomeScoreStableValue, ref _ocrHomeScoreStableSince, nowUtc, OcrFieldCorroborationWindow);
         bool ocrAwayScoreSettled = IsFieldStableFor(ocrAwayScore, ref _ocrAwayScoreStableValue, ref _ocrAwayScoreStableSince, nowUtc, OcrFieldCorroborationWindow);
 
+        // RAM home/away orientation check -- see _ramOrientationChecked's own doc comment. Runs
+        // once per game, before the rs-driven overlay below so a confirmed swap corrects every
+        // home/away-scoped RAM field (score, timeouts, possession) for the rest of this tick and
+        // every tick after.
+        if (!_ramOrientationChecked && readerSnapshot is { } rsForOrientation
+            && rsForOrientation.AwayScore >= 0 && rsForOrientation.HomeScore >= 0
+            && ocrAwayScoreSettled && ocrHomeScoreSettled && (ocrAwayScore > 0 || ocrHomeScore > 0))
+        {
+            bool directMatches = rsForOrientation.AwayScore == ocrAwayScore && rsForOrientation.HomeScore == ocrHomeScore;
+            bool swappedMatches = rsForOrientation.AwayScore == ocrHomeScore && rsForOrientation.HomeScore == ocrAwayScore;
+            bool? candidate = directMatches ? false : swappedMatches ? true : null;
+            if (candidate is { } swapped)
+            {
+                if (_ramOrientationStreakValue == swapped) _ramOrientationStreak++;
+                else { _ramOrientationStreakValue = swapped; _ramOrientationStreak = 1; }
+                if (_ramOrientationStreak >= RamOrientationConfirmTicks)
+                {
+                    _ramOrientationChecked = true;
+                    _ramOrientationSwapped = swapped;
+                    Log?.Invoke($"[RAM watchdog] orientation check: RAM home/away{(swapped ? " IS" : " is NOT")} swapped vs OCR score (locked for the rest of this game)");
+                }
+            }
+            else
+            {
+                _ramOrientationStreakValue = null;
+                _ramOrientationStreak = 0;
+            }
+        }
+        if (_ramOrientationChecked && _ramOrientationSwapped && readerSnapshot is { } rsToFix)
+        {
+            readerSnapshot = rsToFix with
+            {
+                AwayScore = rsToFix.HomeScore,
+                HomeScore = rsToFix.AwayScore,
+                AwayTimeoutsRemaining = rsToFix.HomeTimeoutsRemaining,
+                HomeTimeoutsRemaining = rsToFix.AwayTimeoutsRemaining,
+                PossessionAway = rsToFix.HavePossession ? !rsToFix.PossessionAway : rsToFix.PossessionAway,
+            };
+        }
+
         // Reader takes over score/possession/yard line/down/distance/timeouts when CONNECTED --
         // see the ScoreboardStatus field's own doc comment. Event flags (situation/banner/etc)
         // stay OCR-owned always; structural-turnover/penalty inference below still reads the OCR
@@ -2420,10 +2462,12 @@ internal sealed class GameWatcher
             // could poison the correction, it couldn't fix a session where OCR is wrong the WHOLE
             // time -- 3 consecutive comparisons against consistently-wrong OCR just reaches the
             // same wrong conclusion 3 ticks later instead of 1. Now trusts RAM's raw possession
-            // bit directly and unconditionally whenever it has resolved -- no correction applied.
-            // _ramPossessionInverted/_ramPossessionOrientationChecked/-Streak* fields are dead code
-            // left in place rather than torn out mid-session; harmless (nothing sets them true
-            // anymore).
+            // bit directly and unconditionally whenever it has resolved -- no per-tick possession
+            // correction applied here. The SCORE-based orientation swap above (_ramOrientationChecked/
+            // _ramOrientationSwapped) is a separate, one-time-per-game check that already corrected
+            // rs.PossessionAway (and rs's score/timeouts) before this point if RAM's home/away was
+            // confirmed backwards -- not a revival of the possession-tie-breaker logic this comment
+            // describes removing.
             if (rs.HavePossession)
             {
                 bool ramPossessionAway = rs.PossessionAway;
