@@ -324,7 +324,20 @@ public sealed class WebMainForm : Form
 
     async Task InitWebViewAsync()
     {
-        string userDataFolder = Path.Combine(AppContext.BaseDirectory, "WebView2Data");
+        // FIXED 2026-08-19 (owner report via Discord: users redoing every download/config on
+        // every launch, no "resume last session" prompt ever showing despite the JS side saving
+        // one to localStorage every 30s -- see app.js's checkResumeSession/saveSessionState).
+        // Root cause: this used AppContext.BaseDirectory, the SAME "versioned app-X.X.X folder
+        // Squirrel deletes wholesale on every update" mistake ConfigStore.UserDataRoot's own doc
+        // comment already documents fixing for songs/profiles/triggers -- just never applied here.
+        // Confirmed live: separate WebView2Data folders existed under app-1.1.22 and app-1.1.25
+        // simultaneously after tonight's releases. WebView2's whole browser profile (localStorage,
+        // cookies, disk cache) lived inside that doomed folder, so it silently reset on literally
+        // every single auto-update -- not just the cosmetic "resume" banner, but any client-side
+        // state the JS app keeps in localStorage rather than round-tripping through ConfigStore's
+        // actual on-disk files. Moved next to Songs/Profiles/etc. in the same stable, Squirrel-
+        // never-touches-this folder.
+        string userDataFolder = Path.Combine(ConfigStore.UserDataRoot, "WebView2Data");
 #if DEBUG
         KillOrphanedWebView2Processes(userDataFolder);
 #endif

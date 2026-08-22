@@ -268,7 +268,10 @@ internal sealed class ScorebugOverlayForm : Form
         CrashLog.Write("ScorebugOverlayForm InitAsync started", new Exception("diagnostic"));
         try
         {
-            string userDataFolder = Path.Combine(AppContext.BaseDirectory, "WebView2Data_Overlay");
+            // FIXED 2026-08-19 -- same "versioned app-X.X.X folder Squirrel wipes on every
+            // update" bug as WebMainForm.InitWebViewAsync's own WebView2Data (see its doc
+            // comment for the full owner report); moved next to it in the stable UserDataRoot.
+            string userDataFolder = Path.Combine(ConfigStore.UserDataRoot, "WebView2Data_Overlay");
             Directory.CreateDirectory(userDataFolder);
             _renderWebView.DefaultBackgroundColor = ChromaKeyColor;
             var env = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
